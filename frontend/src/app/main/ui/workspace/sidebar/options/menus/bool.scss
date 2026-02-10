@@ -1,0 +1,21 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "../../../sidebar/common/sidebar.scss" as sidebar;
+
+.boolean-options {
+  @include sidebar.option-grid-structure;
+}
+
+.boolean-group {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / span 4;
+}
+
+.boolean-radio-btn {
+  background-color: transparent;
+}

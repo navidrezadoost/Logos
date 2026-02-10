@@ -1,0 +1,60 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "refactor/common-refactor.scss" as deprecated;
+
+.assets-bar {
+  display: grid;
+  height: 100%;
+  grid-auto-rows: max-content;
+  // TODO: ugly hack :( Fix this! we shouldn't be hardcoding this height
+  height: calc(100vh - deprecated.$s-92);
+  scrollbar-gutter: stable;
+  overflow-y: auto;
+  padding-top: deprecated.$s-8;
+}
+
+.assets-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-xxs);
+}
+
+.filter-button {
+  border-radius: deprecated.$br-8 0 0 deprecated.$br-8;
+}
+
+.sections-container {
+  @include deprecated.menuShadow;
+  @include deprecated.flexColumn;
+  position: absolute;
+  top: deprecated.$s-84;
+  left: deprecated.$s-12;
+  width: deprecated.$s-192;
+  padding: deprecated.$s-4;
+  border-radius: deprecated.$br-8;
+  background-color: var(--menu-background-color);
+  z-index: deprecated.$z-index-2;
+}
+
+.section-item {
+  @include deprecated.bodySmallTypography;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: deprecated.$s-6;
+  border-radius: deprecated.$br-8;
+}
+
+.assets-header {
+  padding: 0 0 deprecated.$s-24 deprecated.$s-12;
+}
+
+.search-wrapper {
+  display: flex;
+  gap: deprecated.$s-4;
+}

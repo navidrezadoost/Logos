@@ -1,0 +1,26 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+//
+// Copyright (c) KALEIDOS INC
+
+@use "../../../sidebar/common/sidebar.scss" as sidebar;
+
+.align-options {
+  @include sidebar.option-grid-structure;
+}
+.align-group-horizontal,
+.align-group-vertical {
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  justify-items: center;
+}
+
+.align-group-horizontal {
+  grid-column: 1 / span 4;
+}
+
+.align-group-vertical {
+  grid-column: 5 / span 4;
+}
