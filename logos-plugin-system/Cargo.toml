@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "logos-core",
+    "logos-desktop/src-tauri",
+]
+resolver = "2"
+
+# [patch.crates-io]
+# time = { version = "=0.3.36" }
+# ... cannot patch to same source easily for version pinning without git.
+
+

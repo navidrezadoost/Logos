@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Logos</title>
+    <script>
+      // Simple Tauri invoke wrapper
+      const invoke = window.__TAURI__.invoke;
+
+      async function init() {
+        try {
+            const info = await invoke('get_app_info');
+            document.getElementById('info').innerText = info;
+        } catch (e) {
+            console.error(e);
+            document.getElementById('info').innerText = "Backend not connected (running in browser?)";
+        }
+      }
+
+      window.addEventListener('DOMContentLoaded', init);
+    </script>
+    <style>
+        body { font-family: sans-serif; background: #1e1e1e; color: #eee; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .container { text-align: center; }
+        h1 { font-size: 3rem; margin-bottom: 0.5rem; }
+        p { opacity: 0.7; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Logos</h1>
+      <p id="info">Loading core...</p>
+    </div>
+  </body>
+</html>

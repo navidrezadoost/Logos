@@ -1,61 +1,119 @@
+# Logos
 
 [uri_license]: https://www.mozilla.org/en-US/MPL/2.0
-[uri_license_image]: https://img.shields.io/badge/MPL-2.0-blue.svg
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://penpot.app/images/readme/github-dark-mode.png">
-  <source media="(prefers-color-scheme: light)" srcset="https://penpot.app/images/readme/github-light-mode.png">
+<p align="center">[uri_license_image]: https://img.shields.io/badge/MPL-2.0-blue.svg
+
+  <img src="https://img.shields.io/badge/Status-Pre--Alpha-red.svg" alt="Status">
+
+  <img src="https://img.shields.io/badge/Built_With-Rust-orange.svg" alt="Rust"><picture>
+
+  <img src="https://img.shields.io/badge/Renderer-WGPU-blue.svg" alt="WGPU">  <source media="(prefers-color-scheme: dark)" srcset="https://penpot.app/images/readme/github-dark-mode.png">
+
+</p>  <source media="(prefers-color-scheme: light)" srcset="https://penpot.app/images/readme/github-light-mode.png">
+
   <img alt="penpot header image" src="https://penpot.app/images/readme/github-light-mode.png">
-</picture>
 
-<p align="center">
+**Logos** is a high-performance, open-source design tool built to compete with industry standards like Figma. It leverages the power of **Rust** and **WebGPU** to deliver native performance on the desktop and the web.</picture>
+
+
+
+## 🚀 Mission<p align="center">
+
 <a href="https://www.mozilla.org/en-US/MPL/2.0" rel="nofollow"><img alt="License: MPL-2.0" src="https://img.shields.io/badge/MPL-2.0-blue.svg" style="max-width:100%;"></a>
-<a href="https://community.penpot.app" rel="nofollow"><img alt="Penpot Community" src="https://img.shields.io/discourse/posts?server=https%3A%2F%2Fcommunity.penpot.app" style="max-width:100%;"></a>
-<a href="https://tree.taiga.io/project/penpot/" title="Managed with Taiga.io" rel="nofollow"><img alt="Managed with Taiga.io" src="https://img.shields.io/badge/managed%20with-TAIGA.io-709f14.svg" style="max-width:100%;"></a>
-<a href="https://gitpod.io/#https://github.com/penpot/penpot" rel="nofollow"><img alt="Gitpod ready-to-code" src="https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod" style="max-width:100%;"></a>
-</p>
+
+To create a professional design tool that is:<a href="https://community.penpot.app" rel="nofollow"><img alt="Penpot Community" src="https://img.shields.io/discourse/posts?server=https%3A%2F%2Fcommunity.penpot.app" style="max-width:100%;"></a>
+
+- **Fast**: Native performance using WGPU and Rust.<a href="https://tree.taiga.io/project/penpot/" title="Managed with Taiga.io" rel="nofollow"><img alt="Managed with Taiga.io" src="https://img.shields.io/badge/managed%20with-TAIGA.io-709f14.svg" style="max-width:100%;"></a>
+
+- **Collaborative**: Real-time multiplayer built-in using CRDTs (`yrs`).<a href="https://gitpod.io/#https://github.com/penpot/penpot" rel="nofollow"><img alt="Gitpod ready-to-code" src="https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod" style="max-width:100%;"></a>
+
+- **Open**: Fully open-source and extensible.</p>
+
+
+
+## 🛠 Tech Stack<p align="center">
+
+    <a href="https://penpot.app/"><b>Website</b></a>  •
+
+- **Language**: Rust (2021 Edition)    <a href="https://help.penpot.app/user-guide/"><b>User Guide</b></a>  •
+
+- **Graphics**: `wgpu` (WebGPU implementation), `pollster`, `bytemuck`    <a href="https://penpot.app/learning-center"><b>Learning Center</b></a>  •
+
+- **Application Shell**: Tauri v1 (planned migration to v2)    <a href="https://community.penpot.app/"><b>Community</b></a>
+
+- **State Management**: `yrs` (CRDTs for conflict-free replicated data types)</p>
 
 <p align="center">
-    <a href="https://penpot.app/"><b>Website</b></a>  •
-    <a href="https://help.penpot.app/user-guide/"><b>User Guide</b></a>  •
-    <a href="https://penpot.app/learning-center"><b>Learning Center</b></a>  •
-    <a href="https://community.penpot.app/"><b>Community</b></a>
-</p>
-<p align="center">
-    <a href="https://www.youtube.com/@Penpot"><b>Youtube</b></a>  •
+
+## 📅 Roadmap    <a href="https://www.youtube.com/@Penpot"><b>Youtube</b></a>  •
+
     <a href="https://peertube.kaleidos.net/a/penpot_app/video-channels"><b>Peertube</b></a>  •
-    <a href="https://www.linkedin.com/company/penpot/"><b>Linkedin</b></a>  •
-    <a href="https://instagram.com/penpot.app"><b>Instagram</b></a>  •
-    <a href="https://fosstodon.org/@penpot/"><b>Mastodon</b></a>  •
-    <a href="https://bsky.app/profile/penpot.app"><b>Bluesky</b></a>  •
+
+### Week 1: Core & Architecture (Completed)    <a href="https://www.linkedin.com/company/penpot/"><b>Linkedin</b></a>  •
+
+- [x] Define Object Model (`Node`, `NodeType`).    <a href="https://instagram.com/penpot.app"><b>Instagram</b></a>  •
+
+- [x] Implement CRDT storage using `yrs`.    <a href="https://fosstodon.org/@penpot/"><b>Mastodon</b></a>  •
+
+- [x] Establish monorepo structure.    <a href="https://bsky.app/profile/penpot.app"><b>Bluesky</b></a>  •
+
     <a href="https://twitter.com/penpotapp"><b>X</b></a>
 
-</p>
+### Week 2: Rendering Pipeline (In Progress)
 
-<br />
+- [x] Initialize WGPU Instance and Surface.</p>
+
+- [x] Set up Render Pipeline (`renderer.rs`).
+
+- [ ] Implement primitive drawing (Rectangles, Paths).<br />
+
+- [ ] Shader implementation (WGSL).
 
 [Penpot video](https://github.com/user-attachments/assets/7c67fd7c-04d3-4c9b-88ec-b6f5e23f8332
-)
 
-<br />
+### Week 3: UI & Interaction (Planned))
+
+- [ ] Integrate Input Events (winit/Tauri).
+
+- [ ] Implement usage of Taffy for layout.<br />
+
+- [ ] Selection and Transformation logic.
 
 Penpot is the first **open-source** design tool for design and code collaboration. Designers can create stunning designs, interactive prototypes, design systems at scale, while developers enjoy ready-to-use code and make their workflow easy and fast. And all of this with no handoff drama.
 
+## 📦 Getting Started
+
 Available on browser or self-hosted, Penpot works with open standards like SVG, CSS, HTML and JSON, and it’s free!
 
-The latest updates take Penpot even further. It’s the first design tool to integrate native [design tokens](https://penpot.dev/collaboration/design-tokens)—a single source of truth to improve efficiency and collaboration between product design and development.
-With the [huge 2.0 release](https://penpot.app/dev-diaries), Penpot took the platform to a whole new level. This update introduces the ground-breaking [CSS Grid Layout feature](https://penpot.app/penpot-2.0), a complete UI redesign, a new Components system, and much more.
-For organizations that need extra service for its teams, [get in touch](https://cal.com/team/penpot/talk-to-us)
+### Prerequisites
 
-🎇 Design, code, and Open Source meet at [Penpot Fest](https://penpot.app/penpotfest)! Be part of the 2025 edition in Madrid, Spain, on October 9-10.
+- Rust (latest stable)The latest updates take Penpot even further. It’s the first design tool to integrate native [design tokens](https://penpot.dev/collaboration/design-tokens)—a single source of truth to improve efficiency and collaboration between product design and development.
 
-## Table of contents ##
+- System build tools (GCC, etc.)With the [huge 2.0 release](https://penpot.app/dev-diaries), Penpot took the platform to a whole new level. This update introduces the ground-breaking [CSS Grid Layout feature](https://penpot.app/penpot-2.0), a complete UI redesign, a new Components system, and much more.
 
-- [Why Penpot](#why-penpot)
+- Wayland/X11 libraries (on Linux)For organizations that need extra service for its teams, [get in touch](https://cal.com/team/penpot/talk-to-us)
+
+
+
+### Building🎇 Design, code, and Open Source meet at [Penpot Fest](https://penpot.app/penpotfest)! Be part of the 2025 edition in Madrid, Spain, on October 9-10.
+
+```bash
+
+cd logos-plugin-system/logos-core## Table of contents ##
+
+cargo build
+
+```- [Why Penpot](#why-penpot)
+
 - [Getting Started](#getting-started)
-- [Community](#community)
+
+## 🤝 Contributing- [Community](#community)
+
 - [Contributing](#contributing)
-- [Resources](#resources)
+
+Logos is in the early stages of development. We welcome contributors who are passionate about Rust, Graphics, and Design Tools.- [Resources](#resources)
+
 - [License](#license)
 
 ## Why Penpot ##

@@ -1,24 +1,45 @@
-# CHANGELOG
+# Changelog# CHANGELOG
 
-## 2.14.0 (Unreleased)
 
-### :boom: Breaking changes & Deprecations
 
-### :rocket: Epics and highlights
+## [0.2.0] - Week 2: Rendering Engine (Current)## 2.14.0 (Unreleased)
 
-### :heart: Community contributions (Thank you!)
+
+
+### Added### :boom: Breaking changes & Deprecations
+
+- **Graphics Engine**: Integrated `wgpu` (v24) for cross-platform GPU rendering (Vulkan, Metal, DX12, WebGPU).
+
+- **Core Renderer**: Implemented `renderer.rs` with async instance/device initialization.### :rocket: Epics and highlights
+
+- **Project Structure**: Organized workspace into `logos-core` (Library) and `logos-desktop` (App).
+
+- **CRDT Layer**: Implemented `yrs`-based document synchronization for real-time collaboration.### :heart: Community contributions (Thank you!)
+
+- **Object Model**: Defined fundamental `Node` and `Document` structures.
 
 ### :sparkles: New features & Enhancements
 
-- Access to design tokens in Penpot Plugins [Taiga #8990](https://tree.taiga.io/project/penpot/us/8990)
-- Remap references when renaming tokens [Taiga #10202](https://tree.taiga.io/project/penpot/us/10202)
-- Tokens panel nested path view [Taiga #9966](https://tree.taiga.io/project/penpot/us/9966)
-- Improve usability of lock and hide buttons in the layer panel. [Taiga #12916](https://tree.taiga.io/project/penpot/issue/12916)
-- Optimize sidebar performance for deeply nested shapes [Taiga #13017](https://tree.taiga.io/project/penpot/task/13017)
-- Remove tokens path node and bulk remove tokens [Taiga #13007](https://tree.taiga.io/project/penpot/us/13007)
-- Replace themes management modal radio buttons for switches [Taiga #9215](https://tree.taiga.io/project/penpot/us/9215)
+### Fixed
 
-### :bug: Bugs fixed
+- Resolved dependency conflicts with `raw-window-handle` and `wgpu`.- Access to design tokens in Penpot Plugins [Taiga #8990](https://tree.taiga.io/project/penpot/us/8990)
+
+- Fixed crate edition mismatches in the experimental desktop build.- Remap references when renaming tokens [Taiga #10202](https://tree.taiga.io/project/penpot/us/10202)
+
+- Tokens panel nested path view [Taiga #9966](https://tree.taiga.io/project/penpot/us/9966)
+
+## [0.1.0] - Week 1: Inception- Improve usability of lock and hide buttons in the layer panel. [Taiga #12916](https://tree.taiga.io/project/penpot/issue/12916)
+
+- Optimize sidebar performance for deeply nested shapes [Taiga #13017](https://tree.taiga.io/project/penpot/task/13017)
+
+### Started- Remove tokens path node and bulk remove tokens [Taiga #13007](https://tree.taiga.io/project/penpot/us/13007)
+
+- **Strategy & Roadmap**: Defined the vision to compete with Figma using Rust & WASM.- Replace themes management modal radio buttons for switches [Taiga #9215](https://tree.taiga.io/project/penpot/us/9215)
+
+- **Repository**: Initialized the monorepo structure.
+
+- **Core Architecture**: Outlined the `logos-core` library design.### :bug: Bugs fixed
+
 
 - Remove whitespaces from asset export filename [Github #8133](https://github.com/penpot/penpot/pull/8133)
 - Fix prototype connections lost when switching between variants [Taiga #12812](https://tree.taiga.io/project/penpot/issue/12812)
