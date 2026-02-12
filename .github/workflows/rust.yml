@@ -70,8 +70,8 @@ jobs:
           echo "ERROR: logos-desktop has $IGNORED ignored tests"
           exit 1
         fi
-        if [ "$PASSED" -lt 13 ]; then
-          echo "ERROR: Expected >=13 desktop tests, got $PASSED"
+        if [ "$PASSED" -lt 15 ]; then
+          echo "ERROR: Expected >=15 desktop tests, got $PASSED"
           exit 1
         fi
     - name: Verify logos-text tests (0 ignored)
@@ -85,7 +85,7 @@ jobs:
           echo "ERROR: logos-text has $IGNORED ignored tests"
           exit 1
         fi
-        if [ "$PASSED" -lt 18 ]; then
-          echo "ERROR: Expected >=18 text tests, got $PASSED"
+        if [ "$PASSED" -lt 55 ]; then
+          echo "ERROR: Expected >=55 text tests, got $PASSED"
           exit 1
         fi

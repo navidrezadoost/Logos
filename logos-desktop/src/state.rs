@@ -9,7 +9,7 @@ use logos_layout::engine::LayoutEngine;
 use logos_render::vertex::{CameraUniform, RectInstance, TextInstance};
 use logos_render::renderer::{FrameStats, Renderer};
 use logos_render::context::GpuContext;
-use logos_text::{Atlas, TextEngine, TextStyle};
+use logos_text::{Atlas, FontRegistry, TextEngine, TextStyle};
 use uuid::Uuid;
 
 /// Interactive state for selection / hover.
@@ -107,6 +107,8 @@ pub struct AppState {
     pub interaction: InteractionState,
     /// Text engine for shaping and rasterization.
     pub text_engine: TextEngine,
+    /// Font registry for system font discovery and CSS matching.
+    pub font_registry: FontRegistry,
     /// Glyph atlas for GPU texture upload.
     pub atlas: Atlas,
     /// Cached rect instance buffer, rebuilt each frame.
@@ -124,6 +126,8 @@ impl AppState {
         let document = Document::new();
         let layout_engine = LayoutEngine::new();
         let camera = Camera::new(width as f32, height as f32);
+        let font_registry = FontRegistry::discover();
+        log::info!("Font registry: {}", font_registry);
         let text_engine = TextEngine::new();
         let atlas = Atlas::new(ATLAS_SIZE);
 
@@ -135,6 +139,7 @@ impl AppState {
             camera,
             interaction: InteractionState::default(),
             text_engine,
+            font_registry,
             atlas,
             instances: Vec::new(),
             text_instances: Vec::new(),
@@ -285,41 +290,24 @@ impl AppState {
         self.rebuild_text_instances();
     }
 
-    /// Shape and generate text glyph instances.
+    /// Shape and generate text glyph instances — typography showcase.
+    ///
+    /// Renders multiple text blocks demonstrating font families, weights,
+    /// styles, colors, sizes, and alignment.
     fn rebuild_text_instances(&mut self) {
-        let style = TextStyle {
-            font_size: 32.0,
-            line_height: 38.0,
+        // ── Title ────────────────────────────────────────────────
+        let title_style = TextStyle {
+            font_size: 36.0,
+            line_height: 42.0,
             color: [1.0, 1.0, 1.0, 1.0],
             family: "sans-serif".into(),
             weight: 700,
             italic: false,
+            ..Default::default()
         };
+        self.shape_and_place("Hello, Logos!", &title_style, 400.0, 540.0, true);
 
-        let shaped = self.text_engine.shape_text(
-            "Hello, Logos!",
-            &style,
-            f32::INFINITY,
-            &mut self.atlas,
-        );
-
-        // Center the text on the canvas (below the demo scene).
-        let center_x = 400.0 - shaped.width / 2.0;
-        let center_y = 550.0;
-
-        for glyph in &shaped.glyphs {
-            self.text_instances.push(TextInstance::new(
-                center_x + glyph.x,
-                center_y + glyph.y,
-                glyph.width,
-                glyph.height,
-                [glyph.atlas_region.u_min, glyph.atlas_region.v_min],
-                [glyph.atlas_region.u_max, glyph.atlas_region.v_max],
-                glyph.color,
-            ));
-        }
-
-        // Second line: subtitle in lighter weight.
+        // ── Subtitle ─────────────────────────────────────────────
         let subtitle_style = TextStyle {
             font_size: 18.0,
             line_height: 22.0,
@@ -327,22 +315,166 @@ impl AppState {
             family: "sans-serif".into(),
             weight: 400,
             italic: false,
+            ..Default::default()
         };
+        self.shape_and_place("Design at the speed of thought", &subtitle_style, 400.0, 586.0, true);
 
-        let subtitle = self.text_engine.shape_text(
-            "Design at the speed of thought",
-            &subtitle_style,
-            f32::INFINITY,
-            &mut self.atlas,
+        // ── Serif vs Sans-serif ──────────────────────────────────
+        let serif_style = TextStyle {
+            font_size: 22.0,
+            line_height: 28.0,
+            color: [0.95, 0.85, 0.70, 1.0], // warm gold
+            family: "serif".into(),
+            weight: 400,
+            italic: false,
+            ..Default::default()
+        };
+        self.shape_and_place("Serif — classic & elegant", &serif_style, 80.0, 630.0, false);
+
+        let sans_style = TextStyle {
+            font_size: 22.0,
+            line_height: 28.0,
+            color: [0.70, 0.85, 0.95, 1.0], // cool blue
+            family: "sans-serif".into(),
+            weight: 400,
+            italic: false,
+            ..Default::default()
+        };
+        self.shape_and_place("Sans-serif — clean & modern", &sans_style, 420.0, 630.0, false);
+
+        // ── Weight showcase ──────────────────────────────────────
+        let weights = [
+            (100, "Thin"),
+            (300, "Light"),
+            (400, "Regular"),
+            (700, "Bold"),
+            (900, "Black"),
+        ];
+        let mut weight_x = 80.0;
+        for (w, label) in &weights {
+            let style = TextStyle {
+                font_size: 18.0,
+                line_height: 22.0,
+                color: [0.9, 0.9, 0.9, 1.0],
+                family: "sans-serif".into(),
+                weight: *w,
+                italic: false,
+                ..Default::default()
+            };
+            let shaped = self.text_engine.shape_text(label, &style, f32::INFINITY, &mut self.atlas);
+            self.place_glyphs(&shaped, weight_x, 670.0);
+            weight_x += shaped.width + 24.0;
+        }
+
+        // ── Italic ───────────────────────────────────────────────
+        let italic_style = TextStyle {
+            font_size: 20.0,
+            line_height: 24.0,
+            color: [0.85, 0.75, 0.95, 1.0], // lavender
+            family: "sans-serif".into(),
+            weight: 400,
+            italic: true,
+            ..Default::default()
+        };
+        self.shape_and_place("Italic — emphasis & flair", &italic_style, 80.0, 704.0, false);
+
+        // ── Bold Italic ──────────────────────────────────────────
+        let bold_italic = TextStyle {
+            font_size: 20.0,
+            line_height: 24.0,
+            color: [0.95, 0.65, 0.65, 1.0], // coral
+            family: "sans-serif".into(),
+            weight: 700,
+            italic: true,
+            ..Default::default()
+        };
+        self.shape_and_place("Bold Italic — strong emphasis", &bold_italic, 420.0, 704.0, false);
+
+        // ── Monospace ────────────────────────────────────────────
+        let mono_style = TextStyle {
+            font_size: 16.0,
+            line_height: 20.0,
+            color: [0.60, 0.90, 0.60, 1.0], // green (code-like)
+            family: "monospace".into(),
+            weight: 400,
+            italic: false,
+            ..Default::default()
+        };
+        self.shape_and_place("fn main() { render(); }", &mono_style, 80.0, 740.0, false);
+
+        // ── Size showcase ────────────────────────────────────────
+        let sizes = [(12.0, "12px"), (16.0, "16px"), (24.0, "24px"), (32.0, "32px")];
+        let mut size_x = 420.0;
+        for (sz, label) in &sizes {
+            let style = TextStyle {
+                font_size: *sz,
+                line_height: sz * 1.2,
+                color: [0.8, 0.8, 0.85, 1.0],
+                family: "sans-serif".into(),
+                weight: 400,
+                italic: false,
+                ..Default::default()
+            };
+            let shaped = self.text_engine.shape_text(label, &style, f32::INFINITY, &mut self.atlas);
+            self.place_glyphs(&shaped, size_x, 740.0);
+            size_x += shaped.width + 16.0;
+        }
+
+        // ── Color showcase ───────────────────────────────────────
+        let colors = [
+            ([0.96, 0.26, 0.42, 1.0], "Red"),
+            ([0.26, 0.52, 0.96, 1.0], "Blue"),
+            ([0.26, 0.87, 0.56, 1.0], "Green"),
+            ([0.96, 0.76, 0.26, 1.0], "Gold"),
+            ([0.87, 0.26, 0.96, 1.0], "Purple"),
+        ];
+        let mut color_x = 80.0;
+        for (c, label) in &colors {
+            let style = TextStyle {
+                font_size: 18.0,
+                line_height: 22.0,
+                color: *c,
+                family: "sans-serif".into(),
+                weight: 600,
+                italic: false,
+                ..Default::default()
+            };
+            let shaped = self.text_engine.shape_text(label, &style, f32::INFINITY, &mut self.atlas);
+            self.place_glyphs(&shaped, color_x, 776.0);
+            color_x += shaped.width + 20.0;
+        }
+
+        // ── Font count badge ─────────────────────────────────────
+        let font_info = format!(
+            "{} font families available",
+            self.font_registry.family_count()
         );
+        let badge_style = TextStyle {
+            font_size: 13.0,
+            line_height: 16.0,
+            color: [0.5, 0.5, 0.55, 1.0],
+            family: "sans-serif".into(),
+            weight: 400,
+            italic: false,
+            ..Default::default()
+        };
+        self.shape_and_place(&font_info, &badge_style, 400.0, 810.0, true);
+    }
 
-        let sub_x = 400.0 - subtitle.width / 2.0;
-        let sub_y = center_y + 44.0;
+    /// Shape text and place glyphs at the given position.
+    /// If `center` is true, the text is centered horizontally around `x`.
+    fn shape_and_place(&mut self, text: &str, style: &TextStyle, x: f32, y: f32, center: bool) {
+        let shaped = self.text_engine.shape_text(text, style, f32::INFINITY, &mut self.atlas);
+        let offset_x = if center { x - shaped.width / 2.0 } else { x };
+        self.place_glyphs(&shaped, offset_x, y);
+    }
 
-        for glyph in &subtitle.glyphs {
+    /// Convert shaped glyph quads to TextInstance GPU structs.
+    fn place_glyphs(&mut self, shaped: &logos_text::ShapedText, base_x: f32, base_y: f32) {
+        for glyph in &shaped.glyphs {
             self.text_instances.push(TextInstance::new(
-                sub_x + glyph.x,
-                sub_y + glyph.y,
+                base_x + glyph.x,
+                base_y + glyph.y,
                 glyph.width,
                 glyph.height,
                 [glyph.atlas_region.u_min, glyph.atlas_region.v_min],
@@ -549,10 +681,11 @@ mod tests {
             let mut app = AppState::new(gpu, 800, 600);
             app.load_demo_scene();
             app.rebuild_instances();
-            // Should have text glyphs from "Hello, Logos!" + subtitle.
+            // Should have text glyphs from the full typography showcase.
             assert!(!app.text_instances.is_empty(), "Text instances should be generated");
-            // "Hello, Logos!" has visible glyphs (space/comma may not produce quads).
-            assert!(app.text_instances.len() >= 5, "Expected at least 5 glyph quads, got {}", app.text_instances.len());
+            // The showcase has many text blocks (title, subtitle, serif, sans, weights,
+            // italic, bold-italic, mono, sizes, colors, badge) — expect many glyphs.
+            assert!(app.text_instances.len() >= 20, "Expected at least 20 glyph quads, got {}", app.text_instances.len());
         }
     }
 
@@ -583,6 +716,44 @@ mod tests {
             app.rebuild_instances();
             assert!(app.atlas.glyph_count() > 0, "Atlas should have glyphs");
             assert!(app.atlas.dirty, "Atlas should be dirty after new glyphs");
+        }
+    }
+
+    #[test]
+    fn test_font_registry_available() {
+        let gpu = pollster::block_on(GpuContext::new_headless());
+        if let Ok(gpu) = gpu {
+            let app = AppState::new(gpu, 800, 600);
+            assert!(
+                app.font_registry.family_count() > 0,
+                "Font registry should discover system fonts"
+            );
+        }
+    }
+
+    #[test]
+    fn test_typography_showcase_variety() {
+        let gpu = pollster::block_on(GpuContext::new_headless());
+        if let Ok(gpu) = gpu {
+            let mut app = AppState::new(gpu, 800, 600);
+            app.load_demo_scene();
+            app.rebuild_instances();
+            // Verify we have diverse colors (not all white).
+            let unique_colors: std::collections::HashSet<[u8; 4]> = app.text_instances.iter()
+                .map(|inst| {
+                    [
+                        (inst.color[0] * 255.0) as u8,
+                        (inst.color[1] * 255.0) as u8,
+                        (inst.color[2] * 255.0) as u8,
+                        (inst.color[3] * 255.0) as u8,
+                    ]
+                })
+                .collect();
+            assert!(
+                unique_colors.len() >= 3,
+                "Expected at least 3 distinct colors in showcase, got {}",
+                unique_colors.len(),
+            );
         }
     }
 }
