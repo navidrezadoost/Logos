@@ -2,6 +2,7 @@
 members = [
     "logos-core",
     "logos-render",
+    "logos-text",
     "logos-desktop",
     "logos-wasm",
     "logos-layout"

@@ -74,3 +74,18 @@ jobs:
           echo "ERROR: Expected >=10 desktop tests, got $PASSED"
           exit 1
         fi
+    - name: Verify logos-text tests (0 ignored)
+      run: |
+        RESULT=$(cargo test -p logos-text 2>&1)
+        echo "$RESULT"
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | head -1 | grep -oP '\d+')
+        IGNORED=$(echo "$RESULT" | grep -oP '\d+ ignored' | head -1 | grep -oP '\d+')
+        echo "Text tests: $PASSED passed, $IGNORED ignored"
+        if [ "$IGNORED" != "0" ]; then
+          echo "ERROR: logos-text has $IGNORED ignored tests"
+          exit 1
+        fi
+        if [ "$PASSED" -lt 18 ]; then
+          echo "ERROR: Expected >=18 text tests, got $PASSED"
+          exit 1
+        fi
