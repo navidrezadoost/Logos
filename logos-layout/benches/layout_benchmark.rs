@@ -1,6 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 use logos_layout::engine::LayoutEngine;
+use logos_layout::bridge::LayoutBridge;
 use logos_core::{Layer, RectLayer};
+use logos_core::collab::CollabOp;
 use taffy::prelude::*;
 use uuid::Uuid;
 
@@ -171,6 +173,110 @@ fn bench_get_layout_cached(c: &mut Criterion) {
     });
 }
 
+// ===================================================================
+// Bridge benchmarks
+// ===================================================================
+
+/// Benchmark: bridge push + flush of a single AddLayer op
+fn bench_bridge_single_op(c: &mut Criterion) {
+    c.bench_function("bridge_single_add_op", |b| {
+        b.iter(|| {
+            let mut bridge = LayoutBridge::new();
+            let mut engine = LayoutEngine::new();
+            let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 50.0));
+            bridge.push(CollabOp::AddLayer {
+                id: layer.id(),
+                parent_id: Uuid::nil(),
+                index: 0,
+                layer,
+            });
+            bridge.flush(&mut engine).unwrap();
+        });
+    });
+}
+
+/// Benchmark: bridge batch flush of N AddLayer ops
+fn bench_bridge_batch_flush(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bridge_batch_flush");
+
+    for count in [10, 100, 1_000] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, &n| {
+                b.iter(|| {
+                    let mut bridge = LayoutBridge::new();
+                    let mut engine = LayoutEngine::new();
+                    let ops: Vec<CollabOp> = (0..n)
+                        .map(|_| {
+                            let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 50.0, 30.0));
+                            CollabOp::AddLayer {
+                                id: layer.id(),
+                                parent_id: Uuid::nil(),
+                                index: 0,
+                                layer,
+                            }
+                        })
+                        .collect();
+                    bridge.push_batch(ops);
+                    bridge.flush(&mut engine).unwrap();
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: end-to-end CollabOp → Layout (add + compute + read)
+fn bench_bridge_end_to_end(c: &mut Criterion) {
+    c.bench_function("bridge_end_to_end_add_compute_read", |b| {
+        b.iter(|| {
+            let mut bridge = LayoutBridge::new();
+            let mut engine = LayoutEngine::new();
+
+            let layer = Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0));
+            let id = layer.id();
+            bridge.push(CollabOp::AddLayer {
+                id,
+                parent_id: Uuid::nil(),
+                index: 0,
+                layer,
+            });
+            bridge.flush(&mut engine).unwrap();
+            engine.compute_layout(id).unwrap();
+            engine.get_layout(id).unwrap();
+        });
+    });
+}
+
+/// Benchmark: bridge overhead for ModifyProperty (layout-relevant)
+fn bench_bridge_modify_property(c: &mut Criterion) {
+    c.bench_function("bridge_modify_width", |b| {
+        let mut bridge = LayoutBridge::new();
+        let mut engine = LayoutEngine::new();
+
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 50.0));
+        let id = layer.id();
+        bridge.push(CollabOp::AddLayer {
+            id,
+            parent_id: Uuid::nil(),
+            index: 0,
+            layer,
+        });
+        bridge.flush(&mut engine).unwrap();
+
+        b.iter(|| {
+            bridge.push(CollabOp::ModifyProperty {
+                id,
+                property: "width".to_string(),
+                value: serde_json::json!(200.0),
+            });
+            bridge.flush(&mut engine).unwrap();
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_add_layer,
@@ -178,5 +284,9 @@ criterion_group!(
     bench_compute_flex_tree,
     bench_compute_nested_hierarchy,
     bench_get_layout_cached,
+    bench_bridge_single_op,
+    bench_bridge_batch_flush,
+    bench_bridge_end_to_end,
+    bench_bridge_modify_property,
 );
 criterion_main!(benches);

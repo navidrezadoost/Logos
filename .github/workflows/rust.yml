@@ -27,5 +27,20 @@ jobs:
           echo "ERROR: $IGNORED tests are still ignored"
           exit 1
         fi
+    - name: Verify logos-layout tests (0 ignored)
+      run: |
+        RESULT=$(cargo test -p logos-layout 2>&1)
+        echo "$RESULT"
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | head -1 | grep -oP '\d+')
+        IGNORED=$(echo "$RESULT" | grep -oP '\d+ ignored' | head -1 | grep -oP '\d+')
+        echo "Layout tests: $PASSED passed, $IGNORED ignored"
+        if [ "$IGNORED" != "0" ]; then
+          echo "ERROR: logos-layout has $IGNORED ignored tests"
+          exit 1
+        fi
+        if [ "$PASSED" -lt 12 ]; then
+          echo "ERROR: Expected >=12 layout tests, got $PASSED"
+          exit 1
+        fi
     - name: Build WASM
       run: cargo build --release --target wasm32-unknown-unknown

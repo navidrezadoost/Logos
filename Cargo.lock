@@ -410,6 +410,7 @@ dependencies = [
  "criterion",
  "log",
  "logos-core",
+ "serde_json",
  "taffy",
  "thiserror",
  "uuid",

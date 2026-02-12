@@ -252,6 +252,75 @@ impl LayoutEngine {
     pub fn dirty_count(&self) -> usize {
         self.dirty_nodes.len()
     }
+
+    // ---------------------------------------------------------------
+    // Fine-grained mutations (used by the bridge)
+    // ---------------------------------------------------------------
+
+    /// Reparent a node under a new parent.
+    pub fn reparent(&mut self, child_id: Uuid, parent_id: Uuid) -> Result<(), LayoutError> {
+        let child_node = *self.layer_to_node
+            .get(&child_id)
+            .ok_or(LayoutError::LayerNotFound(child_id))?;
+        let parent_node = *self.layer_to_node
+            .get(&parent_id)
+            .ok_or(LayoutError::ParentNotFound(parent_id))?;
+
+        self.taffy.add_child(parent_node, child_node)?;
+        self.dirty_nodes.insert(child_id);
+        self.dirty_nodes.insert(parent_id);
+        Ok(())
+    }
+
+    /// Update a single dimension (width or height) for an existing node.
+    pub fn update_dimension(
+        &mut self,
+        id: Uuid,
+        axis: crate::bridge::DimAxis,
+        value: f32,
+    ) -> Result<(), LayoutError> {
+        let node = *self.layer_to_node
+            .get(&id)
+            .ok_or(LayoutError::LayerNotFound(id))?;
+
+        let mut style = self.taffy.style(node)?.clone();
+        match axis {
+            crate::bridge::DimAxis::Width => {
+                style.size.width = Dimension::length(value);
+            }
+            crate::bridge::DimAxis::Height => {
+                style.size.height = Dimension::length(value);
+            }
+        }
+        self.taffy.set_style(node, style)?;
+        self.dirty_nodes.insert(id);
+        Ok(())
+    }
+
+    /// Update a single position axis (left/top) for an existing node.
+    pub fn update_position(
+        &mut self,
+        id: Uuid,
+        axis: crate::bridge::PosAxis,
+        value: f32,
+    ) -> Result<(), LayoutError> {
+        let node = *self.layer_to_node
+            .get(&id)
+            .ok_or(LayoutError::LayerNotFound(id))?;
+
+        let mut style = self.taffy.style(node)?.clone();
+        match axis {
+            crate::bridge::PosAxis::Left => {
+                style.inset.left = LengthPercentageAuto::length(value);
+            }
+            crate::bridge::PosAxis::Top => {
+                style.inset.top = LengthPercentageAuto::length(value);
+            }
+        }
+        self.taffy.set_style(node, style)?;
+        self.dirty_nodes.insert(id);
+        Ok(())
+    }
 }
 
 // ===================================================================
