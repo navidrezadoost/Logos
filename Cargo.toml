@@ -3,7 +3,8 @@ members = [
     "logos-core",
     "logos-render",
     "logos-desktop",
-    "logos-wasm"
+    "logos-wasm",
+    "logos-layout"
 ]
 resolver = "2"
 

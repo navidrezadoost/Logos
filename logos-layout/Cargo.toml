@@ -1,0 +1,18 @@
+[package]
+name = "logos-layout"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+logos-core = { path = "../logos-core" }
+taffy = "0.9.2"
+uuid = { version = "1.20.0", features = ["v4", "serde"] }
+thiserror = "2.0.18"
+log = "0.4.29"
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "layout_benchmark"
+harness = false

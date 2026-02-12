@@ -404,6 +404,18 @@ name = "logos-desktop"
 version = "0.1.0"
 
 [[package]]
+name = "logos-layout"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "log",
+ "logos-core",
+ "taffy",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "logos-render"
 version = "0.1.0"
 
