@@ -5,6 +5,8 @@ use taffy::{TaffyTree, TaffyError, Style, Layout, NodeId};
 use logos_core::Layer;
 use thiserror::Error;
 
+use crate::spatial::{Aabb, SpatialHash};
+
 #[derive(Error, Debug)]
 pub enum LayoutError {
     #[error("Taffy error: {0}")]
@@ -19,6 +21,9 @@ pub enum LayoutError {
 ///
 /// Manages a bidirectional mapping between Logos `Layer` UUIDs and Taffy
 /// `NodeId`s, with dirty-tracking for partial recomputation.
+///
+/// Embeds a [`SpatialHash`] that is automatically refreshed after every
+/// `compute_layout()` call, enabling O(1) hit testing.
 pub struct LayoutEngine {
     /// Taffy 0.9 tree
     taffy: TaffyTree,
@@ -32,6 +37,9 @@ pub struct LayoutEngine {
 
     /// Cache of computed layouts for fast renderer access
     layout_results: HashMap<Uuid, Layout>,
+
+    /// Spatial index updated after each layout pass.
+    spatial: SpatialHash,
 }
 
 impl Default for LayoutEngine {
@@ -40,14 +48,25 @@ impl Default for LayoutEngine {
     }
 }
 
+/// Default spatial hash cell size (128 px).
+///
+/// Good for typical design documents with 50–200 px elements.
+const DEFAULT_CELL_SIZE: f32 = 128.0;
+
 impl LayoutEngine {
     pub fn new() -> Self {
+        Self::with_cell_size(DEFAULT_CELL_SIZE)
+    }
+
+    /// Create a layout engine with a custom spatial hash cell size.
+    pub fn with_cell_size(cell_size: f32) -> Self {
         Self {
             taffy: TaffyTree::new(),
             layer_to_node: HashMap::new(),
             node_to_layer: HashMap::new(),
             dirty_nodes: HashSet::new(),
             layout_results: HashMap::new(),
+            spatial: SpatialHash::new(cell_size),
         }
     }
 
@@ -195,6 +214,7 @@ impl LayoutEngine {
         self.node_to_layer.remove(&node);
         self.layout_results.remove(&id);
         self.dirty_nodes.remove(&id);
+        self.spatial.remove(id);
         Ok(())
     }
 
@@ -205,7 +225,8 @@ impl LayoutEngine {
     /// Compute layout for a subtree rooted at `root_layer_id`.
     ///
     /// Only recomputes when dirty nodes are present. After computation
-    /// the layout cache is refreshed for every tracked node.
+    /// the layout cache and spatial index are refreshed for every tracked
+    /// node.
     pub fn compute_layout(&mut self, root_layer_id: Uuid) -> Result<(), LayoutError> {
         if self.dirty_nodes.is_empty() {
             return Ok(());
@@ -217,7 +238,7 @@ impl LayoutEngine {
 
         self.taffy.compute_layout(root_node, Size::MAX_CONTENT)?;
 
-        // Walk every mapped node and cache its layout result.
+        // Walk every mapped node and cache its layout result + spatial bounds.
         let ids: Vec<(Uuid, NodeId)> = self
             .layer_to_node
             .iter()
@@ -227,6 +248,15 @@ impl LayoutEngine {
         for (id, node) in ids {
             if let Ok(layout) = self.taffy.layout(node) {
                 self.layout_results.insert(id, *layout);
+
+                // Update spatial index with the computed position & size.
+                let aabb = Aabb::from_rect(
+                    layout.location.x,
+                    layout.location.y,
+                    layout.size.width,
+                    layout.size.height,
+                );
+                self.spatial.insert(id, aabb);
             }
         }
 
@@ -251,6 +281,31 @@ impl LayoutEngine {
     /// Number of nodes currently marked dirty.
     pub fn dirty_count(&self) -> usize {
         self.dirty_nodes.len()
+    }
+
+    // ---------------------------------------------------------------
+    // Spatial queries (delegated to embedded SpatialHash)
+    // ---------------------------------------------------------------
+
+    /// O(1) point hit test — returns the topmost layer at `(px, py)`.
+    #[inline]
+    pub fn hit_test(&self, px: f32, py: f32) -> Option<Uuid> {
+        self.spatial.hit_test(px, py)
+    }
+
+    /// Return **all** layers at the point (top-to-bottom order).
+    pub fn hit_test_all(&self, px: f32, py: f32) -> Vec<Uuid> {
+        self.spatial.hit_test_all(px, py)
+    }
+
+    /// Region query: return all layers whose bounds intersect the rect.
+    pub fn query_region(&self, region: &Aabb) -> Vec<Uuid> {
+        self.spatial.query_region(region)
+    }
+
+    /// Read-only access to the embedded spatial hash.
+    pub fn spatial(&self) -> &SpatialHash {
+        &self.spatial
     }
 
     // ---------------------------------------------------------------
@@ -514,5 +569,156 @@ mod tests {
             engine.add_or_update_layer(layer).unwrap();
         }
         assert_eq!(engine.node_count(), 4);
+    }
+
+    // ---------------------------------------------------------------
+    // Layout → Spatial integration tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_spatial_populated_after_compute() {
+        let mut engine = LayoutEngine::new();
+        let layer = Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0));
+        let id = layer.id();
+        engine.add_or_update_layer(&layer).unwrap();
+        engine.compute_layout(id).unwrap();
+
+        // Spatial hash should now contain this layer
+        assert_eq!(engine.spatial().len(), 1);
+    }
+
+    #[test]
+    fn test_hit_test_via_engine() {
+        let mut engine = LayoutEngine::new();
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 50.0));
+        let id = layer.id();
+        engine.add_or_update_layer(&layer).unwrap();
+        engine.compute_layout(id).unwrap();
+
+        // Point inside the rect
+        assert_eq!(engine.hit_test(50.0, 25.0), Some(id));
+        // Point outside
+        assert!(engine.hit_test(200.0, 200.0).is_none());
+    }
+
+    #[test]
+    fn test_hit_test_all_via_engine() {
+        let mut engine = LayoutEngine::new();
+        let r1 = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 100.0));
+        let r2 = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 100.0));
+        let id1 = r1.id();
+        let id2 = r2.id();
+
+        engine.add_or_update_layer(&r1).unwrap();
+        engine.compute_layout(id1).unwrap();
+        engine.add_or_update_layer(&r2).unwrap();
+        engine.compute_layout(id2).unwrap();
+
+        let hits = engine.hit_test_all(50.0, 50.0);
+        assert_eq!(hits.len(), 2);
+        assert!(hits.contains(&id1));
+        assert!(hits.contains(&id2));
+    }
+
+    #[test]
+    fn test_spatial_cleared_on_remove() {
+        let mut engine = LayoutEngine::new();
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 50.0));
+        let id = layer.id();
+        engine.add_or_update_layer(&layer).unwrap();
+        engine.compute_layout(id).unwrap();
+        assert_eq!(engine.spatial().len(), 1);
+
+        engine.remove_layer(id).unwrap();
+        assert_eq!(engine.spatial().len(), 0);
+        assert!(engine.hit_test(50.0, 25.0).is_none());
+    }
+
+    #[test]
+    fn test_query_region_via_engine() {
+        let mut engine = LayoutEngine::new();
+        let layer = Layer::Rect(RectLayer::new(10.0, 10.0, 50.0, 50.0));
+        let id = layer.id();
+        engine.add_or_update_layer(&layer).unwrap();
+        engine.compute_layout(id).unwrap();
+
+        let region = crate::spatial::Aabb::from_rect(0.0, 0.0, 200.0, 200.0);
+        let hits = engine.query_region(&region);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0], id);
+    }
+
+    #[test]
+    fn test_spatial_updates_on_recompute() {
+        let mut engine = LayoutEngine::new();
+
+        // Create a parent frame large enough to contain the child.
+        let parent_id = Uuid::new_v4();
+        engine
+            .add_layer(
+                parent_id,
+                None,
+                Style {
+                    size: Size {
+                        width: Dimension::length(1000.0),
+                        height: Dimension::length(1000.0),
+                    },
+                    ..Style::default()
+                },
+            )
+            .unwrap();
+
+        // Add child at position (0,0), size 100×100
+        let child_id = Uuid::new_v4();
+        engine
+            .add_layer(
+                child_id,
+                Some(parent_id),
+                Style {
+                    size: Size {
+                        width: Dimension::length(100.0),
+                        height: Dimension::length(100.0),
+                    },
+                    position: Position::Absolute,
+                    inset: taffy::Rect {
+                        left: LengthPercentageAuto::length(0.0),
+                        top: LengthPercentageAuto::length(0.0),
+                        right: LengthPercentageAuto::auto(),
+                        bottom: LengthPercentageAuto::auto(),
+                    },
+                    ..Style::default()
+                },
+            )
+            .unwrap();
+
+        engine.compute_layout(parent_id).unwrap();
+
+        // Child should be hit-testable at its initial position (0,0)
+        let initial_hits = engine.hit_test_all(50.0, 50.0);
+        assert!(initial_hits.contains(&child_id), "child should be at initial position");
+
+        // Move child to (500, 500)
+        engine
+            .update_position(child_id, crate::bridge::PosAxis::Left, 500.0)
+            .unwrap();
+        engine
+            .update_position(child_id, crate::bridge::PosAxis::Top, 500.0)
+            .unwrap();
+        engine.compute_layout(parent_id).unwrap();
+
+        // Old position should not contain the child
+        let old_hits = engine.hit_test_all(50.0, 50.0);
+        assert!(!old_hits.contains(&child_id), "child should not be at old position");
+
+        // New position should contain the child
+        let new_hits = engine.hit_test_all(550.0, 550.0);
+        assert!(new_hits.contains(&child_id), "child should be at new position");
+    }
+
+    #[test]
+    fn test_with_cell_size() {
+        let engine = LayoutEngine::with_cell_size(64.0);
+        assert_eq!(engine.node_count(), 0);
+        assert_eq!(engine.spatial().len(), 0);
     }
 }

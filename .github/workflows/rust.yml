@@ -38,8 +38,8 @@ jobs:
           echo "ERROR: logos-layout has $IGNORED ignored tests"
           exit 1
         fi
-        if [ "$PASSED" -lt 12 ]; then
-          echo "ERROR: Expected >=12 layout tests, got $PASSED"
+        if [ "$PASSED" -lt 59 ]; then
+          echo "ERROR: Expected >=59 layout tests, got $PASSED"
           exit 1
         fi
     - name: Build WASM

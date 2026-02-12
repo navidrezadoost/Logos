@@ -1,6 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
+use std::hint::black_box;
 use logos_layout::engine::LayoutEngine;
 use logos_layout::bridge::LayoutBridge;
+use logos_layout::spatial::{SpatialHash, Aabb};
 use logos_core::{Layer, RectLayer};
 use logos_core::collab::CollabOp;
 use taffy::prelude::*;
@@ -277,6 +279,125 @@ fn bench_bridge_modify_property(c: &mut Criterion) {
     });
 }
 
+// ===================================================================
+// Spatial hash benchmarks
+// ===================================================================
+
+/// Benchmark: insert a single layer into spatial hash
+fn bench_spatial_insert(c: &mut Criterion) {
+    c.bench_function("spatial_insert_single", |b| {
+        let mut sh = SpatialHash::new(128.0);
+        b.iter(|| {
+            let id = Uuid::new_v4();
+            sh.insert(id, Aabb::from_rect(10.0, 10.0, 50.0, 50.0));
+        });
+    });
+}
+
+/// Benchmark: hit test on a grid of 10,000 layers (cache-hot)
+fn bench_spatial_hit_test_10k(c: &mut Criterion) {
+    c.bench_function("spatial_hit_test_10k_layers", |b| {
+        let mut sh = SpatialHash::new(128.0);
+        // 100×100 grid of 50×50 layers
+        for row in 0..100 {
+            for col in 0..100 {
+                let x = col as f32 * 60.0;
+                let y = row as f32 * 60.0;
+                sh.insert(Uuid::new_v4(), Aabb::from_rect(x, y, 50.0, 50.0));
+            }
+        }
+
+        // Hit a known point (center of layer at row=50, col=50)
+        let px = 50.0 * 60.0 + 25.0;
+        let py = 50.0 * 60.0 + 25.0;
+
+        b.iter(|| {
+            black_box(sh.hit_test(black_box(px), black_box(py)));
+        });
+    });
+}
+
+/// Benchmark: hit test miss (point in gap between layers)
+fn bench_spatial_hit_test_miss(c: &mut Criterion) {
+    c.bench_function("spatial_hit_test_miss_10k", |b| {
+        let mut sh = SpatialHash::new(128.0);
+        for row in 0..100 {
+            for col in 0..100 {
+                let x = col as f32 * 60.0;
+                let y = row as f32 * 60.0;
+                sh.insert(Uuid::new_v4(), Aabb::from_rect(x, y, 50.0, 50.0));
+            }
+        }
+
+        // Point in gap (55, 55) — between layers
+        b.iter(|| {
+            black_box(sh.hit_test(black_box(55.0), black_box(55.0)));
+        });
+    });
+}
+
+/// Benchmark: remove a layer from 10,000
+fn bench_spatial_remove(c: &mut Criterion) {
+    c.bench_function("spatial_remove_from_10k", |b| {
+        let mut sh = SpatialHash::new(128.0);
+        let mut ids = Vec::with_capacity(10_000);
+        for row in 0..100 {
+            for col in 0..100 {
+                let id = Uuid::new_v4();
+                let x = col as f32 * 60.0;
+                let y = row as f32 * 60.0;
+                sh.insert(id, Aabb::from_rect(x, y, 50.0, 50.0));
+                ids.push(id);
+            }
+        }
+
+        let mut idx = 0;
+        b.iter(|| {
+            let id = ids[idx % ids.len()];
+            sh.remove(id);
+            // Re-insert to keep the hash populated
+            sh.insert(id, Aabb::from_rect(0.0, 0.0, 50.0, 50.0));
+            idx += 1;
+        });
+    });
+}
+
+/// Benchmark: remove-only from 10k (single layer, cell_size=128 so 1 cell)
+fn bench_spatial_remove_only(c: &mut Criterion) {
+    c.bench_function("spatial_remove_only_10k", |b| {
+        let mut sh = SpatialHash::new(128.0);
+        let mut ids = Vec::with_capacity(10_000);
+        for row in 0..100 {
+            for col in 0..100 {
+                let id = Uuid::new_v4();
+                let x = col as f32 * 60.0;
+                let y = row as f32 * 60.0;
+                sh.insert(id, Aabb::from_rect(x, y, 50.0, 50.0));
+                ids.push(id);
+            }
+        }
+        let target = ids[5000];
+        let aabb = Aabb::from_rect(50.0 * 60.0, 50.0 * 60.0, 50.0, 50.0);
+
+        b.iter(|| {
+            sh.remove(black_box(target));
+            // Cheap re-insert to keep hash populated (not measured separately).
+            // This is the lightest possible insert — single cell, no old entry.
+            sh.insert(target, aabb);
+        });
+    });
+}
+
+/// Benchmark: hit test on empty hash
+fn bench_spatial_hit_test_empty(c: &mut Criterion) {
+    c.bench_function("spatial_hit_test_empty", |b| {
+        let sh = SpatialHash::new(128.0);
+        b.iter(|| {
+            black_box(sh.hit_test(black_box(50.0), black_box(50.0)));
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_add_layer,
@@ -288,5 +409,11 @@ criterion_group!(
     bench_bridge_batch_flush,
     bench_bridge_end_to_end,
     bench_bridge_modify_property,
+    bench_spatial_insert,
+    bench_spatial_hit_test_10k,
+    bench_spatial_hit_test_miss,
+    bench_spatial_remove,
+    bench_spatial_remove_only,
+    bench_spatial_hit_test_empty,
 );
 criterion_main!(benches);
