@@ -18,7 +18,14 @@ jobs:
       run: rustup target add wasm32-unknown-unknown
     - name: Build Native
       run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose -- --nocapture
+    - name: Run tests with verification
+      run: cargo test -- --nocapture --test-threads=1
+    - name: Ensure no ignored tests
+      run: |
+        IGNORED=$(cargo test -- --ignored --list | grep ": test" | wc -l)
+        if [ $IGNORED -gt 0 ]; then
+          echo "ERROR: $IGNORED tests are still ignored"
+          exit 1
+        fi
     - name: Build WASM
       run: cargo build --release --target wasm32-unknown-unknown
