@@ -9,7 +9,8 @@ use wgpu::{
 
 use crate::context::GpuContext;
 use crate::pipelines::rect::RectPipeline;
-use crate::vertex::{CameraUniform, RectInstance};
+use crate::pipelines::text::TextPipeline;
+use crate::vertex::{CameraUniform, RectInstance, TextInstance};
 
 #[derive(Error, Debug)]
 pub enum RenderError {
@@ -24,6 +25,8 @@ pub enum RenderError {
 pub struct FrameStats {
     /// Number of rect instances drawn.
     pub rect_count: u32,
+    /// Number of glyph instances drawn.
+    pub text_count: u32,
     /// Number of draw calls.
     pub draw_calls: u32,
 }
@@ -50,17 +53,27 @@ pub struct FrameStats {
 /// ```
 pub struct Renderer {
     rect_pipeline: RectPipeline,
+    text_pipeline: TextPipeline,
     clear_color: Color,
     quad_uploaded: bool,
 }
 
 impl Renderer {
     /// Create a new renderer for the given GPU context.
+    ///
+    /// `atlas_size` controls the glyph atlas texture dimensions (default 1024).
     pub fn new(gpu: &GpuContext) -> Self {
+        Self::with_atlas_size(gpu, 1024)
+    }
+
+    /// Create a renderer with a specific atlas texture size.
+    pub fn with_atlas_size(gpu: &GpuContext, atlas_size: u32) -> Self {
         let rect_pipeline = RectPipeline::new(&gpu.device, gpu.surface_format);
+        let text_pipeline = TextPipeline::new(&gpu.device, gpu.surface_format, atlas_size);
 
         Self {
             rect_pipeline,
+            text_pipeline,
             clear_color: Color {
                 r: 0.12,
                 g: 0.12,
@@ -89,11 +102,27 @@ impl Renderer {
         // Upload static quad geometry on first frame.
         if !self.quad_uploaded {
             self.rect_pipeline.upload_quad(&gpu.queue);
+            self.text_pipeline.upload_quad(&gpu.queue);
             self.quad_uploaded = true;
         }
 
         self.rect_pipeline.upload_instances(&gpu.queue, instances);
         self.rect_pipeline.upload_camera(&gpu.queue, camera);
+        self.text_pipeline.upload_camera(&gpu.queue, camera);
+    }
+
+    /// Upload text glyph instances for this frame.
+    ///
+    /// Call after `prepare()` and before `render_to_surface()`.
+    pub fn prepare_text(&mut self, gpu: &GpuContext, text_instances: &[TextInstance]) {
+        self.text_pipeline.upload_instances(&gpu.queue, text_instances);
+    }
+
+    /// Upload the glyph atlas texture data.
+    ///
+    /// Only call when the atlas is dirty (new glyphs rasterized).
+    pub fn upload_atlas(&mut self, gpu: &GpuContext, data: &[u8], size: u32) {
+        self.text_pipeline.upload_atlas(&gpu.device, &gpu.queue, data, size);
     }
 
     /// Render to the window surface.  Returns frame statistics.
@@ -122,15 +151,22 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
+            // Draw rects first (background), then text on top.
             self.rect_pipeline.draw(&mut pass);
+            self.text_pipeline.draw(&mut pass);
         }
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
+        let rect_count = self.rect_pipeline.instance_count();
+        let text_count = self.text_pipeline.instance_count();
+        let draw_calls = (rect_count > 0) as u32 + (text_count > 0) as u32;
+
         Ok(FrameStats {
-            rect_count: self.rect_pipeline.instance_count(),
-            draw_calls: if self.rect_pipeline.instance_count() > 0 { 1 } else { 0 },
+            rect_count,
+            text_count,
+            draw_calls,
         })
     }
 
@@ -163,13 +199,19 @@ impl Renderer {
             });
 
             self.rect_pipeline.draw(&mut pass);
+            self.text_pipeline.draw(&mut pass);
         }
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
 
+        let rect_count = self.rect_pipeline.instance_count();
+        let text_count = self.text_pipeline.instance_count();
+        let draw_calls = (rect_count > 0) as u32 + (text_count > 0) as u32;
+
         FrameStats {
-            rect_count: self.rect_pipeline.instance_count(),
-            draw_calls: if self.rect_pipeline.instance_count() > 0 { 1 } else { 0 },
+            rect_count,
+            text_count,
+            draw_calls,
         }
     }
 
@@ -191,10 +233,12 @@ mod tests {
     fn test_frame_stats_default() {
         let stats = FrameStats {
             rect_count: 42,
-            draw_calls: 1,
+            text_count: 10,
+            draw_calls: 2,
         };
         assert_eq!(stats.rect_count, 42);
-        assert_eq!(stats.draw_calls, 1);
+        assert_eq!(stats.text_count, 10);
+        assert_eq!(stats.draw_calls, 2);
     }
 
     #[test]

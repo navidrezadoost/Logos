@@ -141,6 +141,88 @@ impl RectInstance {
 // Camera uniform
 // ───────────────────────────────────────────────────────────────────
 
+/// Per-instance data for a single glyph quad drawn via instanced rendering.
+///
+/// 48 bytes per instance — 10,000 glyphs = 480 KB of GPU memory.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct TextInstance {
+    /// World-space position of the glyph quad top-left.
+    pub position: [f32; 2],
+    /// Width and height of the glyph in pixels.
+    pub size: [f32; 2],
+    /// Atlas UV top-left.
+    pub uv_min: [f32; 2],
+    /// Atlas UV bottom-right.
+    pub uv_max: [f32; 2],
+    /// RGBA text color, each channel in [0.0, 1.0].
+    pub color: [f32; 4],
+}
+
+impl TextInstance {
+    pub fn new(
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        uv_min: [f32; 2],
+        uv_max: [f32; 2],
+        color: [f32; 4],
+    ) -> Self {
+        Self {
+            position: [x, y],
+            size: [w, h],
+            uv_min,
+            uv_max,
+            color,
+        }
+    }
+
+    pub fn layout() -> VertexBufferLayout<'static> {
+        static ATTRS: &[VertexAttribute] = &[
+            // location(1) = position
+            VertexAttribute {
+                offset: 0,
+                shader_location: 1,
+                format: VertexFormat::Float32x2,
+            },
+            // location(2) = size
+            VertexAttribute {
+                offset: 8,
+                shader_location: 2,
+                format: VertexFormat::Float32x2,
+            },
+            // location(3) = uv_min
+            VertexAttribute {
+                offset: 16,
+                shader_location: 3,
+                format: VertexFormat::Float32x2,
+            },
+            // location(4) = uv_max
+            VertexAttribute {
+                offset: 24,
+                shader_location: 4,
+                format: VertexFormat::Float32x2,
+            },
+            // location(5) = color
+            VertexAttribute {
+                offset: 32,
+                shader_location: 5,
+                format: VertexFormat::Float32x4,
+            },
+        ];
+        VertexBufferLayout {
+            array_stride: std::mem::size_of::<TextInstance>() as BufferAddress,
+            step_mode: VertexStepMode::Instance,
+            attributes: ATTRS,
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Camera uniform
+// ───────────────────────────────────────────────────────────────────
+
 /// Camera/viewport uniform sent to the GPU once per frame.
 ///
 /// 80 bytes — fits in a single uniform buffer.
@@ -307,5 +389,51 @@ mod tests {
         assert_eq!(layout.attributes[3].shader_location, 4); // border_radius
         assert_eq!(layout.attributes[4].shader_location, 5); // z_index
         assert_eq!(layout.step_mode, VertexStepMode::Instance);
+    }
+
+    #[test]
+    fn test_text_instance_size() {
+        assert_eq!(std::mem::size_of::<TextInstance>(), 48);
+    }
+
+    #[test]
+    fn test_text_instance_builder() {
+        let inst = TextInstance::new(
+            10.0, 20.0, 8.0, 12.0,
+            [0.0, 0.0], [0.5, 0.5],
+            [1.0, 1.0, 1.0, 1.0],
+        );
+        assert_eq!(inst.position, [10.0, 20.0]);
+        assert_eq!(inst.size, [8.0, 12.0]);
+        assert_eq!(inst.uv_min, [0.0, 0.0]);
+        assert_eq!(inst.uv_max, [0.5, 0.5]);
+        assert_eq!(inst.color, [1.0, 1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_text_instance_layout_locations() {
+        let layout = TextInstance::layout();
+        assert_eq!(layout.attributes.len(), 5);
+        assert_eq!(layout.attributes[0].shader_location, 1); // position
+        assert_eq!(layout.attributes[1].shader_location, 2); // size
+        assert_eq!(layout.attributes[2].shader_location, 3); // uv_min
+        assert_eq!(layout.attributes[3].shader_location, 4); // uv_max
+        assert_eq!(layout.attributes[4].shader_location, 5); // color
+        assert_eq!(layout.step_mode, VertexStepMode::Instance);
+    }
+
+    #[test]
+    fn test_text_instance_bytemuck_cast() {
+        let inst = TextInstance::new(
+            1.0, 2.0, 3.0, 4.0,
+            [0.1, 0.2], [0.9, 0.8],
+            [1.0, 0.0, 0.0, 1.0],
+        );
+        let bytes = bytemuck::bytes_of(&inst);
+        assert_eq!(bytes.len(), 48);
+        // Round-trip
+        let back: &TextInstance = bytemuck::from_bytes(bytes);
+        assert_eq!(back.position, inst.position);
+        assert_eq!(back.uv_min, inst.uv_min);
     }
 }

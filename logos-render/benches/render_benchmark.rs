@@ -1,7 +1,7 @@
 //! Benchmarks for logos-render instance-buffer generation and GPU uploads.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use logos_render::vertex::{RectInstance, CameraUniform};
+use logos_render::vertex::{RectInstance, CameraUniform, TextInstance};
 use logos_render::bridge::collect_instances_direct;
 
 /// Generate `n` random-ish rect descriptors.
@@ -93,6 +93,40 @@ fn bench_bytemuck_cast(c: &mut Criterion) {
     });
 }
 
+fn bench_text_instance_creation(c: &mut Criterion) {
+    c.bench_function("TextInstance::new", |b| {
+        b.iter(|| {
+            black_box(TextInstance::new(
+                black_box(10.0),
+                black_box(20.0),
+                black_box(8.0),
+                black_box(12.0),
+                black_box([0.0, 0.0]),
+                black_box([0.5, 0.5]),
+                black_box([1.0, 1.0, 1.0, 1.0]),
+            ));
+        });
+    });
+}
+
+fn bench_text_instance_batch(c: &mut Criterion) {
+    c.bench_function("TextInstance_batch_1000", |b| {
+        b.iter(|| {
+            let mut v = Vec::with_capacity(1000);
+            for i in 0..1000u32 {
+                let fi = i as f32;
+                v.push(TextInstance::new(
+                    fi * 8.0, 100.0,
+                    8.0, 12.0,
+                    [fi * 0.001, 0.0], [fi * 0.001 + 0.01, 0.02],
+                    [1.0, 1.0, 1.0, 1.0],
+                ));
+            }
+            black_box(&v);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_collect_instances,
@@ -100,5 +134,7 @@ criterion_group!(
     bench_instance_with_radius,
     bench_camera_orthographic,
     bench_bytemuck_cast,
+    bench_text_instance_creation,
+    bench_text_instance_batch,
 );
 criterion_main!(benches);

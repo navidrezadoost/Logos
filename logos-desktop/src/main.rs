@@ -180,8 +180,8 @@ impl ApplicationHandler for App {
                         self.frame_count += 1;
                         if self.frame_count % 300 == 0 {
                             info!(
-                                "Frame {}: {} rects, {} draw call(s)",
-                                self.frame_count, stats.rect_count, stats.draw_calls
+                                "Frame {}: {} rects, {} glyphs, {} draw call(s)",
+                                self.frame_count, stats.rect_count, stats.text_count, stats.draw_calls
                             );
                         }
                     }

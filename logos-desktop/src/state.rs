@@ -2,13 +2,14 @@
 //!
 //! `AppState` is the single source of truth for the running application.
 //! It holds the CRDT document, layout engine, spatial index (via engine),
-//! GPU renderer, camera, and interaction state (selection/hover).
+//! GPU renderer, camera, text engine, and interaction state (selection/hover).
 
 use logos_core::{Document, Layer, RectLayer};
 use logos_layout::engine::LayoutEngine;
-use logos_render::vertex::{CameraUniform, RectInstance};
+use logos_render::vertex::{CameraUniform, RectInstance, TextInstance};
 use logos_render::renderer::{FrameStats, Renderer};
 use logos_render::context::GpuContext;
+use logos_text::{Atlas, TextEngine, TextStyle};
 use uuid::Uuid;
 
 /// Interactive state for selection / hover.
@@ -93,6 +94,9 @@ const HOVER_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 0.08]; // subtle white overlay
 const SELECTION_BORDER_COLOR: [f32; 4] = [0.26, 0.52, 0.96, 1.0]; // solid blue border
 const BORDER_WIDTH: f32 = 2.0;
 
+/// Atlas texture size for glyph caching.
+const ATLAS_SIZE: u32 = 1024;
+
 /// Owns the entire application pipeline.
 pub struct AppState {
     pub document: Document,
@@ -101,8 +105,14 @@ pub struct AppState {
     pub gpu: GpuContext,
     pub camera: Camera,
     pub interaction: InteractionState,
-    /// Cached instance buffer, rebuilt each frame.
+    /// Text engine for shaping and rasterization.
+    pub text_engine: TextEngine,
+    /// Glyph atlas for GPU texture upload.
+    pub atlas: Atlas,
+    /// Cached rect instance buffer, rebuilt each frame.
     instances: Vec<RectInstance>,
+    /// Cached text instance buffer, rebuilt each frame.
+    text_instances: Vec<TextInstance>,
     /// Dirty flag — set when layers/layout/selection change.
     needs_redraw: bool,
 }
@@ -110,10 +120,12 @@ pub struct AppState {
 impl AppState {
     /// Build a new AppState after GPU context has been created.
     pub fn new(gpu: GpuContext, width: u32, height: u32) -> Self {
-        let renderer = Renderer::new(&gpu);
+        let renderer = Renderer::with_atlas_size(&gpu, ATLAS_SIZE);
         let document = Document::new();
         let layout_engine = LayoutEngine::new();
         let camera = Camera::new(width as f32, height as f32);
+        let text_engine = TextEngine::new();
+        let atlas = Atlas::new(ATLAS_SIZE);
 
         Self {
             document,
@@ -122,7 +134,10 @@ impl AppState {
             gpu,
             camera,
             interaction: InteractionState::default(),
+            text_engine,
+            atlas,
             instances: Vec::new(),
+            text_instances: Vec::new(),
             needs_redraw: true,
         }
     }
@@ -166,6 +181,7 @@ impl AppState {
     /// Rebuild the instance buffer from document + layout + interaction state.
     pub fn rebuild_instances(&mut self) {
         self.instances.clear();
+        self.text_instances.clear();
 
         // Palette of distinct colors for visual variety.
         let palette: &[[f32; 4]] = &[
@@ -208,6 +224,7 @@ impl AppState {
                 self.instances.push(inst);
             }
         }
+        drop(page); // Release RwLock before mutable self borrow below.
 
         // Add hover overlay (if any).
         if let Some(hover_id) = self.interaction.hovered {
@@ -263,6 +280,76 @@ impl AppState {
                 );
             }
         }
+
+        // ── Text: "Hello Logos" centered on the canvas ──────────
+        self.rebuild_text_instances();
+    }
+
+    /// Shape and generate text glyph instances.
+    fn rebuild_text_instances(&mut self) {
+        let style = TextStyle {
+            font_size: 32.0,
+            line_height: 38.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+            family: "sans-serif".into(),
+            weight: 700,
+            italic: false,
+        };
+
+        let shaped = self.text_engine.shape_text(
+            "Hello, Logos!",
+            &style,
+            f32::INFINITY,
+            &mut self.atlas,
+        );
+
+        // Center the text on the canvas (below the demo scene).
+        let center_x = 400.0 - shaped.width / 2.0;
+        let center_y = 550.0;
+
+        for glyph in &shaped.glyphs {
+            self.text_instances.push(TextInstance::new(
+                center_x + glyph.x,
+                center_y + glyph.y,
+                glyph.width,
+                glyph.height,
+                [glyph.atlas_region.u_min, glyph.atlas_region.v_min],
+                [glyph.atlas_region.u_max, glyph.atlas_region.v_max],
+                glyph.color,
+            ));
+        }
+
+        // Second line: subtitle in lighter weight.
+        let subtitle_style = TextStyle {
+            font_size: 18.0,
+            line_height: 22.0,
+            color: [0.6, 0.6, 0.65, 1.0],
+            family: "sans-serif".into(),
+            weight: 400,
+            italic: false,
+        };
+
+        let subtitle = self.text_engine.shape_text(
+            "Design at the speed of thought",
+            &subtitle_style,
+            f32::INFINITY,
+            &mut self.atlas,
+        );
+
+        let sub_x = 400.0 - subtitle.width / 2.0;
+        let sub_y = center_y + 44.0;
+
+        for glyph in &subtitle.glyphs {
+            self.text_instances.push(TextInstance::new(
+                sub_x + glyph.x,
+                sub_y + glyph.y,
+                glyph.width,
+                glyph.height,
+                [glyph.atlas_region.u_min, glyph.atlas_region.v_min],
+                [glyph.atlas_region.u_max, glyph.atlas_region.v_max],
+                glyph.color,
+            ));
+        }
     }
 
     /// Prepare and render a frame. Returns FrameStats.
@@ -272,8 +359,15 @@ impl AppState {
             self.needs_redraw = false;
         }
 
+        // Upload atlas texture if glyphs changed.
+        if self.atlas.dirty {
+            self.renderer.upload_atlas(&self.gpu, &self.atlas.data, self.atlas.size);
+            self.atlas.dirty = false;
+        }
+
         let camera = self.camera.uniform();
         self.renderer.prepare(&self.gpu, &self.instances, &camera);
+        self.renderer.prepare_text(&self.gpu, &self.text_instances);
         self.renderer.render_to_surface(&self.gpu)
     }
 
@@ -445,6 +539,50 @@ mod tests {
             app.rebuild_instances();
             // 12 scene + 1 hover overlay = 13
             assert_eq!(app.instances.len(), 13);
+        }
+    }
+
+    #[test]
+    fn test_text_instances_generated() {
+        let gpu = pollster::block_on(GpuContext::new_headless());
+        if let Ok(gpu) = gpu {
+            let mut app = AppState::new(gpu, 800, 600);
+            app.load_demo_scene();
+            app.rebuild_instances();
+            // Should have text glyphs from "Hello, Logos!" + subtitle.
+            assert!(!app.text_instances.is_empty(), "Text instances should be generated");
+            // "Hello, Logos!" has visible glyphs (space/comma may not produce quads).
+            assert!(app.text_instances.len() >= 5, "Expected at least 5 glyph quads, got {}", app.text_instances.len());
+        }
+    }
+
+    #[test]
+    fn test_text_instances_have_valid_uvs() {
+        let gpu = pollster::block_on(GpuContext::new_headless());
+        if let Ok(gpu) = gpu {
+            let mut app = AppState::new(gpu, 800, 600);
+            app.load_demo_scene();
+            app.rebuild_instances();
+            for inst in &app.text_instances {
+                assert!(inst.uv_min[0] >= 0.0 && inst.uv_min[0] <= 1.0, "u_min out of range");
+                assert!(inst.uv_min[1] >= 0.0 && inst.uv_min[1] <= 1.0, "v_min out of range");
+                assert!(inst.uv_max[0] > inst.uv_min[0], "u_max should be > u_min");
+                assert!(inst.uv_max[1] > inst.uv_min[1], "v_max should be > v_min");
+                assert!(inst.size[0] > 0.0, "glyph width should be > 0");
+                assert!(inst.size[1] > 0.0, "glyph height should be > 0");
+            }
+        }
+    }
+
+    #[test]
+    fn test_atlas_populated_after_rebuild() {
+        let gpu = pollster::block_on(GpuContext::new_headless());
+        if let Ok(gpu) = gpu {
+            let mut app = AppState::new(gpu, 800, 600);
+            app.load_demo_scene();
+            app.rebuild_instances();
+            assert!(app.atlas.glyph_count() > 0, "Atlas should have glyphs");
+            assert!(app.atlas.dirty, "Atlas should be dirty after new glyphs");
         }
     }
 }

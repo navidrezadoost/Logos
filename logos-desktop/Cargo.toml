@@ -7,6 +7,7 @@ edition = "2021"
 logos-core = { version = "0.1.0", path = "../logos-core" }
 logos-layout = { version = "0.1.0", path = "../logos-layout" }
 logos-render = { version = "0.1.0", path = "../logos-render" }
+logos-text = { version = "0.1.0", path = "../logos-text" }
 winit = "0.30"
 wgpu = "24"
 pollster = "0.4"
