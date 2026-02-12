@@ -1,4 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use logos_collab::protocol::{AwarenessState, PeerInfo, SyncMessage};
 use logos_collab::broadcast::BroadcastGroup;
 use logos_collab::presence::{

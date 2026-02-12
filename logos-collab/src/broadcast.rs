@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
@@ -19,6 +20,24 @@ pub struct BroadcastStats {
     pub messages_sent: u64,
     pub messages_dropped: u64,
     pub active_peers: usize,
+}
+
+/// Atomic broadcast stats — lock-free on the hot path.
+///
+/// Stats are tracked via atomics so that broadcast_raw() and broadcast()
+/// never acquire a lock. Stats are read via snapshot().
+struct AtomicBroadcastStats {
+    messages_sent: AtomicU64,
+    messages_dropped: AtomicU64,
+}
+
+impl AtomicBroadcastStats {
+    fn new() -> Self {
+        Self {
+            messages_sent: AtomicU64::new(0),
+            messages_dropped: AtomicU64::new(0),
+        }
+    }
 }
 
 /// A broadcast group for a single document room.
@@ -35,8 +54,8 @@ pub struct BroadcastGroup {
     /// Channel capacity (messages buffered per receiver)
     capacity: usize,
 
-    /// Cumulative stats
-    stats: Arc<RwLock<BroadcastStats>>,
+    /// Lock-free stats (atomics)
+    atomic_stats: Arc<AtomicBroadcastStats>,
 }
 
 impl BroadcastGroup {
@@ -50,7 +69,7 @@ impl BroadcastGroup {
             sender,
             peers: Arc::new(RwLock::new(HashMap::new())),
             capacity,
-            stats: Arc::new(RwLock::new(BroadcastStats::default())),
+            atomic_stats: Arc::new(AtomicBroadcastStats::new()),
         }
     }
 
@@ -60,43 +79,38 @@ impl BroadcastGroup {
     pub async fn add_peer(&self, info: PeerInfo) -> broadcast::Receiver<Arc<Vec<u8>>> {
         let mut peers = self.peers.write().await;
         peers.insert(info.peer_id, info);
-
-        let mut stats = self.stats.write().await;
-        stats.active_peers = peers.len();
-
         self.sender.subscribe()
     }
 
     /// Remove a peer from this broadcast group.
     pub async fn remove_peer(&self, peer_id: &Uuid) -> Option<PeerInfo> {
         let mut peers = self.peers.write().await;
-        let removed = peers.remove(peer_id);
-
-        let mut stats = self.stats.write().await;
-        stats.active_peers = peers.len();
-
-        removed
+        peers.remove(peer_id)
     }
 
     /// Broadcast a message to all peers except the sender.
     ///
     /// The message is pre-encoded to avoid redundant serialization.
     /// Returns the number of receivers that received the message.
-    pub async fn broadcast(&self, msg: &SyncMessage) -> Result<usize, crate::protocol::ProtocolError> {
+    /// Stats are tracked via atomics — no lock acquired on hot path.
+    pub fn broadcast(&self, msg: &SyncMessage) -> Result<usize, crate::protocol::ProtocolError> {
         let encoded = msg.encode()?;
         let arc_bytes = Arc::new(encoded);
 
         let receiver_count = self.sender.send(arc_bytes).unwrap_or(0);
 
-        let mut stats = self.stats.write().await;
-        stats.messages_sent += 1;
+        // Lock-free stats update
+        self.atomic_stats.messages_sent.fetch_add(1, Ordering::Relaxed);
 
         Ok(receiver_count)
     }
 
     /// Broadcast pre-encoded bytes directly (zero-copy fast path).
+    /// Fully lock-free: tokio broadcast::send + atomic stats.
     pub fn broadcast_raw(&self, encoded: Arc<Vec<u8>>) -> usize {
-        self.sender.send(encoded).unwrap_or(0)
+        let count = self.sender.send(encoded).unwrap_or(0);
+        self.atomic_stats.messages_sent.fetch_add(1, Ordering::Relaxed);
+        count
     }
 
     /// Get the current peer count.
@@ -114,9 +128,14 @@ impl BroadcastGroup {
         self.peers.read().await.contains_key(peer_id)
     }
 
-    /// Get broadcast statistics.
+    /// Get broadcast statistics (lock-free snapshot).
     pub async fn stats(&self) -> BroadcastStats {
-        self.stats.read().await.clone()
+        let peers = self.peers.read().await;
+        BroadcastStats {
+            messages_sent: self.atomic_stats.messages_sent.load(Ordering::Relaxed),
+            messages_dropped: self.atomic_stats.messages_dropped.load(Ordering::Relaxed),
+            active_peers: peers.len(),
+        }
     }
 
     /// Get the channel capacity.
@@ -226,7 +245,7 @@ mod tests {
 
         // Broadcast a delta
         let msg = SyncMessage::delta(peer1.peer_id, Uuid::new_v4(), 1, vec![1, 2, 3]);
-        let count = group.broadcast(&msg).await.unwrap();
+        let count = group.broadcast(&msg).unwrap();
 
         // All 3 receivers should get it (including sender — filtering is caller's job)
         assert_eq!(count, 3);
@@ -259,8 +278,8 @@ mod tests {
         let _rx = group.add_peer(peer.clone()).await;
 
         let msg = SyncMessage::ping(peer.peer_id);
-        group.broadcast(&msg).await.unwrap();
-        group.broadcast(&msg).await.unwrap();
+        group.broadcast(&msg).unwrap();
+        group.broadcast(&msg).unwrap();
 
         let stats = group.stats().await;
         assert_eq!(stats.messages_sent, 2);

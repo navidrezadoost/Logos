@@ -211,7 +211,7 @@ async fn test_room_manager_isolation() {
 
     // Message to room2 should NOT appear in room1
     let msg = SyncMessage::delta(Uuid::new_v4(), doc2, 1, vec![1, 2, 3]);
-    room2.broadcast(&msg).await.unwrap();
+    room2.broadcast(&msg).unwrap();
 
     // Room1 receiver should timeout (no message)
     let result = timeout(Duration::from_millis(100), rx1.recv()).await;

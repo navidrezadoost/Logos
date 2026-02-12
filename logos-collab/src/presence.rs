@@ -213,12 +213,14 @@ impl AwarenessMessage {
     }
 
     /// Encode to binary (bincode).
+    #[inline(always)]
     pub fn encode(&self) -> Result<Vec<u8>, String> {
         bincode::serde::encode_to_vec(self, bincode::config::standard())
             .map_err(|e| e.to_string())
     }
 
     /// Decode from binary.
+    #[inline(always)]
     pub fn decode(bytes: &[u8]) -> Result<Self, String> {
         let (msg, _) = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
             .map_err(|e| e.to_string())?;

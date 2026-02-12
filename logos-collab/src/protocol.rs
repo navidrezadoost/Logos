@@ -211,12 +211,14 @@ impl SyncMessage {
     }
 
     /// Serialize to binary wire format.
+    #[inline(always)]
     pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
         bincode::serde::encode_to_vec(self, bincode::config::standard())
             .map_err(|e| ProtocolError::SerializationError(e.to_string()))
     }
 
     /// Deserialize from binary wire format.
+    #[inline(always)]
     pub fn decode(bytes: &[u8]) -> Result<Self, ProtocolError> {
         let (msg, _) = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
             .map_err(|e| ProtocolError::DeserializationError(e.to_string()))?;

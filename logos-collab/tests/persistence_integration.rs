@@ -151,15 +151,18 @@ async fn test_crash_recovery_snapshot_survives_restart() {
     let db_path = dir.path().join("db");
     let doc_id = Uuid::new_v4();
 
-    // Phase 1: "Server" writes data then "crashes" (drops)
+    // Phase 1: Write data directly to store then drop (simulates crash)
     {
-        let server = SyncServer::with_storage("127.0.0.1:0", &db_path);
-        let store = server.store().unwrap();
+        let store_config = StoreConfig {
+            path: db_path.clone(),
+            ..StoreConfig::default()
+        };
+        let store = DocumentStore::open(store_config).unwrap();
 
         let (_, state) = make_doc_with_text("Data that must survive a crash");
         store.save_snapshot(doc_id, &state).unwrap();
 
-        // Server dropped here — simulates crash
+        // Store dropped here — simulates crash
     }
 
     // Phase 2: New server starts, recovers data
