@@ -34,10 +34,19 @@ pub struct FrameStats {
 ///
 /// # Usage
 ///
-/// ```ignore
+/// ```no_run
+/// # use logos_render::context::GpuContext;
+/// # use logos_render::renderer::Renderer;
+/// # use logos_render::vertex::{RectInstance, CameraUniform};
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # let gpu = pollster::block_on(GpuContext::new_headless())?;
+/// # let instances = vec![RectInstance::new(0.0, 0.0, 100.0, 50.0, [1.0; 4])];
+/// # let camera = CameraUniform::identity(800.0, 600.0);
 /// let mut renderer = Renderer::new(&gpu);
 /// renderer.prepare(&gpu, &instances, &camera);
-/// let stats = renderer.render_to_surface(&gpu)?;
+/// // renderer.render_to_surface(&gpu)?; // requires window
+/// # Ok(())
+/// # }
 /// ```
 pub struct Renderer {
     rect_pipeline: RectPipeline,
