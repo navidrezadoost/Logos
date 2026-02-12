@@ -1,0 +1,10 @@
+[package]
+name = "logos-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+taffy = "0.9.2"
+uuid = { version = "1.20.0", features = ["v4", "serde"] }
+yrs = "0.25.0"
