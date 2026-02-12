@@ -1,5 +1,5 @@
 {
-  "name": "penpot-render-wasm",
+  "name": "logos-render-wasm",
   "version": "1.20.0",
   "license": "MPL-2.0",
   "author": "Kaleidos INC",
@@ -7,7 +7,7 @@
   "packageManager": "pnpm@10.28.0+sha512.05df71d1421f21399e053fde567cea34d446fa02c76571441bfc1c7956e98e363088982d940465fd34480d4d90a0668bc12362f8aa88000a64e83d0b0e47be48",
   "repository": {
     "type": "git",
-    "url": "https://github.com/penpot/penpot"
+    "url": "https://github.com/logos/logos"
   },
   "type": "module",
   "devDependencies": {

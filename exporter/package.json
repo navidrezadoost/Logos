@@ -7,7 +7,7 @@
   "packageManager": "pnpm@10.28.2+sha512.41872f037ad22f7348e3b1debbaf7e867cfd448f2726d9cf74c08f19507c31d2c8e7a11525b983febc2df640b5438dee6023ebb1f84ed43cc2d654d2bc326264",
   "repository": {
     "type": "git",
-    "url": "https://github.com/penpot/penpot"
+    "url": "https://github.com/logos/logos"
   },
   "type": "module",
   "dependencies": {
@@ -20,7 +20,7 @@
     "playwright": "^1.57.0",
     "raw-body": "^3.0.2",
     "source-map-support": "^0.5.21",
-    "svgo": "penpot/svgo#v3.1",
+    "svgo": "logos/svgo#v3.1",
     "undici": "^7.16.0",
     "xml-js": "^1.6.11",
     "xregexp": "^5.1.2"

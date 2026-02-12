@@ -11,7 +11,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/penpot/penpot"
+    "url": "https://github.com/logos/logos"
   },
   "scripts": {
     "build:app:assets": "node ./scripts/build-app-assets.js",
@@ -45,14 +45,14 @@
     "watch:storybook": "pnpm run build:storybook:assets && concurrently --kill-others-on-fail \"storybook dev -p 6006 --no-open\" \"node ./scripts/watch-storybook.js\""
   },
   "devDependencies": {
-    "@penpot/draft-js": "workspace:./packages/draft-js",
-    "@penpot/mousetrap": "workspace:./packages/mousetrap",
-    "@penpot/tokenscript": "workspace:./packages/tokenscript",
-    "@penpot/plugins-runtime": "1.4.2",
-    "@penpot/svgo": "penpot/svgo#v3.2",
-    "@penpot/text-editor": "workspace:./text-editor",
+    "@logos/draft-js": "workspace:./packages/draft-js",
+    "@logos/mousetrap": "workspace:./packages/mousetrap",
+    "@logos/tokenscript": "workspace:./packages/tokenscript",
+    "@logos/plugins-runtime": "1.4.2",
+    "@logos/svgo": "logos/svgo#v3.2",
+    "@logos/text-editor": "workspace:./text-editor",
     "@playwright/test": "1.58.0",
-    "@penpot/ui": "workspace:./packages/ui",
+    "@logos/ui": "workspace:./packages/ui",
     "@storybook/addon-docs": "10.1.11",
     "@storybook/addon-themes": "10.1.11",
     "@storybook/addon-vitest": "10.1.11",

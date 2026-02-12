@@ -1,5 +1,5 @@
 {
-  "name": "@penpot/plugin-types",
+  "name": "@logos/plugin-types",
   "version": "1.4.2",
   "typings": "./index.d.ts",
   "type": "module",

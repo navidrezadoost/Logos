@@ -1,7 +1,7 @@
 {
-  "name": "penpot-docs",
+  "name": "logos-docs",
   "version": "0.1.0",
-  "description": "Documentation about Penpot project.",
+  "description": "Documentation about Logos project.",
   "scripts": {
     "build": "eleventy",
     "watch": "eleventy --watch",
@@ -11,18 +11,18 @@
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/penpot/penpot.git"
+    "url": "git://github.com/logos/logos.git"
   },
   "author": {
-    "name": "Penpot",
-    "email": "hello@penpot.app",
-    "url": "https://penpot.app/"
+    "name": "Logos",
+    "email": "hello@logos.app",
+    "url": "https://logos.app/"
   },
   "license": "SEE LICENSE IN <../LICENSE>",
   "bugs": {
-    "url": "https://github.com/penpot/penpot/issues"
+    "url": "https://github.com/logos/logos/issues"
   },
-  "homepage": "https://docs.penpot.app",
+  "homepage": "https://docs.logos.app",
   "dependencies": {
     "@11ty/eleventy": "^2.0.1",
     "@11ty/eleventy-navigation": "^0.3.5",

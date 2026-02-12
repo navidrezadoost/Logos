@@ -1,5 +1,5 @@
 {
-  "name": "@penpot/library",
+  "name": "@logos/library",
   "version": "1.2.0-RC1",
   "license": "MPL-2.0",
   "author": "Kaleidos INC",
@@ -7,19 +7,19 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/penpot/penpot.git"
+    "url": "git+https://github.com/logos/logos.git"
   },
   "files": [
-    "target/library/penpot.js",
-    "target/library/penpot.js.map"
+    "target/library/logos.js",
+    "target/library/logos.js.map"
   ],
-  "main": "./target/library/penpot.js",
+  "main": "./target/library/logos.js",
   "exports": {
-    ".": "./target/library/penpot.js"
+    ".": "./target/library/logos.js"
   },
   "imports": {
     "#self": {
-      "default": "./target/library/penpot.js"
+      "default": "./target/library/logos.js"
     }
   },
   "scripts": {

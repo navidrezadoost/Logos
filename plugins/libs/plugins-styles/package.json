@@ -1,5 +1,5 @@
 {
-  "name": "@penpot/plugin-styles",
+  "name": "@logos/plugin-styles",
   "version": "1.4.2",
   "dependencies": {},
   "scripts": {
