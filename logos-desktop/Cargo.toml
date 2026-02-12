@@ -4,3 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+logos-core = { version = "0.1.0", path = "../logos-core" }
+logos-layout = { version = "0.1.0", path = "../logos-layout" }
+logos-render = { version = "0.1.0", path = "../logos-render" }
+winit = "0.30"
+wgpu = "24"
+pollster = "0.4"
+log = "0.4"
+env_logger = "0.11"
+uuid = { version = "1.20.0", features = ["v4"] }
