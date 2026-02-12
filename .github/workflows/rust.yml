@@ -44,3 +44,18 @@ jobs:
         fi
     - name: Build WASM
       run: cargo build --release --target wasm32-unknown-unknown
+    - name: Verify logos-render tests (0 ignored)
+      run: |
+        RESULT=$(cargo test -p logos-render 2>&1)
+        echo "$RESULT"
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | head -1 | grep -oP '\d+')
+        IGNORED=$(echo "$RESULT" | grep -oP '\d+ ignored' | head -1 | grep -oP '\d+')
+        echo "Render tests: $PASSED passed, $IGNORED ignored"
+        if [ "$IGNORED" != "0" ]; then
+          echo "ERROR: logos-render has $IGNORED ignored tests"
+          exit 1
+        fi
+        if [ "$PASSED" -lt 20 ]; then
+          echo "ERROR: Expected >=20 render tests, got $PASSED"
+          exit 1
+        fi
