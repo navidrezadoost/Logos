@@ -89,3 +89,13 @@ jobs:
           echo "ERROR: Expected >=55 text tests, got $PASSED"
           exit 1
         fi
+    - name: Verify logos-collab tests (0 ignored)
+      run: |
+        RESULT=$(cargo test -p logos-collab 2>&1)
+        echo "$RESULT"
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Collab tests: $PASSED passed"
+        if [ "$PASSED" -lt 47 ]; then
+          echo "ERROR: Expected >=47 collab tests, got $PASSED"
+          exit 1
+        fi

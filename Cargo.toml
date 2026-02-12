@@ -6,7 +6,7 @@ members = [
     "logos-desktop",
     "logos-wasm",
     "logos-layout"
-]
+, "logos-collab"]
 resolver = "2"
 
 [profile.release]
