@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, RwLock, Mutex};
 use futures_util::StreamExt;
 use uuid::Uuid;
 
+use crate::presence::AwarenessMessage;
 use crate::protocol::{AwarenessState, PeerInfo, ProtocolError, SyncMessage};
 
 /// Client connection state.
@@ -38,10 +39,15 @@ pub enum SyncEvent {
         clock: u64,
         update: Vec<u8>,
     },
-    /// Received awareness update from a remote peer
+    /// Received awareness update from a remote peer (legacy format)
     RemoteAwareness {
         peer_id: Uuid,
         state: AwarenessState,
+    },
+    /// Received a presence awareness message (cursor/selection/join/leave)
+    PresenceUpdate {
+        peer_id: Uuid,
+        message: AwarenessMessage,
     },
     /// A peer joined the document
     PeerJoined(PeerInfo),
@@ -271,7 +277,13 @@ impl SyncClient {
                                             Some(SyncEvent::StateSynced(sync_msg.payload))
                                         }
                                         crate::protocol::MessageType::Awareness => {
-                                            if let Ok(awareness_state) = sync_msg.awareness_state() {
+                                            // Try new presence format first, fall back to legacy
+                                            if let Ok(presence_msg) = crate::presence::AwarenessMessage::decode(&sync_msg.payload) {
+                                                Some(SyncEvent::PresenceUpdate {
+                                                    peer_id: sync_msg.peer_id,
+                                                    message: presence_msg,
+                                                })
+                                            } else if let Ok(awareness_state) = sync_msg.awareness_state() {
                                                 Some(SyncEvent::RemoteAwareness {
                                                     peer_id: sync_msg.peer_id,
                                                     state: awareness_state,
@@ -411,6 +423,37 @@ impl SyncClient {
     /// Get offline queue length.
     pub async fn offline_queue_len(&self) -> usize {
         self.offline_queue.lock().await.len()
+    }
+
+    /// Send a presence awareness message (cursor, selection, join, leave).
+    ///
+    /// Encodes the `AwarenessMessage` into the SyncMessage::Awareness payload
+    /// and sends it over the WebSocket. Silently drops when offline.
+    pub async fn send_presence(&self, msg: &AwarenessMessage) -> Result<(), ProtocolError> {
+        let state = *self.state.read().await;
+        if state != ConnectionState::Connected {
+            return Ok(()); // Silently drop presence when offline
+        }
+
+        let payload = msg.encode().map_err(|e| ProtocolError::SerializationError(e))?;
+        let clock = *self.clock.read().await;
+
+        let sync_msg = SyncMessage {
+            msg_type: crate::protocol::MessageType::Awareness,
+            peer_id: self.peer_info.peer_id,
+            doc_id: self.doc_id,
+            clock,
+            payload,
+        };
+        let encoded = sync_msg.encode()?;
+
+        if let Some(ref tx) = self.outgoing_tx {
+            tx.send(encoded)
+                .await
+                .map_err(|_| ProtocolError::ConnectionClosed)?;
+        }
+
+        Ok(())
     }
 }
 

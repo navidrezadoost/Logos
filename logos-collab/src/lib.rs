@@ -42,11 +42,16 @@ pub mod protocol;
 pub mod broadcast;
 pub mod server;
 pub mod client;
+pub mod presence;
 
 // Re-exports for convenience
 pub use protocol::{
     AwarenessState, MessageType, PeerInfo, ProtocolError, SyncMessage,
 };
 pub use broadcast::{BroadcastGroup, BroadcastStats, RoomManager};
+pub use presence::{
+    AwarenessMessage, CursorColor, CursorInstance, CursorRenderData,
+    PresenceRoom, RemoteCursorState, Vec2, build_cursor_instances,
+};
 pub use server::{ServerConfig, ServerStats, SyncServer};
 pub use client::{ConnectionState, OfflineQueue, SyncClient, SyncEvent};

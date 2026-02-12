@@ -5,6 +5,7 @@
 //! pipeline for real-time design editing.
 
 mod state;
+pub mod presence;
 
 use log::info;
 use std::sync::Arc;

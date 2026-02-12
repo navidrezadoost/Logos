@@ -70,8 +70,8 @@ jobs:
           echo "ERROR: logos-desktop has $IGNORED ignored tests"
           exit 1
         fi
-        if [ "$PASSED" -lt 15 ]; then
-          echo "ERROR: Expected >=15 desktop tests, got $PASSED"
+        if [ "$PASSED" -lt 24 ]; then
+          echo "ERROR: Expected >=24 desktop tests, got $PASSED"
           exit 1
         fi
     - name: Verify logos-text tests (0 ignored)
@@ -95,7 +95,7 @@ jobs:
         echo "$RESULT"
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Collab tests: $PASSED passed"
-        if [ "$PASSED" -lt 47 ]; then
-          echo "ERROR: Expected >=47 collab tests, got $PASSED"
+        if [ "$PASSED" -lt 95 ]; then
+          echo "ERROR: Expected >=95 collab tests, got $PASSED"
           exit 1
         fi

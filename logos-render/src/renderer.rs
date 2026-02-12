@@ -8,9 +8,10 @@ use wgpu::{
 };
 
 use crate::context::GpuContext;
+use crate::pipelines::cursor::CursorPipeline;
 use crate::pipelines::rect::RectPipeline;
 use crate::pipelines::text::TextPipeline;
-use crate::vertex::{CameraUniform, RectInstance, TextInstance};
+use crate::vertex::{CameraUniform, CursorInstance, RectInstance, TextInstance};
 
 #[derive(Error, Debug)]
 pub enum RenderError {
@@ -27,6 +28,8 @@ pub struct FrameStats {
     pub rect_count: u32,
     /// Number of glyph instances drawn.
     pub text_count: u32,
+    /// Number of cursor instances drawn.
+    pub cursor_count: u32,
     /// Number of draw calls.
     pub draw_calls: u32,
 }
@@ -54,6 +57,7 @@ pub struct FrameStats {
 pub struct Renderer {
     rect_pipeline: RectPipeline,
     text_pipeline: TextPipeline,
+    cursor_pipeline: CursorPipeline,
     clear_color: Color,
     quad_uploaded: bool,
 }
@@ -70,10 +74,12 @@ impl Renderer {
     pub fn with_atlas_size(gpu: &GpuContext, atlas_size: u32) -> Self {
         let rect_pipeline = RectPipeline::new(&gpu.device, gpu.surface_format);
         let text_pipeline = TextPipeline::new(&gpu.device, gpu.surface_format, atlas_size);
+        let cursor_pipeline = CursorPipeline::new(&gpu.device, gpu.surface_format);
 
         Self {
             rect_pipeline,
             text_pipeline,
+            cursor_pipeline,
             clear_color: Color {
                 r: 0.12,
                 g: 0.12,
@@ -103,6 +109,7 @@ impl Renderer {
         if !self.quad_uploaded {
             self.rect_pipeline.upload_quad(&gpu.queue);
             self.text_pipeline.upload_quad(&gpu.queue);
+            self.cursor_pipeline.upload_quad(&gpu.queue);
             self.quad_uploaded = true;
         }
 
@@ -123,6 +130,35 @@ impl Renderer {
     /// Only call when the atlas is dirty (new glyphs rasterized).
     pub fn upload_atlas(&mut self, gpu: &GpuContext, data: &[u8], size: u32) {
         self.text_pipeline.upload_atlas(&gpu.device, &gpu.queue, data, size);
+    }
+
+    /// Upload cursor instances for this frame.
+    ///
+    /// Call after `prepare()` and before `render_to_surface()`.
+    /// Returns the number of cursors that will be drawn.
+    pub fn prepare_cursors(
+        &mut self,
+        gpu: &GpuContext,
+        cursor_instances: &[CursorInstance],
+    ) -> u32 {
+        self.cursor_pipeline.upload_camera(
+            &gpu.queue,
+            &CameraUniform::identity(800.0, 600.0), // overwritten by prepare()
+        );
+        self.cursor_pipeline.upload_instances(&gpu.queue, cursor_instances)
+    }
+
+    /// Upload cursor instances with a specific camera uniform.
+    ///
+    /// Use this when the viewport size differs from the default.
+    pub fn prepare_cursors_with_camera(
+        &mut self,
+        gpu: &GpuContext,
+        cursor_instances: &[CursorInstance],
+        camera: &CameraUniform,
+    ) -> u32 {
+        self.cursor_pipeline.upload_camera(&gpu.queue, camera);
+        self.cursor_pipeline.upload_instances(&gpu.queue, cursor_instances)
     }
 
     /// Render to the window surface.  Returns frame statistics.
@@ -151,9 +187,10 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            // Draw rects first (background), then text on top.
+            // Draw rects first (background), then text, then cursors on top.
             self.rect_pipeline.draw(&mut pass);
             self.text_pipeline.draw(&mut pass);
+            self.cursor_pipeline.draw(&mut pass);
         }
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
@@ -161,11 +198,15 @@ impl Renderer {
 
         let rect_count = self.rect_pipeline.instance_count();
         let text_count = self.text_pipeline.instance_count();
-        let draw_calls = (rect_count > 0) as u32 + (text_count > 0) as u32;
+        let cursor_count = self.cursor_pipeline.instance_count();
+        let draw_calls = (rect_count > 0) as u32
+            + (text_count > 0) as u32
+            + (cursor_count > 0) as u32;
 
         Ok(FrameStats {
             rect_count,
             text_count,
+            cursor_count,
             draw_calls,
         })
     }
@@ -200,17 +241,22 @@ impl Renderer {
 
             self.rect_pipeline.draw(&mut pass);
             self.text_pipeline.draw(&mut pass);
+            self.cursor_pipeline.draw(&mut pass);
         }
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
 
         let rect_count = self.rect_pipeline.instance_count();
         let text_count = self.text_pipeline.instance_count();
-        let draw_calls = (rect_count > 0) as u32 + (text_count > 0) as u32;
+        let cursor_count = self.cursor_pipeline.instance_count();
+        let draw_calls = (rect_count > 0) as u32
+            + (text_count > 0) as u32
+            + (cursor_count > 0) as u32;
 
         FrameStats {
             rect_count,
             text_count,
+            cursor_count,
             draw_calls,
         }
     }
@@ -218,6 +264,11 @@ impl Renderer {
     /// Access the rect pipeline (for advanced usage).
     pub fn rect_pipeline(&self) -> &RectPipeline {
         &self.rect_pipeline
+    }
+
+    /// Access the cursor pipeline (for advanced usage).
+    pub fn cursor_pipeline(&self) -> &CursorPipeline {
+        &self.cursor_pipeline
     }
 }
 
@@ -234,11 +285,13 @@ mod tests {
         let stats = FrameStats {
             rect_count: 42,
             text_count: 10,
-            draw_calls: 2,
+            cursor_count: 5,
+            draw_calls: 3,
         };
         assert_eq!(stats.rect_count, 42);
         assert_eq!(stats.text_count, 10);
-        assert_eq!(stats.draw_calls, 2);
+        assert_eq!(stats.cursor_count, 5);
+        assert_eq!(stats.draw_calls, 3);
     }
 
     #[test]

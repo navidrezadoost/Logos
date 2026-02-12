@@ -36,6 +36,7 @@ pub mod bridge;
 
 // Re-exports for convenience
 pub use context::GpuContext;
-pub use vertex::{RectInstance, CameraUniform, TextInstance};
+pub use vertex::{RectInstance, CameraUniform, TextInstance, CursorInstance};
+pub use pipelines::cursor::CursorPipeline;
 pub use renderer::{Renderer, FrameStats};
 pub use bridge::{collect_instances, collect_instances_direct};

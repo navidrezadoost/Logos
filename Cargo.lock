@@ -1397,6 +1397,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger",
  "log",
+ "logos-collab",
  "logos-core",
  "logos-layout",
  "logos-render",

@@ -220,6 +220,71 @@ impl TextInstance {
 }
 
 // ───────────────────────────────────────────────────────────────────
+// Cursor instance (for remote presence cursors)
+// ───────────────────────────────────────────────────────────────────
+
+/// Per-instance GPU data for a single remote cursor.
+///
+/// 40 bytes per instance — 1000 cursors = 40 KB GPU memory.
+/// Rendered via instanced draw call (single draw for all cursors).
+///
+/// Reference: Akenine-Möller, Real-Time Rendering, Section 18.6
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+pub struct CursorInstance {
+    /// Cursor tip position in world coordinates.
+    pub position: [f32; 2],       // 8 bytes
+    /// RGBA cursor color (derived from user UUID).
+    pub color: [f32; 4],          // 16 bytes
+    /// Selection highlight rect (x, y, w, h) — zero if none.
+    pub selection_rect: [f32; 4], // 16 bytes
+    // Total: 40 bytes
+}
+
+impl CursorInstance {
+    pub fn new(x: f32, y: f32, color: [f32; 4]) -> Self {
+        Self {
+            position: [x, y],
+            color,
+            selection_rect: [0.0; 4],
+        }
+    }
+
+    pub fn with_selection(mut self, x: f32, y: f32, w: f32, h: f32) -> Self {
+        self.selection_rect = [x, y, w, h];
+        self
+    }
+
+    pub fn layout() -> VertexBufferLayout<'static> {
+        static ATTRS: &[VertexAttribute] = &[
+            // location(1) = position
+            VertexAttribute {
+                offset: 0,
+                shader_location: 1,
+                format: VertexFormat::Float32x2,
+            },
+            // location(2) = color
+            VertexAttribute {
+                offset: 8,
+                shader_location: 2,
+                format: VertexFormat::Float32x4,
+            },
+            // location(3) = selection_rect
+            VertexAttribute {
+                offset: 24,
+                shader_location: 3,
+                format: VertexFormat::Float32x4,
+            },
+        ];
+        VertexBufferLayout {
+            array_stride: std::mem::size_of::<CursorInstance>() as BufferAddress,
+            step_mode: VertexStepMode::Instance,
+            attributes: ATTRS,
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Camera uniform
 // ───────────────────────────────────────────────────────────────────
 

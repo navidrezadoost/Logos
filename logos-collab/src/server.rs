@@ -30,6 +30,7 @@ use yrs::updates::decoder::Decode;
 use yrs::updates::encoder::Encode;
 
 use crate::broadcast::{BroadcastGroup, RoomManager};
+use crate::presence::AwarenessMessage;
 use crate::protocol::{MessageType, PeerInfo, SyncMessage};
 
 /// Server configuration.
@@ -290,8 +291,26 @@ impl SyncServer {
                                         }
 
                                         MessageType::Awareness => {
-                                            // Broadcast awareness to all peers in room
+                                            // Decode presence message and broadcast to all peers in room
                                             if let Some(did) = doc_id {
+                                                // Log presence activity for monitoring
+                                                if let Ok(awareness_msg) = AwarenessMessage::decode(&sync_msg.payload) {
+                                                    match &awareness_msg {
+                                                        AwarenessMessage::Join { user_name, .. } => {
+                                                            log::info!("Presence: {} joined room {}", user_name, did);
+                                                        }
+                                                        AwarenessMessage::Leave { user_id } => {
+                                                            log::info!("Presence: {} left room {}", user_id, did);
+                                                        }
+                                                        AwarenessMessage::Cursor { .. } => {
+                                                            log::trace!("Presence: cursor update in room {}", did);
+                                                        }
+                                                        AwarenessMessage::Selection { user_id, layer_ids } => {
+                                                            log::debug!("Presence: {} selected {} layers in room {}", user_id, layer_ids.len(), did);
+                                                        }
+                                                    }
+                                                }
+
                                                 let broadcast_clone = {
                                                     let rooms_r = rooms.read().await;
                                                     rooms_r.get(&did).map(|r| r.broadcast.clone())

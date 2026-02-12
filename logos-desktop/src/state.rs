@@ -12,6 +12,8 @@ use logos_render::context::GpuContext;
 use logos_text::{Atlas, FontRegistry, TextEngine, TextStyle};
 use uuid::Uuid;
 
+use crate::presence::DesktopPresence;
+
 /// Interactive state for selection / hover.
 #[derive(Debug, Clone, Default)]
 pub struct InteractionState {
@@ -111,6 +113,8 @@ pub struct AppState {
     pub font_registry: FontRegistry,
     /// Glyph atlas for GPU texture upload.
     pub atlas: Atlas,
+    /// Presence state for remote cursor rendering.
+    pub presence: DesktopPresence,
     /// Cached rect instance buffer, rebuilt each frame.
     instances: Vec<RectInstance>,
     /// Cached text instance buffer, rebuilt each frame.
@@ -130,6 +134,8 @@ impl AppState {
         log::info!("Font registry: {}", font_registry);
         let text_engine = TextEngine::new();
         let atlas = Atlas::new(ATLAS_SIZE);
+        let local_user_id = Uuid::new_v4();
+        let presence = DesktopPresence::new(local_user_id);
 
         Self {
             document,
@@ -141,6 +147,7 @@ impl AppState {
             text_engine,
             font_registry,
             atlas,
+            presence,
             instances: Vec::new(),
             text_instances: Vec::new(),
             needs_redraw: true,
@@ -500,6 +507,11 @@ impl AppState {
         let camera = self.camera.uniform();
         self.renderer.prepare(&self.gpu, &self.instances, &camera);
         self.renderer.prepare_text(&self.gpu, &self.text_instances);
+
+        // Upload remote cursor instances.
+        let cursor_instances = self.presence.cursor_instances().to_vec();
+        self.renderer.prepare_cursors_with_camera(&self.gpu, &cursor_instances, &camera);
+
         self.renderer.render_to_surface(&self.gpu)
     }
 
