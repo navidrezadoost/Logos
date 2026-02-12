@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "logos-core",
+    "logos-render",
+    "logos-desktop",
+    "logos-wasm"
+]
+resolver = "2"

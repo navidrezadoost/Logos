@@ -124,7 +124,19 @@ pub struct FrameLayer {
     pub bounds: Rect 
 }
 
+impl Layer {
+    pub fn id(&self) -> Uuid {
+        match self {
+            Layer::Rect(l) => l.id,
+            Layer::Ellipse(l) => l.id,
+            Layer::Text(l) => l.id,
+            Layer::Frame(l) => l.id,
+        }
+    }
+}
+
 pub mod ffi;
+pub mod collab;
 
 #[cfg(test)]
 mod tests {
