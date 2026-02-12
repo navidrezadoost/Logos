@@ -5,6 +5,9 @@ use logos_collab::presence::{
     AwarenessMessage, CursorColor, CursorRenderData, PresenceRoom, Vec2,
     build_cursor_instances,
 };
+use logos_collab::storage::{
+    DocumentStore, StoreConfig, CompressedDelta, WriteAheadLog, WalConfig,
+};
 use uuid::Uuid;
 use std::sync::Arc;
 
@@ -273,6 +276,159 @@ fn bench_active_cursors_1000(c: &mut Criterion) {
     });
 }
 
+// ─── Storage benchmarks ─────────────────────────────────────
+
+fn bench_store_delta(c: &mut Criterion) {
+    let dir = std::env::temp_dir().join(format!("logos_bench_store_delta_{}", Uuid::new_v4()));
+    let config = StoreConfig {
+        path: dir.clone(),
+        ..StoreConfig::default()
+    };
+    let store = DocumentStore::open(config).unwrap();
+    let doc_id = Uuid::new_v4();
+    let delta = vec![42u8; 256]; // Typical delta payload
+
+    c.bench_function("store_delta_256B", |b| {
+        let mut version = 0u64;
+        b.iter(|| {
+            store.store_delta(black_box(doc_id), black_box(version), black_box(&delta)).unwrap();
+            version += 1;
+        })
+    });
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn bench_load_snapshot(c: &mut Criterion) {
+    let dir = std::env::temp_dir().join(format!("logos_bench_load_snap_{}", Uuid::new_v4()));
+    let config = StoreConfig {
+        path: dir.clone(),
+        ..StoreConfig::default()
+    };
+    let store = DocumentStore::open(config).unwrap();
+    let doc_id = Uuid::new_v4();
+    let snapshot = vec![0u8; 4096]; // 4KB snapshot
+    store.save_snapshot(doc_id, &snapshot).unwrap();
+
+    c.bench_function("load_snapshot_4KB", |b| {
+        b.iter(|| {
+            black_box(store.load_snapshot(black_box(doc_id)).unwrap());
+        })
+    });
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn bench_save_snapshot(c: &mut Criterion) {
+    let dir = std::env::temp_dir().join(format!("logos_bench_save_snap_{}", Uuid::new_v4()));
+    let config = StoreConfig {
+        path: dir.clone(),
+        ..StoreConfig::default()
+    };
+    let store = DocumentStore::open(config).unwrap();
+    let doc_id = Uuid::new_v4();
+    let snapshot = vec![0u8; 4096];
+
+    c.bench_function("save_snapshot_4KB", |b| {
+        b.iter(|| {
+            store.save_snapshot(black_box(doc_id), black_box(&snapshot)).unwrap();
+        })
+    });
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn bench_lz4_compress_1kb(c: &mut Criterion) {
+    // Repetitive data (design-like)
+    let pattern = b"RGBA(128,64,32,255) transform(1.0,0.0,0.0,1.0,100.5,200.3) ";
+    let mut data = Vec::new();
+    while data.len() < 1024 {
+        data.extend_from_slice(pattern);
+    }
+    data.truncate(1024);
+
+    c.bench_function("lz4_compress_1KB_repetitive", |b| {
+        b.iter(|| {
+            black_box(CompressedDelta::compress(1, black_box(&data)));
+        })
+    });
+}
+
+fn bench_lz4_decompress_1kb(c: &mut Criterion) {
+    let pattern = b"RGBA(128,64,32,255) transform(1.0,0.0,0.0,1.0,100.5,200.3) ";
+    let mut data = Vec::new();
+    while data.len() < 1024 {
+        data.extend_from_slice(pattern);
+    }
+    data.truncate(1024);
+    let compressed = CompressedDelta::compress(1, &data);
+
+    c.bench_function("lz4_decompress_1KB", |b| {
+        b.iter(|| {
+            black_box(black_box(&compressed).decompress().unwrap());
+        })
+    });
+}
+
+fn bench_wal_append(c: &mut Criterion) {
+    let doc_id = Uuid::new_v4();
+    let payload = vec![42u8; 64];
+
+    c.bench_function("wal_append_64B", |b| {
+        let mut wal = WriteAheadLog::new(WalConfig {
+            max_buffered_entries: 1_000_000,
+            flush_threshold: 100_000_000,
+            ..WalConfig::default()
+        });
+        b.iter(|| {
+            let _ = wal.append_delta(black_box(doc_id), black_box(payload.clone()));
+        })
+    });
+}
+
+fn bench_wal_flush_1000(c: &mut Criterion) {
+    let doc_id = Uuid::new_v4();
+    let payload = vec![42u8; 64];
+
+    c.bench_function("wal_flush_1000_entries", |b| {
+        b.iter(|| {
+            let mut wal = WriteAheadLog::new(WalConfig {
+                max_buffered_entries: 2000,
+                flush_threshold: 100_000_000,
+                ..WalConfig::default()
+            });
+            for _ in 0..1000 {
+                let _ = wal.append_delta(doc_id, payload.clone());
+            }
+            let entries = wal.flush();
+            black_box(entries);
+        })
+    });
+}
+
+fn bench_store_load_deltas(c: &mut Criterion) {
+    let dir = std::env::temp_dir().join(format!("logos_bench_load_deltas_{}", Uuid::new_v4()));
+    let config = StoreConfig {
+        path: dir.clone(),
+        ..StoreConfig::default()
+    };
+    let store = DocumentStore::open(config).unwrap();
+    let doc_id = Uuid::new_v4();
+
+    // Pre-populate with 1000 deltas
+    for i in 0..1000u64 {
+        store.store_delta(doc_id, i, &vec![i as u8; 128]).unwrap();
+    }
+
+    c.bench_function("load_all_deltas_1000", |b| {
+        b.iter(|| {
+            black_box(store.load_all_deltas(black_box(doc_id)).unwrap());
+        })
+    });
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 criterion_group!(
     benches,
     bench_delta_encode,
@@ -289,5 +445,13 @@ criterion_group!(
     bench_presence_room_handle_cursor,
     bench_build_1000_cursor_instances,
     bench_active_cursors_1000,
+    bench_store_delta,
+    bench_load_snapshot,
+    bench_save_snapshot,
+    bench_lz4_compress_1kb,
+    bench_lz4_decompress_1kb,
+    bench_wal_append,
+    bench_wal_flush_1000,
+    bench_store_load_deltas,
 );
 criterion_main!(benches);

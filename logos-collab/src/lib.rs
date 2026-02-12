@@ -43,6 +43,7 @@ pub mod broadcast;
 pub mod server;
 pub mod client;
 pub mod presence;
+pub mod storage;
 
 // Re-exports for convenience
 pub use protocol::{
@@ -55,3 +56,8 @@ pub use presence::{
 };
 pub use server::{ServerConfig, ServerStats, SyncServer};
 pub use client::{ConnectionState, OfflineQueue, SyncClient, SyncEvent};
+pub use storage::{
+    DocumentStore, StoreConfig, StoreError, DocumentMetadata,
+    DeltaLog, CompressedDelta, DeltaStats,
+    WriteAheadLog, WalEntry, WalConfig, WalError,
+};

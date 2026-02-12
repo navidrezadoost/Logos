@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    - name: Install system dependencies
+      run: sudo apt-get update && sudo apt-get install -y libclang-dev
     - name: Install WASM target
       run: rustup target add wasm32-unknown-unknown
     - name: Build Native
@@ -95,7 +97,7 @@ jobs:
         echo "$RESULT"
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Collab tests: $PASSED passed"
-        if [ "$PASSED" -lt 95 ]; then
-          echo "ERROR: Expected >=95 collab tests, got $PASSED"
+        if [ "$PASSED" -lt 166 ]; then
+          echo "ERROR: Expected >=166 collab tests, got $PASSED"
           exit 1
         fi

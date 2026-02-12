@@ -4,22 +4,31 @@
 //! ```text
 //! Client A ──┐
 //!             ├── Room (doc_id) ── Yrs Doc ── BroadcastGroup
-//! Client B ──┘                                    │
-//!                                     ┌───────────┼───────────┐
-//!                                     ▼           ▼           ▼
-//!                                  Client A    Client B    Client C
+//! Client B ──┘                        │
+//!                                     ├── DocumentStore (RocksDB)
+//!                                     │       │
+//!                                     │       ├── Snapshots (LZ4)
+//!                                     │       ├── Deltas (LZ4)
+//!                                     │       └── WAL (sequential)
+//!                                     │
+//!                          ┌──────────┼───────────┐
+//!                          ▼          ▼           ▼
+//!                       Client A   Client B    Client C
 //! ```
 //!
 //! Each document room maintains:
 //! - A Yrs `Doc` for authoritative state
 //! - A `BroadcastGroup` for fan-out to connected peers
 //! - Peer presence tracking
+//! - Persistent storage via DocumentStore (RocksDB)
 //!
-//! Reference: Kleppmann — Designing Data-Intensive Applications, Chapter 8
+//! Reference: Kleppmann — Designing Data-Intensive Applications, Chapters 3 & 8
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
 use futures_util::{SinkExt, StreamExt};
@@ -32,6 +41,7 @@ use yrs::updates::encoder::Encode;
 use crate::broadcast::{BroadcastGroup, RoomManager};
 use crate::presence::AwarenessMessage;
 use crate::protocol::{MessageType, PeerInfo, SyncMessage};
+use crate::storage::{DocumentStore, StoreConfig};
 
 /// Server configuration.
 #[derive(Debug, Clone)]
@@ -44,6 +54,8 @@ pub struct ServerConfig {
     pub broadcast_capacity: usize,
     /// Heartbeat interval in seconds
     pub heartbeat_interval_secs: u64,
+    /// Persistence storage path (None = in-memory only)
+    pub storage_path: Option<PathBuf>,
 }
 
 impl Default for ServerConfig {
@@ -53,6 +65,7 @@ impl Default for ServerConfig {
             max_peers_per_room: 100,
             broadcast_capacity: 256,
             heartbeat_interval_secs: 30,
+            storage_path: None,
         }
     }
 }
@@ -65,6 +78,9 @@ pub struct ServerStats {
     pub total_messages: u64,
     pub total_bytes: u64,
     pub active_rooms: usize,
+    pub persisted_deltas: u64,
+    pub persisted_snapshots: u64,
+    pub storage_bytes: u64,
 }
 
 /// Document room: Yrs Doc + broadcast group.
@@ -93,29 +109,102 @@ pub struct SyncServer {
     room_manager: Arc<RoomManager>,
     /// Server-wide statistics
     stats: Arc<RwLock<ServerStats>>,
+    /// Persistent document store (optional)
+    store: Option<Arc<DocumentStore>>,
+    /// Global delta version counter for persistence
+    delta_version: Arc<AtomicU64>,
 }
 
 impl SyncServer {
     /// Create a new sync server with the given configuration.
     pub fn new(config: ServerConfig) -> Self {
         let room_manager = Arc::new(RoomManager::new(config.broadcast_capacity));
+
+        // Open persistent storage if configured
+        let store = config.storage_path.as_ref().map(|path| {
+            let store_config = StoreConfig {
+                path: path.clone(),
+                ..StoreConfig::default()
+            };
+            Arc::new(
+                DocumentStore::open(store_config)
+                    .expect("Failed to open document store"),
+            )
+        });
+
+        let delta_version = Arc::new(AtomicU64::new(
+            store.as_ref().map_or(0, |s| s.wal_sequence()),
+        ));
+
         Self {
             config,
             rooms: Arc::new(RwLock::new(HashMap::new())),
             room_manager,
             stats: Arc::new(RwLock::new(ServerStats::default())),
+            store,
+            delta_version,
         }
     }
 
-    /// Create with default configuration.
+    /// Create with default configuration (in-memory, no persistence).
     pub fn with_defaults() -> Self {
         Self::new(ServerConfig::default())
+    }
+
+    /// Create with persistence enabled at the given path.
+    pub fn with_storage(bind_addr: impl Into<String>, path: impl Into<PathBuf>) -> Self {
+        let config = ServerConfig {
+            bind_addr: bind_addr.into(),
+            storage_path: Some(path.into()),
+            ..ServerConfig::default()
+        };
+        Self::new(config)
+    }
+
+    /// Recover persisted documents from storage on startup.
+    ///
+    /// Loads all previously persisted documents into rooms so they are
+    /// immediately available when peers reconnect.
+    pub async fn recover(&self) -> Result<usize, Box<dyn std::error::Error>> {
+        let store = match &self.store {
+            Some(s) => s,
+            None => return Ok(0),
+        };
+
+        let doc_ids = store.list_documents()?;
+        let mut recovered = 0;
+
+        for doc_id in &doc_ids {
+            if let Ok(snapshot) = store.load_snapshot(*doc_id) {
+                let mut rooms_w = self.rooms.write().await;
+                let room = rooms_w
+                    .entry(*doc_id)
+                    .or_insert_with(|| DocumentRoom::new(self.config.broadcast_capacity));
+
+                // Apply the persisted snapshot to the Yrs doc
+                if let Ok(update) = yrs::Update::decode_v1(&snapshot) {
+                    let mut txn = yrs::Transact::transact_mut(&room.doc);
+                    let _ = txn.apply_update(update);
+                }
+                recovered += 1;
+                log::info!("Recovered document {doc_id} from storage");
+            }
+        }
+
+        log::info!("Recovery complete: {recovered}/{} documents restored", doc_ids.len());
+        Ok(recovered)
     }
 
     /// Start listening for WebSocket connections.
     ///
     /// This runs the server event loop. Call from an async runtime.
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Recover persisted documents on startup
+        let recovered = self.recover().await?;
+        if recovered > 0 {
+            log::info!("Recovered {recovered} documents from persistent storage");
+        }
+
         let listener = TcpListener::bind(&self.config.bind_addr).await?;
         log::info!("Sync server listening on {}", self.config.bind_addr);
 
@@ -127,10 +216,15 @@ impl SyncServer {
             let stats = self.stats.clone();
             let config = self.config.clone();
             let room_manager = self.room_manager.clone();
+            let store = self.store.clone();
+            let delta_version = self.delta_version.clone();
 
             tokio::spawn(async move {
                 if let Err(e) =
-                    Self::handle_connection(stream, addr, rooms, stats, config, room_manager).await
+                    Self::handle_connection(
+                        stream, addr, rooms, stats, config, room_manager,
+                        store, delta_version,
+                    ).await
                 {
                     log::error!("Connection error from {addr}: {e}");
                 }
@@ -146,6 +240,8 @@ impl SyncServer {
         stats: Arc<RwLock<ServerStats>>,
         config: ServerConfig,
         _room_manager: Arc<RoomManager>,
+        store: Option<Arc<DocumentStore>>,
+        delta_version: Arc<AtomicU64>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let ws_stream = tokio_tungstenite::accept_async(stream).await?;
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -191,9 +287,23 @@ impl SyncServer {
 
                                             // Get or create room
                                             let mut rooms_w = rooms.write().await;
+                                            let is_new_room = !rooms_w.contains_key(&sync_msg.doc_id);
                                             let room = rooms_w
                                                 .entry(sync_msg.doc_id)
                                                 .or_insert_with(|| DocumentRoom::new(config.broadcast_capacity));
+
+                                            // Load persisted snapshot into new room
+                                            if is_new_room {
+                                                if let Some(ref s) = store {
+                                                    if let Ok(snapshot) = s.load_snapshot(sync_msg.doc_id) {
+                                                        if let Ok(update) = yrs::Update::decode_v1(&snapshot) {
+                                                            let mut txn = yrs::Transact::transact_mut(&room.doc);
+                                                            let _ = txn.apply_update(update);
+                                                            log::info!("Loaded persisted snapshot for doc {}", sync_msg.doc_id);
+                                                        }
+                                                    }
+                                                }
+                                            }
 
                                             // Add peer to broadcast group
                                             let rx = room.broadcast.add_peer(info.clone()).await;
@@ -255,6 +365,18 @@ impl SyncServer {
                                                         None
                                                     }
                                                 };
+
+                                                // Persist delta to storage (outside of room lock)
+                                                if let Some(ref s) = store {
+                                                    let version = delta_version.fetch_add(1, Ordering::SeqCst);
+                                                    if let Err(e) = s.store_delta(did, version, &sync_msg.payload) {
+                                                        log::error!("Failed to persist delta for doc {did}: {e}");
+                                                    } else {
+                                                        let mut st = stats.write().await;
+                                                        st.persisted_deltas += 1;
+                                                    }
+                                                }
+
                                                 // Broadcast outside of lock
                                                 if let Some(bc) = broadcast_clone {
                                                     let _ = bc.broadcast(&sync_msg).await;
@@ -397,8 +519,29 @@ impl SyncServer {
                 let leave_msg = SyncMessage::peer_left(pid, did);
                 let _ = room.broadcast.broadcast(&leave_msg).await;
 
-                // Remove empty rooms
+                // Remove empty rooms — persist snapshot before removal
                 if room.broadcast.peer_count().await == 0 {
+                    // Save snapshot to persistent storage
+                    if let Some(ref s) = store {
+                        let snapshot = {
+                            let txn = yrs::Transact::transact(&room.doc);
+                            txn.encode_state_as_update_v1(&yrs::StateVector::default())
+                        };
+                        match s.save_snapshot(did, &snapshot) {
+                            Ok(_) => {
+                                // Compact deltas after snapshot (compact all versions)
+                                let current_version = delta_version.load(Ordering::SeqCst);
+                                let _ = s.compact_deltas(did, current_version);
+                                let mut st = stats.write().await;
+                                st.persisted_snapshots += 1;
+                                log::info!("Persisted snapshot for doc {did} (room closing)");
+                            }
+                            Err(e) => {
+                                log::error!("Failed to persist snapshot for doc {did}: {e}");
+                            }
+                        }
+                    }
+
                     rooms_w.remove(&did);
                     log::info!("Room {did} removed (empty)");
                 }
@@ -426,11 +569,17 @@ impl SyncServer {
     pub fn room_manager(&self) -> &Arc<RoomManager> {
         &self.room_manager
     }
+
+    /// Get the persistent store (if configured).
+    pub fn store(&self) -> Option<&Arc<DocumentStore>> {
+        self.store.as_ref()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use yrs::{WriteTxn, GetString, Text};
 
     #[test]
     fn test_server_config_default() {
@@ -439,12 +588,14 @@ mod tests {
         assert_eq!(config.max_peers_per_room, 100);
         assert_eq!(config.broadcast_capacity, 256);
         assert_eq!(config.heartbeat_interval_secs, 30);
+        assert!(config.storage_path.is_none());
     }
 
     #[test]
     fn test_server_creation() {
         let server = SyncServer::with_defaults();
         assert_eq!(server.bind_addr(), "127.0.0.1:9090");
+        assert!(server.store.is_none());
     }
 
     #[test]
@@ -454,9 +605,17 @@ mod tests {
             max_peers_per_room: 50,
             broadcast_capacity: 512,
             heartbeat_interval_secs: 15,
+            storage_path: None,
         };
         let server = SyncServer::new(config);
         assert_eq!(server.bind_addr(), "0.0.0.0:8080");
+    }
+
+    #[tokio::test]
+    async fn test_server_with_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = SyncServer::with_storage("127.0.0.1:0", dir.path().join("db"));
+        assert!(server.store.is_some());
     }
 
     #[tokio::test]
@@ -468,6 +627,58 @@ mod tests {
         assert_eq!(stats.total_messages, 0);
         assert_eq!(stats.total_bytes, 0);
         assert_eq!(stats.active_rooms, 0);
+        assert_eq!(stats.persisted_deltas, 0);
+        assert_eq!(stats.persisted_snapshots, 0);
+        assert_eq!(stats.storage_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_server_recovery_empty() {
+        let server = SyncServer::with_defaults();
+        let recovered = server.recover().await.unwrap();
+        assert_eq!(recovered, 0);
+    }
+
+    #[tokio::test]
+    async fn test_server_recovery_with_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("db");
+        let doc_id = Uuid::new_v4();
+
+        // Write a snapshot to storage
+        {
+            let store_config = StoreConfig {
+                path: db_path.clone(),
+                ..StoreConfig::default()
+            };
+            let store = DocumentStore::open(store_config).unwrap();
+
+            // Create a Yrs doc, make some changes, encode
+            let doc = yrs::Doc::new();
+            {
+                let mut txn = yrs::Transact::transact_mut(&doc);
+                let text = txn.get_or_insert_text("test");
+                text.insert(&mut txn, 0, "Hello, persistence!");
+            }
+            let snapshot = {
+                let txn = yrs::Transact::transact(&doc);
+                txn.encode_state_as_update_v1(&yrs::StateVector::default())
+            };
+            store.save_snapshot(doc_id, &snapshot).unwrap();
+        }
+
+        // Create server pointing to same storage and recover
+        let server = SyncServer::with_storage("127.0.0.1:0", &db_path);
+        let recovered = server.recover().await.unwrap();
+        assert_eq!(recovered, 1);
+
+        // Verify the room exists and has content
+        let rooms = server.rooms.read().await;
+        assert!(rooms.contains_key(&doc_id));
+        let room = rooms.get(&doc_id).unwrap();
+        let txn = yrs::Transact::transact(&room.doc);
+        let text = txn.get_text("test").unwrap();
+        assert_eq!(text.get_string(&txn), "Hello, persistence!");
     }
 
     #[tokio::test]
