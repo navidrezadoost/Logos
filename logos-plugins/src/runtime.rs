@@ -779,7 +779,7 @@ mod tests {
         // 3 calls should succeed
         sb.execute("host.noop(); host.noop(); host.noop()").unwrap();
 
-        // 4th call in a single execution should fail (counter is per-execution)
+        // 4 calls in a single execution should fail
         let result = sb.execute("host.noop(); host.noop(); host.noop(); host.noop()");
         assert!(matches!(
             result,

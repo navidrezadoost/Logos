@@ -386,7 +386,7 @@ mod tests {
 
     fn test_document() -> Arc<RwLock<Document>> {
         let doc = Document::new();
-        doc.add_layer(Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0))).unwrap();
+        let _ = doc.add_layer(Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0)));
         Arc::new(RwLock::new(doc))
     }
 

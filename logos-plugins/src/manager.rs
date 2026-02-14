@@ -17,9 +17,10 @@
 //!   └── state: PluginState
 //! ```
 
+use crate::engine::JsEngine;
 use crate::host::PluginHost;
 use crate::manifest::PluginManifest;
-use crate::runtime::{PluginValue, RuntimeError, RuntimeResult, Sandbox};
+use crate::runtime::{PluginValue, ResourceLimits, RuntimeError, RuntimeResult, Sandbox};
 use logos_core::Document;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -51,27 +52,47 @@ impl std::fmt::Display for PluginState {
     }
 }
 
+/// Backend runtime for a plugin instance.
+///
+/// - `Sandbox`: Day 18 placeholder expression evaluator (for non-JS plugins)
+/// - `JavaScript`: Real boa_engine ES2023 runtime (Day 19)
+pub enum PluginRuntime {
+    /// Placeholder expression evaluator
+    Sandbox(Sandbox),
+    /// Real JavaScript engine (boa_engine ES2023)
+    JavaScript(JsEngine),
+}
+
 /// A running plugin instance.
 pub struct PluginInstance {
     /// The plugin's manifest
     pub manifest: PluginManifest,
-    /// The sandboxed runtime
-    pub sandbox: Sandbox,
+    /// The runtime backend
+    pub runtime: PluginRuntime,
     /// Current state
     pub state: PluginState,
 }
 
 impl PluginInstance {
-    /// Create a new instance from manifest + sandbox.
+    /// Create a new instance from manifest + sandbox (legacy).
     fn new(manifest: PluginManifest, sandbox: Sandbox) -> Self {
         Self {
             manifest,
-            sandbox,
+            runtime: PluginRuntime::Sandbox(sandbox),
             state: PluginState::Ready,
         }
     }
 
-    /// Execute a script in this plugin's sandbox.
+    /// Create a new instance from manifest + JsEngine.
+    fn new_js(manifest: PluginManifest, engine: JsEngine) -> Self {
+        Self {
+            manifest,
+            runtime: PluginRuntime::JavaScript(engine),
+            state: PluginState::Ready,
+        }
+    }
+
+    /// Execute a script in this plugin's runtime.
     pub fn execute(&mut self, script: &str) -> RuntimeResult<PluginValue> {
         if self.state == PluginState::Stopped {
             return Err(RuntimeError::ExecutionError(
@@ -84,7 +105,10 @@ impl PluginInstance {
             )));
         }
         self.state = PluginState::Running;
-        let result = self.sandbox.execute(script);
+        let result = match &mut self.runtime {
+            PluginRuntime::Sandbox(sb) => sb.execute(script),
+            PluginRuntime::JavaScript(engine) => engine.execute(script),
+        };
         self.state = match &result {
             Ok(_) => PluginState::Ready,
             Err(e) => PluginState::Error(e.to_string()),
@@ -94,7 +118,10 @@ impl PluginInstance {
 
     /// Stop this plugin.
     pub fn stop(&mut self) {
-        self.sandbox.kill();
+        match &mut self.runtime {
+            PluginRuntime::Sandbox(sb) => sb.kill(),
+            PluginRuntime::JavaScript(engine) => engine.kill(),
+        }
         self.state = PluginState::Stopped;
     }
 }
@@ -129,8 +156,8 @@ impl PluginManager {
 
     /// Load a plugin from its manifest.
     ///
-    /// Creates a sandbox, registers host functions, and marks
-    /// the plugin as Ready.
+    /// For `.js` entry points, uses the real JavaScript engine (boa_engine).
+    /// For other entry points, uses the placeholder Sandbox evaluator.
     pub fn load(&mut self, manifest: PluginManifest) -> RuntimeResult<()> {
         // Validate manifest
         manifest
@@ -155,21 +182,33 @@ impl PluginManager {
             )));
         }
 
-        // Create sandbox with resource limits
-        let mut sandbox = Sandbox::new(&manifest.name, crate::runtime::ResourceLimits::default());
-        if let Some(max_time) = manifest.max_execution_time {
-            sandbox.limits_mut().max_execution_time = max_time;
-        }
+        let limits = manifest
+            .max_execution_time
+            .map(|t| {
+                let mut l = ResourceLimits::default();
+                l.max_execution_time = t;
+                l
+            })
+            .unwrap_or_default();
 
-        // Create host bridge and register functions
-        let host = PluginHost::new(
-            Arc::clone(&self.document),
-            manifest.permissions.clone(),
-        );
-        host.register_host_fns(&mut sandbox);
+        let use_js = manifest.entry_point.ends_with(".js");
 
-        // Create instance
-        let instance = PluginInstance::new(manifest, sandbox);
+        let instance = if use_js {
+            // Real JavaScript engine (Day 19)
+            let mut engine = JsEngine::new(&manifest.name, limits, manifest.permissions.clone());
+            engine.register_document(Arc::clone(&self.document));
+            PluginInstance::new_js(manifest, engine)
+        } else {
+            // Legacy placeholder sandbox (Day 18)
+            let mut sandbox = Sandbox::new(&manifest.name, limits);
+            let host = PluginHost::new(
+                Arc::clone(&self.document),
+                manifest.permissions.clone(),
+            );
+            host.register_host_fns(&mut sandbox);
+            PluginInstance::new(manifest, sandbox)
+        };
+
         self.plugins.insert(plugin_id, instance);
         Ok(())
     }
@@ -273,9 +312,7 @@ mod tests {
         let doc = test_document();
         let mut mgr = PluginManager::new(doc);
         let manifest = hello_manifest();
-        // Create a second manifest with the same ID
-        let mut dup = hello_manifest();
-        dup.id = manifest.id;
+        let dup = manifest.clone();
         mgr.load(manifest).unwrap();
         assert!(mgr.load(dup).is_err());
     }
@@ -327,7 +364,7 @@ mod tests {
         let id = manifest.id.to_string();
         mgr.load(manifest).unwrap();
 
-        let result = mgr.execute(&id, "host.get_layer_count()").unwrap();
+        let result = mgr.execute(&id, "Logos.getLayerCount()").unwrap();
         assert_eq!(result, PluginValue::Int(0));
     }
 
@@ -339,12 +376,12 @@ mod tests {
         let id = manifest.id.to_string();
         mgr.load(manifest).unwrap();
 
-        // Create a rect
-        mgr.execute(&id, "host.create_rect(10, 20, 100, 50)")
+        // Create a rect via JS Logos API
+        mgr.execute(&id, "Logos.createRect(10, 20, 100, 50)")
             .unwrap();
 
         // Verify via layer count
-        let count = mgr.execute(&id, "host.get_layer_count()").unwrap();
+        let count = mgr.execute(&id, "Logos.getLayerCount()").unwrap();
         assert_eq!(count, PluginValue::Int(1));
     }
 
@@ -417,5 +454,96 @@ mod tests {
         // Missing entry_point → validation fails
         let manifest = PluginManifest::new("Bad Plugin");
         assert!(mgr.load(manifest).is_err());
+    }
+
+    // ─── JavaScript Engine Integration Tests ───
+
+    fn js_manifest() -> PluginManifest {
+        PluginManifest::new("JS Plugin")
+            .with_entry_point("main.js")
+            .with_permissions(PermissionSet::document_full())
+    }
+
+    #[test]
+    fn test_load_js_plugin() {
+        let doc = test_document();
+        let mut mgr = PluginManager::new(doc);
+        let manifest = js_manifest();
+        assert!(mgr.load(manifest).is_ok());
+        assert_eq!(mgr.plugin_count(), 1);
+    }
+
+    #[test]
+    fn test_js_plugin_uses_js_engine() {
+        let doc = test_document();
+        let mut mgr = PluginManager::new(doc);
+        let manifest = js_manifest();
+        let id = manifest.id.to_string();
+        mgr.load(manifest).unwrap();
+
+        // Should be a JsEngine backend
+        let instance = mgr.get(&id).unwrap();
+        assert!(matches!(instance.runtime, PluginRuntime::JavaScript(_)));
+    }
+
+    #[test]
+    fn test_js_plugin_execute_arithmetic() {
+        let doc = test_document();
+        let mut mgr = PluginManager::new(doc);
+        let manifest = js_manifest();
+        let id = manifest.id.to_string();
+        mgr.load(manifest).unwrap();
+
+        let result = mgr.execute(&id, "2 + 3").unwrap();
+        assert_eq!(result, PluginValue::Int(5));
+    }
+
+    #[test]
+    fn test_js_plugin_host_api() {
+        let doc = test_document();
+        let mut mgr = PluginManager::new(Arc::clone(&doc));
+        let manifest = js_manifest();
+        let id = manifest.id.to_string();
+        mgr.load(manifest).unwrap();
+
+        // Create a rect via JS Logos API
+        mgr.execute(&id, "Logos.createRect(10, 20, 100, 50)")
+            .unwrap();
+
+        let count = mgr.execute(&id, "Logos.getLayerCount()").unwrap();
+        assert_eq!(count, PluginValue::Int(1));
+    }
+
+    #[test]
+    fn test_js_plugin_es2023_features() {
+        let doc = test_document();
+        let mut mgr = PluginManager::new(doc);
+        let manifest = js_manifest();
+        let id = manifest.id.to_string();
+        mgr.load(manifest).unwrap();
+
+        // Arrow functions, template literals, destructuring
+        let code = r#"
+            const nums = [1, 2, 3, 4, 5];
+            const sum = nums.reduce((a, b) => a + b, 0);
+            sum;
+        "#;
+        let result = mgr.execute(&id, code).unwrap();
+        assert_eq!(result, PluginValue::Int(15));
+    }
+
+    #[test]
+    fn test_legacy_sandbox_still_works() {
+        let doc = test_document();
+        let mut mgr = PluginManager::new(doc);
+        // .pjs extension → Sandbox (not .js)
+        let manifest = PluginManifest::new("Legacy Plugin")
+            .with_entry_point("main.pjs")
+            .with_permissions(PermissionSet::read_only());
+        let id = manifest.id.to_string();
+        mgr.load(manifest).unwrap();
+
+        let instance = mgr.get(&id).unwrap();
+        assert!(matches!(instance.runtime, PluginRuntime::Sandbox(_)));
     }
 }
