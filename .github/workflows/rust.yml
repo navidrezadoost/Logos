@@ -101,3 +101,14 @@ jobs:
           echo "ERROR: Expected >=262 collab tests, got $PASSED"
           exit 1
         fi
+    - name: Verify logos-plugins tests (0 ignored)
+      run: |
+        RESULT=$(cargo test -p logos-plugins 2>&1)
+        echo "$RESULT"
+        # Sum both unit tests and doc tests
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Plugins tests: $PASSED passed"
+        if [ "$PASSED" -lt 77 ]; then
+          echo "ERROR: Expected >=77 plugins tests, got $PASSED"
+          exit 1
+        fi
