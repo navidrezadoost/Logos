@@ -45,6 +45,8 @@ use crate::protocol::{MessageType, PeerInfo, SyncMessage};
 use crate::storage::{DocumentStore, StoreConfig};
 use crate::auth::{AuthMiddleware, AuthConfig};
 use crate::auth::middleware::extract_token_from_uri;
+use crate::auth::multilimit::{MultiLevelLimiter, MultiLimitConfig};
+use crate::auth::backpressure::AtomicDropCounter;
 
 /// Server configuration.
 #[derive(Debug, Clone)]
@@ -152,6 +154,10 @@ pub struct SyncServer {
     persistence_handle: Option<tokio::task::JoinHandle<()>>,
     /// Authentication middleware (None = permissive)
     auth: Arc<AuthMiddleware>,
+    /// Multi-level rate limiter (user + room + global)
+    multi_limiter: Arc<tokio::sync::Mutex<MultiLevelLimiter>>,
+    /// Atomic drop counter for backpressure monitoring
+    drop_counter: Arc<AtomicDropCounter>,
 }
 
 impl SyncServer {
@@ -241,6 +247,10 @@ impl SyncServer {
             persistence_tx,
             persistence_handle,
             auth,
+            multi_limiter: Arc::new(tokio::sync::Mutex::new(
+                MultiLevelLimiter::new(MultiLimitConfig::default()),
+            )),
+            drop_counter: Arc::new(AtomicDropCounter::new()),
         }
     }
 
@@ -318,12 +328,15 @@ impl SyncServer {
             let delta_version = self.delta_version.clone();
             let persistence_tx = self.persistence_tx.clone();
             let auth = self.auth.clone();
+            let multi_limiter = self.multi_limiter.clone();
+            let drop_counter = self.drop_counter.clone();
 
             tokio::spawn(async move {
                 if let Err(e) =
                     Self::handle_connection(
                         stream, addr, rooms, stats, config, room_manager,
                         store, delta_version, persistence_tx, auth,
+                        multi_limiter, drop_counter,
                     ).await
                 {
                     log::error!("Connection error from {addr}: {e}");
@@ -344,6 +357,8 @@ impl SyncServer {
         delta_version: Arc<AtomicU64>,
         persistence_tx: Option<mpsc::UnboundedSender<PersistenceCommand>>,
         auth: Arc<AuthMiddleware>,
+        multi_limiter: Arc<tokio::sync::Mutex<MultiLevelLimiter>>,
+        drop_counter: Arc<AtomicDropCounter>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Accept WebSocket with callback to extract URI for token
         let request_uri = Arc::new(std::sync::Mutex::new(String::new()));
@@ -489,17 +504,22 @@ impl SyncServer {
                                         MessageType::Delta => {
                                             // Apply delta to server's Yrs doc, then broadcast
                                             if let Some(did) = doc_id {
-                                                // Rate limit check (<200ns)
-                                                if let Err(_e) = auth.check_message(
-                                                    auth_ctx.user_id,
-                                                    did,
-                                                    bytes.len() as u64,
-                                                ).await {
-                                                    log::warn!(
-                                                        "Rate limited user {} on doc {}",
-                                                        auth_ctx.name, did
-                                                    );
-                                                    continue; // Drop message silently
+                                                // Multi-level rate limit check (user+room+global, target <100ns)
+                                                {
+                                                    let mut ml = multi_limiter.lock().await;
+                                                    if let Err(level) = ml.check_all_with_bandwidth(
+                                                        auth_ctx.user_id,
+                                                        did,
+                                                        bytes.len() as u64,
+                                                    ) {
+                                                        drop_counter.record_dropped();
+                                                        log::warn!(
+                                                            "Rate limited user {} on doc {} (level: {})",
+                                                            auth_ctx.name, did, level
+                                                        );
+                                                        continue; // Drop message silently
+                                                    }
+                                                    drop_counter.record_sent();
                                                 }
 
                                                 let broadcast_clone = {
@@ -650,7 +670,8 @@ impl SyncServer {
                             ws_sender.send(Message::Binary(data.to_vec().into())).await?;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("Peer {peer_id:?} lagged by {n} messages");
+                            drop_counter.record_dropped();
+                            log::warn!("Peer {peer_id:?} lagged by {n} messages (backpressure active)");
                         }
                         Err(_) => break,
                     }
@@ -724,6 +745,16 @@ impl SyncServer {
     /// Get the auth middleware.
     pub fn auth(&self) -> &Arc<AuthMiddleware> {
         &self.auth
+    }
+
+    /// Get the multi-level rate limiter.
+    pub fn multi_limiter(&self) -> &Arc<tokio::sync::Mutex<MultiLevelLimiter>> {
+        &self.multi_limiter
+    }
+
+    /// Get the backpressure drop counter.
+    pub fn drop_counter(&self) -> &Arc<AtomicDropCounter> {
+        &self.drop_counter
     }
 }
 

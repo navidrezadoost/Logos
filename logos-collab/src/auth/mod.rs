@@ -35,7 +35,17 @@
 pub mod token;
 pub mod ratelimit;
 pub mod middleware;
+pub mod multilimit;
+pub mod backpressure;
 
 pub use token::{TokenEngine, Claims, TokenError};
 pub use ratelimit::{RateLimiter, RateLimitConfig, TokenBucket};
 pub use middleware::{AuthMiddleware, AuthConfig, AuthError};
+pub use multilimit::{
+    MultiLevelLimiter, MultiLimitConfig, MultiLimitStats,
+    AtomicGlobalLimiter, RejectionLevel,
+};
+pub use backpressure::{
+    BackpressureChannel, BackpressureStats, DropStrategy,
+    AdaptiveLimiter, AtomicDropCounter,
+};

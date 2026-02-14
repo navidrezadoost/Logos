@@ -10,6 +10,8 @@ use logos_collab::storage::{
     DocumentStore, StoreConfig, CompressedDelta, WriteAheadLog, WalConfig,
 };
 use logos_collab::auth::{TokenEngine, Claims, RateLimiter, RateLimitConfig};
+use logos_collab::auth::multilimit::{MultiLevelLimiter, MultiLimitConfig, AtomicGlobalLimiter};
+use logos_collab::auth::backpressure::{BackpressureChannel, DropStrategy, AdaptiveLimiter, AtomicDropCounter};
 use uuid::Uuid;
 use std::sync::Arc;
 
@@ -515,6 +517,109 @@ fn bench_rate_limit_bandwidth(c: &mut Criterion) {
     });
 }
 
+fn bench_multi_level_check_all(c: &mut Criterion) {
+    let config = MultiLimitConfig {
+        user_rate: 1_000_000.0,
+        user_burst: 2_000_000.0,
+        room_rate: 10_000_000.0,
+        room_burst: 20_000_000.0,
+        global_rate: 100_000_000.0,
+        global_burst: 200_000_000.0,
+        ..Default::default()
+    };
+    let mut limiter = MultiLevelLimiter::new(config);
+    let user_id = Uuid::new_v4();
+    let room_id = Uuid::new_v4();
+
+    c.bench_function("multi_level_check_all", |b| {
+        b.iter(|| {
+            black_box(limiter.check_all(black_box(user_id), black_box(room_id)));
+        })
+    });
+}
+
+fn bench_multi_level_check_with_bandwidth(c: &mut Criterion) {
+    let config = MultiLimitConfig {
+        user_rate: 1_000_000.0,
+        user_burst: 2_000_000.0,
+        room_rate: 10_000_000.0,
+        room_burst: 20_000_000.0,
+        global_rate: 100_000_000.0,
+        global_burst: 200_000_000.0,
+        room_bytes_per_sec: u64::MAX,
+        ..Default::default()
+    };
+    let mut limiter = MultiLevelLimiter::new(config);
+    let user_id = Uuid::new_v4();
+    let room_id = Uuid::new_v4();
+
+    c.bench_function("multi_level_check_with_bandwidth", |b| {
+        b.iter(|| {
+            black_box(limiter.check_all_with_bandwidth(
+                black_box(user_id),
+                black_box(room_id),
+                black_box(1024),
+            ));
+        })
+    });
+}
+
+fn bench_atomic_global_check(c: &mut Criterion) {
+    let limiter = AtomicGlobalLimiter::new(100_000_000.0, 200_000_000.0);
+
+    c.bench_function("atomic_global_check", |b| {
+        b.iter(|| {
+            black_box(limiter.check());
+        })
+    });
+}
+
+fn bench_backpressure_send(c: &mut Criterion) {
+    let mut ch = BackpressureChannel::new(10_000, DropStrategy::DropNew);
+
+    c.bench_function("backpressure_send", |b| {
+        b.iter(|| {
+            black_box(ch.send(black_box(42u64)));
+            ch.recv(); // Drain to avoid filling
+        })
+    });
+}
+
+fn bench_backpressure_send_drop_oldest(c: &mut Criterion) {
+    let mut ch = BackpressureChannel::new(100, DropStrategy::DropOldest);
+    // Fill it first
+    for i in 0..100 {
+        ch.send(i);
+    }
+
+    c.bench_function("backpressure_send_drop_oldest", |b| {
+        b.iter(|| {
+            black_box(ch.send(black_box(999u64)));
+        })
+    });
+}
+
+fn bench_adaptive_limiter_record(c: &mut Criterion) {
+    let mut limiter = AdaptiveLimiter::new(100_000.0, std::time::Duration::from_millis(10));
+
+    c.bench_function("adaptive_limiter_record", |b| {
+        b.iter(|| {
+            limiter.record_latency(black_box(std::time::Duration::from_nanos(500)));
+        })
+    });
+}
+
+fn bench_atomic_drop_counter(c: &mut Criterion) {
+    let counter = AtomicDropCounter::new();
+
+    c.bench_function("atomic_drop_counter_record", |b| {
+        b.iter(|| {
+            counter.record_sent();
+            black_box(counter.sent());
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_delta_encode,
@@ -545,5 +650,12 @@ criterion_group!(
     bench_rate_limit_check,
     bench_rate_limit_check_new_user,
     bench_rate_limit_bandwidth,
+    bench_multi_level_check_all,
+    bench_multi_level_check_with_bandwidth,
+    bench_atomic_global_check,
+    bench_backpressure_send,
+    bench_backpressure_send_drop_oldest,
+    bench_adaptive_limiter_record,
+    bench_atomic_drop_counter,
 );
 criterion_main!(benches);

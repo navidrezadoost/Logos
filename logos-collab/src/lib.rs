@@ -66,4 +66,8 @@ pub use auth::{
     TokenEngine, Claims, TokenError,
     RateLimiter, RateLimitConfig, TokenBucket,
     AuthMiddleware, AuthConfig, AuthError,
+    MultiLevelLimiter, MultiLimitConfig, MultiLimitStats,
+    AtomicGlobalLimiter, RejectionLevel,
+    BackpressureChannel, BackpressureStats, DropStrategy,
+    AdaptiveLimiter, AtomicDropCounter,
 };
