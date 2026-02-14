@@ -36,7 +36,9 @@
 //! | Memory limit | 50MB hard cap | — | Secure Programming |
 //! | Timeout | 10ms default | — | OWASP Testing Guide |
 
+pub mod events;
 pub mod host_api;
 pub mod js_runtime;
 
+pub use events::EventBus;
 pub use js_runtime::JsEngine;

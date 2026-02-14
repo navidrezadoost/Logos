@@ -16,7 +16,14 @@
 //! | `Logos.getLayerCount()` | DocumentRead | Number of layers |
 //! | `Logos.getLayer(id)` | DocumentRead | Single layer by ID |
 //! | `Logos.createRect(x,y,w,h)` | DocumentWrite | Create rectangle |
+//! | `Logos.createPath(commands)` | DocumentWrite | Create path/bezier |
 //! | `Logos.deleteLayer(id)` | DocumentWrite | Delete a layer |
+//! | `Logos.getSelection()` | DocumentRead | Get selected layer IDs |
+//! | `Logos.setSelection(ids)` | DocumentWrite | Set selection |
+//! | `Logos.clearSelection()` | DocumentWrite | Clear selection |
+//! | `Logos.undo()` | DocumentWrite | Undo last action |
+//! | `Logos.redo()` | DocumentWrite | Redo last undone action |
+//! | `Logos.on(event, callback)` | None | Register event listener |
 //! | `Logos.log(msg)` | None | Log a message |
 //! | `Logos.checkTimeout()` | None | Throws if timed out |
 //!
@@ -28,9 +35,11 @@
 //! documentation: only capturing `Gc<T>` / `JsObject` etc. would be
 //! unsound.
 
+use crate::engine::events::{EventBus, EventData, EventKind, EventPayload};
 use crate::permissions::{PermissionGuard, PermissionKind};
 use boa_engine::{Context, JsString, JsValue, NativeFunction};
-use logos_core::{Document, Layer, RectLayer};
+use logos_core::{Document, Layer, PathCommand, PathLayer, Point, RectLayer, UndoAction, UndoStack};
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use uuid::Uuid;
@@ -45,6 +54,8 @@ pub fn register_logos_api(
     guard: Arc<RwLock<PermissionGuard>>,
     host_call_count: Arc<RwLock<u64>>,
     deadline: Arc<RwLock<Option<Instant>>>,
+    undo_stack: Arc<RwLock<UndoStack>>,
+    event_bus: Arc<RwLock<EventBus>>,
 ) {
     let mut obj = boa_engine::object::ObjectInitializer::new(context);
 
@@ -194,6 +205,8 @@ pub fn register_logos_api(
         let g = Arc::clone(&guard);
         let calls = Arc::clone(&host_call_count);
         let dl = Arc::clone(&deadline);
+        let undo = Arc::clone(&undo_stack);
+        let events = Arc::clone(&event_bus);
         let f = unsafe {
             NativeFunction::from_closure(
                 move |_this: &JsValue, args: &[JsValue], _ctx: &mut Context| {
@@ -216,9 +229,25 @@ pub fn register_logos_api(
                     let id = rect.id;
                     let layer = Layer::Rect(rect);
 
+                    // Push undo action
+                    if let Ok(mut us) = undo.write() {
+                        us.push(UndoAction::AddLayer(layer.clone()));
+                    }
+
                     let d = doc.read().map_err(js_lock_error)?;
                     d.add_layer(layer)
                         .map_err(|e| js_error(&e))?;
+
+                    // Emit layerAdded event
+                    if let Ok(mut eb) = events.write() {
+                        let mut data = HashMap::new();
+                        data.insert("id".to_string(), EventData::String(id.to_string()));
+                        data.insert("type".to_string(), EventData::String("rect".to_string()));
+                        eb.emit(EventPayload {
+                            kind: EventKind::LayerAdded,
+                            data,
+                        });
+                    }
 
                     Ok(JsValue::new(JsString::from(id.to_string())))
                 },
@@ -233,6 +262,8 @@ pub fn register_logos_api(
         let g = Arc::clone(&guard);
         let calls = Arc::clone(&host_call_count);
         let dl = Arc::clone(&deadline);
+        let undo = Arc::clone(&undo_stack);
+        let events = Arc::clone(&event_bus);
         let f = unsafe {
             NativeFunction::from_closure(
                 move |_this: &JsValue, args: &[JsValue], _ctx: &mut Context| {
@@ -252,16 +283,23 @@ pub fn register_logos_api(
                         .map_err(|e| js_error(&format!("invalid UUID: {e}")))?;
 
                     let d = doc.read().map_err(js_lock_error)?;
-                    let mut page = d.root.write().map_err(|e| {
-                        boa_engine::JsError::from_opaque(JsValue::new(
-                            JsString::from(format!("lock error: {e}")),
-                        ))
-                    })?;
+                    let removed = d
+                        .remove_layer(target_id)
+                        .map_err(|e| js_error(&e))?;
 
-                    let before = page.layers.len();
-                    page.layers.retain(|l| l.id() != target_id);
-                    if page.layers.len() == before {
-                        return Err(js_error(&format!("layer not found: {id_str}")));
+                    // Push undo action
+                    if let Ok(mut us) = undo.write() {
+                        us.push(UndoAction::RemoveLayer(removed));
+                    }
+
+                    // Emit layerRemoved event
+                    if let Ok(mut eb) = events.write() {
+                        let mut data = HashMap::new();
+                        data.insert("id".to_string(), EventData::String(id_str));
+                        eb.emit(EventPayload {
+                            kind: EventKind::LayerRemoved,
+                            data,
+                        });
                     }
 
                     Ok(JsValue::new(true))
@@ -269,6 +307,436 @@ pub fn register_logos_api(
             )
         };
         obj.function(f, JsString::from("deleteLayer"), 1);
+    }
+
+    // ─── Logos.createPath(commands) ───
+    // commands: array of {type: "moveTo"|"lineTo"|"quadTo"|"bezierTo"|"close", ...coords}
+    {
+        let doc = Arc::clone(&document);
+        let g = Arc::clone(&guard);
+        let calls = Arc::clone(&host_call_count);
+        let dl = Arc::clone(&deadline);
+        let undo = Arc::clone(&undo_stack);
+        let events = Arc::clone(&event_bus);
+        let f = unsafe {
+            NativeFunction::from_closure(
+                move |_this: &JsValue, args: &[JsValue], ctx: &mut Context| {
+                    check_deadline(&dl)?;
+                    increment_calls(&calls);
+                    check_permission(&g, &PermissionKind::DocumentWrite)?;
+
+                    let cmds_val = args
+                        .first()
+                        .ok_or_else(|| js_error("createPath requires a commands array"))?;
+
+                    let cmds_obj = cmds_val
+                        .as_object()
+                        .ok_or_else(|| js_error("createPath argument must be an array"))?;
+
+                    let length_val = cmds_obj
+                        .get(JsString::from("length"), ctx)
+                        .map_err(|e| js_error(&e.to_string()))?;
+                    let length = length_val
+                        .as_number()
+                        .ok_or_else(|| js_error("commands must be an array with length"))? as usize;
+
+                    if length == 0 {
+                        return Err(js_error("createPath requires at least one command"));
+                    }
+
+                    let mut commands = Vec::with_capacity(length);
+                    for i in 0..length {
+                        let elem = cmds_obj
+                            .get(i as u32, ctx)
+                            .map_err(|e| js_error(&e.to_string()))?;
+                        let elem_obj = elem
+                            .as_object()
+                            .ok_or_else(|| js_error(&format!("command[{i}] must be an object")))?;
+
+                        let type_val = elem_obj
+                            .get(JsString::from("type"), ctx)
+                            .map_err(|e| js_error(&e.to_string()))?;
+                        let cmd_type = type_val
+                            .as_string()
+                            .map(|s| s.to_std_string_escaped())
+                            .ok_or_else(|| js_error(&format!("command[{i}].type must be a string")))?;
+
+                        let cmd = match cmd_type.as_str() {
+                            "moveTo" => {
+                                let x = js_obj_f32(&elem_obj, "x", ctx)?;
+                                let y = js_obj_f32(&elem_obj, "y", ctx)?;
+                                PathCommand::MoveTo(Point::new(x, y))
+                            }
+                            "lineTo" => {
+                                let x = js_obj_f32(&elem_obj, "x", ctx)?;
+                                let y = js_obj_f32(&elem_obj, "y", ctx)?;
+                                PathCommand::LineTo(Point::new(x, y))
+                            }
+                            "quadTo" => {
+                                let cx = js_obj_f32(&elem_obj, "cx", ctx)?;
+                                let cy = js_obj_f32(&elem_obj, "cy", ctx)?;
+                                let x = js_obj_f32(&elem_obj, "x", ctx)?;
+                                let y = js_obj_f32(&elem_obj, "y", ctx)?;
+                                PathCommand::QuadTo {
+                                    ctrl: Point::new(cx, cy),
+                                    end: Point::new(x, y),
+                                }
+                            }
+                            "bezierTo" => {
+                                let cp1x = js_obj_f32(&elem_obj, "cp1x", ctx)?;
+                                let cp1y = js_obj_f32(&elem_obj, "cp1y", ctx)?;
+                                let cp2x = js_obj_f32(&elem_obj, "cp2x", ctx)?;
+                                let cp2y = js_obj_f32(&elem_obj, "cp2y", ctx)?;
+                                let x = js_obj_f32(&elem_obj, "x", ctx)?;
+                                let y = js_obj_f32(&elem_obj, "y", ctx)?;
+                                PathCommand::BezierTo {
+                                    cp1: Point::new(cp1x, cp1y),
+                                    cp2: Point::new(cp2x, cp2y),
+                                    end: Point::new(x, y),
+                                }
+                            }
+                            "close" => PathCommand::Close,
+                            other => {
+                                return Err(js_error(&format!(
+                                    "unknown command type: {other}"
+                                )));
+                            }
+                        };
+                        commands.push(cmd);
+                    }
+
+                    let path = PathLayer::new(commands);
+                    let id = path.id;
+                    let layer = Layer::Path(path);
+
+                    // Push undo action
+                    if let Ok(mut us) = undo.write() {
+                        us.push(UndoAction::AddLayer(layer.clone()));
+                    }
+
+                    let d = doc.read().map_err(js_lock_error)?;
+                    d.add_layer(layer)
+                        .map_err(|e| js_error(&e))?;
+
+                    // Emit layerAdded event
+                    if let Ok(mut eb) = events.write() {
+                        let mut data = HashMap::new();
+                        data.insert("id".to_string(), EventData::String(id.to_string()));
+                        data.insert("type".to_string(), EventData::String("path".to_string()));
+                        eb.emit(EventPayload {
+                            kind: EventKind::LayerAdded,
+                            data,
+                        });
+                    }
+
+                    Ok(JsValue::new(JsString::from(id.to_string())))
+                },
+            )
+        };
+        obj.function(f, JsString::from("createPath"), 1);
+    }
+
+    // ─── Logos.getSelection() ───
+    {
+        let doc = Arc::clone(&document);
+        let g = Arc::clone(&guard);
+        let calls = Arc::clone(&host_call_count);
+        let dl = Arc::clone(&deadline);
+        let f = unsafe {
+            NativeFunction::from_closure(
+                move |_this: &JsValue, _args: &[JsValue], ctx: &mut Context| {
+                    check_deadline(&dl)?;
+                    increment_calls(&calls);
+                    check_permission(&g, &PermissionKind::DocumentRead)?;
+
+                    let d = doc.read().map_err(js_lock_error)?;
+                    let sel = d.get_selection().map_err(|e| js_error(&e))?;
+
+                    let arr = boa_engine::object::builtins::JsArray::new(ctx);
+                    for id in &sel {
+                        arr.push(
+                            JsValue::new(JsString::from(id.to_string())),
+                            ctx,
+                        )
+                        .map_err(|e| js_error(&e.to_string()))?;
+                    }
+
+                    Ok(arr.into())
+                },
+            )
+        };
+        obj.function(f, JsString::from("getSelection"), 0);
+    }
+
+    // ─── Logos.setSelection(ids) ───
+    {
+        let doc = Arc::clone(&document);
+        let g = Arc::clone(&guard);
+        let calls = Arc::clone(&host_call_count);
+        let dl = Arc::clone(&deadline);
+        let events = Arc::clone(&event_bus);
+        let f = unsafe {
+            NativeFunction::from_closure(
+                move |_this: &JsValue, args: &[JsValue], ctx: &mut Context| {
+                    check_deadline(&dl)?;
+                    increment_calls(&calls);
+                    check_permission(&g, &PermissionKind::DocumentWrite)?;
+
+                    let arr_val = args
+                        .first()
+                        .ok_or_else(|| js_error("setSelection requires an array of IDs"))?;
+
+                    let arr_obj = arr_val
+                        .as_object()
+                        .ok_or_else(|| js_error("setSelection argument must be an array"))?;
+
+                    let length_val = arr_obj
+                        .get(JsString::from("length"), ctx)
+                        .map_err(|e| js_error(&e.to_string()))?;
+                    let length = length_val
+                        .as_number()
+                        .ok_or_else(|| js_error("argument must be an array with length"))? as usize;
+
+                    let mut ids = Vec::with_capacity(length);
+                    for i in 0..length {
+                        let elem = arr_obj
+                            .get(i as u32, ctx)
+                            .map_err(|e| js_error(&e.to_string()))?;
+                        let id_str = elem
+                            .as_string()
+                            .map(|s| s.to_std_string_escaped())
+                            .ok_or_else(|| js_error(&format!("selection[{i}] must be a string")))?;
+                        let uuid = Uuid::parse_str(&id_str)
+                            .map_err(|e| js_error(&format!("invalid UUID at [{i}]: {e}")))?;
+                        ids.push(uuid);
+                    }
+
+                    let d = doc.read().map_err(js_lock_error)?;
+                    d.set_selection(ids.clone()).map_err(|e| js_error(&e))?;
+
+                    // Emit selectionChanged event
+                    if let Ok(mut eb) = events.write() {
+                        let mut data = HashMap::new();
+                        data.insert(
+                            "ids".to_string(),
+                            EventData::StringArray(ids.iter().map(|id| id.to_string()).collect()),
+                        );
+                        eb.emit(EventPayload {
+                            kind: EventKind::SelectionChanged,
+                            data,
+                        });
+                    }
+
+                    Ok(JsValue::new(true))
+                },
+            )
+        };
+        obj.function(f, JsString::from("setSelection"), 1);
+    }
+
+    // ─── Logos.clearSelection() ───
+    {
+        let doc = Arc::clone(&document);
+        let g = Arc::clone(&guard);
+        let calls = Arc::clone(&host_call_count);
+        let dl = Arc::clone(&deadline);
+        let events = Arc::clone(&event_bus);
+        let f = unsafe {
+            NativeFunction::from_closure(
+                move |_this: &JsValue, _args: &[JsValue], _ctx: &mut Context| {
+                    check_deadline(&dl)?;
+                    increment_calls(&calls);
+                    check_permission(&g, &PermissionKind::DocumentWrite)?;
+
+                    let d = doc.read().map_err(js_lock_error)?;
+                    d.clear_selection().map_err(|e| js_error(&e))?;
+
+                    // Emit selectionChanged event with empty array
+                    if let Ok(mut eb) = events.write() {
+                        let mut data = HashMap::new();
+                        data.insert("ids".to_string(), EventData::StringArray(Vec::new()));
+                        eb.emit(EventPayload {
+                            kind: EventKind::SelectionChanged,
+                            data,
+                        });
+                    }
+
+                    Ok(JsValue::new(true))
+                },
+            )
+        };
+        obj.function(f, JsString::from("clearSelection"), 0);
+    }
+
+    // ─── Logos.undo() ───
+    {
+        let doc = Arc::clone(&document);
+        let g = Arc::clone(&guard);
+        let calls = Arc::clone(&host_call_count);
+        let dl = Arc::clone(&deadline);
+        let undo = Arc::clone(&undo_stack);
+        let events = Arc::clone(&event_bus);
+        let f = unsafe {
+            NativeFunction::from_closure(
+                move |_this: &JsValue, _args: &[JsValue], _ctx: &mut Context| {
+                    check_deadline(&dl)?;
+                    increment_calls(&calls);
+                    check_permission(&g, &PermissionKind::DocumentWrite)?;
+
+                    let action = {
+                        let mut us = undo.write().map_err(js_lock_error)?;
+                        us.pop_undo()
+                    };
+
+                    match action {
+                        Some(UndoAction::AddLayer(layer)) => {
+                            // Undo an add → remove the layer
+                            let id = layer.id();
+                            let d = doc.read().map_err(js_lock_error)?;
+                            let _ = d.remove_layer(id);
+
+                            if let Ok(mut eb) = events.write() {
+                                let mut data = HashMap::new();
+                                data.insert("id".to_string(), EventData::String(id.to_string()));
+                                eb.emit(EventPayload {
+                                    kind: EventKind::LayerRemoved,
+                                    data,
+                                });
+                            }
+
+                            Ok(JsValue::new(true))
+                        }
+                        Some(UndoAction::RemoveLayer(layer)) => {
+                            // Undo a remove → re-add the layer
+                            let id = layer.id();
+                            let d = doc.read().map_err(js_lock_error)?;
+                            d.add_layer(layer)
+                                .map_err(|e| js_error(&e))?;
+
+                            if let Ok(mut eb) = events.write() {
+                                let mut data = HashMap::new();
+                                data.insert("id".to_string(), EventData::String(id.to_string()));
+                                data.insert("type".to_string(), EventData::String("restored".to_string()));
+                                eb.emit(EventPayload {
+                                    kind: EventKind::LayerAdded,
+                                    data,
+                                });
+                            }
+
+                            Ok(JsValue::new(true))
+                        }
+                        None => Ok(JsValue::new(false)),
+                    }
+                },
+            )
+        };
+        obj.function(f, JsString::from("undo"), 0);
+    }
+
+    // ─── Logos.redo() ───
+    {
+        let doc = Arc::clone(&document);
+        let g = Arc::clone(&guard);
+        let calls = Arc::clone(&host_call_count);
+        let dl = Arc::clone(&deadline);
+        let undo = Arc::clone(&undo_stack);
+        let events = Arc::clone(&event_bus);
+        let f = unsafe {
+            NativeFunction::from_closure(
+                move |_this: &JsValue, _args: &[JsValue], _ctx: &mut Context| {
+                    check_deadline(&dl)?;
+                    increment_calls(&calls);
+                    check_permission(&g, &PermissionKind::DocumentWrite)?;
+
+                    let action = {
+                        let mut us = undo.write().map_err(js_lock_error)?;
+                        us.pop_redo()
+                    };
+
+                    match action {
+                        Some(UndoAction::AddLayer(layer)) => {
+                            // Redo an add → re-add the layer
+                            let id = layer.id();
+                            let d = doc.read().map_err(js_lock_error)?;
+                            d.add_layer(layer)
+                                .map_err(|e| js_error(&e))?;
+
+                            if let Ok(mut eb) = events.write() {
+                                let mut data = HashMap::new();
+                                data.insert("id".to_string(), EventData::String(id.to_string()));
+                                eb.emit(EventPayload {
+                                    kind: EventKind::LayerAdded,
+                                    data,
+                                });
+                            }
+
+                            Ok(JsValue::new(true))
+                        }
+                        Some(UndoAction::RemoveLayer(layer)) => {
+                            // Redo a remove → remove the layer again
+                            let id = layer.id();
+                            let d = doc.read().map_err(js_lock_error)?;
+                            let _ = d.remove_layer(id);
+
+                            if let Ok(mut eb) = events.write() {
+                                let mut data = HashMap::new();
+                                data.insert("id".to_string(), EventData::String(id.to_string()));
+                                eb.emit(EventPayload {
+                                    kind: EventKind::LayerRemoved,
+                                    data,
+                                });
+                            }
+
+                            Ok(JsValue::new(true))
+                        }
+                        None => Ok(JsValue::new(false)),
+                    }
+                },
+            )
+        };
+        obj.function(f, JsString::from("redo"), 0);
+    }
+
+    // ─── Logos.on(event, callback) ───
+    {
+        let calls = Arc::clone(&host_call_count);
+        let dl = Arc::clone(&deadline);
+        let events = Arc::clone(&event_bus);
+        let f = unsafe {
+            NativeFunction::from_closure(
+                move |_this: &JsValue, args: &[JsValue], _ctx: &mut Context| {
+                    check_deadline(&dl)?;
+                    increment_calls(&calls);
+
+                    let event_name = args
+                        .first()
+                        .and_then(|v| v.as_string())
+                        .map(|s| s.to_std_string_escaped())
+                        .ok_or_else(|| js_error("on() requires event name as first argument"))?;
+
+                    let kind = EventKind::from_str(&event_name)
+                        .ok_or_else(|| js_error(&format!("unknown event: {event_name}")))?;
+
+                    let callback = args
+                        .get(1)
+                        .and_then(|v| v.as_object())
+                        .ok_or_else(|| js_error("on() requires a callback function as second argument"))?
+                        .clone();
+
+                    if !callback.is_callable() {
+                        return Err(js_error("on() second argument must be a function"));
+                    }
+
+                    events
+                        .write()
+                        .map_err(js_lock_error)?
+                        .on(kind, callback);
+
+                    Ok(JsValue::new(true))
+                },
+            )
+        };
+        obj.function(f, JsString::from("on"), 2);
     }
 
     // ─── Logos.log(msg) ───
@@ -368,6 +836,20 @@ fn js_to_f32(val: &JsValue) -> Result<f32, boa_engine::JsError> {
 /// Convert a lock error to a JsError.
 fn js_lock_error<T: std::fmt::Display>(err: T) -> boa_engine::JsError {
     js_error(&format!("lock error: {err}"))
+}
+
+/// Extract a numeric property from a JS object as f32.
+fn js_obj_f32(
+    obj: &boa_engine::JsObject,
+    key: &str,
+    ctx: &mut Context,
+) -> Result<f32, boa_engine::JsError> {
+    let val = obj
+        .get(JsString::from(key), ctx)
+        .map_err(|e| js_error(&e.to_string()))?;
+    val.as_number()
+        .map(|n| n as f32)
+        .ok_or_else(|| js_error(&format!("property '{key}' must be a number")))
 }
 
 /// Convert a logos_core Layer to a boa JsObject.
@@ -491,6 +973,44 @@ fn layer_to_js_object(layer: &Layer, ctx: &mut Context) -> boa_engine::JsObject 
                 .property(
                     JsString::from("children"),
                     JsValue::new(fr.children.len() as i32),
+                    boa_engine::property::Attribute::all(),
+                );
+        }
+        Layer::Path(p) => {
+            builder
+                .property(
+                    JsString::from("type"),
+                    JsValue::new(JsString::from("path")),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("x"),
+                    JsValue::rational(p.bounds.x as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("y"),
+                    JsValue::rational(p.bounds.y as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("width"),
+                    JsValue::rational(p.bounds.width as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("height"),
+                    JsValue::rational(p.bounds.height as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("commandCount"),
+                    JsValue::new(p.commands.len() as i32),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("closed"),
+                    JsValue::new(p.closed),
                     boa_engine::property::Attribute::all(),
                 );
         }
@@ -682,5 +1202,529 @@ mod tests {
         let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::none());
 
         engine.execute("Logos.log('hello from plugin')").unwrap();
+    }
+
+    // ═══════════ Day 20: Path API Tests ═══════════
+
+    #[test]
+    fn test_js_create_path_line() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            Logos.createPath([
+                { type: "moveTo", x: 0, y: 0 },
+                { type: "lineTo", x: 100, y: 100 },
+                { type: "lineTo", x: 200, y: 0 },
+                { type: "close" }
+            ]);
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert!(result.as_str().is_some(), "should return UUID string");
+        assert!(result.as_str().unwrap().len() > 10);
+    }
+
+    #[test]
+    fn test_js_create_path_bezier() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            Logos.createPath([
+                { type: "moveTo", x: 0, y: 0 },
+                { type: "bezierTo", cp1x: 50, cp1y: -50, cp2x: 150, cp2y: -50, x: 200, y: 0 }
+            ]);
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert!(result.as_str().is_some());
+
+        let count = engine.execute("Logos.getLayerCount()").unwrap();
+        assert_eq!(count.as_int(), Some(1));
+    }
+
+    #[test]
+    fn test_js_create_path_quad() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            Logos.createPath([
+                { type: "moveTo", x: 0, y: 0 },
+                { type: "quadTo", cx: 100, cy: 200, x: 200, y: 0 }
+            ]);
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert!(result.as_str().is_some());
+    }
+
+    #[test]
+    fn test_js_get_path_layer() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            var pathId = Logos.createPath([
+                { type: "moveTo", x: 10, y: 20 },
+                { type: "lineTo", x: 110, y: 120 }
+            ]);
+            Logos.getLayer(pathId);
+        "#;
+        let result = engine.execute(code).unwrap();
+        if let PluginValue::Object(ref obj) = result {
+            assert_eq!(obj.get("type").and_then(|v: &PluginValue| v.as_str()), Some("path"));
+            assert!(obj.contains_key("commandCount"));
+        } else {
+            panic!("expected object, got {:?}", result);
+        }
+    }
+
+    #[test]
+    fn test_js_create_path_empty_errors() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute("Logos.createPath([])");
+        assert!(result.is_err(), "empty path should error");
+    }
+
+    #[test]
+    fn test_js_create_path_unknown_type_errors() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute(r#"Logos.createPath([{ type: "invalid", x: 0, y: 0 }])"#);
+        assert!(result.is_err(), "unknown command type should error");
+    }
+
+    #[test]
+    fn test_js_create_path_permission_denied() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::read_only());
+
+        let code = r#"Logos.createPath([{ type: "moveTo", x: 0, y: 0 }])"#;
+        assert!(engine.execute(code).is_err(), "read-only should deny createPath");
+    }
+
+    #[test]
+    fn test_js_create_path_complex_shape() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        // A complex shape: heart-like bezier curve
+        let code = r#"
+            Logos.createPath([
+                { type: "moveTo", x: 100, y: 200 },
+                { type: "bezierTo", cp1x: 100, cp1y: 100, cp2x: 0, cp2y: 100, x: 0, y: 200 },
+                { type: "bezierTo", cp1x: 0, cp1y: 300, cp2x: 100, cp2y: 400, x: 100, y: 500 },
+                { type: "bezierTo", cp1x: 100, cp1y: 400, cp2x: 200, cp2y: 300, x: 200, y: 200 },
+                { type: "bezierTo", cp1x: 200, cp1y: 100, cp2x: 100, cp2y: 100, x: 100, y: 200 },
+                { type: "close" }
+            ]);
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert!(result.as_str().is_some());
+
+        let layers = engine.execute("Logos.getLayers()").unwrap();
+        if let PluginValue::Array(arr) = layers {
+            assert_eq!(arr.len(), 1);
+            if let PluginValue::Object(ref obj) = arr[0] {
+                assert_eq!(obj.get("type").and_then(|v: &PluginValue| v.as_str()), Some("path"));
+                assert_eq!(obj.get("commandCount").and_then(|v: &PluginValue| v.as_int()), Some(6));
+            }
+        }
+    }
+
+    // ═══════════ Day 20: Selection API Tests ═══════════
+
+    #[test]
+    fn test_js_get_selection_empty() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute("Logos.getSelection()").unwrap();
+        if let PluginValue::Array(arr) = result {
+            assert!(arr.is_empty(), "initial selection should be empty");
+        } else {
+            panic!("expected array");
+        }
+    }
+
+    #[test]
+    fn test_js_set_and_get_selection() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            var id1 = Logos.createRect(0, 0, 50, 50);
+            var id2 = Logos.createRect(100, 100, 50, 50);
+            Logos.setSelection([id1, id2]);
+            Logos.getSelection();
+        "#;
+        let result = engine.execute(code).unwrap();
+        if let PluginValue::Array(arr) = result {
+            assert_eq!(arr.len(), 2, "should have 2 selected items");
+        } else {
+            panic!("expected array");
+        }
+    }
+
+    #[test]
+    fn test_js_clear_selection() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            var id = Logos.createRect(0, 0, 50, 50);
+            Logos.setSelection([id]);
+            Logos.clearSelection();
+            Logos.getSelection();
+        "#;
+        let result = engine.execute(code).unwrap();
+        if let PluginValue::Array(arr) = result {
+            assert!(arr.is_empty(), "selection should be cleared");
+        } else {
+            panic!("expected array");
+        }
+    }
+
+    #[test]
+    fn test_js_selection_permission_read() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::read_only());
+
+        // getSelection should work with read-only
+        let result = engine.execute("Logos.getSelection()");
+        assert!(result.is_ok(), "getSelection should work with read-only");
+    }
+
+    #[test]
+    fn test_js_selection_permission_write_denied() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::read_only());
+
+        // setSelection should be denied with read-only
+        let result = engine.execute("Logos.setSelection([])");
+        assert!(result.is_err(), "setSelection should be denied with read-only");
+    }
+
+    #[test]
+    fn test_js_clear_selection_permission_denied() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::read_only());
+
+        let result = engine.execute("Logos.clearSelection()");
+        assert!(result.is_err(), "clearSelection should be denied with read-only");
+    }
+
+    #[test]
+    fn test_js_set_selection_invalid_uuid() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute("Logos.setSelection(['not-a-uuid'])");
+        assert!(result.is_err(), "invalid UUID should error");
+    }
+
+    // ═══════════ Day 20: Undo/Redo Tests ═══════════
+
+    #[test]
+    fn test_js_undo_create_rect() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        engine.execute("Logos.createRect(0, 0, 50, 50)").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(1));
+
+        engine.execute("Logos.undo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(0));
+    }
+
+    #[test]
+    fn test_js_undo_redo_cycle() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        engine.execute("Logos.createRect(10, 20, 100, 50)").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(1));
+
+        // Undo → 0 layers
+        engine.execute("Logos.undo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(0));
+
+        // Redo → 1 layer
+        engine.execute("Logos.redo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(1));
+    }
+
+    #[test]
+    fn test_js_undo_empty_returns_false() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute("Logos.undo()").unwrap();
+        assert_eq!(result.as_bool(), Some(false), "undo on empty stack should return false");
+    }
+
+    #[test]
+    fn test_js_redo_empty_returns_false() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute("Logos.redo()").unwrap();
+        assert_eq!(result.as_bool(), Some(false), "redo on empty stack should return false");
+    }
+
+    #[test]
+    fn test_js_undo_delete_layer() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        engine.execute("var id = Logos.createRect(0, 0, 50, 50)").unwrap();
+        engine.execute("Logos.deleteLayer(id)").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(0));
+
+        // Undo the delete → layer should reappear
+        engine.execute("Logos.undo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(1));
+    }
+
+    #[test]
+    fn test_js_undo_multiple_actions() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        engine.execute("Logos.createRect(0, 0, 50, 50)").unwrap();
+        engine.execute("Logos.createRect(100, 100, 50, 50)").unwrap();
+        engine.execute("Logos.createRect(200, 200, 50, 50)").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(3));
+
+        engine.execute("Logos.undo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(2));
+
+        engine.execute("Logos.undo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(1));
+
+        engine.execute("Logos.undo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(0));
+    }
+
+    #[test]
+    fn test_js_undo_permission_denied() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::read_only());
+
+        assert!(engine.execute("Logos.undo()").is_err());
+        assert!(engine.execute("Logos.redo()").is_err());
+    }
+
+    #[test]
+    fn test_js_undo_path() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            Logos.createPath([
+                { type: "moveTo", x: 0, y: 0 },
+                { type: "lineTo", x: 100, y: 100 }
+            ]);
+        "#;
+        engine.execute(code).unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(1));
+
+        engine.execute("Logos.undo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(0));
+
+        engine.execute("Logos.redo()").unwrap();
+        assert_eq!(engine.execute("Logos.getLayerCount()").unwrap().as_int(), Some(1));
+    }
+
+    // ═══════════ Day 20: Event System Tests ═══════════
+
+    #[test]
+    fn test_js_on_event_registration() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            Logos.on("selectionChanged", function(e) {
+                globalThis.__lastEvent = e.event;
+            });
+            true;
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert_eq!(result.as_bool(), Some(true));
+    }
+
+    #[test]
+    fn test_js_on_invalid_event_name() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute(r#"Logos.on("nonExistentEvent", function() {})"#);
+        assert!(result.is_err(), "unknown event should error");
+    }
+
+    #[test]
+    fn test_js_on_non_function_callback() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let result = engine.execute(r#"Logos.on("selectionChanged", "not a function")"#);
+        assert!(result.is_err(), "non-function callback should error");
+    }
+
+    #[test]
+    fn test_js_event_dispatch_selection() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        // Register callback
+        engine.execute(r#"
+            globalThis.__eventCount = 0;
+            Logos.on("selectionChanged", function(e) {
+                globalThis.__eventCount++;
+            });
+        "#).unwrap();
+
+        // Trigger selection change (emits event)
+        engine.execute("var id = Logos.createRect(0, 0, 50, 50)").unwrap();
+        engine.execute("Logos.setSelection([id])").unwrap();
+
+        // Flush events
+        let invoked = engine.flush_events();
+        assert!(invoked >= 1, "at least one callback should have been invoked");
+
+        let count = engine.execute("globalThis.__eventCount").unwrap();
+        assert!(count.as_int().unwrap_or(0) >= 1, "event handler should have been called");
+    }
+
+    #[test]
+    fn test_js_event_dispatch_layer_added() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        engine.execute(r#"
+            globalThis.__addedIds = [];
+            Logos.on("layerAdded", function(e) {
+                globalThis.__addedIds.push(e.id);
+            });
+        "#).unwrap();
+
+        engine.execute("Logos.createRect(0, 0, 50, 50)").unwrap();
+        engine.execute("Logos.createRect(100, 100, 50, 50)").unwrap();
+
+        engine.flush_events();
+
+        let result = engine.execute("globalThis.__addedIds.length").unwrap();
+        // Due to rate limiting, at least 1 should fire (maybe not 2)
+        assert!(result.as_int().unwrap_or(0) >= 1, "at least one layerAdded event should fire");
+    }
+
+    #[test]
+    fn test_js_event_dispatch_layer_removed() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        engine.execute(r#"
+            globalThis.__removedCount = 0;
+            Logos.on("layerRemoved", function(e) {
+                globalThis.__removedCount++;
+            });
+        "#).unwrap();
+
+        engine.execute("var id = Logos.createRect(0, 0, 50, 50)").unwrap();
+        engine.flush_events(); // flush layerAdded
+
+        // Small delay to pass rate limiter
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        engine.execute("Logos.deleteLayer(id)").unwrap();
+        engine.flush_events();
+
+        let count = engine.execute("globalThis.__removedCount").unwrap();
+        assert_eq!(count.as_int(), Some(1), "layerRemoved event should fire");
+    }
+
+    // ═══════════ Day 20: Integration Tests ═══════════
+
+    #[test]
+    fn test_js_full_workflow_path_select_undo() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            // Create a triangle path
+            var pathId = Logos.createPath([
+                { type: "moveTo", x: 0, y: 0 },
+                { type: "lineTo", x: 100, y: 200 },
+                { type: "lineTo", x: 200, y: 0 },
+                { type: "close" }
+            ]);
+
+            // Create a rect
+            var rectId = Logos.createRect(50, 50, 100, 100);
+
+            // Select both
+            Logos.setSelection([pathId, rectId]);
+
+            // Verify
+            var sel = Logos.getSelection();
+            var count = Logos.getLayerCount();
+
+            // Undo rect creation
+            Logos.undo();
+
+            var count2 = Logos.getLayerCount();
+            count + ":" + count2;
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert_eq!(result.as_str(), Some("2:1"));
+    }
+
+    #[test]
+    fn test_js_mixed_layers_query() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            Logos.createRect(0, 0, 50, 50);
+            Logos.createPath([
+                { type: "moveTo", x: 0, y: 0 },
+                { type: "bezierTo", cp1x: 50, cp1y: -50, cp2x: 150, cp2y: -50, x: 200, y: 0 }
+            ]);
+            Logos.createRect(100, 100, 50, 50);
+
+            var layers = Logos.getLayers();
+            var types = [];
+            for (var i = 0; i < layers.length; i++) {
+                types.push(layers[i].type);
+            }
+            types.join(",");
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert_eq!(result.as_str(), Some("rect,path,rect"));
+    }
+
+    #[test]
+    fn test_js_delete_and_undo_preserves_path() {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = engine_with_doc(Arc::clone(&doc), PermissionSet::document_full());
+
+        let code = r#"
+            var pathId = Logos.createPath([
+                { type: "moveTo", x: 10, y: 20 },
+                { type: "lineTo", x: 110, y: 120 },
+                { type: "lineTo", x: 210, y: 20 },
+                { type: "close" }
+            ]);
+
+            Logos.deleteLayer(pathId);
+            Logos.undo(); // undo delete → path reappears
+
+            var layer = Logos.getLayer(pathId);
+            layer.type;
+        "#;
+        let result = engine.execute(code).unwrap();
+        assert_eq!(result.as_str(), Some("path"));
     }
 }

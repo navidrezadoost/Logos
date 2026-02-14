@@ -20,6 +20,12 @@ pub struct Point {
     pub y: f32,
 }
 
+impl Point {
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { x, y }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct Rect {
     pub x: f32,
@@ -32,12 +38,172 @@ pub struct RenderContext {
     // Placeholder
 }
 
+/// Path drawing command for bezier curves and lines.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum PathCommand {
+    /// Move the pen to (x, y) without drawing.
+    MoveTo(Point),
+    /// Draw a straight line to (x, y).
+    LineTo(Point),
+    /// Quadratic bezier: control point + end point.
+    QuadTo { ctrl: Point, end: Point },
+    /// Cubic bezier: two control points + end point.
+    BezierTo { cp1: Point, cp2: Point, end: Point },
+    /// Close the current sub-path.
+    Close,
+}
+
+/// A vector path layer composed of path commands.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PathLayer {
+    pub id: Uuid,
+    pub commands: Vec<PathCommand>,
+    pub bounds: Rect,
+    pub closed: bool,
+}
+
+impl PathLayer {
+    pub fn new(commands: Vec<PathCommand>) -> Self {
+        let bounds = Self::compute_bounds(&commands);
+        let closed = commands.last().map_or(false, |c| matches!(c, PathCommand::Close));
+        Self {
+            id: Uuid::new_v4(),
+            commands,
+            bounds,
+            closed,
+        }
+    }
+
+    /// Compute a bounding box from path commands (conservative estimate).
+    fn compute_bounds(commands: &[PathCommand]) -> Rect {
+        if commands.is_empty() {
+            return Rect::default();
+        }
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+
+        let mut update = |x: f32, y: f32| {
+            if x < min_x { min_x = x; }
+            if y < min_y { min_y = y; }
+            if x > max_x { max_x = x; }
+            if y > max_y { max_y = y; }
+        };
+
+        for cmd in commands {
+            match cmd {
+                PathCommand::MoveTo(p) | PathCommand::LineTo(p) => {
+                    update(p.x, p.y);
+                }
+                PathCommand::QuadTo { ctrl, end } => {
+                    update(ctrl.x, ctrl.y);
+                    update(end.x, end.y);
+                }
+                PathCommand::BezierTo { cp1, cp2, end } => {
+                    update(cp1.x, cp1.y);
+                    update(cp2.x, cp2.y);
+                    update(end.x, end.y);
+                }
+                PathCommand::Close => {}
+            }
+        }
+
+        if min_x == f32::MAX {
+            return Rect::default();
+        }
+        Rect {
+            x: min_x,
+            y: min_y,
+            width: max_x - min_x,
+            height: max_y - min_y,
+        }
+    }
+}
+
+/// An action that can be undone/redone.
+#[derive(Clone, Debug)]
+pub enum UndoAction {
+    /// A layer was added — undo removes it.
+    AddLayer(Layer),
+    /// A layer was removed — undo restores it.
+    RemoveLayer(Layer),
+}
+
+/// Undo/redo stack for document operations.
+#[derive(Debug)]
+pub struct UndoStack {
+    /// Past actions (most recent at end).
+    undo_stack: Vec<UndoAction>,
+    /// Actions that were undone (for redo).
+    redo_stack: Vec<UndoAction>,
+    /// Maximum stack depth.
+    max_depth: usize,
+}
+
+impl UndoStack {
+    pub fn new(max_depth: usize) -> Self {
+        Self {
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_depth,
+        }
+    }
+
+    /// Push an action onto the undo stack, clearing the redo stack.
+    pub fn push(&mut self, action: UndoAction) {
+        self.redo_stack.clear();
+        self.undo_stack.push(action);
+        if self.undo_stack.len() > self.max_depth {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Pop the most recent undo action (returns None if stack empty).
+    pub fn pop_undo(&mut self) -> Option<UndoAction> {
+        let action = self.undo_stack.pop()?;
+        self.redo_stack.push(action.clone());
+        Some(action)
+    }
+
+    /// Pop the most recent redo action (returns None if stack empty).
+    pub fn pop_redo(&mut self) -> Option<UndoAction> {
+        let action = self.redo_stack.pop()?;
+        self.undo_stack.push(action.clone());
+        Some(action)
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    pub fn undo_count(&self) -> usize {
+        self.undo_stack.len()
+    }
+
+    pub fn redo_count(&self) -> usize {
+        self.redo_stack.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Document {
     pub id: Uuid,
     pub version: u32,
     pub root: Arc<RwLock<Page>>,
     pub metadata: DocumentMetadata,
+    /// Currently selected layer IDs.
+    #[serde(skip)]
+    pub selection: Arc<RwLock<Vec<Uuid>>>,
 }
 
 impl Document {
@@ -50,7 +216,8 @@ impl Document {
                 author_id: Uuid::nil(),
                 created_at: 0,
                 updated_at: 0,
-            }
+            },
+            selection: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -59,6 +226,34 @@ impl Document {
         let mut page = self.root.write().map_err(|e| e.to_string())?;
         page.layers.push(layer);
         Ok(())
+    }
+
+    /// Get the current selection.
+    pub fn get_selection(&self) -> Result<Vec<Uuid>, String> {
+        let sel = self.selection.read().map_err(|e| e.to_string())?;
+        Ok(sel.clone())
+    }
+
+    /// Set the selection to a list of layer IDs.
+    pub fn set_selection(&self, ids: Vec<Uuid>) -> Result<(), String> {
+        let mut sel = self.selection.write().map_err(|e| e.to_string())?;
+        *sel = ids;
+        Ok(())
+    }
+
+    /// Clear the selection.
+    pub fn clear_selection(&self) -> Result<(), String> {
+        let mut sel = self.selection.write().map_err(|e| e.to_string())?;
+        sel.clear();
+        Ok(())
+    }
+
+    /// Delete a layer by ID, returning the removed layer if found.
+    pub fn remove_layer(&self, id: Uuid) -> Result<Layer, String> {
+        let mut page = self.root.write().map_err(|e| e.to_string())?;
+        let idx = page.layers.iter().position(|l| l.id() == id)
+            .ok_or_else(|| format!("layer not found: {id}"))?;
+        Ok(page.layers.remove(idx))
     }
 }
 
@@ -87,6 +282,7 @@ pub enum Layer {
     Ellipse(EllipseLayer),
     Text(TextLayer),
     Frame(FrameLayer),
+    Path(PathLayer),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -131,6 +327,7 @@ impl Layer {
             Layer::Ellipse(l) => l.id,
             Layer::Text(l) => l.id,
             Layer::Frame(l) => l.id,
+            Layer::Path(l) => l.id,
         }
     }
 }
@@ -162,5 +359,251 @@ mod tests {
             },
             _ => panic!("Wrong layer type"),
         }
+    }
+
+    // ═══════════ Day 20: Point Tests ═══════════
+
+    #[test]
+    fn test_point_new() {
+        let p = Point::new(3.0, 4.0);
+        assert_eq!(p.x, 3.0);
+        assert_eq!(p.y, 4.0);
+    }
+
+    // ═══════════ Day 20: PathCommand Tests ═══════════
+
+    #[test]
+    fn test_path_command_move_to() {
+        let cmd = PathCommand::MoveTo(Point::new(10.0, 20.0));
+        match cmd {
+            PathCommand::MoveTo(p) => {
+                assert_eq!(p.x, 10.0);
+                assert_eq!(p.y, 20.0);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_path_command_bezier_to() {
+        let cmd = PathCommand::BezierTo {
+            cp1: Point::new(1.0, 2.0),
+            cp2: Point::new(3.0, 4.0),
+            end: Point::new(5.0, 6.0),
+        };
+        match cmd {
+            PathCommand::BezierTo { cp1, cp2, end } => {
+                assert_eq!(cp1.x, 1.0);
+                assert_eq!(cp2.y, 4.0);
+                assert_eq!(end.x, 5.0);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_path_command_quad_to() {
+        let cmd = PathCommand::QuadTo {
+            ctrl: Point::new(50.0, 100.0),
+            end: Point::new(100.0, 0.0),
+        };
+        match cmd {
+            PathCommand::QuadTo { ctrl, end } => {
+                assert_eq!(ctrl.x, 50.0);
+                assert_eq!(end.y, 0.0);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    // ═══════════ Day 20: PathLayer Tests ═══════════
+
+    #[test]
+    fn test_path_layer_new_line() {
+        let path = PathLayer::new(vec![
+            PathCommand::MoveTo(Point::new(0.0, 0.0)),
+            PathCommand::LineTo(Point::new(100.0, 100.0)),
+        ]);
+        assert_eq!(path.commands.len(), 2);
+        assert!(!path.closed);
+        assert_eq!(path.bounds.x, 0.0);
+        assert_eq!(path.bounds.y, 0.0);
+        assert_eq!(path.bounds.width, 100.0);
+        assert_eq!(path.bounds.height, 100.0);
+    }
+
+    #[test]
+    fn test_path_layer_new_triangle() {
+        let path = PathLayer::new(vec![
+            PathCommand::MoveTo(Point::new(50.0, 0.0)),
+            PathCommand::LineTo(Point::new(100.0, 100.0)),
+            PathCommand::LineTo(Point::new(0.0, 100.0)),
+            PathCommand::Close,
+        ]);
+        assert!(path.closed);
+        assert_eq!(path.bounds.x, 0.0);
+        assert_eq!(path.bounds.y, 0.0);
+        assert_eq!(path.bounds.width, 100.0);
+        assert_eq!(path.bounds.height, 100.0);
+    }
+
+    #[test]
+    fn test_path_layer_bounds_bezier() {
+        let path = PathLayer::new(vec![
+            PathCommand::MoveTo(Point::new(0.0, 0.0)),
+            PathCommand::BezierTo {
+                cp1: Point::new(50.0, -50.0),
+                cp2: Point::new(150.0, -50.0),
+                end: Point::new(200.0, 0.0),
+            },
+        ]);
+        // Conservative bounds include control points
+        assert_eq!(path.bounds.x, 0.0);
+        assert_eq!(path.bounds.y, -50.0);
+        assert_eq!(path.bounds.width, 200.0);
+        assert_eq!(path.bounds.height, 50.0);
+    }
+
+    #[test]
+    fn test_path_layer_id_unique() {
+        let p1 = PathLayer::new(vec![PathCommand::MoveTo(Point::new(0.0, 0.0))]);
+        let p2 = PathLayer::new(vec![PathCommand::MoveTo(Point::new(0.0, 0.0))]);
+        assert_ne!(p1.id, p2.id);
+    }
+
+    #[test]
+    fn test_layer_path_variant() {
+        let path = PathLayer::new(vec![
+            PathCommand::MoveTo(Point::new(0.0, 0.0)),
+            PathCommand::LineTo(Point::new(100.0, 0.0)),
+        ]);
+        let id = path.id;
+        let layer = Layer::Path(path);
+        assert_eq!(layer.id(), id);
+    }
+
+    // ═══════════ Day 20: UndoStack Tests ═══════════
+
+    #[test]
+    fn test_undo_stack_new() {
+        let stack = UndoStack::new(50);
+        assert!(!stack.can_undo());
+        assert!(!stack.can_redo());
+        assert_eq!(stack.undo_count(), 0);
+        assert_eq!(stack.redo_count(), 0);
+    }
+
+    #[test]
+    fn test_undo_stack_push_pop() {
+        let mut stack = UndoStack::new(50);
+        let rect = RectLayer::new(0.0, 0.0, 50.0, 50.0);
+        stack.push(UndoAction::AddLayer(Layer::Rect(rect)));
+
+        assert!(stack.can_undo());
+        assert_eq!(stack.undo_count(), 1);
+
+        let action = stack.pop_undo();
+        assert!(action.is_some());
+        assert_eq!(stack.undo_count(), 0);
+
+        // After undo, should be available in redo
+        assert!(stack.can_redo());
+        assert_eq!(stack.redo_count(), 1);
+    }
+
+    #[test]
+    fn test_undo_stack_redo() {
+        let mut stack = UndoStack::new(50);
+        let rect = RectLayer::new(0.0, 0.0, 50.0, 50.0);
+        stack.push(UndoAction::AddLayer(Layer::Rect(rect)));
+
+        stack.pop_undo();
+        let redo = stack.pop_redo();
+        assert!(redo.is_some());
+        assert!(!stack.can_redo());
+    }
+
+    #[test]
+    fn test_undo_stack_push_clears_redo() {
+        let mut stack = UndoStack::new(50);
+        let rect1 = RectLayer::new(0.0, 0.0, 50.0, 50.0);
+        let rect2 = RectLayer::new(100.0, 100.0, 50.0, 50.0);
+
+        stack.push(UndoAction::AddLayer(Layer::Rect(rect1)));
+        stack.pop_undo(); // Now in redo
+        assert!(stack.can_redo());
+
+        // New action should clear redo
+        stack.push(UndoAction::AddLayer(Layer::Rect(rect2)));
+        assert!(!stack.can_redo());
+    }
+
+    #[test]
+    fn test_undo_stack_max_depth() {
+        let mut stack = UndoStack::new(3);
+        for i in 0..5 {
+            let rect = RectLayer::new(i as f32, 0.0, 50.0, 50.0);
+            stack.push(UndoAction::AddLayer(Layer::Rect(rect)));
+        }
+        assert_eq!(stack.undo_count(), 3, "should cap at max depth");
+    }
+
+    #[test]
+    fn test_undo_stack_clear() {
+        let mut stack = UndoStack::new(50);
+        let rect = RectLayer::new(0.0, 0.0, 50.0, 50.0);
+        stack.push(UndoAction::AddLayer(Layer::Rect(rect)));
+        stack.clear();
+        assert!(!stack.can_undo());
+        assert!(!stack.can_redo());
+    }
+
+    // ═══════════ Day 20: Document Selection Tests ═══════════
+
+    #[test]
+    fn test_document_selection_empty() {
+        let doc = Document::new();
+        let sel = doc.get_selection().unwrap();
+        assert!(sel.is_empty());
+    }
+
+    #[test]
+    fn test_document_set_selection() {
+        let doc = Document::new();
+        let id = Uuid::new_v4();
+        doc.set_selection(vec![id]).unwrap();
+        let sel = doc.get_selection().unwrap();
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0], id);
+    }
+
+    #[test]
+    fn test_document_clear_selection() {
+        let doc = Document::new();
+        doc.set_selection(vec![Uuid::new_v4()]).unwrap();
+        doc.clear_selection().unwrap();
+        let sel = doc.get_selection().unwrap();
+        assert!(sel.is_empty());
+    }
+
+    #[test]
+    fn test_document_remove_layer() {
+        let doc = Document::new();
+        let rect = RectLayer::new(10.0, 20.0, 100.0, 50.0);
+        let id = rect.id;
+        doc.add_layer(Layer::Rect(rect)).unwrap();
+
+        let removed = doc.remove_layer(id).unwrap();
+        assert_eq!(removed.id(), id);
+
+        let page = doc.root.read().unwrap();
+        assert_eq!(page.layers.len(), 0);
+    }
+
+    #[test]
+    fn test_document_remove_layer_not_found() {
+        let doc = Document::new();
+        let result = doc.remove_layer(Uuid::new_v4());
+        assert!(result.is_err());
     }
 }

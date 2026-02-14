@@ -18,11 +18,12 @@
 //! - OWASP Testing Guide v4 — Permission Systems
 //! - Software Architecture: The Hard Parts — Extensibility
 
+use crate::engine::events::EventBus;
 use crate::permissions::{PermissionGuard, PermissionSet};
 use crate::runtime::{ExecutionStats, PluginValue, ResourceLimits, RuntimeError, RuntimeResult};
 use boa_engine::value::JsVariant;
 use boa_engine::{Context, JsValue, Source};
-use logos_core::Document;
+use logos_core::{Document, UndoStack};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -72,6 +73,10 @@ pub struct JsEngine {
     alive: bool,
     /// Document reference (optional, set via register_document)
     document: Option<Arc<RwLock<Document>>>,
+    /// Undo stack for document operations
+    undo_stack: Arc<RwLock<UndoStack>>,
+    /// Event bus for plugin callbacks
+    event_bus: Arc<RwLock<EventBus>>,
 }
 
 impl JsEngine {
@@ -101,6 +106,8 @@ impl JsEngine {
             deadline,
             alive: true,
             document: None,
+            undo_stack: Arc::new(RwLock::new(UndoStack::new(100))),
+            event_bus: Arc::new(RwLock::new(EventBus::new())),
         };
 
         // Register the console.log shim
@@ -166,7 +173,27 @@ impl JsEngine {
             Arc::clone(&self.guard),
             Arc::clone(&self.host_call_count),
             Arc::clone(&self.deadline),
+            Arc::clone(&self.undo_stack),
+            Arc::clone(&self.event_bus),
         );
+    }
+
+    /// Get the undo stack.
+    pub fn undo_stack(&self) -> &Arc<RwLock<UndoStack>> {
+        &self.undo_stack
+    }
+
+    /// Get the event bus.
+    pub fn event_bus(&self) -> &Arc<RwLock<EventBus>> {
+        &self.event_bus
+    }
+
+    /// Flush pending events, invoking registered callbacks.
+    ///
+    /// Returns the number of callbacks invoked.
+    pub fn flush_events(&mut self) -> u64 {
+        let mut bus = self.event_bus.write().unwrap();
+        bus.flush(&mut self.context)
     }
 
     /// Execute JavaScript code and return the result.

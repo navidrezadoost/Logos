@@ -375,6 +375,27 @@ fn layer_to_plugin_value(layer: &Layer) -> PluginValue {
                 PluginValue::Int(fr.children.len() as i64),
             );
         }
+        Layer::Path(p) => {
+            map.insert("type".to_string(), PluginValue::String("path".to_string()));
+            map.insert("x".to_string(), PluginValue::Float(p.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(p.bounds.y as f64));
+            map.insert(
+                "width".to_string(),
+                PluginValue::Float(p.bounds.width as f64),
+            );
+            map.insert(
+                "height".to_string(),
+                PluginValue::Float(p.bounds.height as f64),
+            );
+            map.insert(
+                "commandCount".to_string(),
+                PluginValue::Int(p.commands.len() as i64),
+            );
+            map.insert(
+                "closed".to_string(),
+                PluginValue::Bool(p.closed),
+            );
+        }
     }
     PluginValue::Object(map)
 }

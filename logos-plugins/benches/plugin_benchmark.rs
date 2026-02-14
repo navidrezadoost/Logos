@@ -7,9 +7,13 @@
 //! - Host function calls (<500ns target)
 //! - Permission checks (<50ns target)
 //! - JS host API calls via Logos.* (<500ns target)
+//! - Path creation (<10μs target) [Day 20]
+//! - Selection operations (<10μs target) [Day 20]
+//! - Undo/Redo (<10μs target) [Day 20]
+//! - Event dispatch (<10μs target) [Day 20]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use logos_core::{Document, Layer, RectLayer};
+use logos_core::{Document, Layer, PathCommand, PathLayer, Point, RectLayer};
 use logos_plugins::engine::JsEngine;
 use logos_plugins::host::PluginHost;
 use logos_plugins::manager::PluginManager;
@@ -17,6 +21,15 @@ use logos_plugins::manifest::PluginManifest;
 use logos_plugins::permissions::{PermissionGuard, PermissionKind, PermissionSet};
 use logos_plugins::runtime::{PluginValue, ResourceLimits, Sandbox};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+/// Generous limits for benchmarks — avoids TimeLimitExceeded panics
+/// under Criterion's warm-up / measurement contention.
+fn bench_limits() -> ResourceLimits {
+    let mut l = ResourceLimits::default();
+    l.max_execution_time = Duration::from_secs(5);
+    l
+}
 
 fn bench_sandbox_create(c: &mut Criterion) {
     c.bench_function("sandbox_create", |b| {
@@ -56,7 +69,7 @@ fn bench_eval_literal(c: &mut Criterion) {
 }
 
 fn bench_js_eval(c: &mut Criterion) {
-    let mut engine = JsEngine::new("bench", ResourceLimits::default(), PermissionSet::none());
+    let mut engine = JsEngine::new("bench", bench_limits(), PermissionSet::none());
     c.bench_function("js_eval_literal_int", |b| {
         b.iter(|| {
             engine.execute(black_box("42")).unwrap();
@@ -111,7 +124,7 @@ fn bench_js_host_api(c: &mut Criterion) {
 
     let mut engine = JsEngine::new(
         "bench",
-        ResourceLimits::default(),
+        bench_limits(),
         PermissionSet::document_full(),
     );
     engine.register_document(Arc::clone(&doc));
@@ -143,7 +156,7 @@ fn bench_js_create_rect(c: &mut Criterion) {
     let doc = Arc::new(RwLock::new(Document::new()));
     let mut engine = JsEngine::new(
         "bench",
-        ResourceLimits::default(),
+        bench_limits(),
         PermissionSet::document_full(),
     );
     engine.register_document(Arc::clone(&doc));
@@ -266,6 +279,146 @@ fn bench_plugin_value_json(c: &mut Criterion) {
     });
 }
 
+// ═══════════ Day 20: Path, Selection, Undo, Event Benchmarks ═══════════
+
+fn bench_js_create_path(c: &mut Criterion) {
+    let doc = Arc::new(RwLock::new(Document::new()));
+    let mut engine = JsEngine::new(
+        "bench",
+        bench_limits(),
+        PermissionSet::document_full(),
+    );
+    engine.register_document(Arc::clone(&doc));
+
+    let code = r#"Logos.createPath([
+        { type: "moveTo", x: 0, y: 0 },
+        { type: "bezierTo", cp1x: 50, cp1y: -50, cp2x: 150, cp2y: -50, x: 200, y: 0 },
+        { type: "lineTo", x: 200, y: 100 },
+        { type: "close" }
+    ])"#;
+
+    c.bench_function("js_logos_createPath_bezier", |b| {
+        b.iter(|| {
+            engine.execute(black_box(code)).unwrap();
+        });
+    });
+}
+
+fn bench_js_selection(c: &mut Criterion) {
+    let doc = Arc::new(RwLock::new(Document::new()));
+    let mut engine = JsEngine::new(
+        "bench",
+        bench_limits(),
+        PermissionSet::document_full(),
+    );
+    engine.register_document(Arc::clone(&doc));
+
+    // Pre-create some rects to select
+    engine.execute(r#"
+        var ids = [];
+        for (var i = 0; i < 5; i++) {
+            ids.push(Logos.createRect(i*10, i*10, 50, 50));
+        }
+    "#).unwrap();
+
+    c.bench_function("js_logos_getSelection", |b| {
+        b.iter(|| {
+            engine.execute(black_box("Logos.getSelection()")).unwrap();
+        });
+    });
+
+    c.bench_function("js_logos_setSelection", |b| {
+        b.iter(|| {
+            engine.execute(black_box("Logos.setSelection(ids)")).unwrap();
+        });
+    });
+
+    c.bench_function("js_logos_clearSelection", |b| {
+        b.iter(|| {
+            engine.execute(black_box("Logos.clearSelection()")).unwrap();
+        });
+    });
+}
+
+fn bench_js_undo_redo(c: &mut Criterion) {
+    let doc = Arc::new(RwLock::new(Document::new()));
+    let mut engine = JsEngine::new(
+        "bench",
+        bench_limits(),
+        PermissionSet::document_full(),
+    );
+    engine.register_document(Arc::clone(&doc));
+
+    c.bench_function("js_logos_undo_redo_cycle", |b| {
+        b.iter(|| {
+            engine.execute(black_box("Logos.createRect(0,0,50,50)")).unwrap();
+            engine.execute(black_box("Logos.undo()")).unwrap();
+        });
+    });
+}
+
+fn bench_js_event_on(c: &mut Criterion) {
+    let doc = Arc::new(RwLock::new(Document::new()));
+    let mut engine = JsEngine::new(
+        "bench",
+        bench_limits(),
+        PermissionSet::document_full(),
+    );
+    engine.register_document(Arc::clone(&doc));
+
+    c.bench_function("js_logos_on_register", |b| {
+        b.iter(|| {
+            engine.execute(black_box(
+                r#"Logos.on("layerAdded", function(e) {})"#
+            )).unwrap();
+        });
+    });
+}
+
+fn bench_event_flush(c: &mut Criterion) {
+    let doc = Arc::new(RwLock::new(Document::new()));
+    let mut engine = JsEngine::new(
+        "bench",
+        bench_limits(),
+        PermissionSet::document_full(),
+    );
+    engine.register_document(Arc::clone(&doc));
+
+    // Register a callback
+    engine.execute(r#"
+        Logos.on("layerAdded", function(e) {
+            globalThis.__benchCount = (globalThis.__benchCount || 0) + 1;
+        });
+    "#).unwrap();
+
+    c.bench_function("event_flush_with_callback", |b| {
+        b.iter(|| {
+            // Create a rect to queue a layerAdded event
+            engine.execute("Logos.createRect(0,0,10,10)").unwrap();
+            // Flush the event queue (rate limited — first call dispatches, subsequent may skip)
+            black_box(engine.flush_events());
+        });
+    });
+}
+
+fn bench_path_layer_core(c: &mut Criterion) {
+    c.bench_function("core_path_layer_create", |b| {
+        b.iter(|| {
+            let path = PathLayer::new(vec![
+                PathCommand::MoveTo(Point::new(0.0, 0.0)),
+                PathCommand::BezierTo {
+                    cp1: Point::new(50.0, -50.0),
+                    cp2: Point::new(150.0, -50.0),
+                    end: Point::new(200.0, 0.0),
+                },
+                PathCommand::LineTo(Point::new(200.0, 100.0)),
+                PathCommand::Close,
+            ]);
+            black_box(path);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_sandbox_create,
@@ -281,5 +434,11 @@ criterion_group!(
     bench_host_create_rect,
     bench_manager_load,
     bench_plugin_value_json,
+    bench_js_create_path,
+    bench_js_selection,
+    bench_js_undo_redo,
+    bench_js_event_on,
+    bench_event_flush,
+    bench_path_layer_core,
 );
 criterion_main!(benches);
