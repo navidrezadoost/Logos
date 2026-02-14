@@ -9,6 +9,7 @@ use logos_collab::presence::{
 use logos_collab::storage::{
     DocumentStore, StoreConfig, CompressedDelta, WriteAheadLog, WalConfig,
 };
+use logos_collab::auth::{TokenEngine, Claims, RateLimiter, RateLimitConfig};
 use uuid::Uuid;
 use std::sync::Arc;
 
@@ -430,6 +431,90 @@ fn bench_store_load_deltas(c: &mut Criterion) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ── Auth benchmarks ───────────────────────────────────────────────
+
+fn bench_token_issue(c: &mut Criterion) {
+    let engine = TokenEngine::new([42u8; 32]);
+    let user_id = Uuid::new_v4();
+
+    c.bench_function("token_issue", |b| {
+        b.iter(|| {
+            let claims = Claims::new(black_box(user_id), "BenchUser");
+            black_box(engine.issue(&claims).unwrap());
+        })
+    });
+}
+
+fn bench_token_verify(c: &mut Criterion) {
+    let engine = TokenEngine::new([42u8; 32]);
+    let user_id = Uuid::new_v4();
+    let claims = Claims::new(user_id, "BenchUser");
+    let token = engine.issue(&claims).unwrap();
+
+    c.bench_function("token_verify", |b| {
+        b.iter(|| {
+            black_box(engine.verify(black_box(&token)).unwrap());
+        })
+    });
+}
+
+fn bench_token_verify_with_docs(c: &mut Criterion) {
+    let engine = TokenEngine::new([42u8; 32]);
+    let user_id = Uuid::new_v4();
+    let doc_id = Uuid::new_v4();
+    let claims = Claims::new(user_id, "BenchUser").with_docs(vec![doc_id]);
+    let token = engine.issue(&claims).unwrap();
+
+    c.bench_function("token_verify_with_docs", |b| {
+        b.iter(|| {
+            black_box(engine.verify_access(black_box(&token), black_box(&doc_id)).unwrap());
+        })
+    });
+}
+
+fn bench_rate_limit_check(c: &mut Criterion) {
+    let config = RateLimitConfig {
+        messages_per_second: 100_000.0, // Very high so we don't hit the limit
+        burst_capacity: 1_000_000.0,
+        ..Default::default()
+    };
+    let mut limiter = RateLimiter::new(config);
+    let user_id = Uuid::new_v4();
+
+    c.bench_function("rate_limit_check", |b| {
+        b.iter(|| {
+            black_box(limiter.check_user(black_box(user_id)));
+        })
+    });
+}
+
+fn bench_rate_limit_check_new_user(c: &mut Criterion) {
+    let config = RateLimitConfig::default();
+    let mut limiter = RateLimiter::new(config);
+
+    c.bench_function("rate_limit_check_new_user", |b| {
+        b.iter(|| {
+            let user_id = Uuid::new_v4();
+            black_box(limiter.check_user(black_box(user_id)));
+        })
+    });
+}
+
+fn bench_rate_limit_bandwidth(c: &mut Criterion) {
+    let config = RateLimitConfig {
+        room_bytes_per_second: u64::MAX, // Very high so we don't hit the limit
+        ..Default::default()
+    };
+    let mut limiter = RateLimiter::new(config);
+    let room_id = Uuid::new_v4();
+
+    c.bench_function("rate_limit_bandwidth_check", |b| {
+        b.iter(|| {
+            black_box(limiter.check_room_bandwidth(black_box(room_id), black_box(1024)));
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_delta_encode,
@@ -454,5 +539,11 @@ criterion_group!(
     bench_wal_append,
     bench_wal_flush_1000,
     bench_store_load_deltas,
+    bench_token_issue,
+    bench_token_verify,
+    bench_token_verify_with_docs,
+    bench_rate_limit_check,
+    bench_rate_limit_check_new_user,
+    bench_rate_limit_bandwidth,
 );
 criterion_main!(benches);
