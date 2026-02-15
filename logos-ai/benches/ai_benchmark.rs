@@ -10,7 +10,7 @@ use logos_ai::preprocess::tokenizer::TextTokenizer;
 use ndarray::Array3;
 
 fn bench_layout_generation(c: &mut Criterion) {
-    let gen = LayoutGenerator::new();
+    let mut gen = LayoutGenerator::new();
     let constraints = LayoutConstraints::new(1920.0, 1080.0)
         .add_element(ElementHint::new("text").with_role("heading"))
         .add_element(ElementHint::new("image").with_role("hero"))
@@ -24,7 +24,7 @@ fn bench_layout_generation(c: &mut Criterion) {
 }
 
 fn bench_style_transfer(c: &mut Criterion) {
-    let engine = StyleTransfer::new();
+    let mut engine = StyleTransfer::new();
     let content = Array3::from_shape_fn((3, 256, 256), |(c, y, x)| {
         ((c * 100 + y + x) as f32 / 1000.0).min(1.0)
     });
@@ -39,7 +39,7 @@ fn bench_style_transfer(c: &mut Criterion) {
 }
 
 fn bench_asset_generation(c: &mut Criterion) {
-    let gen = AssetGenerator::new();
+    let mut gen = AssetGenerator::new();
     let params = GenerationParams::new("a beautiful sunset")
         .with_size(ImageSize::Small)
         .with_seed(42);
