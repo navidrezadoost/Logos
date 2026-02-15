@@ -38,6 +38,11 @@ pub use error::{AiError, AiResult};
 // Model management
 pub use models::{ModelRegistry, ModelInfo, ModelFormat, ModelStatus};
 
+// Quantization & deployment
+pub use models::quantization::{ModelPrecision, QuantizationManager, QuantizedModelInfo, SizeReport};
+pub use models::embedding::{EmbeddedModel, EmbeddedModelRegistry, EmbeddedModelMeta};
+pub use models::wasm::{Platform, WasmConstraints, WasmReadinessReport, check_wasm_readiness};
+
 // Layout generation
 pub use inference::layout_gen::{LayoutGenerator, LayoutProposal, LayoutConstraints, ElementHint};
 

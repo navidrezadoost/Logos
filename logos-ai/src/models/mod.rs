@@ -1,8 +1,14 @@
 //! Model registry — loading, caching, and managing ONNX models.
 
 mod loader;
+pub mod quantization;
+pub mod embedding;
+pub mod wasm;
 
 pub use loader::{ModelLoader, ModelSource};
+pub use quantization::{ModelPrecision, QuantizationManager, QuantizedModelInfo, SizeReport};
+pub use embedding::{EmbeddedModel, EmbeddedModelRegistry, EmbeddedModelMeta};
+pub use wasm::{Platform, WasmConstraints, WasmReadinessReport, check_wasm_readiness};
 
 use crate::error::{AiError, AiResult};
 use serde::{Deserialize, Serialize};
