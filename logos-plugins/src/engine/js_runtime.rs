@@ -19,6 +19,7 @@
 //! - Software Architecture: The Hard Parts — Extensibility
 
 use crate::engine::events::EventBus;
+use crate::engine::ui::{UiBridge, UiPermissionSet};
 use crate::permissions::{PermissionGuard, PermissionSet};
 use crate::runtime::{ExecutionStats, PluginValue, ResourceLimits, RuntimeError, RuntimeResult};
 use boa_engine::value::JsVariant;
@@ -77,6 +78,8 @@ pub struct JsEngine {
     undo_stack: Arc<RwLock<UndoStack>>,
     /// Event bus for plugin callbacks
     event_bus: Arc<RwLock<EventBus>>,
+    /// UI bridge for panel communication
+    ui_bridge: Arc<RwLock<UiBridge>>,
 }
 
 impl JsEngine {
@@ -108,6 +111,7 @@ impl JsEngine {
             document: None,
             undo_stack: Arc::new(RwLock::new(UndoStack::new(100))),
             event_bus: Arc::new(RwLock::new(EventBus::new())),
+            ui_bridge: Arc::new(RwLock::new(UiBridge::new())),
         };
 
         // Register the console.log shim
@@ -175,6 +179,8 @@ impl JsEngine {
             Arc::clone(&self.deadline),
             Arc::clone(&self.undo_stack),
             Arc::clone(&self.event_bus),
+            self.id,
+            Arc::clone(&self.ui_bridge),
         );
     }
 
@@ -186,6 +192,19 @@ impl JsEngine {
     /// Get the event bus.
     pub fn event_bus(&self) -> &Arc<RwLock<EventBus>> {
         &self.event_bus
+    }
+
+    /// Get the UI bridge.
+    pub fn ui_bridge(&self) -> &Arc<RwLock<UiBridge>> {
+        &self.ui_bridge
+    }
+
+    /// Set UI permissions for this engine's plugin.
+    ///
+    /// Must be called before the plugin can use `Logos.ui.*` functions.
+    pub fn set_ui_permissions(&self, perms: UiPermissionSet) {
+        let mut bridge = self.ui_bridge.write().unwrap();
+        bridge.set_permissions(self.id, perms);
     }
 
     /// Flush pending events, invoking registered callbacks.

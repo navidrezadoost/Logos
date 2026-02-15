@@ -11,10 +11,19 @@
 //! - Selection operations (<10μs target) [Day 20]
 //! - Undo/Redo (<10μs target) [Day 20]
 //! - Event dispatch (<10μs target) [Day 20]
+//! - UI panel create (<1μs target) [Day 21]
+//! - UI message serialize (<500ns target) [Day 21]
+//! - UI message roundtrip (<1μs target) [Day 21]
+//! - UI bridge dispatch (<1μs target) [Day 21]
+//! - UI permission check (<50ns target) [Day 21]
+//! - UI createPanel via JS (<500μs target) [Day 21]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use logos_core::{Document, Layer, PathCommand, PathLayer, Point, RectLayer};
-use logos_plugins::engine::JsEngine;
+use logos_plugins::engine::{JsEngine, UiBridge};
+use logos_plugins::engine::ui::{
+    DockPosition, UiMessage, UiPermission, UiPermissionSet, UiValue,
+};
 use logos_plugins::host::PluginHost;
 use logos_plugins::manager::PluginManager;
 use logos_plugins::manifest::PluginManifest;
@@ -419,6 +428,105 @@ fn bench_path_layer_core(c: &mut Criterion) {
     });
 }
 
+// ═══════════════════════════════════════════════════════════════
+// Day 21 — UI system benchmarks
+// ═══════════════════════════════════════════════════════════════
+
+fn bench_ui_panel_create(c: &mut Criterion) {
+    c.bench_function("ui_panel_create", |b| {
+        b.iter(|| {
+            let mut bridge = UiBridge::new();
+            let pid = uuid::Uuid::new_v4();
+            bridge.set_permissions(pid, UiPermissionSet::render_only());
+            let id = bridge.create_panel(pid, "Bench Panel", DockPosition::Right).unwrap();
+            black_box(id);
+        });
+    });
+}
+
+fn bench_ui_message_serialize(c: &mut Criterion) {
+    c.bench_function("ui_message_serialize", |b| {
+        let msg = UiMessage::ValueChanged {
+            key: "opacity".to_string(),
+            value: UiValue::Number(0.75),
+        };
+        b.iter(|| {
+            let json = black_box(&msg).to_json();
+            black_box(json);
+        });
+    });
+}
+
+fn bench_ui_message_roundtrip(c: &mut Criterion) {
+    use std::collections::HashMap;
+    c.bench_function("ui_message_roundtrip", |b| {
+        let msg = UiMessage::Custom {
+            kind: "propertyUpdate".to_string(),
+            data: {
+                let mut m = HashMap::new();
+                m.insert("x".to_string(), UiValue::Number(100.0));
+                m.insert("y".to_string(), UiValue::Number(200.0));
+                m.insert("name".to_string(), UiValue::String("Layer 1".to_string()));
+                m
+            },
+        };
+        b.iter(|| {
+            let json = msg.to_json();
+            let json_str = json.unwrap();
+            let parsed = UiMessage::from_json(&json_str);
+            black_box(parsed);
+        });
+    });
+}
+
+fn bench_ui_bridge_dispatch(c: &mut Criterion) {
+    c.bench_function("ui_bridge_dispatch", |b| {
+        let mut bridge = UiBridge::new();
+        let pid = uuid::Uuid::new_v4();
+        bridge.set_permissions(pid, UiPermissionSet::full());
+        let panel_id = bridge.create_panel(pid, "Dispatch Panel", DockPosition::Right).unwrap();
+
+        b.iter(|| {
+            let msg = UiMessage::UpdateValue {
+                key: "x".to_string(),
+                value: UiValue::Number(42.0),
+            };
+            bridge.send_to_panel(pid, panel_id, msg).unwrap();
+            let drained = bridge.drain_outbox();
+            black_box(drained);
+        });
+    });
+}
+
+fn bench_ui_permission_check(c: &mut Criterion) {
+    c.bench_function("ui_permission_check", |b| {
+        let perms = UiPermissionSet::full();
+        b.iter(|| {
+            let ok = perms.has(UiPermission::Render)
+                && perms.has(UiPermission::ReadDocument)
+                && perms.has(UiPermission::WriteDocument)
+                && perms.has(UiPermission::Network);
+            black_box(ok);
+        });
+    });
+}
+
+fn bench_ui_create_panel_js(c: &mut Criterion) {
+    c.bench_function("js_ui_create_panel", |b| {
+        let doc = Arc::new(RwLock::new(Document::new()));
+        let mut engine = JsEngine::new("bench-ui", bench_limits(), PermissionSet::document_full());
+        engine.register_document(doc);
+
+        b.iter(|| {
+            let result = engine.execute(r#"
+                var panelId = Logos.ui.createPanel("Bench", "right");
+                panelId;
+            "#);
+            let _ = black_box(result);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_sandbox_create,
@@ -440,5 +548,11 @@ criterion_group!(
     bench_js_event_on,
     bench_event_flush,
     bench_path_layer_core,
+    bench_ui_panel_create,
+    bench_ui_message_serialize,
+    bench_ui_message_roundtrip,
+    bench_ui_bridge_dispatch,
+    bench_ui_permission_check,
+    bench_ui_create_panel_js,
 );
 criterion_main!(benches);

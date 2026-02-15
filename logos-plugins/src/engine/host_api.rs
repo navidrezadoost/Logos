@@ -36,6 +36,9 @@
 //! unsound.
 
 use crate::engine::events::{EventBus, EventData, EventKind, EventPayload};
+use crate::engine::ui::{
+    DockPosition, PanelSize, UiBridge, UiComponent, UiMessage, UiValue,
+};
 use crate::permissions::{PermissionGuard, PermissionKind};
 use boa_engine::{Context, JsString, JsValue, NativeFunction};
 use logos_core::{Document, Layer, PathCommand, PathLayer, Point, RectLayer, UndoAction, UndoStack};
@@ -56,7 +59,266 @@ pub fn register_logos_api(
     deadline: Arc<RwLock<Option<Instant>>>,
     undo_stack: Arc<RwLock<UndoStack>>,
     event_bus: Arc<RwLock<EventBus>>,
+    plugin_id: Uuid,
+    ui_bridge: Arc<RwLock<UiBridge>>,
 ) {
+    // ═══════════════════════════════════════════════════════════════
+    // Build Logos.ui sub-object FIRST (separate ObjectInitializer
+    // scope to avoid double-borrowing context)
+    // ═══════════════════════════════════════════════════════════════
+    let ui_built = {
+        let mut ui_obj = boa_engine::object::ObjectInitializer::new(context);
+
+        // ─── Logos.ui.createPanel(title, dock, [options]) ───
+        {
+            let bridge = Arc::clone(&ui_bridge);
+            let calls = Arc::clone(&host_call_count);
+            let dl = Arc::clone(&deadline);
+            let pid = plugin_id;
+            let f = unsafe {
+                NativeFunction::from_closure(
+                    move |_this: &JsValue, args: &[JsValue], ctx: &mut Context| {
+                        check_deadline(&dl)?;
+                        increment_calls(&calls);
+
+                        let title = args
+                            .first()
+                            .map(|v| v.to_string(ctx).map(|s| s.to_std_string_escaped()))
+                            .transpose()
+                            .map_err(|_| js_error("createPanel: title must be a string"))?
+                            .unwrap_or_else(|| "Plugin Panel".to_string());
+
+                        let dock_str = args
+                            .get(1)
+                            .map(|v| v.to_string(ctx).map(|s| s.to_std_string_escaped()))
+                            .transpose()
+                            .map_err(|_| js_error("createPanel: dock must be a string"))?
+                            .unwrap_or_else(|| "right".to_string());
+                        let dock = DockPosition::from_str(&dock_str)
+                            .unwrap_or(DockPosition::Right);
+
+                        let mut size = PanelSize::default();
+                        let mut components = Vec::new();
+
+                        if let Some(opts_val) = args.get(2) {
+                            if let Some(opts_obj) = opts_val.as_object() {
+                                if let Ok(w_val) = opts_obj.get(JsString::from("width"), ctx) {
+                                    if let Some(w) = w_val.as_number() {
+                                        size.preferred_width = w as u32;
+                                    }
+                                }
+                                if let Ok(h_val) = opts_obj.get(JsString::from("height"), ctx) {
+                                    if let Some(h) = h_val.as_number() {
+                                        size.preferred_height = h as u32;
+                                    }
+                                }
+                                if let Ok(comp_val) = opts_obj.get(JsString::from("components"), ctx) {
+                                    if let Some(comp_obj) = comp_val.as_object() {
+                                        if let Ok(len_val) = comp_obj.get(JsString::from("length"), ctx) {
+                                            if let Some(len) = len_val.as_number() {
+                                                for i in 0..len as u32 {
+                                                    if let Ok(item) = comp_obj.get(i, ctx) {
+                                                        if let Some(c) = parse_js_component(&item, ctx) {
+                                                            components.push(c);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        let mut b = bridge.write().map_err(|e| js_error(&e.to_string()))?;
+                        let panel_id = if components.is_empty() {
+                            b.create_panel(pid, title, dock)
+                        } else {
+                            b.create_panel_full(pid, title, dock, size, components)
+                        }.map_err(|e| js_error(&e))?;
+
+                        Ok(JsValue::new(JsString::from(panel_id.to_string())))
+                    },
+                )
+            };
+            ui_obj.function(f, JsString::from("createPanel"), 2);
+        }
+
+        // ─── Logos.ui.closePanel(panelId) ───
+        {
+            let bridge = Arc::clone(&ui_bridge);
+            let calls = Arc::clone(&host_call_count);
+            let dl = Arc::clone(&deadline);
+            let pid = plugin_id;
+            let f = unsafe {
+                NativeFunction::from_closure(
+                    move |_this: &JsValue, args: &[JsValue], ctx: &mut Context| {
+                        check_deadline(&dl)?;
+                        increment_calls(&calls);
+
+                        let id_str = args
+                            .first()
+                            .map(|v| v.to_string(ctx).map(|s| s.to_std_string_escaped()))
+                            .transpose()
+                            .map_err(|_| js_error("closePanel: panelId must be a string"))?
+                            .ok_or_else(|| js_error("closePanel requires a panel ID"))?;
+                        let panel_id = Uuid::parse_str(&id_str)
+                            .map_err(|e| js_error(&format!("invalid panel ID: {e}")))?;
+
+                        let mut b = bridge.write().map_err(|e| js_error(&e.to_string()))?;
+                        b.close_panel(pid, panel_id).map_err(|e| js_error(&e))?;
+
+                        Ok(JsValue::new(true))
+                    },
+                )
+            };
+            ui_obj.function(f, JsString::from("closePanel"), 1);
+        }
+
+        // ─── Logos.ui.sendMessage(panelId, message) ───
+        {
+            let bridge = Arc::clone(&ui_bridge);
+            let calls = Arc::clone(&host_call_count);
+            let dl = Arc::clone(&deadline);
+            let pid = plugin_id;
+            let f = unsafe {
+                NativeFunction::from_closure(
+                    move |_this: &JsValue, args: &[JsValue], ctx: &mut Context| {
+                        check_deadline(&dl)?;
+                        increment_calls(&calls);
+
+                        let id_str = args
+                            .first()
+                            .map(|v| v.to_string(ctx).map(|s| s.to_std_string_escaped()))
+                            .transpose()
+                            .map_err(|_| js_error("sendMessage: panelId must be a string"))?
+                            .ok_or_else(|| js_error("sendMessage requires a panel ID"))?;
+                        let panel_id = Uuid::parse_str(&id_str)
+                            .map_err(|e| js_error(&format!("invalid panel ID: {e}")))?;
+
+                        let msg = args
+                            .get(1)
+                            .map(|v| parse_js_ui_message(v, ctx))
+                            .transpose()?
+                            .ok_or_else(|| js_error("sendMessage requires a message object"))?;
+
+                        let mut b = bridge.write().map_err(|e| js_error(&e.to_string()))?;
+                        b.send_to_panel(pid, panel_id, msg).map_err(|e| js_error(&e))?;
+
+                        Ok(JsValue::new(true))
+                    },
+                )
+            };
+            ui_obj.function(f, JsString::from("sendMessage"), 2);
+        }
+
+        // ─── Logos.ui.updatePanel(panelId, components) ───
+        {
+            let bridge = Arc::clone(&ui_bridge);
+            let calls = Arc::clone(&host_call_count);
+            let dl = Arc::clone(&deadline);
+            let pid = plugin_id;
+            let f = unsafe {
+                NativeFunction::from_closure(
+                    move |_this: &JsValue, args: &[JsValue], ctx: &mut Context| {
+                        check_deadline(&dl)?;
+                        increment_calls(&calls);
+
+                        let id_str = args
+                            .first()
+                            .map(|v| v.to_string(ctx).map(|s| s.to_std_string_escaped()))
+                            .transpose()
+                            .map_err(|_| js_error("updatePanel: panelId must be a string"))?
+                            .ok_or_else(|| js_error("updatePanel requires a panel ID"))?;
+                        let panel_id = Uuid::parse_str(&id_str)
+                            .map_err(|e| js_error(&format!("invalid panel ID: {e}")))?;
+
+                        let mut components = Vec::new();
+                        if let Some(arr_val) = args.get(1) {
+                            if let Some(arr_obj) = arr_val.as_object() {
+                                if let Ok(len_val) = arr_obj.get(JsString::from("length"), ctx) {
+                                    if let Some(len) = len_val.as_number() {
+                                        for i in 0..len as u32 {
+                                            if let Ok(item) = arr_obj.get(i, ctx) {
+                                                if let Some(c) = parse_js_component(&item, ctx) {
+                                                    components.push(c);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        let mut b = bridge.write().map_err(|e| js_error(&e.to_string()))?;
+                        b.update_panel_components(pid, panel_id, components)
+                            .map_err(|e| js_error(&e))?;
+
+                        Ok(JsValue::new(true))
+                    },
+                )
+            };
+            ui_obj.function(f, JsString::from("updatePanel"), 2);
+        }
+
+        // ─── Logos.ui.getPanels() ───
+        {
+            let bridge = Arc::clone(&ui_bridge);
+            let calls = Arc::clone(&host_call_count);
+            let dl = Arc::clone(&deadline);
+            let pid = plugin_id;
+            let f = unsafe {
+                NativeFunction::from_closure(
+                    move |_this: &JsValue, _args: &[JsValue], ctx: &mut Context| {
+                        check_deadline(&dl)?;
+                        increment_calls(&calls);
+
+                        let b = bridge.read().map_err(|e| js_error(&e.to_string()))?;
+                        let panels = b.plugin_panels(pid);
+
+                        let arr = boa_engine::object::builtins::JsArray::new(ctx);
+                        for panel in panels {
+                            let panel_obj = boa_engine::object::ObjectInitializer::new(ctx)
+                                .property(
+                                    JsString::from("id"),
+                                    JsValue::new(JsString::from(panel.id.to_string())),
+                                    boa_engine::property::Attribute::all(),
+                                )
+                                .property(
+                                    JsString::from("title"),
+                                    JsValue::new(JsString::from(panel.title.as_str())),
+                                    boa_engine::property::Attribute::all(),
+                                )
+                                .property(
+                                    JsString::from("dock"),
+                                    JsValue::new(JsString::from(panel.dock.as_str())),
+                                    boa_engine::property::Attribute::all(),
+                                )
+                                .property(
+                                    JsString::from("state"),
+                                    JsValue::new(JsString::from(panel.state.as_str())),
+                                    boa_engine::property::Attribute::all(),
+                                )
+                                .property(
+                                    JsString::from("componentCount"),
+                                    JsValue::new(panel.components.len() as i32),
+                                    boa_engine::property::Attribute::all(),
+                                )
+                                .build();
+                            arr.push(JsValue::from(panel_obj), ctx)
+                                .map_err(|e| js_error(&e.to_string()))?;
+                        }
+
+                        Ok(JsValue::from(arr))
+                    },
+                )
+            };
+            ui_obj.function(f, JsString::from("getPanels"), 0);
+        }
+
+        ui_obj.build()
+    };
+
     let mut obj = boa_engine::object::ObjectInitializer::new(context);
 
     // ─── Logos.getDocumentInfo() ───
@@ -781,6 +1043,13 @@ pub fn register_logos_api(
         obj.function(f, JsString::from("checkTimeout"), 0);
     }
 
+    // Attach pre-built Logos.ui sub-object
+    obj.property(
+        JsString::from("ui"),
+        JsValue::from(ui_built),
+        boa_engine::property::Attribute::all(),
+    );
+
     // Build and register the Logos global object
     let logos_obj = obj.build();
     let _ = context.register_global_property(
@@ -1017,6 +1286,214 @@ fn layer_to_js_object(layer: &Layer, ctx: &mut Context) -> boa_engine::JsObject 
     }
 
     builder.build()
+}
+
+// ───────────────────── UI Helper Functions ─────────────────────
+
+/// Parse a JavaScript object into a UiComponent.
+///
+/// Expects objects like:
+/// - `{ type: "label", text: "Hello" }`
+/// - `{ type: "button", label: "Click", action: "submit" }`
+/// - `{ type: "numberInput", label: "X", key: "x", value: 0, min: -1000, max: 1000, step: 1 }`
+/// - `{ type: "colorPicker", label: "Fill", key: "fill", value: "#FF0000FF" }`
+/// - `{ type: "toggle", label: "Visible", key: "visible", value: true }`
+/// - `{ type: "textInput", label: "Name", key: "name", value: "Layer 1", placeholder: "Enter name" }`
+/// - `{ type: "select", label: "Font", key: "font", value: "Arial", options: ["Arial", "Helvetica"] }`
+/// - `{ type: "separator" }`
+/// - `{ type: "propertyEditor" }`
+/// - `{ type: "layerList", syncSelection: true }`
+fn parse_js_component(val: &JsValue, ctx: &mut Context) -> Option<UiComponent> {
+    let obj = val.as_object()?;
+
+    let type_str = obj.get(JsString::from("type"), ctx).ok()?
+        .to_string(ctx).ok()?.to_std_string_escaped();
+
+    match type_str.as_str() {
+        "label" => {
+            let text = js_obj_string(&obj, "text", ctx).unwrap_or_default();
+            Some(UiComponent::Label { text })
+        }
+        "button" => {
+            let label = js_obj_string(&obj, "label", ctx).unwrap_or_default();
+            let action = js_obj_string(&obj, "action", ctx).unwrap_or_default();
+            Some(UiComponent::Button { label, action })
+        }
+        "numberInput" => {
+            let label = js_obj_string(&obj, "label", ctx).unwrap_or_default();
+            let key = js_obj_string(&obj, "key", ctx).unwrap_or_default();
+            let value = js_obj_f64(&obj, "value", ctx).unwrap_or(0.0);
+            let min = js_obj_f64(&obj, "min", ctx).unwrap_or(f64::MIN);
+            let max = js_obj_f64(&obj, "max", ctx).unwrap_or(f64::MAX);
+            let step = js_obj_f64(&obj, "step", ctx).unwrap_or(1.0);
+            Some(UiComponent::NumberInput { label, key, value, min, max, step })
+        }
+        "textInput" => {
+            let label = js_obj_string(&obj, "label", ctx).unwrap_or_default();
+            let key = js_obj_string(&obj, "key", ctx).unwrap_or_default();
+            let value = js_obj_string(&obj, "value", ctx).unwrap_or_default();
+            let placeholder = js_obj_string(&obj, "placeholder", ctx).unwrap_or_default();
+            Some(UiComponent::TextInput { label, key, value, placeholder })
+        }
+        "colorPicker" => {
+            let label = js_obj_string(&obj, "label", ctx).unwrap_or_default();
+            let key = js_obj_string(&obj, "key", ctx).unwrap_or_default();
+            let value = js_obj_string(&obj, "value", ctx).unwrap_or_else(|| "#000000FF".to_string());
+            Some(UiComponent::ColorPicker { label, key, value })
+        }
+        "toggle" => {
+            let label = js_obj_string(&obj, "label", ctx).unwrap_or_default();
+            let key = js_obj_string(&obj, "key", ctx).unwrap_or_default();
+            let value = obj.get(JsString::from("value"), ctx).ok()
+                .and_then(|v| v.as_boolean()).unwrap_or(false);
+            Some(UiComponent::Toggle { label, key, value })
+        }
+        "select" => {
+            let label = js_obj_string(&obj, "label", ctx).unwrap_or_default();
+            let key = js_obj_string(&obj, "key", ctx).unwrap_or_default();
+            let value = js_obj_string(&obj, "value", ctx).unwrap_or_default();
+            let mut options = Vec::new();
+            if let Ok(opts_val) = obj.get(JsString::from("options"), ctx) {
+                if let Some(opts_obj) = opts_val.as_object() {
+                    if let Ok(len_val) = opts_obj.get(JsString::from("length"), ctx) {
+                        if let Some(len) = len_val.as_number() {
+                            for i in 0..len as u32 {
+                                if let Ok(item) = opts_obj.get(i, ctx) {
+                                    if let Ok(s) = item.to_string(ctx) {
+                                        options.push(s.to_std_string_escaped());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Some(UiComponent::Select { label, key, value, options })
+        }
+        "separator" => Some(UiComponent::Separator),
+        "propertyEditor" => Some(UiComponent::PropertyEditor),
+        "layerList" => {
+            let sync = obj.get(JsString::from("syncSelection"), ctx).ok()
+                .and_then(|v| v.as_boolean()).unwrap_or(false);
+            Some(UiComponent::LayerList { sync_selection: sync })
+        }
+        _ => None,
+    }
+}
+
+/// Parse a JavaScript object into a UiMessage.
+///
+/// Expects objects with a `type` field:
+/// - `{ type: "updateValue", key: "x", value: 42 }`
+/// - `{ type: "notification", message: "Saved!", level: "success" }`
+/// - `{ type: "setTitle", title: "New Title" }`
+/// - `{ type: "custom", kind: "myEvent", data: { ... } }`
+fn parse_js_ui_message(val: &JsValue, ctx: &mut Context) -> Result<UiMessage, boa_engine::JsError> {
+    let obj = val.as_object()
+        .ok_or_else(|| js_error("message must be an object"))?;
+
+    let type_str = obj.get(JsString::from("type"), ctx)
+        .map_err(|_| js_error("message must have a 'type' field"))?
+        .to_string(ctx)
+        .map_err(|_| js_error("message type must be a string"))?
+        .to_std_string_escaped();
+
+    match type_str.as_str() {
+        "updateValue" => {
+            let key = js_obj_string(&obj, "key", ctx)
+                .ok_or_else(|| js_error("updateValue requires 'key'"))?;
+            let value = obj.get(JsString::from("value"), ctx)
+                .map(|v| js_value_to_ui_value(&v, ctx))
+                .unwrap_or(UiValue::Null);
+            Ok(UiMessage::UpdateValue { key, value })
+        }
+        "notification" => {
+            let message = js_obj_string(&obj, "message", ctx)
+                .ok_or_else(|| js_error("notification requires 'message'"))?;
+            let level_str = js_obj_string(&obj, "level", ctx)
+                .unwrap_or_else(|| "info".to_string());
+            let level = match level_str.as_str() {
+                "warning" => crate::engine::ui::NotificationLevel::Warning,
+                "error" => crate::engine::ui::NotificationLevel::Error,
+                "success" => crate::engine::ui::NotificationLevel::Success,
+                _ => crate::engine::ui::NotificationLevel::Info,
+            };
+            Ok(UiMessage::ShowNotification { message, level })
+        }
+        "setTitle" => {
+            let title = js_obj_string(&obj, "title", ctx)
+                .ok_or_else(|| js_error("setTitle requires 'title'"))?;
+            Ok(UiMessage::SetTitle { title })
+        }
+        "custom" => {
+            let kind = js_obj_string(&obj, "kind", ctx)
+                .unwrap_or_else(|| "unknown".to_string());
+            let mut data = HashMap::new();
+            if let Ok(data_val) = obj.get(JsString::from("data"), ctx) {
+                if let Some(data_obj) = data_val.as_object() {
+                    if let Ok(keys) = data_obj.own_property_keys(ctx) {
+                        for pk in keys {
+                            let k_str = match &pk {
+                                boa_engine::property::PropertyKey::String(s) => {
+                                    s.to_std_string_escaped()
+                                }
+                                boa_engine::property::PropertyKey::Index(idx) => {
+                                    idx.get().to_string()
+                                }
+                                _ => continue, // skip symbols
+                            };
+                            if let Ok(v) = data_obj.get(pk, ctx) {
+                                data.insert(k_str, js_value_to_ui_value(&v, ctx));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(UiMessage::Custom { kind, data })
+        }
+        _ => Err(js_error(&format!("unknown message type: {type_str}"))),
+    }
+}
+
+/// Convert a JsValue to a UiValue.
+fn js_value_to_ui_value(val: &JsValue, ctx: &mut Context) -> UiValue {
+    if val.is_null_or_undefined() {
+        UiValue::Null
+    } else if let Some(b) = val.as_boolean() {
+        UiValue::Bool(b)
+    } else if let Some(n) = val.as_number() {
+        UiValue::Number(n)
+    } else if let Ok(s) = val.to_string(ctx) {
+        // Check if it's actually a string type (not a number/bool coerced to string)
+        if val.is_string() {
+            UiValue::String(s.to_std_string_escaped())
+        } else {
+            // It was coerced — treat as string fallback
+            UiValue::String(s.to_std_string_escaped())
+        }
+    } else {
+        UiValue::Null
+    }
+}
+
+/// Extract a string property from a JS object.
+fn js_obj_string(obj: &boa_engine::JsObject, key: &str, ctx: &mut Context) -> Option<String> {
+    obj.get(JsString::from(key), ctx)
+        .ok()
+        .and_then(|v| {
+            if v.is_null_or_undefined() {
+                None
+            } else {
+                v.to_string(ctx).ok().map(|s| s.to_std_string_escaped())
+            }
+        })
+}
+
+/// Extract a f64 property from a JS object.
+fn js_obj_f64(obj: &boa_engine::JsObject, key: &str, ctx: &mut Context) -> Option<f64> {
+    obj.get(JsString::from(key), ctx)
+        .ok()
+        .and_then(|v| v.as_number())
 }
 
 #[cfg(test)]

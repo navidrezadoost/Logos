@@ -36,7 +36,7 @@ pub mod permissions;
 pub mod runtime;
 
 // Re-export key types for convenience
-pub use engine::{EventBus, JsEngine};
+pub use engine::{EventBus, JsEngine, UiBridge};
 pub use host::PluginHost;
 pub use manager::{PluginInstance, PluginManager, PluginRuntime, PluginState};
 pub use manifest::{PluginCommand, PluginHook, PluginManifest, SemVer};

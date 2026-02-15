@@ -39,6 +39,8 @@
 pub mod events;
 pub mod host_api;
 pub mod js_runtime;
+pub mod ui;
 
 pub use events::EventBus;
 pub use js_runtime::JsEngine;
+pub use ui::UiBridge;
