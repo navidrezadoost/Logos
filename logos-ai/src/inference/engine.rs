@@ -1,9 +1,19 @@
 //! Core inference engine — manages sessions, backends, and execution.
+//!
+//! The engine provides a unified API for both simulated and real ONNX-backed
+//! inference. Use [`InferenceEngine::create_session`] for simulated sessions
+//! (always available) or [`InferenceEngine::load_onnx_session`] for real ONNX
+//! Runtime sessions (requires the `onnx` feature).
 
 use crate::error::{AiError, AiResult};
+use crate::inference::onnx_session::{
+    InferenceBackendSession, OnnxSessionConfig, TensorSpec, SimulationMode,
+};
 use ndarray::{Array, IxDyn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(feature = "onnx")]
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 /// Available inference backends.
@@ -177,8 +187,12 @@ impl Default for InferenceProfile {
 
 /// An inference session that can run model computations.
 ///
-/// This is a lightweight simulation of ONNX Runtime sessions.
-/// In production, this wraps [`ort::Session`].
+/// Supports two modes:
+/// - **Simulated** (default): Validates inputs and returns zero tensors
+/// - **ONNX-backed**: Real inference via ONNX Runtime
+///
+/// Use [`InferenceSession::new`] for simulated sessions and
+/// [`InferenceSession::with_backend`] for real ONNX sessions.
 pub struct InferenceSession {
     /// Session configuration.
     config: SessionConfig,
@@ -190,10 +204,12 @@ pub struct InferenceSession {
     output_specs: Vec<(String, Vec<usize>)>,
     /// Number of runs completed.
     run_count: u64,
+    /// Optional real backend session.
+    backend: Option<InferenceBackendSession>,
 }
 
 impl InferenceSession {
-    /// Create a new inference session for the named model.
+    /// Create a new simulated inference session for the named model.
     pub fn new(
         model_name: impl Into<String>,
         config: SessionConfig,
@@ -206,14 +222,72 @@ impl InferenceSession {
             input_specs,
             output_specs,
             run_count: 0,
+            backend: None,
         }
+    }
+
+    /// Create a session backed by a real inference backend.
+    pub fn with_backend(
+        model_name: impl Into<String>,
+        config: SessionConfig,
+        backend: InferenceBackendSession,
+    ) -> Self {
+        let input_specs = backend
+            .input_specs()
+            .iter()
+            .map(|s| {
+                let shape: Vec<usize> = s.shape.iter()
+                    .map(|&d| if d < 0 { 1 } else { d as usize })
+                    .collect();
+                (s.name.clone(), shape)
+            })
+            .collect();
+        let output_specs = backend
+            .output_specs()
+            .iter()
+            .map(|s| {
+                let shape: Vec<usize> = s.shape.iter()
+                    .map(|&d| if d < 0 { 1 } else { d as usize })
+                    .collect();
+                (s.name.clone(), shape)
+            })
+            .collect();
+
+        Self {
+            config,
+            model_name: model_name.into(),
+            input_specs,
+            output_specs,
+            run_count: 0,
+            backend: Some(backend),
+        }
+    }
+
+    /// Whether this session uses a real ONNX backend.
+    pub fn is_onnx_backed(&self) -> bool {
+        self.backend.as_ref().map(|b| b.is_onnx()).unwrap_or(false)
+    }
+
+    /// Whether this session has any backend (ONNX or simulated).
+    pub fn has_backend(&self) -> bool {
+        self.backend.is_some()
     }
 
     /// Run inference with the given input tensors.
     ///
-    /// Validates inputs, simulates computation, and returns output tensors.
+    /// If an ONNX backend is attached, runs real inference.
+    /// Otherwise validates inputs and returns zero tensors (simulated).
     pub fn run(&mut self, inputs: &[Tensor]) -> AiResult<Vec<Tensor>> {
         let start = Instant::now();
+
+        // If we have a real backend, delegate to it
+        if let Some(ref mut backend) = self.backend {
+            let result = backend.run(inputs)?;
+            self.run_count += 1;
+            return Ok(result);
+        }
+
+        // --- Simulated path (backward compatible) ---
 
         // Validate input count
         if inputs.len() != self.input_specs.len() {
@@ -241,7 +315,7 @@ impl InferenceSession {
             return Err(AiError::Timeout(self.config.timeout.as_millis() as u64));
         }
 
-        // Generate output tensors (simulated inference — zeros for now)
+        // Generate output tensors (simulated inference — zeros)
         let outputs: Vec<Tensor> = self
             .output_specs
             .iter()
@@ -384,6 +458,114 @@ impl InferenceEngine {
     pub fn session_names(&self) -> Vec<&str> {
         self.sessions.keys().map(|s| s.as_str()).collect()
     }
+
+    /// Load an ONNX model file and create a real inference session.
+    ///
+    /// Requires the `onnx` feature to be enabled.
+    #[cfg(feature = "onnx")]
+    pub fn load_onnx_session(
+        &mut self,
+        model_name: impl Into<String>,
+        model_path: impl AsRef<Path>,
+    ) -> AiResult<&mut InferenceSession> {
+        let name: String = model_name.into();
+        let onnx_config = OnnxSessionConfig::default()
+            .with_name(name.clone())
+            .with_threads(self.default_config.num_threads)
+            .with_optimization(self.default_config.optimization_level);
+        let backend = InferenceBackendSession::from_onnx_file(model_path, onnx_config)?;
+        let session = InferenceSession::with_backend(
+            name.clone(),
+            self.default_config.clone(),
+            backend,
+        );
+        self.sessions.insert(name.clone(), session);
+        Ok(self.sessions.get_mut(&name).unwrap())
+    }
+
+    /// Load an ONNX model from in-memory bytes and create a real inference session.
+    ///
+    /// Requires the `onnx` feature to be enabled.
+    #[cfg(feature = "onnx")]
+    pub fn load_onnx_bytes(
+        &mut self,
+        model_name: impl Into<String>,
+        bytes: &[u8],
+    ) -> AiResult<&mut InferenceSession> {
+        let name: String = model_name.into();
+        let onnx_config = OnnxSessionConfig::default()
+            .with_name(name.clone())
+            .with_threads(self.default_config.num_threads)
+            .with_optimization(self.default_config.optimization_level);
+        let backend = InferenceBackendSession::from_onnx_bytes(bytes, onnx_config)?;
+        let session = InferenceSession::with_backend(
+            name.clone(),
+            self.default_config.clone(),
+            backend,
+        );
+        self.sessions.insert(name.clone(), session);
+        Ok(self.sessions.get_mut(&name).unwrap())
+    }
+
+    /// Create a session with a simulated ONNX backend.
+    ///
+    /// Useful for testing without real models.
+    pub fn create_simulated_session(
+        &mut self,
+        model_name: impl Into<String>,
+        input_specs: Vec<TensorSpec>,
+        output_specs: Vec<TensorSpec>,
+        mode: SimulationMode,
+    ) -> &mut InferenceSession {
+        let name: String = model_name.into();
+        let onnx_config = OnnxSessionConfig::default().with_name(name.clone());
+        let mut simulated = crate::inference::onnx_session::SimulatedOnnxSession::new(
+            onnx_config,
+            input_specs.clone(),
+            output_specs.clone(),
+        );
+        simulated.mode = mode;
+        let backend = InferenceBackendSession::Simulated(simulated);
+        let session = InferenceSession::with_backend(
+            name.clone(),
+            self.default_config.clone(),
+            backend,
+        );
+        self.sessions.insert(name.clone(), session);
+        self.sessions.get_mut(&name).unwrap()
+    }
+
+    /// Get summary of all sessions (for debugging/monitoring).
+    pub fn session_summary(&self) -> Vec<SessionInfo> {
+        self.sessions
+            .values()
+            .map(|s| SessionInfo {
+                name: s.model_name().to_string(),
+                run_count: s.run_count(),
+                has_backend: s.has_backend(),
+                is_onnx: s.is_onnx_backed(),
+                input_count: s.input_specs().len(),
+                output_count: s.output_specs().len(),
+            })
+            .collect()
+    }
+}
+
+/// Summary information about a session.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionInfo {
+    /// Session name.
+    pub name: String,
+    /// Number of inference runs.
+    pub run_count: u64,
+    /// Whether a backend is attached.
+    pub has_backend: bool,
+    /// Whether the backend is real ONNX.
+    pub is_onnx: bool,
+    /// Number of inputs.
+    pub input_count: usize,
+    /// Number of outputs.
+    pub output_count: usize,
 }
 
 impl Default for InferenceEngine {

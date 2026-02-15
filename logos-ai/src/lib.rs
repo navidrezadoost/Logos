@@ -50,6 +50,14 @@ pub use inference::asset_gen::{AssetGenerator, GenerationParams, GeneratedImage,
 // Inference engine
 pub use inference::engine::{InferenceEngine, InferenceBackend, InferenceSession};
 
+// ONNX Runtime integration
+pub use inference::onnx_session::{
+    OnnxSessionConfig, TensorSpec, SimulatedOnnxSession, SimulationMode,
+    InferenceBackendSession, OnnxInferenceProfile,
+};
+#[cfg(feature = "onnx")]
+pub use inference::onnx_session::OnnxSession;
+
 // Preprocessing
 pub use preprocess::{ImageTensor, TextTokenizer, TokenizerConfig};
 

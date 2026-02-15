@@ -4,6 +4,8 @@
 //! produces ranked layout proposals with confidence scores.
 
 use crate::error::{AiError, AiResult};
+use crate::inference::onnx_session::InferenceBackendSession;
+use crate::inference::engine::Tensor;
 use logos_core::Rect;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -239,17 +241,56 @@ impl LayoutProposal {
 ///
 /// Uses a Transformer-based model (via ONNX Runtime) to produce
 /// ranked layout proposals from design constraints.
+///
+/// # Modes
+///
+/// - **Grid-based** (default): Deterministic grid layouts without a model.
+/// - **ONNX-backed**: Real inference via `InferenceBackendSession`.
+///
+/// # Example
+///
+/// ```no_run
+/// # use logos_ai::inference::layout_gen::*;
+/// let mut gen = LayoutGenerator::new();
+/// let constraints = LayoutConstraints::new(800.0, 600.0)
+///     .add_element(ElementHint::new("text").with_role("heading"));
+/// let proposals = gen.generate(&constraints).unwrap();
+/// ```
 pub struct LayoutGenerator {
     /// Number of variations to produce.
     max_variations: usize,
+    /// Optional ONNX backend for real inference.
+    backend: Option<InferenceBackendSession>,
 }
 
 impl LayoutGenerator {
-    /// Create a new layout generator.
+    /// Create a new layout generator (grid-based mode).
     pub fn new() -> Self {
         Self {
             max_variations: 10,
+            backend: None,
         }
+    }
+
+    /// Create a layout generator with an ONNX backend.
+    pub fn with_backend(backend: InferenceBackendSession) -> Self {
+        Self {
+            max_variations: 10,
+            backend: Some(backend),
+        }
+    }
+
+    /// Load an ONNX model file for layout generation.
+    ///
+    /// Requires the `onnx` feature.
+    #[cfg(feature = "onnx")]
+    pub fn from_onnx_file(
+        path: impl AsRef<std::path::Path>,
+    ) -> AiResult<Self> {
+        use crate::inference::onnx_session::OnnxSessionConfig;
+        let config = OnnxSessionConfig::default().with_name("layout-gen");
+        let backend = InferenceBackendSession::from_onnx_file(path, config)?;
+        Ok(Self::with_backend(backend))
     }
 
     /// Set the maximum number of variations.
@@ -258,14 +299,27 @@ impl LayoutGenerator {
         self
     }
 
+    /// Whether this generator has a model backend.
+    pub fn has_backend(&self) -> bool {
+        self.backend.is_some()
+    }
+
     /// Generate layout proposals from constraints.
     ///
-    /// This is the main entry point. In production, this invokes the
-    /// ONNX model. Currently uses a deterministic grid-based algorithm
-    /// as a reference implementation.
-    pub fn generate(&self, constraints: &LayoutConstraints) -> AiResult<Vec<LayoutProposal>> {
+    /// If an ONNX backend is loaded, uses model inference.
+    /// Otherwise falls back to the deterministic grid-based algorithm.
+    pub fn generate(&mut self, constraints: &LayoutConstraints) -> AiResult<Vec<LayoutProposal>> {
         constraints.validate()?;
 
+        if self.backend.is_some() {
+            return self.generate_with_model(constraints);
+        }
+
+        self.generate_grid(constraints)
+    }
+
+    /// Generate using the grid-based algorithm (no model).
+    fn generate_grid(&self, constraints: &LayoutConstraints) -> AiResult<Vec<LayoutProposal>> {
         let n = constraints.num_variations.min(self.max_variations);
         let mut proposals = Vec::with_capacity(n);
 
@@ -276,7 +330,79 @@ impl LayoutGenerator {
 
         // Sort by confidence descending
         proposals.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+        Ok(proposals)
+    }
 
+    /// Generate using the ONNX model backend.
+    fn generate_with_model(&mut self, constraints: &LayoutConstraints) -> AiResult<Vec<LayoutProposal>> {
+        let backend = self.backend.as_mut().unwrap();
+
+        let n = constraints.num_variations.min(self.max_variations);
+        let features = constraints.to_features();
+        let input = Tensor::from_vec("input", features, &[1, 105])?;
+
+        let outputs = backend.run(&[input])?;
+        if outputs.is_empty() {
+            return Err(AiError::InferenceFailed("model returned no outputs".into()));
+        }
+
+        let raw_output = &outputs[0];
+        let output_data = raw_output.data.as_slice()
+            .ok_or_else(|| AiError::InferenceFailed("cannot read output tensor".into()))?;
+
+        // Interpret output: 80 values = 20 elements × 4 values (x, y, w, h)
+        // Values are in [0, 1] range (sigmoid), scale to canvas dimensions
+        let num_elements = constraints.elements.len();
+        let mut proposals = Vec::with_capacity(n);
+
+        for variation in 0..n {
+            let mut elements = Vec::with_capacity(num_elements);
+            // Use offset based on variation to create diversity
+            let offset = (variation * 4) % output_data.len().max(1);
+
+            for i in 0..num_elements {
+                let base = (i * 4 + offset) % output_data.len().max(1);
+                let x_frac = output_data.get(base).copied().unwrap_or(0.1);
+                let y_frac = output_data.get(base + 1).copied().unwrap_or(0.1);
+                let w_frac = output_data.get(base + 2).copied().unwrap_or(0.3);
+                let h_frac = output_data.get(base + 3).copied().unwrap_or(0.2);
+
+                let padding = constraints.padding;
+                let avail_w = constraints.canvas_width - 2.0 * padding;
+                let avail_h = constraints.canvas_height - 2.0 * padding;
+
+                let x = padding + x_frac.clamp(0.0, 1.0) * avail_w * 0.7;
+                let y = padding + y_frac.clamp(0.0, 1.0) * avail_h * 0.7;
+                let w = (w_frac.clamp(0.05, 1.0) * avail_w * 0.5).max(20.0);
+                let h = (h_frac.clamp(0.05, 1.0) * avail_h * 0.5).max(20.0);
+
+                // Clamp to canvas
+                let w = w.min(constraints.canvas_width - x);
+                let h = h.min(constraints.canvas_height - y);
+
+                elements.push(ProposedElement {
+                    bounds: Rect {
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    },
+                    hint_index: i,
+                });
+            }
+
+            let confidence = (1.0 - variation as f32 * 0.08).max(0.1);
+            proposals.push(LayoutProposal {
+                id: Uuid::new_v4(),
+                confidence,
+                elements,
+                canvas_width: constraints.canvas_width,
+                canvas_height: constraints.canvas_height,
+                name: format!("ONNX-{}", variation),
+            });
+        }
+
+        proposals.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
         Ok(proposals)
     }
 
@@ -479,13 +605,13 @@ mod tests {
 
     #[test]
     fn test_generator_new() {
-        let gen = LayoutGenerator::new();
+        let mut gen = LayoutGenerator::new();
         assert_eq!(gen.max_variations, 10);
     }
 
     #[test]
     fn test_generate_basic() {
-        let gen = LayoutGenerator::new();
+        let mut gen = LayoutGenerator::new();
         let constraints = basic_constraints();
         let proposals = gen.generate(&constraints).unwrap();
         assert!(!proposals.is_empty());
@@ -494,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_generate_correct_element_count() {
-        let gen = LayoutGenerator::new();
+        let mut gen = LayoutGenerator::new();
         let constraints = basic_constraints();
         let proposals = gen.generate(&constraints).unwrap();
         for p in &proposals {
@@ -504,7 +630,7 @@ mod tests {
 
     #[test]
     fn test_generate_sorted_by_confidence() {
-        let gen = LayoutGenerator::new();
+        let mut gen = LayoutGenerator::new();
         let constraints = basic_constraints();
         let proposals = gen.generate(&constraints).unwrap();
         for w in proposals.windows(2) {
@@ -514,7 +640,7 @@ mod tests {
 
     #[test]
     fn test_generate_valid_bounds() {
-        let gen = LayoutGenerator::new();
+        let mut gen = LayoutGenerator::new();
         let constraints = basic_constraints();
         let proposals = gen.generate(&constraints).unwrap();
         for p in &proposals {
@@ -524,7 +650,7 @@ mod tests {
 
     #[test]
     fn test_generate_custom_variations() {
-        let gen = LayoutGenerator::new().with_max_variations(3);
+        let mut gen = LayoutGenerator::new().with_max_variations(3);
         let constraints = basic_constraints().with_variations(3);
         let proposals = gen.generate(&constraints).unwrap();
         assert_eq!(proposals.len(), 3);
@@ -532,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_generate_single_element() {
-        let gen = LayoutGenerator::new();
+        let mut gen = LayoutGenerator::new();
         let constraints = LayoutConstraints::new(400.0, 300.0)
             .add_element(ElementHint::new("rect"))
             .with_variations(3);
@@ -599,7 +725,7 @@ mod tests {
 
     #[test]
     fn test_proposal_unique_ids() {
-        let gen = LayoutGenerator::new();
+        let mut gen = LayoutGenerator::new();
         let constraints = basic_constraints().with_variations(5);
         let proposals = gen.generate(&constraints).unwrap();
         let ids: Vec<Uuid> = proposals.iter().map(|p| p.id).collect();

@@ -4,6 +4,8 @@
 //! to design layers in real-time via adaptive instance normalization.
 
 use crate::error::{AiError, AiResult};
+use crate::inference::onnx_session::InferenceBackendSession;
+use crate::inference::engine::Tensor;
 use ndarray::{Array, Array3, IxDyn};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -159,16 +161,21 @@ impl StyleResult {
 /// 1. Encoder: Extract feature maps from content and style images
 /// 2. AdaIN: Adaptive instance normalization to align statistics
 /// 3. Decoder: Reconstruct image from aligned features
+///
+/// Without an ONNX model, uses simulated feature extraction and mean-color blending.
 pub struct StyleTransfer {
     /// Default options.
     default_options: StyleOptions,
+    /// Optional ONNX encoder backend (for style embedding extraction).
+    encoder_backend: Option<InferenceBackendSession>,
 }
 
 impl StyleTransfer {
-    /// Create a new style transfer engine.
+    /// Create a new style transfer engine (simulated mode).
     pub fn new() -> Self {
         Self {
             default_options: StyleOptions::default(),
+            encoder_backend: None,
         }
     }
 
@@ -176,13 +183,39 @@ impl StyleTransfer {
     pub fn with_defaults(options: StyleOptions) -> Self {
         Self {
             default_options: options,
+            encoder_backend: None,
         }
+    }
+
+    /// Create with an ONNX encoder backend.
+    pub fn with_encoder(backend: InferenceBackendSession) -> Self {
+        Self {
+            default_options: StyleOptions::default(),
+            encoder_backend: Some(backend),
+        }
+    }
+
+    /// Load an ONNX encoder model for style embedding extraction.
+    #[cfg(feature = "onnx")]
+    pub fn from_onnx_encoder(
+        path: impl AsRef<std::path::Path>,
+    ) -> AiResult<Self> {
+        use crate::inference::onnx_session::OnnxSessionConfig;
+        let config = OnnxSessionConfig::default().with_name("style-encoder");
+        let backend = InferenceBackendSession::from_onnx_file(path, config)?;
+        Ok(Self::with_encoder(backend))
+    }
+
+    /// Whether an encoder backend is loaded.
+    pub fn has_encoder(&self) -> bool {
+        self.encoder_backend.is_some()
     }
 
     /// Extract a style embedding from an image tensor.
     ///
     /// Input: CHW tensor (3, H, W) with values in [0, 1].
-    pub fn extract_style(&self, image: &Array3<f32>) -> AiResult<StyleEmbedding> {
+    /// If an ONNX encoder is loaded, uses real model inference.
+    pub fn extract_style(&mut self, image: &Array3<f32>) -> AiResult<StyleEmbedding> {
         let shape = image.shape();
         if shape[0] != 3 {
             return Err(AiError::InvalidInput(format!(
@@ -200,11 +233,19 @@ impl StyleTransfer {
             image.slice(ndarray::s![2, .., ..]).mean().unwrap_or(0.5),
         ];
 
+        // If we have an encoder backend, use it for feature extraction
+        if self.encoder_backend.is_some() {
+            let backend = self.encoder_backend.as_mut().unwrap();
+            let features = Self::extract_with_model_static(backend, image)?;
+            let mut embedding = StyleEmbedding::new(features, w, h);
+            embedding.mean_color = mean_color;
+            return Ok(embedding);
+        }
+
         // Simulated feature extraction: downsample to 64-dim embedding
         let feature_dim = 64;
         let features = Array::from_shape_fn(IxDyn(&[feature_dim]), |idx| {
             let i = idx[0];
-            // Simple hash-based feature (placeholder for real CNN encoder)
             let c = i % 3;
             let spatial_idx = i / 3;
             let h_idx = (spatial_idx * shape[1]) / feature_dim;
@@ -216,6 +257,46 @@ impl StyleTransfer {
         embedding.mean_color = mean_color;
 
         Ok(embedding)
+    }
+
+    /// Extract features using the ONNX encoder model.
+    fn extract_with_model_static(
+        backend: &mut InferenceBackendSession,
+        image: &Array3<f32>,
+    ) -> AiResult<Array<f32, IxDyn>> {
+        // Get the expected input shape from the model
+        let input_specs = backend.input_specs();
+        if input_specs.is_empty() {
+            return Err(AiError::InferenceFailed("encoder has no inputs".into()));
+        }
+
+        let expected_shape = &input_specs[0].shape;
+        let (target_h, target_w) = if expected_shape.len() == 4 {
+            (expected_shape[2] as usize, expected_shape[3] as usize)
+        } else {
+            (64, 64) // default
+        };
+
+        // Resize image to model's expected input size
+        let shape = image.shape();
+        let resized = Array3::from_shape_fn((3, target_h, target_w), |(c, y, x)| {
+            let src_y = (y as f32 * shape[1] as f32 / target_h as f32) as usize;
+            let src_x = (x as f32 * shape[2] as f32 / target_w as f32) as usize;
+            image[[c, src_y.min(shape[1] - 1), src_x.min(shape[2] - 1)]]
+        });
+
+        // Convert to 4D batch tensor [1, 3, H, W]
+        let batch = resized.into_shape_with_order(IxDyn(&[1, 3, target_h, target_w]))
+            .map_err(|e| AiError::InferenceFailed(format!("reshape: {e}")))?;
+
+        let input = Tensor::new("input", batch);
+        let outputs = backend.run(&[input])?;
+
+        if outputs.is_empty() {
+            return Err(AiError::InferenceFailed("encoder returned no outputs".into()));
+        }
+
+        Ok(outputs[0].data.clone())
     }
 
     /// Apply style to a content image using the given embedding.
@@ -343,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_extract_style() {
-        let engine = StyleTransfer::new();
+        let mut engine = StyleTransfer::new();
         let image = test_image(64, 64);
         let embedding = engine.extract_style(&image).unwrap();
         assert_eq!(embedding.feature_dim(), 64);
@@ -353,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_extract_style_wrong_channels() {
-        let engine = StyleTransfer::new();
+        let mut engine = StyleTransfer::new();
         let image = Array3::zeros((1, 64, 64)); // 1 channel instead of 3
         let result = engine.extract_style(&image);
         assert!(result.is_err());
@@ -361,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_transfer_basic() {
-        let engine = StyleTransfer::new();
+        let mut engine = StyleTransfer::new();
         let content = test_image(64, 64);
         let style = test_image(32, 32);
 
@@ -377,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_transfer_custom_options() {
-        let engine = StyleTransfer::new();
+        let mut engine = StyleTransfer::new();
         let content = test_image(32, 32);
         let style = test_image(32, 32);
         let embedding = engine.extract_style(&style).unwrap();
@@ -391,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_transfer_resize_output() {
-        let engine = StyleTransfer::new();
+        let mut engine = StyleTransfer::new();
         let content = test_image(64, 64);
         let style = test_image(32, 32);
         let embedding = engine.extract_style(&style).unwrap();
@@ -404,7 +485,7 @@ mod tests {
 
     #[test]
     fn test_transfer_zero_strength() {
-        let engine = StyleTransfer::new();
+        let mut engine = StyleTransfer::new();
         let content = test_image(16, 16);
         let style = test_image(16, 16);
         let embedding = engine.extract_style(&style).unwrap();

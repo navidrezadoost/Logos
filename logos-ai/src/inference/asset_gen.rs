@@ -4,6 +4,8 @@
 //! Stable Diffusion pipeline (text encoder + UNet + VAE decoder).
 
 use crate::error::{AiError, AiResult};
+use crate::inference::onnx_session::InferenceBackendSession;
+use crate::inference::engine::Tensor;
 use ndarray::Array3;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -238,21 +240,44 @@ impl Rng {
 /// 2. **UNet**: iterative denoising over N steps
 /// 3. **VAE Decoder**: latent → pixel space
 ///
-/// Currently uses a deterministic procedural generator as a placeholder.
+/// Supports both procedural generation (default) and ONNX-backed decoding.
 pub struct AssetGenerator {
     /// Default number of diffusion steps.
     default_steps: u32,
     /// Default guidance scale.
     default_guidance: f32,
+    /// Optional ONNX decoder backend.
+    decoder_backend: Option<InferenceBackendSession>,
 }
 
 impl AssetGenerator {
-    /// Create a new asset generator.
+    /// Create a new asset generator (procedural mode).
     pub fn new() -> Self {
         Self {
             default_steps: 20,
             default_guidance: 7.5,
+            decoder_backend: None,
         }
+    }
+
+    /// Create with an ONNX decoder backend.
+    pub fn with_decoder(backend: InferenceBackendSession) -> Self {
+        Self {
+            default_steps: 20,
+            default_guidance: 7.5,
+            decoder_backend: Some(backend),
+        }
+    }
+
+    /// Load an ONNX decoder model.
+    #[cfg(feature = "onnx")]
+    pub fn from_onnx_decoder(
+        path: impl AsRef<std::path::Path>,
+    ) -> AiResult<Self> {
+        use crate::inference::onnx_session::OnnxSessionConfig;
+        let config = OnnxSessionConfig::default().with_name("asset-decoder");
+        let backend = InferenceBackendSession::from_onnx_file(path, config)?;
+        Ok(Self::with_decoder(backend))
     }
 
     /// Set default steps.
@@ -267,20 +292,30 @@ impl AssetGenerator {
         self
     }
 
-    /// Generate an image from the given parameters.
+    /// Whether a decoder backend is loaded.
+    pub fn has_decoder(&self) -> bool {
+        self.decoder_backend.is_some()
+    }
+
+    /// Generate images from the given parameters.
     ///
-    /// In production, this runs the full diffusion pipeline via ONNX.
-    /// Currently generates a procedural pattern from the prompt hash.
-    pub fn generate(&self, params: &GenerationParams) -> AiResult<Vec<GeneratedImage>> {
+    /// If an ONNX decoder is loaded, uses model inference for image generation.
+    /// Otherwise falls back to procedural generation.
+    pub fn generate(&mut self, params: &GenerationParams) -> AiResult<Vec<GeneratedImage>> {
         params.validate()?;
 
         let start = Instant::now();
         let mut results = Vec::with_capacity(params.num_images as usize);
 
         for i in 0..params.num_images {
-            // Derive seed from params or generate one
             let seed = params.seed.unwrap_or(42) + i as u64;
-            let image = self.generate_single(params, seed)?;
+
+            let image = if self.decoder_backend.is_some() {
+                self.generate_with_model(params, seed)?
+            } else {
+                self.generate_single(params, seed)?
+            };
+
             let elapsed = start.elapsed();
 
             results.push(GeneratedImage {
@@ -298,6 +333,83 @@ impl AssetGenerator {
         Ok(results)
     }
 
+    /// Generate using the ONNX decoder model.
+    fn generate_with_model(&mut self, params: &GenerationParams, seed: u64) -> AiResult<Array3<f32>> {
+        let backend = self.decoder_backend.as_mut().unwrap();
+
+        // Create a latent vector from the prompt hash and seed
+        let prompt_hash = Self::hash_prompt_static(&params.prompt);
+        let mut rng = Rng::new(seed ^ prompt_hash);
+
+        let latent_dim = 64;
+        let latent: Vec<f32> = (0..latent_dim)
+            .map(|_| rng.next_gaussian() * 0.5)
+            .collect();
+
+        let input = Tensor::from_vec("input", latent, &[1, latent_dim])?;
+        let outputs = backend.run(&[input])?;
+
+        if outputs.is_empty() {
+            return Err(AiError::InferenceFailed("decoder returned no outputs".into()));
+        }
+
+        let raw = &outputs[0];
+        let raw_shape = raw.shape();
+
+        // Expected output shape: [1, 3, H, W]
+        if raw_shape.len() == 4 && raw_shape[0] == 1 && raw_shape[1] == 3 {
+            let model_h = raw_shape[2];
+            let model_w = raw_shape[3];
+            let target_h = params.size.height() as usize;
+            let target_w = params.size.width() as usize;
+
+            // If model output matches target, use directly
+            if model_h == target_h && model_w == target_w {
+                let data_slice = raw.data.as_slice()
+                    .ok_or_else(|| AiError::InferenceFailed("cannot read output".into()))?;
+                let image = Array3::from_shape_fn((3, target_h, target_w), |(c, y, x)| {
+                    let idx = c * model_h * model_w + y * model_w + x;
+                    data_slice.get(idx).copied().unwrap_or(0.5).clamp(0.0, 1.0)
+                });
+                return Ok(image);
+            }
+
+            // Bilinear resize from model output to target
+            let data_slice = raw.data.as_slice()
+                .ok_or_else(|| AiError::InferenceFailed("cannot read output".into()))?;
+            let image = Array3::from_shape_fn((3, target_h, target_w), |(c, y, x)| {
+                let src_y = (y as f32 * model_h as f32 / target_h as f32) as usize;
+                let src_x = (x as f32 * model_w as f32 / target_w as f32) as usize;
+                let idx = c * model_h * model_w + src_y.min(model_h - 1) * model_w + src_x.min(model_w - 1);
+                data_slice.get(idx).copied().unwrap_or(0.5).clamp(0.0, 1.0)
+            });
+            return Ok(image);
+        }
+
+        // Fallback: reshape flat output into target image
+        let target_h = params.size.height() as usize;
+        let target_w = params.size.width() as usize;
+        let total = raw.data.len();
+        let image = Array3::from_shape_fn((3, target_h, target_w), |(c, y, x)| {
+            let idx = (c * target_h * target_w + y * target_w + x) % total;
+            raw.data.as_slice()
+                .and_then(|s| s.get(idx))
+                .copied()
+                .unwrap_or(0.5)
+                .clamp(0.0, 1.0)
+        });
+        Ok(image)
+    }
+
+    /// Static hash function for prompt text.
+    fn hash_prompt_static(prompt: &str) -> u64 {
+        let mut hash: u64 = 5381;
+        for byte in prompt.bytes() {
+            hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
+        }
+        hash
+    }
+
     /// Generate a single image (procedural placeholder).
     fn generate_single(&self, params: &GenerationParams, seed: u64) -> AiResult<Array3<f32>> {
         let w = params.size.width() as usize;
@@ -305,7 +417,7 @@ impl AssetGenerator {
         let mut rng = Rng::new(seed);
 
         // Hash the prompt to derive base colors
-        let prompt_hash = self.hash_prompt(&params.prompt);
+        let prompt_hash = Self::hash_prompt_static(&params.prompt);
         let base_r = ((prompt_hash >> 16) & 0xFF) as f32 / 255.0;
         let base_g = ((prompt_hash >> 8) & 0xFF) as f32 / 255.0;
         let base_b = (prompt_hash & 0xFF) as f32 / 255.0;
@@ -330,14 +442,6 @@ impl AssetGenerator {
         Ok(image)
     }
 
-    /// Simple hash function for prompt text.
-    fn hash_prompt(&self, prompt: &str) -> u64 {
-        let mut hash: u64 = 5381;
-        for byte in prompt.bytes() {
-            hash = hash.wrapping_mul(33).wrapping_add(byte as u64);
-        }
-        hash
-    }
 }
 
 impl Default for AssetGenerator {
@@ -419,13 +523,13 @@ mod tests {
 
     #[test]
     fn test_generator_new() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         assert_eq!(gen.default_steps, 20);
     }
 
     #[test]
     fn test_generate_single_image() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let params = GenerationParams::new("a red circle")
             .with_size(ImageSize::Small)
             .with_seed(42);
@@ -439,7 +543,7 @@ mod tests {
 
     #[test]
     fn test_generate_multiple_images() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let params = GenerationParams::new("landscape")
             .with_size(ImageSize::Small)
             .with_count(3)
@@ -453,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_generate_deterministic_with_seed() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let params = GenerationParams::new("test")
             .with_size(ImageSize::Small)
             .with_seed(42);
@@ -465,7 +569,7 @@ mod tests {
 
     #[test]
     fn test_generate_different_seeds_different_images() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let p1 = GenerationParams::new("test")
             .with_size(ImageSize::Small)
             .with_seed(1);
@@ -480,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_generated_image_pixel_at() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let params = GenerationParams::new("test")
             .with_size(ImageSize::Small)
             .with_seed(42);
@@ -495,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_generated_image_pixel_out_of_bounds() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let params = GenerationParams::new("test")
             .with_size(ImageSize::Small)
             .with_seed(42);
@@ -505,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_generated_image_brightness() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let params = GenerationParams::new("bright image")
             .with_size(ImageSize::Small)
             .with_seed(42);
@@ -516,7 +620,7 @@ mod tests {
 
     #[test]
     fn test_generated_image_to_rgb_bytes() {
-        let gen = AssetGenerator::new();
+        let mut gen = AssetGenerator::new();
         let params = GenerationParams::new("test")
             .with_size(ImageSize::Small)
             .with_seed(42);
