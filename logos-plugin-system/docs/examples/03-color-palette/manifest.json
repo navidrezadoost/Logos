@@ -1,0 +1,27 @@
+{
+  "name": "Color Palette",
+  "version": "1.0.0",
+  "author": "Logos Team",
+  "description": "Create colored shapes with a visual color picker and precise controls.",
+  "entry_point": "plugin.js",
+  "category": "Color",
+  "license": "MIT",
+  "permissions": {
+    "document": ["read", "write"],
+    "ui": ["panel"]
+  },
+  "hooks": ["onLoad"],
+  "commands": [
+    {
+      "id": "create-colored-rect",
+      "label": "Create Colored Rectangle",
+      "shortcut": "Ctrl+Shift+R"
+    },
+    {
+      "id": "create-color-grid",
+      "label": "Create Color Grid",
+      "shortcut": "Ctrl+Shift+G"
+    }
+  ],
+  "tags": ["color", "palette", "shapes", "design"]
+}

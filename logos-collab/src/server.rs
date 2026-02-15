@@ -43,6 +43,10 @@ use crate::broadcast::{BroadcastGroup, RoomManager};
 use crate::presence::AwarenessMessage;
 use crate::protocol::{MessageType, PeerInfo, SyncMessage};
 use crate::storage::{DocumentStore, StoreConfig};
+use crate::auth::{AuthMiddleware, AuthConfig};
+use crate::auth::middleware::extract_token_from_uri;
+use crate::auth::multilimit::{MultiLevelLimiter, MultiLimitConfig};
+use crate::auth::backpressure::AtomicDropCounter;
 
 /// Server configuration.
 #[derive(Debug, Clone)]
@@ -57,6 +61,8 @@ pub struct ServerConfig {
     pub heartbeat_interval_secs: u64,
     /// Persistence storage path (None = in-memory only)
     pub storage_path: Option<PathBuf>,
+    /// Authentication configuration (None = permissive / no auth)
+    pub auth: Option<AuthConfig>,
 }
 
 impl Default for ServerConfig {
@@ -67,6 +73,7 @@ impl Default for ServerConfig {
             broadcast_capacity: 256,
             heartbeat_interval_secs: 30,
             storage_path: None,
+            auth: None,
         }
     }
 }
@@ -145,6 +152,12 @@ pub struct SyncServer {
     persistence_tx: Option<mpsc::UnboundedSender<PersistenceCommand>>,
     /// Handle to the background persistence task (for join on drop)
     persistence_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Authentication middleware (None = permissive)
+    auth: Arc<AuthMiddleware>,
+    /// Multi-level rate limiter (user + room + global)
+    multi_limiter: Arc<tokio::sync::Mutex<MultiLevelLimiter>>,
+    /// Atomic drop counter for backpressure monitoring
+    drop_counter: Arc<AtomicDropCounter>,
 }
 
 impl SyncServer {
@@ -216,6 +229,12 @@ impl SyncServer {
             (None, None)
         };
 
+        // Initialize auth middleware
+        let auth = Arc::new(match &config.auth {
+            Some(auth_config) => AuthMiddleware::new(auth_config.clone()),
+            None => AuthMiddleware::permissive(),
+        });
+
         Self {
             config,
             rooms: Arc::new(RwLock::new(HashMap::new())),
@@ -227,6 +246,11 @@ impl SyncServer {
             persisted_snapshots_counter,
             persistence_tx,
             persistence_handle,
+            auth,
+            multi_limiter: Arc::new(tokio::sync::Mutex::new(
+                MultiLevelLimiter::new(MultiLimitConfig::default()),
+            )),
+            drop_counter: Arc::new(AtomicDropCounter::new()),
         }
     }
 
@@ -303,12 +327,16 @@ impl SyncServer {
             let store = self.store.clone();
             let delta_version = self.delta_version.clone();
             let persistence_tx = self.persistence_tx.clone();
+            let auth = self.auth.clone();
+            let multi_limiter = self.multi_limiter.clone();
+            let drop_counter = self.drop_counter.clone();
 
             tokio::spawn(async move {
                 if let Err(e) =
                     Self::handle_connection(
                         stream, addr, rooms, stats, config, room_manager,
-                        store, delta_version, persistence_tx,
+                        store, delta_version, persistence_tx, auth,
+                        multi_limiter, drop_counter,
                     ).await
                 {
                     log::error!("Connection error from {addr}: {e}");
@@ -328,11 +356,38 @@ impl SyncServer {
         store: Option<Arc<DocumentStore>>,
         delta_version: Arc<AtomicU64>,
         persistence_tx: Option<mpsc::UnboundedSender<PersistenceCommand>>,
+        auth: Arc<AuthMiddleware>,
+        multi_limiter: Arc<tokio::sync::Mutex<MultiLevelLimiter>>,
+        drop_counter: Arc<AtomicDropCounter>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let ws_stream = tokio_tungstenite::accept_async(stream).await?;
+        // Accept WebSocket with callback to extract URI for token
+        let request_uri = Arc::new(std::sync::Mutex::new(String::new()));
+        let uri_clone = request_uri.clone();
+        let ws_stream = tokio_tungstenite::accept_hdr_async(stream, move |req: &tokio_tungstenite::tungstenite::handshake::server::Request, res: tokio_tungstenite::tungstenite::handshake::server::Response| {
+            *uri_clone.lock().unwrap() = req.uri().to_string();
+            Ok(res)
+        }).await?;
         let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
-        log::info!("WebSocket connection established from {addr}");
+        // Authenticate from URI token
+        let uri = request_uri.lock().unwrap().clone();
+        let token = extract_token_from_uri(&uri);
+        let auth_ctx = match auth.authenticate(token.as_deref()) {
+            Ok(ctx) => ctx,
+            Err(e) => {
+                log::warn!("Auth failed for {addr}: {e}");
+                let err_msg = format!("{{\"error\":\"{e}\"}}");
+                let _ = ws_sender.send(Message::Text(err_msg.into())).await;
+                let _ = ws_sender.close().await;
+                return Ok(());
+            }
+        };
+
+        log::info!(
+            "WebSocket connection authenticated from {addr}: user={}, anonymous={}",
+            auth_ctx.name,
+            auth_ctx.is_anonymous,
+        );
 
         {
             let mut s = stats.write().await;
@@ -366,6 +421,17 @@ impl SyncServer {
                                             // First message: peer joins a document room
                                             peer_id = Some(sync_msg.peer_id);
                                             doc_id = Some(sync_msg.doc_id);
+
+                                            // Check document access
+                                            if !auth_ctx.can_access(&sync_msg.doc_id) {
+                                                log::warn!(
+                                                    "Access denied: {} cannot access doc {}",
+                                                    auth_ctx.name, sync_msg.doc_id
+                                                );
+                                                let err_msg = r#"{"error":"Access denied to document"}"#;
+                                                let _ = ws_sender.send(Message::Text(err_msg.into())).await;
+                                                break;
+                                            }
 
                                             let info = sync_msg.peer_info().unwrap_or_else(|_| {
                                                 PeerInfo::with_id(sync_msg.peer_id, "Anonymous")
@@ -438,6 +504,24 @@ impl SyncServer {
                                         MessageType::Delta => {
                                             // Apply delta to server's Yrs doc, then broadcast
                                             if let Some(did) = doc_id {
+                                                // Multi-level rate limit check (user+room+global, target <100ns)
+                                                {
+                                                    let mut ml = multi_limiter.lock().await;
+                                                    if let Err(level) = ml.check_all_with_bandwidth(
+                                                        auth_ctx.user_id,
+                                                        did,
+                                                        bytes.len() as u64,
+                                                    ) {
+                                                        drop_counter.record_dropped();
+                                                        log::warn!(
+                                                            "Rate limited user {} on doc {} (level: {})",
+                                                            auth_ctx.name, did, level
+                                                        );
+                                                        continue; // Drop message silently
+                                                    }
+                                                    drop_counter.record_sent();
+                                                }
+
                                                 let broadcast_clone = {
                                                     let mut rooms_w = rooms.write().await;
                                                     if let Some(room) = rooms_w.get_mut(&did) {
@@ -586,7 +670,8 @@ impl SyncServer {
                             ws_sender.send(Message::Binary(data.to_vec().into())).await?;
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                            log::warn!("Peer {peer_id:?} lagged by {n} messages");
+                            drop_counter.record_dropped();
+                            log::warn!("Peer {peer_id:?} lagged by {n} messages (backpressure active)");
                         }
                         Err(_) => break,
                     }
@@ -656,6 +741,21 @@ impl SyncServer {
     pub fn store(&self) -> Option<&Arc<DocumentStore>> {
         self.store.as_ref()
     }
+
+    /// Get the auth middleware.
+    pub fn auth(&self) -> &Arc<AuthMiddleware> {
+        &self.auth
+    }
+
+    /// Get the multi-level rate limiter.
+    pub fn multi_limiter(&self) -> &Arc<tokio::sync::Mutex<MultiLevelLimiter>> {
+        &self.multi_limiter
+    }
+
+    /// Get the backpressure drop counter.
+    pub fn drop_counter(&self) -> &Arc<AtomicDropCounter> {
+        &self.drop_counter
+    }
 }
 
 /// Drop sends Shutdown to the persistence task and aborts it
@@ -701,6 +801,7 @@ mod tests {
             broadcast_capacity: 512,
             heartbeat_interval_secs: 15,
             storage_path: None,
+            auth: None,
         };
         let server = SyncServer::new(config);
         assert_eq!(server.bind_addr(), "0.0.0.0:8080");

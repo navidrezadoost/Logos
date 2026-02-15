@@ -15,7 +15,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Install system dependencies
-      run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      run: sudo apt-get update && sudo apt-get install -y libclang-dev libfontconfig1-dev
     - name: Install WASM target
       run: rustup target add wasm32-unknown-unknown
     - name: Build Native
@@ -45,7 +45,7 @@ jobs:
           exit 1
         fi
     - name: Build WASM
-      run: cargo build --release --target wasm32-unknown-unknown
+      run: cargo build --release --target wasm32-unknown-unknown -p logos-wasm
     - name: Verify logos-render tests (0 ignored)
       run: |
         RESULT=$(cargo test -p logos-render 2>&1)
@@ -97,7 +97,18 @@ jobs:
         echo "$RESULT"
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Collab tests: $PASSED passed"
-        if [ "$PASSED" -lt 166 ]; then
-          echo "ERROR: Expected >=166 collab tests, got $PASSED"
+        if [ "$PASSED" -lt 262 ]; then
+          echo "ERROR: Expected >=262 collab tests, got $PASSED"
+          exit 1
+        fi
+    - name: Verify logos-plugins tests (0 ignored)
+      run: |
+        RESULT=$(cargo test -p logos-plugins 2>&1)
+        echo "$RESULT"
+        # Sum both unit tests and doc tests
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Plugins tests: $PASSED passed"
+        if [ "$PASSED" -lt 77 ]; then
+          echo "ERROR: Expected >=77 plugins tests, got $PASSED"
           exit 1
         fi

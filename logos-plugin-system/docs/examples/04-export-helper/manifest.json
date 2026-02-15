@@ -1,0 +1,27 @@
+{
+  "name": "Export Helper",
+  "version": "1.0.0",
+  "author": "Logos Team",
+  "description": "Generate structured reports of your document—layer tree, stats, and metadata.",
+  "entry_point": "plugin.js",
+  "category": "Export",
+  "license": "MIT",
+  "permissions": {
+    "document": ["read"],
+    "ui": ["panel"],
+    "clipboard": true
+  },
+  "hooks": ["onLoad", "onExport"],
+  "commands": [
+    {
+      "id": "generate-report",
+      "label": "Generate Document Report",
+      "shortcut": "Ctrl+Shift+E"
+    },
+    {
+      "id": "export-selection",
+      "label": "Export Selection Info"
+    }
+  ],
+  "tags": ["export", "report", "statistics", "json", "csv"]
+}

@@ -29,6 +29,7 @@ async fn start_test_server() -> u16 {
         broadcast_capacity: 64,
         heartbeat_interval_secs: 30,
         storage_path: None,
+        auth: None,
     };
     let server = SyncServer::new(config);
     tokio::spawn(async move {

@@ -44,6 +44,7 @@ pub mod server;
 pub mod client;
 pub mod presence;
 pub mod storage;
+pub mod auth;
 
 // Re-exports for convenience
 pub use protocol::{
@@ -60,4 +61,13 @@ pub use storage::{
     DocumentStore, StoreConfig, StoreError, DocumentMetadata,
     DeltaLog, CompressedDelta, DeltaStats,
     WriteAheadLog, WalEntry, WalConfig, WalError,
+};
+pub use auth::{
+    TokenEngine, Claims, TokenError,
+    RateLimiter, RateLimitConfig, TokenBucket,
+    AuthMiddleware, AuthConfig, AuthError,
+    MultiLevelLimiter, MultiLimitConfig, MultiLimitStats,
+    AtomicGlobalLimiter, RejectionLevel,
+    BackpressureChannel, BackpressureStats, DropStrategy,
+    AdaptiveLimiter, AtomicDropCounter,
 };

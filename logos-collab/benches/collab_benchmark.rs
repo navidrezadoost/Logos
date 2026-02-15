@@ -9,6 +9,9 @@ use logos_collab::presence::{
 use logos_collab::storage::{
     DocumentStore, StoreConfig, CompressedDelta, WriteAheadLog, WalConfig,
 };
+use logos_collab::auth::{TokenEngine, Claims, RateLimiter, RateLimitConfig};
+use logos_collab::auth::multilimit::{MultiLevelLimiter, MultiLimitConfig, AtomicGlobalLimiter};
+use logos_collab::auth::backpressure::{BackpressureChannel, DropStrategy, AdaptiveLimiter, AtomicDropCounter};
 use uuid::Uuid;
 use std::sync::Arc;
 
@@ -430,6 +433,193 @@ fn bench_store_load_deltas(c: &mut Criterion) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// ── Auth benchmarks ───────────────────────────────────────────────
+
+fn bench_token_issue(c: &mut Criterion) {
+    let engine = TokenEngine::new([42u8; 32]);
+    let user_id = Uuid::new_v4();
+
+    c.bench_function("token_issue", |b| {
+        b.iter(|| {
+            let claims = Claims::new(black_box(user_id), "BenchUser");
+            black_box(engine.issue(&claims).unwrap());
+        })
+    });
+}
+
+fn bench_token_verify(c: &mut Criterion) {
+    let engine = TokenEngine::new([42u8; 32]);
+    let user_id = Uuid::new_v4();
+    let claims = Claims::new(user_id, "BenchUser");
+    let token = engine.issue(&claims).unwrap();
+
+    c.bench_function("token_verify", |b| {
+        b.iter(|| {
+            black_box(engine.verify(black_box(&token)).unwrap());
+        })
+    });
+}
+
+fn bench_token_verify_with_docs(c: &mut Criterion) {
+    let engine = TokenEngine::new([42u8; 32]);
+    let user_id = Uuid::new_v4();
+    let doc_id = Uuid::new_v4();
+    let claims = Claims::new(user_id, "BenchUser").with_docs(vec![doc_id]);
+    let token = engine.issue(&claims).unwrap();
+
+    c.bench_function("token_verify_with_docs", |b| {
+        b.iter(|| {
+            black_box(engine.verify_access(black_box(&token), black_box(&doc_id)).unwrap());
+        })
+    });
+}
+
+fn bench_rate_limit_check(c: &mut Criterion) {
+    let config = RateLimitConfig {
+        messages_per_second: 100_000.0, // Very high so we don't hit the limit
+        burst_capacity: 1_000_000.0,
+        ..Default::default()
+    };
+    let mut limiter = RateLimiter::new(config);
+    let user_id = Uuid::new_v4();
+
+    c.bench_function("rate_limit_check", |b| {
+        b.iter(|| {
+            black_box(limiter.check_user(black_box(user_id)));
+        })
+    });
+}
+
+fn bench_rate_limit_check_new_user(c: &mut Criterion) {
+    let config = RateLimitConfig::default();
+    let mut limiter = RateLimiter::new(config);
+
+    c.bench_function("rate_limit_check_new_user", |b| {
+        b.iter(|| {
+            let user_id = Uuid::new_v4();
+            black_box(limiter.check_user(black_box(user_id)));
+        })
+    });
+}
+
+fn bench_rate_limit_bandwidth(c: &mut Criterion) {
+    let config = RateLimitConfig {
+        room_bytes_per_second: u64::MAX, // Very high so we don't hit the limit
+        ..Default::default()
+    };
+    let mut limiter = RateLimiter::new(config);
+    let room_id = Uuid::new_v4();
+
+    c.bench_function("rate_limit_bandwidth_check", |b| {
+        b.iter(|| {
+            black_box(limiter.check_room_bandwidth(black_box(room_id), black_box(1024)));
+        })
+    });
+}
+
+fn bench_multi_level_check_all(c: &mut Criterion) {
+    let config = MultiLimitConfig {
+        user_rate: 1_000_000.0,
+        user_burst: 2_000_000.0,
+        room_rate: 10_000_000.0,
+        room_burst: 20_000_000.0,
+        global_rate: 100_000_000.0,
+        global_burst: 200_000_000.0,
+        ..Default::default()
+    };
+    let mut limiter = MultiLevelLimiter::new(config);
+    let user_id = Uuid::new_v4();
+    let room_id = Uuid::new_v4();
+
+    c.bench_function("multi_level_check_all", |b| {
+        b.iter(|| {
+            black_box(limiter.check_all(black_box(user_id), black_box(room_id)));
+        })
+    });
+}
+
+fn bench_multi_level_check_with_bandwidth(c: &mut Criterion) {
+    let config = MultiLimitConfig {
+        user_rate: 1_000_000.0,
+        user_burst: 2_000_000.0,
+        room_rate: 10_000_000.0,
+        room_burst: 20_000_000.0,
+        global_rate: 100_000_000.0,
+        global_burst: 200_000_000.0,
+        room_bytes_per_sec: u64::MAX,
+        ..Default::default()
+    };
+    let mut limiter = MultiLevelLimiter::new(config);
+    let user_id = Uuid::new_v4();
+    let room_id = Uuid::new_v4();
+
+    c.bench_function("multi_level_check_with_bandwidth", |b| {
+        b.iter(|| {
+            black_box(limiter.check_all_with_bandwidth(
+                black_box(user_id),
+                black_box(room_id),
+                black_box(1024),
+            ));
+        })
+    });
+}
+
+fn bench_atomic_global_check(c: &mut Criterion) {
+    let limiter = AtomicGlobalLimiter::new(100_000_000.0, 200_000_000.0);
+
+    c.bench_function("atomic_global_check", |b| {
+        b.iter(|| {
+            black_box(limiter.check());
+        })
+    });
+}
+
+fn bench_backpressure_send(c: &mut Criterion) {
+    let mut ch = BackpressureChannel::new(10_000, DropStrategy::DropNew);
+
+    c.bench_function("backpressure_send", |b| {
+        b.iter(|| {
+            black_box(ch.send(black_box(42u64)));
+            ch.recv(); // Drain to avoid filling
+        })
+    });
+}
+
+fn bench_backpressure_send_drop_oldest(c: &mut Criterion) {
+    let mut ch = BackpressureChannel::new(100, DropStrategy::DropOldest);
+    // Fill it first
+    for i in 0..100 {
+        ch.send(i);
+    }
+
+    c.bench_function("backpressure_send_drop_oldest", |b| {
+        b.iter(|| {
+            black_box(ch.send(black_box(999u64)));
+        })
+    });
+}
+
+fn bench_adaptive_limiter_record(c: &mut Criterion) {
+    let mut limiter = AdaptiveLimiter::new(100_000.0, std::time::Duration::from_millis(10));
+
+    c.bench_function("adaptive_limiter_record", |b| {
+        b.iter(|| {
+            limiter.record_latency(black_box(std::time::Duration::from_nanos(500)));
+        })
+    });
+}
+
+fn bench_atomic_drop_counter(c: &mut Criterion) {
+    let counter = AtomicDropCounter::new();
+
+    c.bench_function("atomic_drop_counter_record", |b| {
+        b.iter(|| {
+            counter.record_sent();
+            black_box(counter.sent());
+        })
+    });
+}
+
 criterion_group!(
     benches,
     bench_delta_encode,
@@ -454,5 +644,18 @@ criterion_group!(
     bench_wal_append,
     bench_wal_flush_1000,
     bench_store_load_deltas,
+    bench_token_issue,
+    bench_token_verify,
+    bench_token_verify_with_docs,
+    bench_rate_limit_check,
+    bench_rate_limit_check_new_user,
+    bench_rate_limit_bandwidth,
+    bench_multi_level_check_all,
+    bench_multi_level_check_with_bandwidth,
+    bench_atomic_global_check,
+    bench_backpressure_send,
+    bench_backpressure_send_drop_oldest,
+    bench_adaptive_limiter_record,
+    bench_atomic_drop_counter,
 );
 criterion_main!(benches);

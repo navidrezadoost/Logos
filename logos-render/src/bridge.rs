@@ -13,6 +13,7 @@ const COLOR_RECT: [f32; 4] = [0.26, 0.52, 0.96, 1.0]; // Blue
 const COLOR_ELLIPSE: [f32; 4] = [0.96, 0.26, 0.42, 1.0]; // Red
 const COLOR_TEXT: [f32; 4] = [0.96, 0.78, 0.26, 1.0]; // Yellow
 const COLOR_FRAME: [f32; 4] = [0.22, 0.22, 0.24, 0.8]; // Dark gray
+const COLOR_PATH: [f32; 4] = [0.55, 0.24, 0.86, 1.0]; // Purple
 
 /// Build a list of `RectInstance`s from the layout engine's computed results.
 ///
@@ -37,6 +38,7 @@ pub fn collect_instances(
             Layer::Ellipse(_) => COLOR_ELLIPSE,
             Layer::Text(_) => COLOR_TEXT,
             Layer::Frame(_) => COLOR_FRAME,
+            Layer::Path(_) => COLOR_PATH,
         };
 
         let instance = RectInstance::new(
