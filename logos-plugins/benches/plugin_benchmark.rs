@@ -17,6 +17,12 @@
 //! - UI bridge dispatch (<1μs target) [Day 21]
 //! - UI permission check (<50ns target) [Day 21]
 //! - UI createPanel via JS (<500μs target) [Day 21]
+//! - Manifest parse (<10μs target) [Day 22]
+//! - Signature verify (<1μs target) [Day 22]
+//! - Package create (<5ms target) [Day 22]
+//! - Package verify (<1ms target) [Day 22]
+//! - Registry lookup (<1μs target) [Day 22]
+//! - Registry install (<5ms target) [Day 22]
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use logos_core::{Document, Layer, PathCommand, PathLayer, Point, RectLayer};
@@ -26,9 +32,16 @@ use logos_plugins::engine::ui::{
 };
 use logos_plugins::host::PluginHost;
 use logos_plugins::manager::PluginManager;
-use logos_plugins::manifest::PluginManifest;
+use logos_plugins::manifest::{PluginManifest, PluginCategory};
+use logos_plugins::marketplace::{
+    MarketplaceClient, MarketplaceSearch, PackageBuilder, PublisherInfo, SortOrder,
+    TrustLevel, TrustedPublishers,
+};
+use logos_plugins::packaging::{PluginPackage, IconSize};
 use logos_plugins::permissions::{PermissionGuard, PermissionKind, PermissionSet};
+use logos_plugins::registry::{PluginFilter, PluginRegistry, RegistrySource};
 use logos_plugins::runtime::{PluginValue, ResourceLimits, Sandbox};
+use logos_plugins::signing::{ContentHash, PluginKeyPair, SigningContext};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -527,6 +540,282 @@ fn bench_ui_create_panel_js(c: &mut Criterion) {
     });
 }
 
+// ─── Day 22: Signing, Packaging, Registry Benchmarks ───
+
+fn bench_manifest_parse(c: &mut Criterion) {
+    let manifest = PluginManifest::new("Bench Plugin")
+        .with_version(1, 0, 0)
+        .with_author("Bench Author")
+        .with_entry_point("main.js")
+        .with_category(PluginCategory::Layout)
+        .with_description("A plugin for benchmarking")
+        .with_tag("bench")
+        .with_permissions(PermissionSet::document_full());
+
+    let json = serde_json::to_string(&manifest).unwrap();
+
+    c.bench_function("manifest_parse", |b| {
+        b.iter(|| {
+            let parsed: PluginManifest =
+                serde_json::from_str(black_box(&json)).unwrap();
+            black_box(parsed);
+        });
+    });
+}
+
+fn bench_signature_verify(c: &mut Criterion) {
+    let kp = PluginKeyPair::generate();
+    let data = b"plugin code bundle for benchmark verification";
+    let hash = ContentHash::compute(data);
+    let sig = kp.sign(&hash);
+
+    c.bench_function("signature_verify", |b| {
+        b.iter(|| {
+            let result = black_box(&sig).verify(black_box(&hash));
+            black_box(result).unwrap();
+        });
+    });
+}
+
+fn bench_package_create(c: &mut Criterion) {
+    let manifest = PluginManifest::new("Packaged Plugin")
+        .with_version(1, 0, 0)
+        .with_entry_point("main.js")
+        .with_permissions(PermissionSet::read_only());
+    let code = "console.log('hello');".repeat(50).into_bytes();
+
+    c.bench_function("package_create", |b| {
+        b.iter(|| {
+            let pkg = PluginPackage::create(
+                black_box(&manifest),
+                black_box(&code),
+            ).unwrap();
+            let bytes = pkg.to_bytes().unwrap();
+            black_box(bytes);
+        });
+    });
+}
+
+fn bench_package_verify(c: &mut Criterion) {
+    let manifest = PluginManifest::new("Verified Plugin")
+        .with_version(1, 0, 0)
+        .with_entry_point("main.js")
+        .with_permissions(PermissionSet::read_only());
+    let code = b"console.log('hello from verified plugin');";
+    let mut pkg = PluginPackage::create(&manifest, code).unwrap();
+    let kp = PluginKeyPair::generate();
+    pkg.sign(&kp);
+    let bytes = pkg.to_bytes().unwrap();
+
+    c.bench_function("package_verify", |b| {
+        b.iter(|| {
+            let parsed = PluginPackage::from_bytes(black_box(&bytes)).unwrap();
+            parsed.verify_signature().unwrap();
+            parsed.verify_integrity().unwrap();
+            black_box(parsed);
+        });
+    });
+}
+
+fn bench_registry_lookup(c: &mut Criterion) {
+    let mut reg = PluginRegistry::new();
+    // Pre-populate with 50 plugins
+    let mut ids = Vec::new();
+    for i in 0..50 {
+        let manifest = PluginManifest::new(format!("Plugin {i}"))
+            .with_version(1, 0, 0)
+            .with_entry_point("main.js")
+            .with_permissions(PermissionSet::read_only());
+        let code = format!("console.log('Plugin {i}');");
+        let pkg = PluginPackage::create(&manifest, code.as_bytes()).unwrap();
+        let id = manifest.id.to_string();
+        ids.push(id);
+        reg.install(&pkg, RegistrySource::Local).unwrap();
+    }
+
+    let lookup_id = &ids[25]; // middle of the registry
+
+    c.bench_function("registry_lookup", |b| {
+        b.iter(|| {
+            let result = reg.get(black_box(lookup_id));
+            black_box(result).unwrap();
+        });
+    });
+}
+
+fn bench_registry_install(c: &mut Criterion) {
+    let manifest = PluginManifest::new("Install Bench")
+        .with_version(1, 0, 0)
+        .with_entry_point("main.js")
+        .with_permissions(PermissionSet::read_only());
+    let code = b"console.log('install bench');";
+    let mut pkg = PluginPackage::create(&manifest, code).unwrap();
+    let kp = PluginKeyPair::generate();
+    pkg.sign(&kp);
+
+    c.bench_function("registry_install", |b| {
+        b.iter(|| {
+            let mut reg = PluginRegistry::new();
+            reg.install(black_box(&pkg), RegistrySource::Local).unwrap();
+            black_box(&reg);
+        });
+    });
+}
+
+// ─── Day 22: Marketplace Benchmarks ───
+
+fn bench_marketplace_publish(c: &mut Criterion) {
+    let manifest = PluginManifest::new("Publish Bench")
+        .with_version(1, 0, 0)
+        .with_entry_point("main.js")
+        .with_category(PluginCategory::Layout)
+        .with_permissions(PermissionSet::read_only());
+    let code = b"console.log('marketplace publish bench');";
+    let mut pkg = PluginPackage::create(&manifest, code).unwrap();
+    let kp = PluginKeyPair::generate();
+    pkg.sign(&kp);
+
+    c.bench_function("marketplace_publish", |b| {
+        b.iter(|| {
+            let mut client = MarketplaceClient::new();
+            let listing = client.publish(black_box(pkg.clone()), "pub_key").unwrap();
+            black_box(listing);
+        });
+    });
+}
+
+fn bench_marketplace_search(c: &mut Criterion) {
+    let mut client = MarketplaceClient::new();
+    // Pre-populate with 50 plugins
+    for i in 0..50 {
+        let manifest = PluginManifest::new(format!("Plugin {i}"))
+            .with_version(1, 0, 0)
+            .with_entry_point("main.js")
+            .with_category(if i % 3 == 0 {
+                PluginCategory::Layout
+            } else if i % 3 == 1 {
+                PluginCategory::Color
+            } else {
+                PluginCategory::Export
+            })
+            .with_tag(if i % 2 == 0 { "grid" } else { "color" })
+            .with_permissions(PermissionSet::read_only());
+        let code = format!("console.log('Plugin {i}');");
+        let pkg = PluginPackage::create(&manifest, code.as_bytes()).unwrap();
+        client.publish(pkg, "pk").unwrap();
+    }
+
+    c.bench_function("marketplace_search_query", |b| {
+        b.iter(|| {
+            let results = client.search(
+                black_box(&MarketplaceSearch::new().with_query("Plugin 2")),
+            );
+            black_box(results);
+        });
+    });
+
+    c.bench_function("marketplace_search_category", |b| {
+        b.iter(|| {
+            let results = client.search(
+                black_box(&MarketplaceSearch::new().with_category(PluginCategory::Layout)),
+            );
+            black_box(results);
+        });
+    });
+
+    c.bench_function("marketplace_search_sorted", |b| {
+        b.iter(|| {
+            let results = client.search(
+                black_box(
+                    &MarketplaceSearch::new()
+                        .sorted_by(SortOrder::Downloads)
+                        .with_limit(10),
+                ),
+            );
+            black_box(results);
+        });
+    });
+}
+
+fn bench_marketplace_download(c: &mut Criterion) {
+    let mut client = MarketplaceClient::new();
+    let manifest = PluginManifest::new("Download Bench")
+        .with_version(1, 0, 0)
+        .with_entry_point("main.js")
+        .with_permissions(PermissionSet::read_only());
+    let code = b"console.log('download bench');";
+    let mut pkg = PluginPackage::create(&manifest, code).unwrap();
+    let kp = PluginKeyPair::generate();
+    pkg.sign(&kp);
+    let id = manifest.id.to_string();
+    client.publish(pkg, "pk").unwrap();
+
+    c.bench_function("marketplace_download", |b| {
+        b.iter(|| {
+            let result = client.download(black_box(&id)).unwrap();
+            black_box(result);
+        });
+    });
+}
+
+fn bench_publisher_check(c: &mut Criterion) {
+    let mut publishers = TrustedPublishers::new();
+    // Add 20 publishers
+    for i in 0..20 {
+        publishers.add_publisher(
+            PublisherInfo::new(format!("Publisher {i}"), format!("key_{i:032x}"))
+                .with_trust_level(TrustLevel::Verified),
+        );
+    }
+
+    c.bench_function("publisher_trust_check", |b| {
+        b.iter(|| {
+            let trusted = publishers.is_trusted(black_box("key_00000000000000000000000000000010"));
+            black_box(trusted);
+        });
+    });
+}
+
+fn bench_package_builder(c: &mut Criterion) {
+    let kp = PluginKeyPair::generate();
+
+    c.bench_function("package_builder_full", |b| {
+        b.iter(|| {
+            let pkg = PackageBuilder::new()
+                .manifest(
+                    PluginManifest::new("Built Plugin")
+                        .with_version(1, 0, 0)
+                        .with_entry_point("main.js")
+                        .with_category(PluginCategory::Layout)
+                        .with_permissions(PermissionSet::read_only()),
+                )
+                .code("console.log('built');")
+                .icon(IconSize::Small, vec![0x89, 0x50])
+                .build()
+                .unwrap();
+            black_box(pkg);
+        });
+    });
+
+    c.bench_function("package_builder_signed", |b| {
+        let key_bytes = *kp.private_key_bytes();
+        b.iter(|| {
+            let pkg = PackageBuilder::new()
+                .manifest(
+                    PluginManifest::new("Signed Built")
+                        .with_version(1, 0, 0)
+                        .with_entry_point("main.js")
+                        .with_permissions(PermissionSet::read_only()),
+                )
+                .code("console.log('signed built');")
+                .sign_with(PluginKeyPair::from_bytes(&key_bytes))
+                .build()
+                .unwrap();
+            black_box(pkg);
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_sandbox_create,
@@ -554,5 +843,16 @@ criterion_group!(
     bench_ui_bridge_dispatch,
     bench_ui_permission_check,
     bench_ui_create_panel_js,
+    bench_manifest_parse,
+    bench_signature_verify,
+    bench_package_create,
+    bench_package_verify,
+    bench_registry_lookup,
+    bench_registry_install,
+    bench_marketplace_publish,
+    bench_marketplace_search,
+    bench_marketplace_download,
+    bench_publisher_check,
+    bench_package_builder,
 );
 criterion_main!(benches);

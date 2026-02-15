@@ -26,6 +26,7 @@
 //! Reference: Software Architecture: The Hard Parts — Plugin Contracts
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -59,6 +60,54 @@ impl SemVer {
 impl std::fmt::Display for SemVer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+/// Plugin category for marketplace browsing and discovery.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum PluginCategory {
+    /// Layout and alignment tools
+    Layout,
+    /// Color and styling tools
+    Color,
+    /// Typography tools
+    Typography,
+    /// Export and publishing
+    Export,
+    /// Accessibility checkers
+    Accessibility,
+    /// Animation and motion
+    Animation,
+    /// Collaboration tools
+    Collaboration,
+    /// Developer tools and debugging
+    DevTools,
+    /// Asset management
+    Assets,
+    /// Other / uncategorized
+    Other,
+}
+
+impl std::fmt::Display for PluginCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Layout => write!(f, "layout"),
+            Self::Color => write!(f, "color"),
+            Self::Typography => write!(f, "typography"),
+            Self::Export => write!(f, "export"),
+            Self::Accessibility => write!(f, "accessibility"),
+            Self::Animation => write!(f, "animation"),
+            Self::Collaboration => write!(f, "collaboration"),
+            Self::DevTools => write!(f, "devtools"),
+            Self::Assets => write!(f, "assets"),
+            Self::Other => write!(f, "other"),
+        }
+    }
+}
+
+impl Default for PluginCategory {
+    fn default() -> Self {
+        Self::Other
     }
 }
 
@@ -101,6 +150,17 @@ pub struct PluginManifest {
     pub icon: Option<String>,
     /// Homepage URL
     pub homepage: Option<String>,
+    // ─── Marketplace Metadata (Day 22) ───
+    /// UI entry point (HTML file for panel rendering)
+    pub ui_entry_point: Option<String>,
+    /// Plugin category for marketplace browsing
+    pub category: PluginCategory,
+    /// License identifier (SPDX, e.g. "MIT", "Apache-2.0")
+    pub license: Option<String>,
+    /// Source repository URL
+    pub repository: Option<String>,
+    /// Icon map: size → PNG data path (16, 48, 128 px)
+    pub icons: HashMap<u16, String>,
 }
 
 impl PluginManifest {
@@ -121,6 +181,11 @@ impl PluginManifest {
             tags: Vec::new(),
             icon: None,
             homepage: None,
+            ui_entry_point: None,
+            category: PluginCategory::Other,
+            license: None,
+            repository: None,
+            icons: HashMap::new(),
         }
     }
 
@@ -157,6 +222,48 @@ impl PluginManifest {
     /// Builder: add a command.
     pub fn with_command(mut self, cmd: PluginCommand) -> Self {
         self.commands.push(cmd);
+        self
+    }
+
+    /// Builder: set UI entry point (HTML file for panel rendering).
+    pub fn with_ui_entry_point(mut self, entry: impl Into<String>) -> Self {
+        self.ui_entry_point = Some(entry.into());
+        self
+    }
+
+    /// Builder: set category.
+    pub fn with_category(mut self, category: PluginCategory) -> Self {
+        self.category = category;
+        self
+    }
+
+    /// Builder: set license (SPDX identifier).
+    pub fn with_license(mut self, license: impl Into<String>) -> Self {
+        self.license = Some(license.into());
+        self
+    }
+
+    /// Builder: set repository URL.
+    pub fn with_repository(mut self, repo: impl Into<String>) -> Self {
+        self.repository = Some(repo.into());
+        self
+    }
+
+    /// Builder: add an icon at a specific size.
+    pub fn with_icon(mut self, size: u16, path: impl Into<String>) -> Self {
+        self.icons.insert(size, path.into());
+        self
+    }
+
+    /// Builder: set description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
+    }
+
+    /// Builder: add a tag.
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.push(tag.into());
         self
     }
 
@@ -324,5 +431,77 @@ mod tests {
         assert!(json.contains("\"name\":\"Test\""));
         let parsed: PluginManifest = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.name, "Test");
+    }
+
+    // ─── Marketplace Metadata Tests (Day 22) ───
+
+    #[test]
+    fn test_manifest_marketplace_fields() {
+        let m = PluginManifest::new("Market Plugin")
+            .with_entry_point("main.js")
+            .with_ui_entry_point("panel.html")
+            .with_category(PluginCategory::Layout)
+            .with_license("MIT")
+            .with_repository("https://github.com/logos/auto-grid")
+            .with_description("Auto grid plugin")
+            .with_tag("grid")
+            .with_tag("layout")
+            .with_icon(16, "icons/16.png")
+            .with_icon(48, "icons/48.png")
+            .with_icon(128, "icons/128.png");
+
+        assert_eq!(m.ui_entry_point, Some("panel.html".into()));
+        assert_eq!(m.category, PluginCategory::Layout);
+        assert_eq!(m.license, Some("MIT".into()));
+        assert_eq!(m.repository, Some("https://github.com/logos/auto-grid".into()));
+        assert_eq!(m.description, "Auto grid plugin");
+        assert_eq!(m.tags, vec!["grid", "layout"]);
+        assert_eq!(m.icons.len(), 3);
+        assert_eq!(m.icons.get(&16), Some(&"icons/16.png".into()));
+    }
+
+    #[test]
+    fn test_plugin_category_display() {
+        assert_eq!(PluginCategory::Layout.to_string(), "layout");
+        assert_eq!(PluginCategory::Color.to_string(), "color");
+        assert_eq!(PluginCategory::Typography.to_string(), "typography");
+        assert_eq!(PluginCategory::Export.to_string(), "export");
+        assert_eq!(PluginCategory::Accessibility.to_string(), "accessibility");
+        assert_eq!(PluginCategory::Animation.to_string(), "animation");
+        assert_eq!(PluginCategory::Collaboration.to_string(), "collaboration");
+        assert_eq!(PluginCategory::DevTools.to_string(), "devtools");
+        assert_eq!(PluginCategory::Assets.to_string(), "assets");
+        assert_eq!(PluginCategory::Other.to_string(), "other");
+    }
+
+    #[test]
+    fn test_plugin_category_default() {
+        assert_eq!(PluginCategory::default(), PluginCategory::Other);
+    }
+
+    #[test]
+    fn test_marketplace_manifest_serialization() {
+        let m = PluginManifest::new("Serialized")
+            .with_entry_point("main.js")
+            .with_category(PluginCategory::Color)
+            .with_license("Apache-2.0")
+            .with_icon(48, "icon48.png");
+
+        let json = serde_json::to_string(&m).unwrap();
+        let parsed: PluginManifest = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.category, PluginCategory::Color);
+        assert_eq!(parsed.license, Some("Apache-2.0".into()));
+        assert_eq!(parsed.icons.get(&48), Some(&"icon48.png".into()));
+    }
+
+    #[test]
+    fn test_manifest_defaults() {
+        let m = PluginManifest::new("Defaults");
+        assert_eq!(m.category, PluginCategory::Other);
+        assert_eq!(m.ui_entry_point, None);
+        assert_eq!(m.license, None);
+        assert_eq!(m.repository, None);
+        assert!(m.icons.is_empty());
     }
 }

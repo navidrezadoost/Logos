@@ -134,6 +134,20 @@ impl LayoutEngine {
                 },
                 ..Style::default()
             },
+            Layer::Path(path) => Style {
+                size: Size {
+                    width: Dimension::length(path.bounds.width),
+                    height: Dimension::length(path.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(path.bounds.x),
+                    top: LengthPercentageAuto::length(path.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
         }
     }
 

@@ -1,0 +1,30 @@
+{
+  "name": "Animation Tool",
+  "version": "1.0.0",
+  "author": "Logos Team",
+  "description": "Generative pattern tool — create circular, spiral, and grid patterns programmatically.",
+  "entry_point": "plugin.js",
+  "category": "Animation",
+  "license": "MIT",
+  "permissions": {
+    "document": ["read", "write"],
+    "ui": ["panel"]
+  },
+  "hooks": ["onLoad"],
+  "commands": [
+    {
+      "id": "generate-circle",
+      "label": "Generate Circle Pattern",
+      "shortcut": "Ctrl+Shift+P"
+    },
+    {
+      "id": "generate-spiral",
+      "label": "Generate Spiral Pattern"
+    },
+    {
+      "id": "undo-pattern",
+      "label": "Undo Last Pattern"
+    }
+  ],
+  "tags": ["animation", "pattern", "generative", "creative", "advanced"]
+}
