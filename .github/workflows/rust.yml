@@ -45,7 +45,7 @@ jobs:
           exit 1
         fi
     - name: Build WASM
-      run: cargo build --release --target wasm32-unknown-unknown -p logos-wasm -p logos-core -p logos-layout
+      run: cargo build --release --target wasm32-unknown-unknown -p logos-wasm
     - name: Verify logos-render tests (0 ignored)
       run: |
         RESULT=$(cargo test -p logos-render 2>&1)
