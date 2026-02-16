@@ -1,0 +1,135 @@
+name: Plugin Submission
+description: Submit your plugin to the Logos Marketplace
+title: "[Plugin]: "
+labels: ["plugin", "marketplace"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Plugin Marketplace Submission
+        
+        Thank you for building a plugin for Logos! Please fill out the details below so we can review and list your plugin in the marketplace.
+        
+        **Requirements:**
+        - A valid `plugin.toml` manifest
+        - Ed25519 signature verification
+        - Tested against Logos v2.0.0-rc.1 or later
+        - Source code available for review
+
+  - type: input
+    id: name
+    attributes:
+      label: Plugin Name
+      description: "The display name for your plugin."
+      placeholder: "My Awesome Plugin"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Plugin Version
+      description: "Semantic version of your plugin."
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: "A clear description of what your plugin does (2-4 sentences)."
+      placeholder: "This plugin adds the ability to..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Design Tools
+        - Import / Export
+        - Collaboration
+        - Automation
+        - Accessibility
+        - Analytics
+        - Theming
+        - Developer Tools
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Runtime
+      description: "Which plugin runtime does your plugin target?"
+      options:
+        - WASM (Wasmtime)
+        - JavaScript (QuickJS)
+    validations:
+      required: true
+
+  - type: input
+    id: repository
+    attributes:
+      label: Source Code URL
+      description: "Link to your plugin's source repository."
+      placeholder: "https://github.com/username/logos-plugin-example"
+    validations:
+      required: true
+
+  - type: input
+    id: download_url
+    attributes:
+      label: Download URL
+      description: "Direct link to the plugin binary/package (if hosted externally)."
+      placeholder: "https://github.com/username/plugin/releases/download/v1.0.0/plugin.wasm"
+
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permissions Required
+      description: "List the permissions declared in your `plugin.toml`."
+      placeholder: |
+        - document:read
+        - document:write
+        - selection:read
+        - ui:notifications
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / Demo
+      description: "Add screenshots or a link to a demo video showing your plugin in action."
+
+  - type: input
+    id: logos_version
+    attributes:
+      label: Minimum Logos Version
+      description: "The minimum version of Logos required."
+      placeholder: "v2.0.0-rc.1"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Submission Checklist
+      description: "Please verify the following before submitting:"
+      options:
+        - label: I have tested this plugin with the specified minimum Logos version
+          required: true
+        - label: My plugin includes a valid `plugin.toml` manifest
+          required: true
+        - label: My plugin binary is signed with my Ed25519 publisher key
+          required: true
+        - label: My plugin respects the declared permission boundaries (no undeclared host calls)
+          required: true
+        - label: My plugin source code is publicly available for review
+          required: true
+        - label: I agree to the Logos Marketplace Terms of Service
+          required: true

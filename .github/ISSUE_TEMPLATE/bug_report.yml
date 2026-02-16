@@ -1,0 +1,125 @@
+name: Bug Report
+description: Report a crash, performance issue, or unexpected behavior in Logos
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this bug! Please fill out the sections below so we can reproduce and fix the issue quickly.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Logos is affected?
+      options:
+        - Core Engine (CRDT, document model)
+        - Layout (spatial hash, Taffy, hit testing)
+        - Rendering (wgpu, GPU pipeline)
+        - Text (shaping, atlas, typography)
+        - Desktop UI (toolbars, panels, palette, tabs)
+        - Collaboration (WebSocket, sync, presence)
+        - Plugins (WASM runtime, marketplace client)
+        - Import (Figma, Sketch, SVG, PDF, XD, Canva)
+        - Marketplace (auth, API, publisher tools)
+        - AI Engine (ONNX, quantization, inference)
+        - WASM Web Target (WebGPU, JS bindings)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+      placeholder: "When I do X, Y happens instead of Z."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Open Logos desktop
+        2. Create a new document
+        3. Click '...'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened. Include error messages, stack traces, or screenshots if applicable.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Logos Version
+      description: "Run `logos-desktop --version` or check the About dialog."
+      placeholder: "v2.0.0-rc.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Linux (X11)
+        - Linux (Wayland)
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 10
+        - Windows 11
+        - Web (Chrome)
+        - Web (Firefox)
+        - Web (Safari)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: "GPU model, driver version, Rust toolchain, or any other relevant system info."
+      placeholder: |
+        GPU: NVIDIA RTX 3060
+        Driver: 535.129.03
+        Rust: 1.93.0
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Stack Trace
+      description: "Paste any relevant log output. This will be automatically formatted."
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues and this bug has not been reported before
+          required: true
+        - label: I am running the latest version of Logos
+          required: false
+        - label: I can reproduce this bug consistently
+          required: false
