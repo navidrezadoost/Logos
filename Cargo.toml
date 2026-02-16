@@ -9,6 +9,7 @@ members = [
     "logos-collab",
     "logos-plugins",
     "logos-ai",
+    "logos-import-figma",
 ]
 resolver = "2"
 
