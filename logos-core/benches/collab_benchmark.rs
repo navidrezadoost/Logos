@@ -121,5 +121,83 @@ fn bench_large_document(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_delta_generation, bench_apply_remote, bench_serialization_only, bench_large_document);
+fn bench_batch_operations(c: &mut Criterion) {
+    // ─── Measure batch vs single at various N ───
+    for batch_size in [1, 5, 10, 25, 50] {
+        let mut group = c.benchmark_group(format!("Batch N={}", batch_size));
+        group.throughput(Throughput::Elements(batch_size as u64));
+        
+        // Batch: one transaction for N inserts
+        group.bench_function("batched", |b| {
+            let doc = Document::new();
+            let mut engine = CollaborationEngine::new(&doc);
+            let layers: Vec<Layer> = (0..batch_size)
+                .map(|i| Layer::Rect(RectLayer::new(i as f32, 0.0, 50.0, 50.0)))
+                .collect();
+            
+            b.iter(|| {
+                let delta = engine.add_layers_batch(black_box(&layers)).unwrap();
+                black_box(delta);
+            })
+        });
+        
+        // Single: N separate transactions
+        group.bench_function("individual", |b| {
+            let doc = Document::new();
+            let mut engine = CollaborationEngine::new(&doc);
+            let layers: Vec<Layer> = (0..batch_size)
+                .map(|i| Layer::Rect(RectLayer::new(i as f32, 0.0, 50.0, 50.0)))
+                .collect();
+            
+            b.iter(|| {
+                for layer in &layers {
+                    let delta = engine.add_layer_local(black_box(layer.clone())).unwrap();
+                    black_box(delta);
+                }
+            })
+        });
+        
+        group.finish();
+    }
+}
+
+fn bench_batch_apply_remote(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Batch Apply Remote");
+    group.throughput(Throughput::Elements(10));
+    
+    // Generate 10 deltas
+    let doc = Document::new();
+    let mut source = CollaborationEngine::new(&doc);
+    let deltas: Vec<Vec<u8>> = (0..10)
+        .map(|i| {
+            let layer = Layer::Rect(RectLayer::new(i as f32, 0.0, 50.0, 50.0));
+            source.add_layer_local(layer).unwrap()
+        })
+        .collect();
+    let delta_refs: Vec<&[u8]> = deltas.iter().map(|d| d.as_slice()).collect();
+    
+    group.bench_function("batched_10", |b| {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        
+        b.iter(|| {
+            engine.apply_remote_updates_batch(black_box(&delta_refs)).unwrap();
+        })
+    });
+    
+    group.bench_function("individual_10", |b| {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        
+        b.iter(|| {
+            for delta in &deltas {
+                engine.apply_remote_update(black_box(delta)).unwrap();
+            }
+        })
+    });
+    
+    group.finish();
+}
+
+criterion_group!(benches, bench_delta_generation, bench_apply_remote, bench_serialization_only, bench_large_document, bench_batch_operations, bench_batch_apply_remote);
 criterion_main!(benches);
