@@ -6,6 +6,7 @@ use logos_render::bridge::{
     collect_instances, collect_instances_direct, collect_instances_direct_into,
     collect_instances_into, collect_instances_fast, prepare_layer_data,
 };
+use logos_render::frame_cache::FrameCache;
 use logos_core::{Layer, RectLayer};
 use logos_core::collab::CollabOp;
 use logos_layout::engine::LayoutEngine;
@@ -375,5 +376,216 @@ criterion_group!(
     bench_collect_instances_from_engine,
     bench_collect_instances_fast,
     bench_pipeline_modify_recompute_fast,
+    bench_frame_cache_rebuild,
+    bench_frame_cache_steady_state,
+    bench_frame_cache_incremental_1,
+    bench_frame_cache_incremental_10,
+    bench_frame_cache_full_pipeline,
 );
 criterion_main!(benches);
+
+// ===================================================================
+// Frame-coherence benchmarks (retained instance buffer)
+// ===================================================================
+
+/// Frame cache: full rebuild (structural change)
+fn bench_frame_cache_rebuild(c: &mut Criterion) {
+    let mut group = c.benchmark_group("frame_cache_rebuild");
+
+    for &count in &[100, 1_000] {
+        let (engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let mut cache = FrameCache::new();
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let update = cache.rebuild(black_box(&engine), black_box(&layer_refs));
+                    black_box(update.total);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Frame cache: steady state — no changes, incremental returns immediately.
+fn bench_frame_cache_steady_state(c: &mut Criterion) {
+    let mut group = c.benchmark_group("frame_cache_steady");
+
+    for &count in &[100, 1_000] {
+        let (engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &layer_refs);
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    // No changes → empty slice
+                    let update = cache.update_incremental(black_box(&engine), black_box(&[]));
+                    black_box(update.skipped);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Frame cache: incremental update — 1 layer changed out of N.
+fn bench_frame_cache_incremental_1(c: &mut Criterion) {
+    let mut group = c.benchmark_group("frame_cache_incr_1");
+
+    for &count in &[100, 1_000] {
+        let (mut engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &layer_refs);
+
+        let target = layers[0].0;
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    // 1. Modify one layer
+                    engine
+                        .update_dimension(
+                            target,
+                            logos_layout::bridge::DimAxis::Width,
+                            black_box(120.0),
+                        )
+                        .unwrap();
+                    // 2. Recompute (subtree-only)
+                    engine.compute_layout(target).unwrap();
+                    // 3. Drain changed
+                    let changed = engine.drain_changed();
+                    // 4. Incremental update (patches 1 slot)
+                    let update = cache.update_incremental(&engine, &changed);
+                    black_box(update.updated);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Frame cache: incremental update — 10 layers changed out of N.
+fn bench_frame_cache_incremental_10(c: &mut Criterion) {
+    let mut group = c.benchmark_group("frame_cache_incr_10");
+
+    for &count in &[100, 1_000] {
+        let (mut engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &layer_refs);
+
+        // Pick 10 targets spaced evenly
+        let step = count / 10;
+        let targets: Vec<Uuid> = (0..10).map(|i| layers[i * step].0).collect();
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    // 1. Modify 10 layers
+                    for &t in &targets {
+                        engine
+                            .update_dimension(
+                                t,
+                                logos_layout::bridge::DimAxis::Width,
+                                black_box(120.0),
+                            )
+                            .unwrap();
+                        engine.compute_layout(t).unwrap();
+                    }
+                    // 2. Drain all changed
+                    let changed = engine.drain_changed();
+                    // 3. Incremental update (patches 10 slots)
+                    let update = cache.update_incremental(&engine, &changed);
+                    black_box(update.updated);
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Full pipeline comparison: modify → compute → collect_fast  vs  modify → compute → incremental
+fn bench_frame_cache_full_pipeline(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pipeline_coherence");
+
+    for &count in &[100, 1_000] {
+        // --- Baseline: collect_fast (rebuilds all instances every frame) ---
+        {
+            let (mut engine, layers) = setup_scene(count);
+            let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+            let (ids, colors) = prepare_layer_data(&layer_refs);
+            let mut buf: Vec<RectInstance> = Vec::with_capacity(count);
+            let target = layers[0].0;
+
+            group.bench_with_input(
+                BenchmarkId::new("collect_fast", count),
+                &count,
+                |b, _| {
+                    b.iter(|| {
+                        engine
+                            .update_dimension(
+                                target,
+                                logos_layout::bridge::DimAxis::Width,
+                                black_box(120.0),
+                            )
+                            .unwrap();
+                        engine.compute_layout(target).unwrap();
+                        let _ = engine.drain_changed(); // drain to keep parity
+                        collect_instances_fast(&engine, black_box(&ids), &colors, &mut buf);
+                        black_box(buf.len());
+                    });
+                },
+            );
+        }
+
+        // --- New: frame cache incremental (patches 1 slot) ---
+        {
+            let (mut engine, layers) = setup_scene(count);
+            let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+            let mut cache = FrameCache::new();
+            cache.rebuild(&engine, &layer_refs);
+            let target = layers[0].0;
+
+            group.bench_with_input(
+                BenchmarkId::new("frame_cache", count),
+                &count,
+                |b, _| {
+                    b.iter(|| {
+                        engine
+                            .update_dimension(
+                                target,
+                                logos_layout::bridge::DimAxis::Width,
+                                black_box(120.0),
+                            )
+                            .unwrap();
+                        engine.compute_layout(target).unwrap();
+                        let changed = engine.drain_changed();
+                        let update = cache.update_incremental(&engine, &changed);
+                        black_box(update.updated);
+                        // The buffer is ready — no re-collect needed.
+                        black_box(cache.instances().len());
+                    });
+                },
+            );
+        }
+    }
+
+    group.finish();
+}

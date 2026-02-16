@@ -43,6 +43,10 @@ pub struct LayoutEngine {
 
     /// Reusable buffer for `compute_layout` to avoid per-call allocation.
     node_buf: Vec<(Uuid, NodeId)>,
+
+    /// IDs whose layout actually changed during the most recent `compute_layout`.
+    /// Consumers can call `drain_changed()` to retrieve and clear this list.
+    recently_changed: Vec<Uuid>,
 }
 
 impl Default for LayoutEngine {
@@ -71,6 +75,7 @@ impl LayoutEngine {
             layout_results: FxHashMap::default(),
             spatial: SpatialHash::new(cell_size),
             node_buf: Vec::new(),
+            recently_changed: Vec::new(),
         }
     }
 
@@ -286,6 +291,7 @@ impl LayoutEngine {
                         new_layout.size.height,
                     );
                     self.spatial.insert(id, aabb);
+                    self.recently_changed.push(id);
                 }
 
                 self.layout_results.insert(id, new_layout);
@@ -319,6 +325,23 @@ impl LayoutEngine {
     /// Retrieve the cached layout for a layer.
     pub fn get_layout(&self, id: Uuid) -> Option<&Layout> {
         self.layout_results.get(&id)
+    }
+
+    /// Drain the list of layer IDs whose layout actually changed
+    /// during the most recent `compute_layout()` call(s).
+    ///
+    /// Returns the changed IDs and clears the internal list.
+    /// Useful for incremental renderers that only need to update
+    /// instances for layers that actually moved/resized.
+    #[inline]
+    pub fn drain_changed(&mut self) -> Vec<Uuid> {
+        std::mem::take(&mut self.recently_changed)
+    }
+
+    /// Check whether any layouts changed since the last `drain_changed()`.
+    #[inline]
+    pub fn has_changes(&self) -> bool {
+        !self.recently_changed.is_empty()
     }
 
     /// Batch-lookup layouts for a list of IDs.

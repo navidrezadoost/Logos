@@ -33,6 +33,7 @@ pub mod vertex;
 pub mod pipelines;
 pub mod renderer;
 pub mod bridge;
+pub mod frame_cache;
 
 // Re-exports for convenience
 pub use context::GpuContext;
