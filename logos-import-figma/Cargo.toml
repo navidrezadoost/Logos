@@ -1,0 +1,21 @@
+[package]
+name = "logos-import-figma"
+version = "0.1.0"
+edition = "2021"
+description = "Figma (.fig) file format importer for Logos"
+
+[dependencies]
+logos-core = { path = "../logos-core" }
+flate2 = "1.1"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.20", features = ["v4"] }
+log = "0.4"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "import_benchmark"
+harness = false

@@ -9,6 +9,16 @@ members = [
     "logos-collab",
     "logos-plugins",
     "logos-ai",
+    "logos-import-figma",
+    "logos-import-common",
+    "logos-import-svg",
+    "logos-import-sketch",
+    "logos-import-pdf",
+    "logos-import-xd",
+    "logos-import-canva",
+    "logos-marketplace-auth",
+    "logos-marketplace-db",
+    "logos-marketplace-api",
 ]
 resolver = "2"
 

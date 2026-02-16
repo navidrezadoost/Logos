@@ -19,6 +19,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -789,6 +795,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc32fast"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1168,6 +1183,16 @@ name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
+name = "flate2"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide",
+]
 
 [[package]]
 name = "float-ord"
@@ -2026,12 +2051,113 @@ dependencies = [
  "logos-collab",
  "logos-core",
  "logos-layout",
+ "logos-marketplace-api",
+ "logos-marketplace-auth",
+ "logos-marketplace-db",
  "logos-render",
  "logos-text",
  "pollster",
+ "serde",
+ "serde_json",
  "uuid",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "logos-import-canva"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-common"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-figma"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "flate2",
+ "log",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-pdf"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-sketch"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "flate2",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-svg"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-xd"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "flate2",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -2044,6 +2170,48 @@ dependencies = [
  "rustc-hash 2.1.1",
  "serde_json",
  "taffy",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-marketplace-api"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-marketplace-auth",
+ "logos-marketplace-db",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-marketplace-auth"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-marketplace-db"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-marketplace-auth",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "uuid",
 ]
@@ -2190,6 +2358,16 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
+name = "miniz_oxide"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
+dependencies = [
+ "adler2",
+ "simd-adler32",
+]
 
 [[package]]
 name = "mio"
@@ -3461,6 +3639,12 @@ dependencies = [
  "errno",
  "libc",
 ]
+
+[[package]]
+name = "simd-adler32"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
 
 [[package]]
 name = "siphasher"

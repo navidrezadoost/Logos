@@ -30,3 +30,8 @@ harness = false
 name = "onnx_benchmark"
 harness = false
 required-features = ["onnx"]
+
+[[bench]]
+name = "quantization_benchmark"
+harness = false
+required-features = ["onnx"]

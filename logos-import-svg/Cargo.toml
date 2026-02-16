@@ -1,0 +1,19 @@
+[package]
+name = "logos-import-svg"
+version = "0.1.0"
+edition = "2021"
+description = "SVG file format importer for Logos"
+
+[dependencies]
+logos-core = { path = "../logos-core" }
+logos-import-common = { path = "../logos-import-common" }
+thiserror = "2.0"
+uuid = { version = "1.20", features = ["v4"] }
+log = "0.4"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "svg_benchmark"
+harness = false
