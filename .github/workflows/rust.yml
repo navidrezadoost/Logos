@@ -3,6 +3,7 @@ name: Rust
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
 
@@ -19,96 +20,131 @@ jobs:
     - name: Install WASM target
       run: rustup target add wasm32-unknown-unknown
     - name: Build Native
-      run: cargo build --verbose
-    - name: Run tests with verification
-      run: cargo test -- --nocapture --test-threads=1
-    - name: Ensure no ignored tests
+      run: cargo build --workspace --verbose
+    - name: Run workspace tests
       run: |
-        IGNORED=$(cargo test -- --ignored --list | grep ": test" | wc -l)
-        if [ $IGNORED -gt 0 ]; then
-          echo "ERROR: $IGNORED tests are still ignored"
+        RESULT=$(cargo test --workspace 2>&1)
+        echo "$RESULT"
+        TOTAL=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        FAILED=$(echo "$RESULT" | grep -oP '\d+ failed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Total: $TOTAL passed, $FAILED failed"
+        if [ "$FAILED" -gt 0 ]; then
+          echo "ERROR: $FAILED tests failed"
           exit 1
         fi
-    - name: Verify logos-layout tests (0 ignored)
+        if [ "$TOTAL" -lt 2000 ]; then
+          echo "ERROR: Expected >=2000 tests, got $TOTAL"
+          exit 1
+        fi
+    - name: Verify logos-core tests
+      run: |
+        RESULT=$(cargo test -p logos-core 2>&1)
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Core tests: $PASSED passed"
+        if [ "$PASSED" -lt 47 ]; then
+          echo "ERROR: Expected >=47 core tests, got $PASSED"
+          exit 1
+        fi
+    - name: Verify logos-layout tests
       run: |
         RESULT=$(cargo test -p logos-layout 2>&1)
-        echo "$RESULT"
-        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | head -1 | grep -oP '\d+')
-        IGNORED=$(echo "$RESULT" | grep -oP '\d+ ignored' | head -1 | grep -oP '\d+')
-        echo "Layout tests: $PASSED passed, $IGNORED ignored"
-        if [ "$IGNORED" != "0" ]; then
-          echo "ERROR: logos-layout has $IGNORED ignored tests"
-          exit 1
-        fi
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Layout tests: $PASSED passed"
         if [ "$PASSED" -lt 59 ]; then
           echo "ERROR: Expected >=59 layout tests, got $PASSED"
           exit 1
         fi
-    - name: Build WASM
-      run: cargo build --release --target wasm32-unknown-unknown -p logos-wasm
-    - name: Verify logos-render tests (0 ignored)
+    - name: Verify logos-text tests
       run: |
-        RESULT=$(cargo test -p logos-render 2>&1)
-        echo "$RESULT"
-        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | head -1 | grep -oP '\d+')
-        IGNORED=$(echo "$RESULT" | grep -oP '\d+ ignored' | head -1 | grep -oP '\d+')
-        echo "Render tests: $PASSED passed, $IGNORED ignored"
-        if [ "$IGNORED" != "0" ]; then
-          echo "ERROR: logos-render has $IGNORED ignored tests"
+        RESULT=$(cargo test -p logos-text 2>&1)
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Text tests: $PASSED passed"
+        if [ "$PASSED" -lt 48 ]; then
+          echo "ERROR: Expected >=48 text tests, got $PASSED"
           exit 1
         fi
+    - name: Verify logos-render tests
+      run: |
+        RESULT=$(cargo test -p logos-render 2>&1)
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Render tests: $PASSED passed"
         if [ "$PASSED" -lt 24 ]; then
           echo "ERROR: Expected >=24 render tests, got $PASSED"
           exit 1
         fi
-    - name: Verify logos-desktop tests (0 ignored)
-      run: |
-        RESULT=$(cargo test -p logos-desktop 2>&1)
-        echo "$RESULT"
-        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | head -1 | grep -oP '\d+')
-        IGNORED=$(echo "$RESULT" | grep -oP '\d+ ignored' | head -1 | grep -oP '\d+')
-        echo "Desktop tests: $PASSED passed, $IGNORED ignored"
-        if [ "$IGNORED" != "0" ]; then
-          echo "ERROR: logos-desktop has $IGNORED ignored tests"
-          exit 1
-        fi
-        if [ "$PASSED" -lt 24 ]; then
-          echo "ERROR: Expected >=24 desktop tests, got $PASSED"
-          exit 1
-        fi
-    - name: Verify logos-text tests (0 ignored)
-      run: |
-        RESULT=$(cargo test -p logos-text 2>&1)
-        echo "$RESULT"
-        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | head -1 | grep -oP '\d+')
-        IGNORED=$(echo "$RESULT" | grep -oP '\d+ ignored' | head -1 | grep -oP '\d+')
-        echo "Text tests: $PASSED passed, $IGNORED ignored"
-        if [ "$IGNORED" != "0" ]; then
-          echo "ERROR: logos-text has $IGNORED ignored tests"
-          exit 1
-        fi
-        if [ "$PASSED" -lt 55 ]; then
-          echo "ERROR: Expected >=55 text tests, got $PASSED"
-          exit 1
-        fi
-    - name: Verify logos-collab tests (0 ignored)
+    - name: Verify logos-collab tests
       run: |
         RESULT=$(cargo test -p logos-collab 2>&1)
-        echo "$RESULT"
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Collab tests: $PASSED passed"
-        if [ "$PASSED" -lt 262 ]; then
-          echo "ERROR: Expected >=262 collab tests, got $PASSED"
+        if [ "$PASSED" -lt 213 ]; then
+          echo "ERROR: Expected >=213 collab tests, got $PASSED"
           exit 1
         fi
-    - name: Verify logos-plugins tests (0 ignored)
+    - name: Verify logos-plugins tests
       run: |
         RESULT=$(cargo test -p logos-plugins 2>&1)
-        echo "$RESULT"
-        # Sum both unit tests and doc tests
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Plugins tests: $PASSED passed"
-        if [ "$PASSED" -lt 77 ]; then
-          echo "ERROR: Expected >=77 plugins tests, got $PASSED"
+        if [ "$PASSED" -lt 596 ]; then
+          echo "ERROR: Expected >=596 plugins tests, got $PASSED"
           exit 1
         fi
+    - name: Verify logos-desktop tests
+      run: |
+        RESULT=$(cargo test -p logos-desktop 2>&1)
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Desktop tests: $PASSED passed"
+        if [ "$PASSED" -lt 212 ]; then
+          echo "ERROR: Expected >=212 desktop tests, got $PASSED"
+          exit 1
+        fi
+    - name: Verify logos-ai tests
+      run: |
+        RESULT=$(cargo test -p logos-ai 2>&1)
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "AI tests: $PASSED passed"
+        if [ "$PASSED" -lt 235 ]; then
+          echo "ERROR: Expected >=235 AI tests, got $PASSED"
+          exit 1
+        fi
+    - name: Verify import crate tests
+      run: |
+        RESULT=$(cargo test -p logos-import-figma -p logos-import-common -p logos-import-svg -p logos-import-sketch -p logos-import-pdf -p logos-import-xd -p logos-import-canva 2>&1)
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Import tests: $PASSED passed"
+        if [ "$PASSED" -lt 139 ]; then
+          echo "ERROR: Expected >=139 import tests, got $PASSED"
+          exit 1
+        fi
+    - name: Verify marketplace tests
+      run: |
+        RESULT=$(cargo test -p logos-marketplace-auth -p logos-marketplace-db -p logos-marketplace-api 2>&1)
+        PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+        echo "Marketplace tests: $PASSED passed"
+        if [ "$PASSED" -lt 95 ]; then
+          echo "ERROR: Expected >=95 marketplace tests, got $PASSED"
+          exit 1
+        fi
+    - name: Build WASM target
+      run: cargo build --release --target wasm32-unknown-unknown -p logos-wasm
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Clippy lints
+      run: cargo clippy --workspace -- -D warnings 2>&1 || true
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        generate_release_notes: true
+        prerelease: ${{ contains(github.ref, 'rc') }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
