@@ -14,7 +14,7 @@ pub struct SpatialHash {
     pub cell_size: f32,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default)]
 pub struct Point {
     pub x: f32,
     pub y: f32,
@@ -26,7 +26,7 @@ impl Point {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default)]
 pub struct Rect {
     pub x: f32,
     pub y: f32,
