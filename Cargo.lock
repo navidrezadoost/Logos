@@ -2552,6 +2552,7 @@ dependencies = [
  "logos-core",
  "serde",
  "serde_json",
+ "toml",
  "uuid",
  "wasmtime",
 ]
