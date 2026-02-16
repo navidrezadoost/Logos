@@ -7,6 +7,12 @@
 mod state;
 pub mod presence;
 pub mod marketplace;
+pub mod commands;
+pub mod shortcuts;
+pub mod toolbar;
+pub mod panels;
+pub mod palette;
+pub mod tabs;
 
 use log::info;
 use std::sync::Arc;
