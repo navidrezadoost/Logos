@@ -18,6 +18,7 @@
 //! ```
 
 use crate::engine::JsEngine;
+use crate::engine::WasmRuntime;
 use crate::host::PluginHost;
 use crate::manifest::PluginManifest;
 use crate::runtime::{PluginValue, ResourceLimits, RuntimeError, RuntimeResult, Sandbox};
@@ -56,11 +57,14 @@ impl std::fmt::Display for PluginState {
 ///
 /// - `Sandbox`: Day 18 placeholder expression evaluator (for non-JS plugins)
 /// - `JavaScript`: Real boa_engine ES2023 runtime (Day 19)
+/// - `Wasm`: Wasmtime WebAssembly runtime with fuel metering
 pub enum PluginRuntime {
     /// Placeholder expression evaluator
     Sandbox(Sandbox),
     /// Real JavaScript engine (boa_engine ES2023)
     JavaScript(JsEngine),
+    /// Wasmtime WASM sandbox with host function bridge
+    Wasm(WasmRuntime),
 }
 
 /// A running plugin instance.
@@ -92,6 +96,15 @@ impl PluginInstance {
         }
     }
 
+    /// Create a new instance from manifest + WasmRuntime.
+    fn new_wasm(manifest: PluginManifest, wasm_rt: WasmRuntime) -> Self {
+        Self {
+            manifest,
+            runtime: PluginRuntime::Wasm(wasm_rt),
+            state: PluginState::Ready,
+        }
+    }
+
     /// Execute a script in this plugin's runtime.
     pub fn execute(&mut self, script: &str) -> RuntimeResult<PluginValue> {
         if self.state == PluginState::Stopped {
@@ -108,6 +121,7 @@ impl PluginInstance {
         let result = match &mut self.runtime {
             PluginRuntime::Sandbox(sb) => sb.execute(script),
             PluginRuntime::JavaScript(engine) => engine.execute(script),
+            PluginRuntime::Wasm(wasm_rt) => wasm_rt.execute(script),
         };
         self.state = match &result {
             Ok(_) => PluginState::Ready,
@@ -121,6 +135,7 @@ impl PluginInstance {
         match &mut self.runtime {
             PluginRuntime::Sandbox(sb) => sb.kill(),
             PluginRuntime::JavaScript(engine) => engine.kill(),
+            PluginRuntime::Wasm(wasm_rt) => wasm_rt.kill(),
         }
         self.state = PluginState::Stopped;
     }
@@ -157,6 +172,7 @@ impl PluginManager {
     /// Load a plugin from its manifest.
     ///
     /// For `.js` entry points, uses the real JavaScript engine (boa_engine).
+    /// For `.wasm` entry points, uses the Wasmtime WASM runtime.
     /// For other entry points, uses the placeholder Sandbox evaluator.
     pub fn load(&mut self, manifest: PluginManifest) -> RuntimeResult<()> {
         // Validate manifest
@@ -192,8 +208,14 @@ impl PluginManager {
             .unwrap_or_default();
 
         let use_js = manifest.entry_point.ends_with(".js");
+        let use_wasm = manifest.entry_point.ends_with(".wasm");
 
-        let instance = if use_js {
+        let instance = if use_wasm {
+            // Wasmtime WASM runtime
+            let mut wasm_rt = WasmRuntime::new(&manifest.name, limits, manifest.permissions.clone())?;
+            wasm_rt.register_document(Arc::clone(&self.document));
+            PluginInstance::new_wasm(manifest, wasm_rt)
+        } else if use_js {
             // Real JavaScript engine (Day 19)
             let mut engine = JsEngine::new(&manifest.name, limits, manifest.permissions.clone());
             engine.register_document(Arc::clone(&self.document));

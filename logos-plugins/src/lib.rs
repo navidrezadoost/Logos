@@ -47,7 +47,7 @@ pub mod runtime;
 pub mod signing;
 
 // Re-export key types for convenience
-pub use engine::{EventBus, JsEngine, UiBridge};
+pub use engine::{EventBus, JsEngine, UiBridge, WasmRuntime};
 pub use host::PluginHost;
 pub use marketplace::{MarketplaceClient, PackageBuilder, TrustedPublishers};
 pub use manager::{PluginInstance, PluginManager, PluginRuntime, PluginState};
