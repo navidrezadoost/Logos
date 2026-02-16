@@ -10,7 +10,23 @@ fn bench_shape_short_text(c: &mut Criterion) {
         ..Default::default()
     };
 
-    c.bench_function("shape_short_text", |b| {
+    // Cold: first shaping (uncached).
+    c.bench_function("shape_short_text_cold", |b| {
+        b.iter(|| {
+            engine.clear_shape_cache();
+            engine.shape_text(
+                black_box("Hello, Logos!"),
+                black_box(&style),
+                f32::INFINITY,
+                &mut atlas,
+            )
+        });
+    });
+
+    // Warm: cache hit (identical text + style).
+    // Prime the cache first.
+    engine.shape_text("Hello, Logos!", &style, f32::INFINITY, &mut atlas);
+    c.bench_function("shape_short_text_cached", |b| {
         b.iter(|| {
             engine.shape_text(
                 black_box("Hello, Logos!"),
@@ -35,7 +51,21 @@ fn bench_shape_paragraph(c: &mut Criterion) {
         Lorem ipsum dolor sit amet, consectetur adipiscing elit. \
         Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
 
-    c.bench_function("shape_paragraph", |b| {
+    c.bench_function("shape_paragraph_cold", |b| {
+        b.iter(|| {
+            engine.clear_shape_cache();
+            engine.shape_text(
+                black_box(paragraph),
+                black_box(&style),
+                400.0,
+                &mut atlas,
+            )
+        });
+    });
+
+    // Prime cache.
+    engine.shape_text(paragraph, &style, 400.0, &mut atlas);
+    c.bench_function("shape_paragraph_cached", |b| {
         b.iter(|| {
             engine.shape_text(
                 black_box(paragraph),
