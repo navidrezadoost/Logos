@@ -6,6 +6,7 @@
 
 mod state;
 pub mod presence;
+pub mod marketplace;
 
 use log::info;
 use std::sync::Arc;
