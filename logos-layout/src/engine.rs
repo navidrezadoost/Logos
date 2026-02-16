@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use uuid::Uuid;
 use taffy::prelude::*;
 use taffy::{TaffyTree, TaffyError, Style, Layout, NodeId};
@@ -29,17 +29,20 @@ pub struct LayoutEngine {
     taffy: TaffyTree,
 
     /// Bidirectional mapping between Layer IDs and Taffy nodes
-    layer_to_node: HashMap<Uuid, NodeId>,
-    node_to_layer: HashMap<NodeId, Uuid>,
+    layer_to_node: FxHashMap<Uuid, NodeId>,
+    node_to_layer: FxHashMap<NodeId, Uuid>,
 
     /// Dirty tracking for partial recomputation
-    dirty_nodes: HashSet<Uuid>,
+    dirty_nodes: FxHashSet<Uuid>,
 
     /// Cache of computed layouts for fast renderer access
-    layout_results: HashMap<Uuid, Layout>,
+    layout_results: FxHashMap<Uuid, Layout>,
 
     /// Spatial index updated after each layout pass.
     spatial: SpatialHash,
+
+    /// Reusable buffer for `compute_layout` to avoid per-call allocation.
+    node_buf: Vec<(Uuid, NodeId)>,
 }
 
 impl Default for LayoutEngine {
@@ -62,11 +65,12 @@ impl LayoutEngine {
     pub fn with_cell_size(cell_size: f32) -> Self {
         Self {
             taffy: TaffyTree::new(),
-            layer_to_node: HashMap::new(),
-            node_to_layer: HashMap::new(),
-            dirty_nodes: HashSet::new(),
-            layout_results: HashMap::new(),
+            layer_to_node: FxHashMap::default(),
+            node_to_layer: FxHashMap::default(),
+            dirty_nodes: FxHashSet::default(),
+            layout_results: FxHashMap::default(),
             spatial: SpatialHash::new(cell_size),
+            node_buf: Vec::new(),
         }
     }
 
@@ -252,25 +256,39 @@ impl LayoutEngine {
 
         self.taffy.compute_layout(root_node, Size::MAX_CONTENT)?;
 
-        // Walk every mapped node and cache its layout result + spatial bounds.
-        let ids: Vec<(Uuid, NodeId)> = self
-            .layer_to_node
-            .iter()
-            .map(|(&id, &node)| (id, node))
-            .collect();
+        // Reuse the node buffer to avoid per-call allocation.
+        self.node_buf.clear();
+        self.node_buf.extend(
+            self.layer_to_node.iter().map(|(&id, &node)| (id, node)),
+        );
 
-        for (id, node) in ids {
+        for i in 0..self.node_buf.len() {
+            let (id, node) = self.node_buf[i];
             if let Ok(layout) = self.taffy.layout(node) {
-                self.layout_results.insert(id, *layout);
+                let new_layout = *layout;
 
-                // Update spatial index with the computed position & size.
-                let aabb = Aabb::from_rect(
-                    layout.location.x,
-                    layout.location.y,
-                    layout.size.width,
-                    layout.size.height,
-                );
-                self.spatial.insert(id, aabb);
+                // Only update spatial index when the layout actually changed.
+                let changed = match self.layout_results.get(&id) {
+                    Some(prev) => {
+                        prev.location.x != new_layout.location.x
+                            || prev.location.y != new_layout.location.y
+                            || prev.size.width != new_layout.size.width
+                            || prev.size.height != new_layout.size.height
+                    }
+                    None => true,
+                };
+
+                if changed {
+                    let aabb = Aabb::from_rect(
+                        new_layout.location.x,
+                        new_layout.location.y,
+                        new_layout.size.width,
+                        new_layout.size.height,
+                    );
+                    self.spatial.insert(id, aabb);
+                }
+
+                self.layout_results.insert(id, new_layout);
             }
         }
 
