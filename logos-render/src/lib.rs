@@ -39,4 +39,4 @@ pub use context::GpuContext;
 pub use vertex::{RectInstance, CameraUniform, TextInstance, CursorInstance};
 pub use pipelines::cursor::CursorPipeline;
 pub use renderer::{Renderer, FrameStats};
-pub use bridge::{collect_instances, collect_instances_direct};
+pub use bridge::{collect_instances, collect_instances_direct, collect_instances_direct_into, collect_instances_into};

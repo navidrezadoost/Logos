@@ -199,5 +199,37 @@ fn bench_batch_apply_remote(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_delta_generation, bench_apply_remote, bench_serialization_only, bench_large_document, bench_batch_operations, bench_batch_apply_remote);
+fn bench_deferred_encode(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Deferred Encode");
+    group.throughput(Throughput::Elements(1));
+
+    // Deferred add (no encode)
+    group.bench_function("add_layer_deferred", |b| {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = create_test_layer();
+        
+        b.iter(|| {
+            engine.add_layer_local_deferred(black_box(layer.clone())).unwrap();
+        })
+    });
+
+    // Flush 10 deferred changes into one delta
+    group.bench_function("encode_pending_10", |b| {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        
+        b.iter(|| {
+            for _ in 0..10 {
+                engine.add_layer_local_deferred(create_test_layer()).unwrap();
+            }
+            let delta = engine.encode_pending_updates();
+            black_box(delta);
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_delta_generation, bench_apply_remote, bench_serialization_only, bench_large_document, bench_batch_operations, bench_batch_apply_remote, bench_deferred_encode);
 criterion_main!(benches);

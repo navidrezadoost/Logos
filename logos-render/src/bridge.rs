@@ -65,9 +65,68 @@ pub fn collect_instances_direct(rects: &[(f32, f32, f32, f32, [f32; 4])]) -> Vec
         .iter()
         .enumerate()
         .map(|(i, &(x, y, w, h, color))| {
-            RectInstance::new(x, y, w, h, color).with_z(i as f32)
+            RectInstance {
+                position: [x, y],
+                size: [w, h],
+                color,
+                border_radius: 0.0,
+                z_index: i as f32,
+                _pad: [0.0; 2],
+            }
         })
         .collect()
+}
+
+/// Build instances directly into a **reusable** buffer (zero per-frame allocation).
+///
+/// Call with the same `out` buffer each frame — it is cleared and refilled.
+/// This avoids Vec heap allocation on every frame.
+#[inline]
+pub fn collect_instances_direct_into(
+    rects: &[(f32, f32, f32, f32, [f32; 4])],
+    out: &mut Vec<RectInstance>,
+) {
+    out.clear();
+    out.extend(rects.iter().enumerate().map(|(i, &(x, y, w, h, color))| {
+        RectInstance {
+            position: [x, y],
+            size: [w, h],
+            color,
+            border_radius: 0.0,
+            z_index: i as f32,
+            _pad: [0.0; 2],
+        }
+    }));
+}
+
+/// Build instances from the layout engine into a **reusable** buffer.
+///
+/// Same as `collect_instances()` but avoids per-frame Vec allocation.
+#[inline]
+pub fn collect_instances_into(
+    engine: &LayoutEngine,
+    layers: &[(Uuid, &Layer)],
+    out: &mut Vec<RectInstance>,
+) {
+    out.clear();
+    out.extend(layers.iter().enumerate().filter_map(|(i, &(id, layer))| {
+        let layout = engine.get_layout(id)?;
+        let color = match layer {
+            Layer::Rect(_) => COLOR_RECT,
+            Layer::Ellipse(_) => COLOR_ELLIPSE,
+            Layer::Text(_) => COLOR_TEXT,
+            Layer::Frame(_) => COLOR_FRAME,
+            Layer::Path(_) => COLOR_PATH,
+        };
+        Some(RectInstance {
+            position: [layout.location.x, layout.location.y],
+            size: [layout.size.width, layout.size.height],
+            color,
+            border_radius: 0.0,
+            z_index: i as f32,
+            _pad: [0.0; 2],
+        })
+    }));
 }
 
 // ===================================================================

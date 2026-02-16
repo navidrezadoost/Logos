@@ -2,7 +2,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use logos_render::vertex::{RectInstance, CameraUniform, TextInstance};
-use logos_render::bridge::collect_instances_direct;
+use logos_render::bridge::{collect_instances_direct, collect_instances_direct_into};
 
 /// Generate `n` random-ish rect descriptors.
 fn make_rects(n: usize) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -35,6 +35,25 @@ fn bench_collect_instances(c: &mut Criterion) {
             |b, rects| {
                 b.iter(|| {
                     black_box(collect_instances_direct(black_box(rects)));
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_collect_instances_reuse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("collect_instances_reuse");
+    for &count in &[100, 1_000, 10_000] {
+        let rects = make_rects(count);
+        let mut buf = Vec::with_capacity(count);
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &rects,
+            |b, rects| {
+                b.iter(|| {
+                    collect_instances_direct_into(black_box(rects), &mut buf);
+                    black_box(&buf);
                 });
             },
         );
@@ -130,6 +149,7 @@ fn bench_text_instance_batch(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_collect_instances,
+    bench_collect_instances_reuse,
     bench_instance_creation,
     bench_instance_with_radius,
     bench_camera_orthographic,
