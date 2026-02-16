@@ -2060,6 +2060,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-import-canva"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-common"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "logos-import-figma"
 version = "0.1.0"
 dependencies = [
@@ -2067,6 +2093,62 @@ dependencies = [
  "flate2",
  "log",
  "logos-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-pdf"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-sketch"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "flate2",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-svg"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-import-xd"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "flate2",
+ "log",
+ "logos-core",
+ "logos-import-common",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

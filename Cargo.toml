@@ -10,6 +10,12 @@ members = [
     "logos-plugins",
     "logos-ai",
     "logos-import-figma",
+    "logos-import-common",
+    "logos-import-svg",
+    "logos-import-sketch",
+    "logos-import-pdf",
+    "logos-import-xd",
+    "logos-import-canva",
 ]
 resolver = "2"
 
