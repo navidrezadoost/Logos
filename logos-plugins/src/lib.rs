@@ -36,24 +36,31 @@
 //! - [`registry`] — Local plugin registry, install/upgrade/search
 
 pub mod engine;
+pub mod examples;
 pub mod host;
+#[cfg(test)]
+mod integration_tests;
 pub mod manifest;
 pub mod manager;
 pub mod marketplace;
+pub mod marketplace_http;
 pub mod packaging;
+pub mod permission_prompt;
 pub mod permissions;
 pub mod registry;
 pub mod runtime;
 pub mod signing;
 
 // Re-export key types for convenience
-pub use engine::{EventBus, JsEngine, UiBridge};
+pub use engine::{EventBus, JsEngine, UiBridge, WasmRuntime};
 pub use host::PluginHost;
 pub use marketplace::{MarketplaceClient, PackageBuilder, TrustedPublishers};
+pub use marketplace_http::{ApiEndpoint, ApiError, ApiResponse, DownloadProgress, DownloadState, InstallTransaction, MarketplaceHttpClient, PluginUpdate, RateLimiter, RetryPolicy, TransactionState};
 pub use manager::{PluginInstance, PluginManager, PluginRuntime, PluginState};
-pub use manifest::{PluginCategory, PluginCommand, PluginHook, PluginManifest, SemVer};
+pub use manifest::{ManifestError, PluginCategory, PluginCommand, PluginHook, PluginManifest, SemVer, TomlManifest};
 pub use packaging::{IconSize, PackageFlags, PluginPackage};
 pub use permissions::{PermissionGuard, PermissionKind, PermissionSet};
+pub use permission_prompt::{InstallApproval, PermissionDecision, PermissionPromptItem, PermissionPromptSession, RiskLevel, SavedPermissionPreferences};
 pub use registry::{InstalledPlugin, PluginFilter, PluginRegistry, RegistrySource};
 pub use runtime::{ExecutionStats, HostFn, PluginValue, ResourceLimits, RuntimeError, Sandbox};
-pub use signing::{ContentHash, PluginKeyPair, PluginPublicKey, PluginSignature, SigningContext};
+pub use signing::{CertificateChain, ContentHash, PluginKeyPair, PluginPublicKey, PluginSignature, SignatureVerifier, SigningContext, TrustCertificate, VerificationPolicy, VerificationResult};

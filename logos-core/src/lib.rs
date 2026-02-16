@@ -14,7 +14,7 @@ pub struct SpatialHash {
     pub cell_size: f32,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default)]
 pub struct Point {
     pub x: f32,
     pub y: f32,
@@ -26,7 +26,7 @@ impl Point {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default)]
 pub struct Rect {
     pub x: f32,
     pub y: f32,
@@ -36,6 +36,45 @@ pub struct Rect {
 
 pub struct RenderContext {
     // Placeholder
+}
+
+/// 2D camera representing the viewport position and zoom level.
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+pub struct Camera {
+    /// Camera X position (world coordinates).
+    pub x: f32,
+    /// Camera Y position (world coordinates).
+    pub y: f32,
+    /// Zoom level (1.0 = 100%).
+    pub zoom: f32,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Self { x: 0.0, y: 0.0, zoom: 1.0 }
+    }
+}
+
+impl Camera {
+    pub fn new(x: f32, y: f32, zoom: f32) -> Self {
+        Self { x, y, zoom }
+    }
+
+    /// Convert screen coordinates to world coordinates.
+    pub fn screen_to_world(&self, screen_x: f32, screen_y: f32) -> Point {
+        Point {
+            x: self.x + screen_x / self.zoom,
+            y: self.y + screen_y / self.zoom,
+        }
+    }
+
+    /// Convert world coordinates to screen coordinates.
+    pub fn world_to_screen(&self, world_x: f32, world_y: f32) -> Point {
+        Point {
+            x: (world_x - self.x) * self.zoom,
+            y: (world_y - self.y) * self.zoom,
+        }
+    }
 }
 
 /// Path drawing command for bezier curves and lines.
@@ -255,6 +294,12 @@ impl Document {
             .ok_or_else(|| format!("layer not found: {id}"))?;
         Ok(page.layers.remove(idx))
     }
+
+    /// Find a layer by ID, returning a clone if found.
+    pub fn find_layer_by_id(&self, id: Uuid) -> Result<Option<Layer>, String> {
+        let page = self.root.read().map_err(|e| e.to_string())?;
+        Ok(page.layers.iter().find(|l| l.id() == id).cloned())
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -306,11 +351,30 @@ pub struct EllipseLayer {
     pub bounds: Rect 
 }
 
+impl EllipseLayer {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            bounds: Rect { x, y, width, height },
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct TextLayer { 
     pub id: Uuid, 
     pub content: String, 
     pub bounds: Rect 
+}
+
+impl TextLayer {
+    pub fn new(content: &str, x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            content: content.to_string(),
+            bounds: Rect { x, y, width, height },
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

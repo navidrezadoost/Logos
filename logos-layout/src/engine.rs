@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use uuid::Uuid;
 use taffy::prelude::*;
 use taffy::{TaffyTree, TaffyError, Style, Layout, NodeId};
@@ -29,17 +29,24 @@ pub struct LayoutEngine {
     taffy: TaffyTree,
 
     /// Bidirectional mapping between Layer IDs and Taffy nodes
-    layer_to_node: HashMap<Uuid, NodeId>,
-    node_to_layer: HashMap<NodeId, Uuid>,
+    layer_to_node: FxHashMap<Uuid, NodeId>,
+    node_to_layer: FxHashMap<NodeId, Uuid>,
 
     /// Dirty tracking for partial recomputation
-    dirty_nodes: HashSet<Uuid>,
+    dirty_nodes: FxHashSet<Uuid>,
 
     /// Cache of computed layouts for fast renderer access
-    layout_results: HashMap<Uuid, Layout>,
+    layout_results: FxHashMap<Uuid, Layout>,
 
     /// Spatial index updated after each layout pass.
     spatial: SpatialHash,
+
+    /// Reusable buffer for `compute_layout` to avoid per-call allocation.
+    node_buf: Vec<(Uuid, NodeId)>,
+
+    /// IDs whose layout actually changed during the most recent `compute_layout`.
+    /// Consumers can call `drain_changed()` to retrieve and clear this list.
+    recently_changed: Vec<Uuid>,
 }
 
 impl Default for LayoutEngine {
@@ -62,11 +69,13 @@ impl LayoutEngine {
     pub fn with_cell_size(cell_size: f32) -> Self {
         Self {
             taffy: TaffyTree::new(),
-            layer_to_node: HashMap::new(),
-            node_to_layer: HashMap::new(),
-            dirty_nodes: HashSet::new(),
-            layout_results: HashMap::new(),
+            layer_to_node: FxHashMap::default(),
+            node_to_layer: FxHashMap::default(),
+            dirty_nodes: FxHashSet::default(),
+            layout_results: FxHashMap::default(),
             spatial: SpatialHash::new(cell_size),
+            node_buf: Vec::new(),
+            recently_changed: Vec::new(),
         }
     }
 
@@ -252,30 +261,61 @@ impl LayoutEngine {
 
         self.taffy.compute_layout(root_node, Size::MAX_CONTENT)?;
 
-        // Walk every mapped node and cache its layout result + spatial bounds.
-        let ids: Vec<(Uuid, NodeId)> = self
-            .layer_to_node
-            .iter()
-            .map(|(&id, &node)| (id, node))
-            .collect();
+        // Walk only the subtree rooted at `root_node` instead of ALL nodes.
+        // For independent absolute nodes (the common case), this is O(1)
+        // instead of O(total_nodes).
+        self.node_buf.clear();
+        self.collect_subtree(root_node);
 
-        for (id, node) in ids {
+        for i in 0..self.node_buf.len() {
+            let (id, node) = self.node_buf[i];
             if let Ok(layout) = self.taffy.layout(node) {
-                self.layout_results.insert(id, *layout);
+                let new_layout = *layout;
 
-                // Update spatial index with the computed position & size.
-                let aabb = Aabb::from_rect(
-                    layout.location.x,
-                    layout.location.y,
-                    layout.size.width,
-                    layout.size.height,
-                );
-                self.spatial.insert(id, aabb);
+                // Only update spatial index when the layout actually changed.
+                let changed = match self.layout_results.get(&id) {
+                    Some(prev) => {
+                        prev.location.x != new_layout.location.x
+                            || prev.location.y != new_layout.location.y
+                            || prev.size.width != new_layout.size.width
+                            || prev.size.height != new_layout.size.height
+                    }
+                    None => true,
+                };
+
+                if changed {
+                    let aabb = Aabb::from_rect(
+                        new_layout.location.x,
+                        new_layout.location.y,
+                        new_layout.size.width,
+                        new_layout.size.height,
+                    );
+                    self.spatial.insert(id, aabb);
+                    self.recently_changed.push(id);
+                }
+
+                self.layout_results.insert(id, new_layout);
             }
         }
 
-        self.dirty_nodes.clear();
+        // Only clear dirty nodes that belong to this subtree.
+        for &(id, _) in &self.node_buf {
+            self.dirty_nodes.remove(&id);
+        }
         Ok(())
+    }
+
+    /// Recursively collect (Uuid, NodeId) pairs for a subtree rooted at `node`.
+    fn collect_subtree(&mut self, node: NodeId) {
+        if let Some(&id) = self.node_to_layer.get(&node) {
+            self.node_buf.push((id, node));
+        }
+        // Use child_count + children to walk the subtree.
+        if let Ok(children) = self.taffy.children(node) {
+            for child in children {
+                self.collect_subtree(child);
+            }
+        }
     }
 
     // ---------------------------------------------------------------
@@ -285,6 +325,41 @@ impl LayoutEngine {
     /// Retrieve the cached layout for a layer.
     pub fn get_layout(&self, id: Uuid) -> Option<&Layout> {
         self.layout_results.get(&id)
+    }
+
+    /// Drain the list of layer IDs whose layout actually changed
+    /// during the most recent `compute_layout()` call(s).
+    ///
+    /// Returns the changed IDs and clears the internal list.
+    /// Useful for incremental renderers that only need to update
+    /// instances for layers that actually moved/resized.
+    #[inline]
+    pub fn drain_changed(&mut self) -> Vec<Uuid> {
+        std::mem::take(&mut self.recently_changed)
+    }
+
+    /// Check whether any layouts changed since the last `drain_changed()`.
+    #[inline]
+    pub fn has_changes(&self) -> bool {
+        !self.recently_changed.is_empty()
+    }
+
+    /// Batch-lookup layouts for a list of IDs.
+    ///
+    /// Calls `f(index, id, layout)` for each ID that has a cached layout.
+    /// Avoids per-element hash lookup overhead from external callers by
+    /// inlining the FxHashMap access.
+    #[inline]
+    pub fn for_each_layout(
+        &self,
+        ids: &[Uuid],
+        mut f: impl FnMut(usize, Uuid, &Layout),
+    ) {
+        for (i, &id) in ids.iter().enumerate() {
+            if let Some(layout) = self.layout_results.get(&id) {
+                f(i, id, layout);
+            }
+        }
     }
 
     /// Number of nodes tracked by the engine.

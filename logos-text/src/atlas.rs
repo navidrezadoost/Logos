@@ -5,12 +5,16 @@
 //! When a glyph doesn't fit the current shelf, a new shelf is started.
 //!
 //! Glyph bitmaps are stored in a single RGBA texture (atlas_data) that
-//! can be uploaded to the GPU. An LRU cache tracks glyph usage for
-//! eventual eviction when the atlas fills up.
+//! can be uploaded to the GPU.
+//!
+//! ## Performance
+//!
+//! Glyph lookups use a flat array indexed by `glyph_id` (u16) for O(1)
+//! direct access — no hashing, no pointer chasing. Pre-computed UV
+//! regions eliminate per-lookup float division.
 
-use std::collections::HashMap;
-use lru::LruCache;
-use std::num::NonZeroUsize;
+/// Maximum number of distinct glyph IDs (u16 range).
+const MAX_GLYPH_ID: usize = 65_536;
 
 /// A region within the atlas texture (UV coordinates normalized to [0,1]).
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +27,26 @@ pub struct AtlasRegion {
     pub u_max: f32,
     /// Bottom-right V coordinate.
     pub v_max: f32,
+}
+
+impl AtlasRegion {
+    /// Sentinel value for an empty / unused slot.
+    ///
+    /// A valid region always has `u_max > 0.0` (non-zero-size glyph at a
+    /// non-negative position), so all-zeros is safe as a sentinel.
+    const EMPTY: Self = Self {
+        u_min: 0.0,
+        v_min: 0.0,
+        u_max: 0.0,
+        v_max: 0.0,
+    };
+
+    /// Returns `true` if this is the empty sentinel.
+    #[inline(always)]
+    fn is_empty(self) -> bool {
+        // u_max == 0.0 is impossible for any inserted glyph (width > 0).
+        self.u_max == 0.0
+    }
 }
 
 /// Pixel-space rectangle within the atlas.
@@ -45,6 +69,8 @@ struct Shelf {
 }
 
 /// CPU-side glyph texture atlas.
+///
+/// Lookups are O(1) via a flat array indexed by `glyph_id` (u16).
 pub struct Atlas {
     /// Atlas texture width and height in pixels (always square).
     pub size: u32,
@@ -52,10 +78,13 @@ pub struct Atlas {
     pub data: Vec<u8>,
     /// Whether data has changed since last GPU upload.
     pub dirty: bool,
-    /// Glyph ID → pixel rect mapping.
-    rects: HashMap<u16, AtlasRect>,
-    /// LRU tracking for eviction.
-    lru: LruCache<u16, ()>,
+    /// Flat lookup: glyph_id → pre-computed UV region.
+    /// 65 536 entries × 16 bytes = 1 MiB. Unused slots hold `EMPTY`.
+    regions: Vec<AtlasRegion>,
+    /// Number of glyphs currently stored.
+    count: usize,
+    /// Cached `1.0 / size` to avoid per-lookup division.
+    inv_size: f32,
     /// Shelf rows.
     shelves: Vec<Shelf>,
     /// Padding between glyphs in pixels.
@@ -68,28 +97,32 @@ impl Atlas {
     /// Common sizes: 512, 1024, 2048.
     pub fn new(size: u32) -> Self {
         let pixel_count = (size as usize) * (size as usize) * 4;
-        let capacity = NonZeroUsize::new(4096).unwrap();
         Self {
             size,
             data: vec![0u8; pixel_count],
             dirty: false,
-            rects: HashMap::new(),
-            lru: LruCache::new(capacity),
+            regions: vec![AtlasRegion::EMPTY; MAX_GLYPH_ID],
+            count: 0,
+            inv_size: 1.0 / size as f32,
             shelves: Vec::new(),
             padding: 1,
         }
     }
 
     /// Number of glyphs currently in the atlas.
+    #[inline]
     pub fn glyph_count(&self) -> usize {
-        self.rects.len()
+        self.count
     }
 
     /// Look up a previously-inserted glyph.
-    pub fn get(&mut self, glyph_id: u16) -> Option<AtlasRegion> {
-        // Touch LRU.
-        self.lru.get(&glyph_id);
-        self.rects.get(&glyph_id).map(|r| self.rect_to_region(r))
+    ///
+    /// O(1) — single array index with no hashing or pointer chasing.
+    #[inline]
+    pub fn get(&self, glyph_id: u16) -> Option<AtlasRegion> {
+        // SAFETY: glyph_id is u16, regions has 65 536 entries — always in bounds.
+        let r = unsafe { *self.regions.get_unchecked(glyph_id as usize) };
+        if r.is_empty() { None } else { Some(r) }
     }
 
     /// Insert a glyph bitmap into the atlas.
@@ -118,18 +151,26 @@ impl Atlas {
         // Copy bitmap into atlas data.
         self.blit_bitmap(&rect, width, height, bitmap_data);
 
-        self.rects.insert(glyph_id, rect);
-        self.lru.put(glyph_id, ());
+        // Pre-compute UV region and store in flat array.
+        let inv = self.inv_size;
+        let region = AtlasRegion {
+            u_min: rect.x as f32 * inv,
+            v_min: rect.y as f32 * inv,
+            u_max: (rect.x + rect.width) as f32 * inv,
+            v_max: (rect.y + rect.height) as f32 * inv,
+        };
+        self.regions[glyph_id as usize] = region;
+        self.count += 1;
         self.dirty = true;
 
-        Some(self.rect_to_region(&rect))
+        Some(region)
     }
 
     /// Reset the atlas (clear all glyphs).
     pub fn clear(&mut self) {
         self.data.fill(0);
-        self.rects.clear();
-        self.lru.clear();
+        self.regions.fill(AtlasRegion::EMPTY);
+        self.count = 0;
         self.shelves.clear();
         self.dirty = true;
     }
@@ -232,17 +273,6 @@ impl Atlas {
             }
         }
     }
-
-    /// Convert pixel rect to normalized UV region.
-    fn rect_to_region(&self, rect: &AtlasRect) -> AtlasRegion {
-        let inv = 1.0 / self.size as f32;
-        AtlasRegion {
-            u_min: rect.x as f32 * inv,
-            v_min: rect.y as f32 * inv,
-            u_max: (rect.x + rect.width) as f32 * inv,
-            v_max: (rect.y + rect.height) as f32 * inv,
-        }
-    }
 }
 
 // ===================================================================
@@ -318,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_get_missing_glyph() {
-        let mut atlas = Atlas::new(256);
+        let atlas = Atlas::new(256);
         assert!(atlas.get(99).is_none());
     }
 

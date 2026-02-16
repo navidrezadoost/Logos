@@ -109,7 +109,67 @@ fn bench_compute_flex_tree(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark: nested flex hierarchy (frames containing frames containing rects)
+/// Benchmark: incremental recomputation — single node dirty in 1000-node tree.
+/// This is the typical case: user moves/resizes one shape.
+fn bench_compute_incremental(c: &mut Criterion) {
+    let mut group = c.benchmark_group("compute_layout_incremental");
+
+    for count in [100, 1_000] {
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, &n| {
+                let mut engine = LayoutEngine::new();
+                let root_id = Uuid::new_v4();
+                engine
+                    .add_layer(
+                        root_id,
+                        None,
+                        Style {
+                            display: Display::Flex,
+                            flex_direction: FlexDirection::Column,
+                            size: Size {
+                                width: Dimension::length(800.0),
+                                height: Dimension::auto(),
+                            },
+                            ..Style::default()
+                        },
+                    )
+                    .unwrap();
+
+                let mut child_ids = Vec::with_capacity(n);
+                for _ in 0..n {
+                    let child_id = Uuid::new_v4();
+                    engine
+                        .add_layer(
+                            child_id,
+                            Some(root_id),
+                            LayoutEngine::create_rect_style(100.0, 30.0),
+                        )
+                        .unwrap();
+                    child_ids.push(child_id);
+                }
+                // Initial full compute
+                engine.compute_layout(root_id).unwrap();
+
+                let target = child_ids[0];
+                b.iter(|| {
+                    // Dirty only one child (resize)
+                    engine
+                        .update_dimension(
+                            target,
+                            logos_layout::bridge::DimAxis::Width,
+                            black_box(120.0),
+                        )
+                        .unwrap();
+                    engine.compute_layout(root_id).unwrap();
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
 /// Simulates realistic design document: 1 root -> 10 groups -> 100 leaves = 1011 nodes
 fn bench_compute_nested_hierarchy(c: &mut Criterion) {
     c.bench_function("compute_nested_hierarchy_1000", |b| {
@@ -403,6 +463,7 @@ criterion_group!(
     bench_add_layer,
     bench_build_tree,
     bench_compute_flex_tree,
+    bench_compute_incremental,
     bench_compute_nested_hierarchy,
     bench_get_layout_cached,
     bench_bridge_single_op,
