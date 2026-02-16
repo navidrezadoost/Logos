@@ -66,7 +66,7 @@
 
 use crate::permissions::{PermissionGuard, PermissionKind, PermissionSet};
 use crate::runtime::{PluginValue, ResourceLimits, RuntimeError, RuntimeResult};
-use logos_core::{Document, Layer};
+use logos_core::{Camera, Document, Layer, PathCommand, Point};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -102,6 +102,10 @@ pub struct WasmRuntime {
     /// Execution statistics.
     fuel_consumed: u64,
     host_calls: u64,
+    /// Current camera state (shared with host functions).
+    camera: Arc<RwLock<Camera>>,
+    /// Notifications emitted during execution.
+    notifications: Arc<RwLock<Vec<Notification>>>,
 }
 
 /// Configuration for the Wasmtime engine.
@@ -139,10 +143,33 @@ pub struct HostState {
     log_output: Vec<String>,
     /// Wasmtime resource limiter.
     store_limits: wasmtime::StoreLimits,
+    /// Current camera / viewport state.
+    camera: Camera,
+    /// Notification output buffer (toasts, confirms, prompts).
+    notifications: Vec<Notification>,
+    /// Lifecycle callback registry (event_name → registered).
+    lifecycle_hooks: HashMap<String, bool>,
+}
+
+/// A notification emitted by a plugin.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Notification {
+    /// Toast message with text.
+    Toast(String),
+    /// Confirmation dialog with message — result stored separately.
+    Confirm(String),
+    /// Prompt dialog with message — result stored separately.
+    Prompt(String),
 }
 
 impl HostState {
-    fn new(document: Arc<RwLock<Document>>, permissions: PermissionSet, max_host_calls: usize) -> Self {
+    fn new(
+        document: Arc<RwLock<Document>>,
+        permissions: PermissionSet,
+        max_host_calls: usize,
+        camera: Arc<RwLock<Camera>>,
+        _notifications: Arc<RwLock<Vec<Notification>>>,
+    ) -> Self {
         Self {
             document,
             guard: PermissionGuard::new(permissions),
@@ -152,6 +179,9 @@ impl HostState {
             store_limits: wasmtime::StoreLimitsBuilder::new()
                 .memory_size(50 * 1024 * 1024) // 50MB
                 .build(),
+            camera: (*camera.read().unwrap()),
+            notifications: Vec::new(),
+            lifecycle_hooks: HashMap::new(),
         }
     }
 
@@ -192,12 +222,30 @@ impl WasmRuntime {
             killed: false,
             fuel_consumed: 0,
             host_calls: 0,
+            camera: Arc::new(RwLock::new(Camera::default())),
+            notifications: Arc::new(RwLock::new(Vec::new())),
         })
     }
 
     /// Attach a document for host function access.
     pub fn register_document(&mut self, document: Arc<RwLock<Document>>) {
         self.document = Some(document);
+    }
+
+    /// Set the camera state for viewport host functions.
+    pub fn set_camera(&mut self, camera: Camera) {
+        *self.camera.write().unwrap() = camera;
+    }
+
+    /// Get the current camera state.
+    pub fn get_camera(&self) -> Camera {
+        *self.camera.read().unwrap()
+    }
+
+    /// Get notifications emitted during the last execution.
+    pub fn take_notifications(&self) -> Vec<Notification> {
+        let mut n = self.notifications.write().unwrap();
+        std::mem::take(&mut *n)
     }
 
     /// Load a WASM module from bytes.
@@ -263,6 +311,8 @@ impl WasmRuntime {
                 document,
                 self.permissions.clone(),
                 self.limits.max_host_calls,
+                self.camera.clone(),
+                self.notifications.clone(),
             ),
         );
 
@@ -334,6 +384,14 @@ impl WasmRuntime {
         self.fuel_consumed += fuel - remaining_fuel;
         self.host_calls += store.data().host_calls;
 
+        // Copy camera state back from host
+        *self.camera.write().unwrap() = store.data().camera;
+        // Copy notifications back
+        {
+            let mut notifs = self.notifications.write().unwrap();
+            notifs.extend(store.data_mut().notifications.drain(..));
+        }
+
         // Read response from buffer
         let resp_data = memory.data(&store);
         if result > 0 && (result as usize) < resp_data.len() {
@@ -381,6 +439,8 @@ impl WasmRuntime {
                 document,
                 self.permissions.clone(),
                 self.limits.max_host_calls,
+                self.camera.clone(),
+                self.notifications.clone(),
             ),
         );
 
@@ -640,10 +700,375 @@ fn register_host_functions(linker: &mut wasmtime::Linker<HostState>) -> RuntimeR
         })
         .map_err(|e| RuntimeError::CompileError(format!("failed to register host_get_layers: {e}")))?;
 
+    // ── Document (read): get_selection ───────────────────────
+
+    // logos::host_get_selection() → i32 (writes JSON array of UUID strings to response buffer)
+    linker
+        .func_wrap("logos", "host_get_selection", |mut caller: wasmtime::Caller<'_, HostState>| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::DocumentRead)?;
+            let json_bytes = {
+                let doc = caller.data().document.clone();
+                let d = doc.read()
+                    .map_err(|e| wasmtime::Error::msg(format!("document lock: {e}")))?;
+                let sel = d.get_selection()
+                    .map_err(|e| wasmtime::Error::msg(format!("selection lock: {e}")))?;
+                let ids: Vec<String> = sel.iter().map(|id| id.to_string()).collect();
+                serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string()).into_bytes()
+            };
+            write_response_buffer(&mut caller, &json_bytes)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_get_selection: {e}")))?;
+
+    // ── Document (read): get_layer_by_id ─────────────────────
+
+    // logos::host_get_layer_by_id(ptr, len) → i32 (writes JSON layer or null to response buffer)
+    linker
+        .func_wrap("logos", "host_get_layer_by_id", |mut caller: wasmtime::Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::DocumentRead)?;
+            let id = read_uuid_from_memory(&mut caller, ptr, len)?;
+            let json_bytes = {
+                let doc = caller.data().document.clone();
+                let d = doc.read()
+                    .map_err(|e| wasmtime::Error::msg(format!("document lock: {e}")))?;
+                match d.find_layer_by_id(id)
+                    .map_err(|e| wasmtime::Error::msg(format!("find_layer: {e}")))? {
+                    Some(layer) => serde_json::to_string(&layer_to_json(&layer))
+                        .unwrap_or_else(|_| "null".to_string()).into_bytes(),
+                    None => b"null".to_vec(),
+                }
+            };
+            write_response_buffer(&mut caller, &json_bytes)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_get_layer_by_id: {e}")))?;
+
+    // ── Document (write): create_text ────────────────────────
+
+    // logos::host_create_text(ptr, len, x, y, w, h) → i32 (writes UUID JSON to response buffer)
+    linker
+        .func_wrap("logos", "host_create_text", |mut caller: wasmtime::Caller<'_, HostState>, ptr: i32, len: i32, x: f32, y: f32, w: f32, h: f32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::DocumentWrite)?;
+            let content = read_string_from_memory(&mut caller, ptr, len)?;
+            let layer = Layer::Text(logos_core::TextLayer::new(&content, x, y, w, h));
+            let id = layer.id();
+            let json_bytes = {
+                let doc = caller.data().document.clone();
+                let d = doc.read()
+                    .map_err(|e| wasmtime::Error::msg(format!("document lock: {e}")))?;
+                d.add_layer(layer)
+                    .map_err(|e| wasmtime::Error::msg(format!("add_layer: {e}")))?;
+                serde_json::json!(id.to_string()).to_string().into_bytes()
+            };
+            write_response_buffer(&mut caller, &json_bytes)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_create_text: {e}")))?;
+
+    // ── Document (write): create_path ────────────────────────
+
+    // logos::host_create_path(ptr, len) → i32 (reads JSON path commands from memory, writes UUID)
+    linker
+        .func_wrap("logos", "host_create_path", |mut caller: wasmtime::Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::DocumentWrite)?;
+            let json_str = read_string_from_memory(&mut caller, ptr, len)?;
+            let commands = parse_path_commands(&json_str)
+                .map_err(|e| wasmtime::Error::msg(format!("invalid path commands: {e}")))?;
+            let layer = Layer::Path(logos_core::PathLayer::new(commands));
+            let id = layer.id();
+            let json_bytes = {
+                let doc = caller.data().document.clone();
+                let d = doc.read()
+                    .map_err(|e| wasmtime::Error::msg(format!("document lock: {e}")))?;
+                d.add_layer(layer)
+                    .map_err(|e| wasmtime::Error::msg(format!("add_layer: {e}")))?;
+                serde_json::json!(id.to_string()).to_string().into_bytes()
+            };
+            write_response_buffer(&mut caller, &json_bytes)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_create_path: {e}")))?;
+
+    // ── Selection: set_selection ──────────────────────────────
+
+    // logos::host_set_selection(ptr, len) → i32 (reads JSON array of UUID strings)
+    linker
+        .func_wrap("logos", "host_set_selection", |mut caller: wasmtime::Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::DocumentWrite)?;
+            let json_str = read_string_from_memory(&mut caller, ptr, len)?;
+            let ids: Vec<String> = serde_json::from_str(&json_str)
+                .map_err(|e| wasmtime::Error::msg(format!("invalid JSON: {e}")))?;
+            let uuids: Vec<uuid::Uuid> = ids.iter().map(|s| {
+                uuid::Uuid::parse_str(s).map_err(|e| wasmtime::Error::msg(format!("invalid UUID '{s}': {e}")))
+            }).collect::<Result<_, _>>()?;
+            let doc = caller.data().document.clone();
+            let d = doc.read()
+                .map_err(|e| wasmtime::Error::msg(format!("document lock: {e}")))?;
+            d.set_selection(uuids)
+                .map_err(|e| wasmtime::Error::msg(format!("set_selection: {e}")))?;
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_set_selection: {e}")))?;
+
+    // ── Selection: clear_selection ────────────────────────────
+
+    // logos::host_clear_selection() → i32
+    linker
+        .func_wrap("logos", "host_clear_selection", |mut caller: wasmtime::Caller<'_, HostState>| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::DocumentWrite)?;
+            let doc = caller.data().document.clone();
+            let d = doc.read()
+                .map_err(|e| wasmtime::Error::msg(format!("document lock: {e}")))?;
+            d.clear_selection()
+                .map_err(|e| wasmtime::Error::msg(format!("clear_selection: {e}")))?;
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_clear_selection: {e}")))?;
+
+    // ── Selection: on_selection_changed ───────────────────────
+
+    // logos::host_on_selection_changed() → i32 (registers interest in selection changes)
+    linker
+        .func_wrap("logos", "host_on_selection_changed", |mut caller: wasmtime::Caller<'_, HostState>| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::DocumentRead)?;
+            caller.data_mut().lifecycle_hooks.insert("selection_changed".to_string(), true);
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_on_selection_changed: {e}")))?;
+
+    // ── Viewport: get_camera ─────────────────────────────────
+
+    // logos::host_get_camera() → i32 (writes JSON camera to response buffer)
+    linker
+        .func_wrap("logos", "host_get_camera", |mut caller: wasmtime::Caller<'_, HostState>| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            let cam = caller.data().camera;
+            let json_bytes = serde_json::json!({
+                "x": cam.x,
+                "y": cam.y,
+                "zoom": cam.zoom,
+            }).to_string().into_bytes();
+            write_response_buffer(&mut caller, &json_bytes)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_get_camera: {e}")))?;
+
+    // ── Viewport: set_camera ─────────────────────────────────
+
+    // logos::host_set_camera(x, y, zoom) → i32
+    linker
+        .func_wrap("logos", "host_set_camera", |mut caller: wasmtime::Caller<'_, HostState>, x: f32, y: f32, zoom: f32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            if zoom <= 0.0 || zoom > 100.0 {
+                return Err(wasmtime::Error::msg(format!("invalid zoom: {zoom} (must be 0 < z <= 100)")));
+            }
+            caller.data_mut().camera = Camera::new(x, y, zoom);
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_set_camera: {e}")))?;
+
+    // ── Viewport: screen_to_world ────────────────────────────
+
+    // logos::host_screen_to_world(sx, sy) → i32 (writes JSON point to response buffer)
+    linker
+        .func_wrap("logos", "host_screen_to_world", |mut caller: wasmtime::Caller<'_, HostState>, sx: f32, sy: f32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            let cam = caller.data().camera;
+            let world = cam.screen_to_world(sx, sy);
+            let json_bytes = serde_json::json!({
+                "x": world.x,
+                "y": world.y,
+            }).to_string().into_bytes();
+            write_response_buffer(&mut caller, &json_bytes)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_screen_to_world: {e}")))?;
+
+    // ── Notifications: show_toast ────────────────────────────
+
+    // logos::host_show_toast(ptr, len) → i32
+    linker
+        .func_wrap("logos", "host_show_toast", |mut caller: wasmtime::Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::Notifications)?;
+            let msg = read_string_from_memory(&mut caller, ptr, len)?;
+            caller.data_mut().notifications.push(Notification::Toast(msg));
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_show_toast: {e}")))?;
+
+    // ── Notifications: confirm ───────────────────────────────
+
+    // logos::host_confirm(ptr, len) → i32 (always returns 1 = yes in sandbox, writes to buffer)
+    linker
+        .func_wrap("logos", "host_confirm", |mut caller: wasmtime::Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::Notifications)?;
+            let msg = read_string_from_memory(&mut caller, ptr, len)?;
+            caller.data_mut().notifications.push(Notification::Confirm(msg));
+            // In sandbox mode, confirm always returns 1 (yes)
+            // Real UI integration would block and return user's choice
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_confirm: {e}")))?;
+
+    // ── Notifications: prompt ────────────────────────────────
+
+    // logos::host_prompt(ptr, len) → i32 (writes empty string to response buffer)
+    linker
+        .func_wrap("logos", "host_prompt", |mut caller: wasmtime::Caller<'_, HostState>, ptr: i32, len: i32| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().check_permission(&PermissionKind::Notifications)?;
+            let msg = read_string_from_memory(&mut caller, ptr, len)?;
+            caller.data_mut().notifications.push(Notification::Prompt(msg));
+            // In sandbox mode, prompt returns empty string; real UI would block
+            let json_bytes = serde_json::json!("").to_string().into_bytes();
+            write_response_buffer(&mut caller, &json_bytes)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_prompt: {e}")))?;
+
+    // ── Lifecycle: on_load ───────────────────────────────────
+
+    // logos::host_on_load() → i32 (registers the on_load lifecycle hook)
+    linker
+        .func_wrap("logos", "host_on_load", |mut caller: wasmtime::Caller<'_, HostState>| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().lifecycle_hooks.insert("on_load".to_string(), true);
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_on_load: {e}")))?;
+
+    // ── Lifecycle: on_unload ─────────────────────────────────
+
+    // logos::host_on_unload() → i32 (registers the on_unload lifecycle hook)
+    linker
+        .func_wrap("logos", "host_on_unload", |mut caller: wasmtime::Caller<'_, HostState>| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().lifecycle_hooks.insert("on_unload".to_string(), true);
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_on_unload: {e}")))?;
+
+    // ── Lifecycle: on_frame ──────────────────────────────────
+
+    // logos::host_on_frame() → i32 (registers the on_frame lifecycle hook)
+    linker
+        .func_wrap("logos", "host_on_frame", |mut caller: wasmtime::Caller<'_, HostState>| -> Result<i32, wasmtime::Error> {
+            caller.data_mut().count_call()?;
+            caller.data_mut().lifecycle_hooks.insert("on_frame".to_string(), true);
+            Ok(1)
+        })
+        .map_err(|e| RuntimeError::CompileError(format!("failed to register host_on_frame: {e}")))?;
+
     Ok(())
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
+
+/// Write a JSON byte slice to the response buffer in WASM memory.
+/// Returns the response buffer offset as i32.
+fn write_response_buffer(caller: &mut wasmtime::Caller<'_, HostState>, json_bytes: &[u8]) -> Result<i32, wasmtime::Error> {
+    if json_bytes.len() > RESPONSE_BUFFER_MAX {
+        return Err(wasmtime::Error::msg("response too large"));
+    }
+    let memory = caller.get_export("memory")
+        .and_then(|e| e.into_memory())
+        .ok_or_else(|| wasmtime::Error::msg("no memory export"))?;
+    let resp_offset = RESPONSE_BUFFER_OFFSET;
+    let len_bytes = (json_bytes.len() as u32).to_le_bytes();
+    let data = memory.data_mut(caller);
+    if resp_offset + 4 + json_bytes.len() > data.len() {
+        return Err(wasmtime::Error::msg("response buffer overflow"));
+    }
+    data[resp_offset..resp_offset + 4].copy_from_slice(&len_bytes);
+    data[resp_offset + 4..resp_offset + 4 + json_bytes.len()].copy_from_slice(json_bytes);
+    Ok(resp_offset as i32)
+}
+
+/// Read a UTF-8 string from WASM linear memory at (ptr, len).
+fn read_string_from_memory(caller: &mut wasmtime::Caller<'_, HostState>, ptr: i32, len: i32) -> Result<String, wasmtime::Error> {
+    let memory = caller.get_export("memory")
+        .and_then(|e| e.into_memory())
+        .ok_or_else(|| wasmtime::Error::msg("no memory export"))?;
+    let data = memory.data(caller);
+    let start = ptr as usize;
+    let end = start + len as usize;
+    if end > data.len() {
+        return Err(wasmtime::Error::msg("out of bounds memory access"));
+    }
+    std::str::from_utf8(&data[start..end])
+        .map(|s| s.to_string())
+        .map_err(|e| wasmtime::Error::msg(format!("invalid UTF-8: {e}")))
+}
+
+/// Read a UUID string from WASM linear memory at (ptr, len).
+fn read_uuid_from_memory(caller: &mut wasmtime::Caller<'_, HostState>, ptr: i32, len: i32) -> Result<uuid::Uuid, wasmtime::Error> {
+    let s = read_string_from_memory(caller, ptr, len)?;
+    uuid::Uuid::parse_str(&s)
+        .map_err(|e| wasmtime::Error::msg(format!("invalid UUID: {e}")))
+}
+
+/// Parse a JSON array of path commands into PathCommand objects.
+///
+/// Expected format:
+/// ```json
+/// [
+///   {"type": "moveTo", "x": 0.0, "y": 0.0},
+///   {"type": "lineTo", "x": 100.0, "y": 50.0},
+///   {"type": "quadTo", "cx": 50, "cy": 100, "x": 100, "y": 0},
+///   {"type": "bezierTo", "cx1": 1, "cy1": 2, "cx2": 3, "cy2": 4, "x": 5, "y": 6},
+///   {"type": "close"}
+/// ]
+/// ```
+fn parse_path_commands(json: &str) -> Result<Vec<PathCommand>, String> {
+    let arr: Vec<serde_json::Value> = serde_json::from_str(json)
+        .map_err(|e| format!("invalid JSON: {e}"))?;
+    let mut commands = Vec::with_capacity(arr.len());
+    for item in &arr {
+        let cmd_type = item["type"].as_str().ok_or("missing 'type' field")?;
+        match cmd_type {
+            "moveTo" => {
+                let x = item["x"].as_f64().ok_or("moveTo: missing 'x'")? as f32;
+                let y = item["y"].as_f64().ok_or("moveTo: missing 'y'")? as f32;
+                commands.push(PathCommand::MoveTo(Point::new(x, y)));
+            }
+            "lineTo" => {
+                let x = item["x"].as_f64().ok_or("lineTo: missing 'x'")? as f32;
+                let y = item["y"].as_f64().ok_or("lineTo: missing 'y'")? as f32;
+                commands.push(PathCommand::LineTo(Point::new(x, y)));
+            }
+            "quadTo" => {
+                let cx = item["cx"].as_f64().ok_or("quadTo: missing 'cx'")? as f32;
+                let cy = item["cy"].as_f64().ok_or("quadTo: missing 'cy'")? as f32;
+                let x = item["x"].as_f64().ok_or("quadTo: missing 'x'")? as f32;
+                let y = item["y"].as_f64().ok_or("quadTo: missing 'y'")? as f32;
+                commands.push(PathCommand::QuadTo {
+                    ctrl: Point::new(cx, cy),
+                    end: Point::new(x, y),
+                });
+            }
+            "bezierTo" => {
+                let cx1 = item["cx1"].as_f64().ok_or("bezierTo: missing 'cx1'")? as f32;
+                let cy1 = item["cy1"].as_f64().ok_or("bezierTo: missing 'cy1'")? as f32;
+                let cx2 = item["cx2"].as_f64().ok_or("bezierTo: missing 'cx2'")? as f32;
+                let cy2 = item["cy2"].as_f64().ok_or("bezierTo: missing 'cy2'")? as f32;
+                let x = item["x"].as_f64().ok_or("bezierTo: missing 'x'")? as f32;
+                let y = item["y"].as_f64().ok_or("bezierTo: missing 'y'")? as f32;
+                commands.push(PathCommand::BezierTo {
+                    cp1: Point::new(cx1, cy1),
+                    cp2: Point::new(cx2, cy2),
+                    end: Point::new(x, y),
+                });
+            }
+            "close" => {
+                commands.push(PathCommand::Close);
+            }
+            other => return Err(format!("unknown command type: '{other}'")),
+        }
+    }
+    Ok(commands)
+}
 
 /// Convert a Layer to a JSON value for serialization to WASM.
 fn layer_to_json(layer: &Layer) -> serde_json::Value {
@@ -1218,9 +1643,17 @@ mod tests {
         assert!(engine.is_ok());
     }
 
+    fn make_cam() -> Arc<RwLock<Camera>> {
+        Arc::new(RwLock::new(Camera::default()))
+    }
+
+    fn make_notifs() -> Arc<RwLock<Vec<Notification>>> {
+        Arc::new(RwLock::new(Vec::new()))
+    }
+
     #[test]
     fn test_host_state_count_call() {
-        let mut state = HostState::new(make_doc(), PermissionSet::none(), 3);
+        let mut state = HostState::new(make_doc(), PermissionSet::none(), 3, make_cam(), make_notifs());
         assert!(state.count_call().is_ok()); // 1
         assert!(state.count_call().is_ok()); // 2
         assert!(state.count_call().is_ok()); // 3
@@ -1229,13 +1662,13 @@ mod tests {
 
     #[test]
     fn test_host_state_check_permission_granted() {
-        let mut state = HostState::new(make_doc(), PermissionSet::read_only(), 100);
+        let mut state = HostState::new(make_doc(), PermissionSet::read_only(), 100, make_cam(), make_notifs());
         assert!(state.check_permission(&PermissionKind::DocumentRead).is_ok());
     }
 
     #[test]
     fn test_host_state_check_permission_denied() {
-        let mut state = HostState::new(make_doc(), PermissionSet::none(), 100);
+        let mut state = HostState::new(make_doc(), PermissionSet::none(), 100, make_cam(), make_notifs());
         assert!(state.check_permission(&PermissionKind::DocumentRead).is_err());
     }
 
@@ -1307,5 +1740,795 @@ mod tests {
         assert_eq!(RESPONSE_BUFFER_OFFSET, 65536);
         assert_eq!(RESPONSE_BUFFER_MAX, 1024 * 1024);
         assert_eq!(DEFAULT_FUEL, 1_000_000);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ── Week 2 Host Function Tests ────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    // ── WAT modules for Week 2 host functions ────────────────
+
+    // WAT: calls host_get_selection() → i32
+    const WAT_GET_SELECTION: &str = r#"
+        (module
+            (import "logos" "host_get_selection" (func $sel (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                call $sel
+            )
+        )
+    "#;
+
+    // WAT: calls host_get_layer_by_id(ptr, len) — reads UUID from execute params
+    const WAT_GET_LAYER_BY_ID: &str = r#"
+        (module
+            (import "logos" "host_get_layer_by_id" (func $get (param i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                local.get 0
+                local.get 1
+                call $get
+            )
+        )
+    "#;
+
+    // WAT: calls host_create_text(ptr, len, x, y, w, h) — text from data segment
+    const WAT_CREATE_TEXT: &str = r#"
+        (module
+            (import "logos" "host_create_text" (func $txt (param i32 i32 f32 f32 f32 f32) (result i32)))
+            (memory (export "memory") 2)
+            (data (i32.const 0) "Hello World")
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                i32.const 0     ;; ptr
+                i32.const 11    ;; len "Hello World"
+                f32.const 10.0  ;; x
+                f32.const 20.0  ;; y
+                f32.const 200.0 ;; w
+                f32.const 50.0  ;; h
+                call $txt
+            )
+        )
+    "#;
+
+    // WAT: calls host_create_path(ptr, len) — JSON path commands from data segment
+    const WAT_CREATE_PATH: &str = r#"
+        (module
+            (import "logos" "host_create_path" (func $path (param i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (data (i32.const 0) "[{\"type\":\"moveTo\",\"x\":0,\"y\":0},{\"type\":\"lineTo\",\"x\":100,\"y\":50},{\"type\":\"close\"}]")
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                i32.const 0    ;; ptr
+                i32.const 81   ;; len of the JSON
+                call $path
+            )
+        )
+    "#;
+
+    // WAT: calls host_set_selection(ptr, len) — reads JSON array from execute params
+    const WAT_SET_SELECTION: &str = r#"
+        (module
+            (import "logos" "host_set_selection" (func $set (param i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                local.get 0
+                local.get 1
+                call $set
+            )
+        )
+    "#;
+
+    // WAT: calls host_clear_selection() → i32
+    const WAT_CLEAR_SELECTION: &str = r#"
+        (module
+            (import "logos" "host_clear_selection" (func $clr (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                call $clr
+            )
+        )
+    "#;
+
+    // WAT: calls host_on_selection_changed() → i32
+    const WAT_ON_SELECTION_CHANGED: &str = r#"
+        (module
+            (import "logos" "host_on_selection_changed" (func $hook (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                call $hook
+            )
+        )
+    "#;
+
+    // WAT: calls host_get_camera() → i32
+    const WAT_GET_CAMERA: &str = r#"
+        (module
+            (import "logos" "host_get_camera" (func $cam (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                call $cam
+            )
+        )
+    "#;
+
+    // WAT: calls host_set_camera(x, y, zoom) → i32
+    const WAT_SET_CAMERA: &str = r#"
+        (module
+            (import "logos" "host_set_camera" (func $set (param f32 f32 f32) (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                f32.const 100.0
+                f32.const 200.0
+                f32.const 2.0
+                call $set
+            )
+        )
+    "#;
+
+    // WAT: calls host_set_camera with invalid zoom (0.0)
+    const WAT_SET_CAMERA_INVALID: &str = r#"
+        (module
+            (import "logos" "host_set_camera" (func $set (param f32 f32 f32) (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                f32.const 0.0
+                f32.const 0.0
+                f32.const 0.0
+                call $set
+            )
+        )
+    "#;
+
+    // WAT: calls host_screen_to_world(sx, sy) → i32
+    const WAT_SCREEN_TO_WORLD: &str = r#"
+        (module
+            (import "logos" "host_screen_to_world" (func $stw (param f32 f32) (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                f32.const 400.0
+                f32.const 300.0
+                call $stw
+            )
+        )
+    "#;
+
+    // WAT: calls host_show_toast(ptr, len) — text from data segment
+    const WAT_SHOW_TOAST: &str = r#"
+        (module
+            (import "logos" "host_show_toast" (func $toast (param i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (data (i32.const 0) "Layer created!")
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                i32.const 0
+                i32.const 14
+                call $toast
+            )
+        )
+    "#;
+
+    // WAT: calls host_confirm(ptr, len) — text from data segment
+    const WAT_CONFIRM: &str = r#"
+        (module
+            (import "logos" "host_confirm" (func $cfm (param i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (data (i32.const 0) "Delete this?")
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                i32.const 0
+                i32.const 12
+                call $cfm
+            )
+        )
+    "#;
+
+    // WAT: calls host_prompt(ptr, len) — text from data segment
+    const WAT_PROMPT: &str = r#"
+        (module
+            (import "logos" "host_prompt" (func $pmt (param i32 i32) (result i32)))
+            (memory (export "memory") 2)
+            (data (i32.const 0) "Enter name:")
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                i32.const 0
+                i32.const 11
+                call $pmt
+            )
+        )
+    "#;
+
+    // WAT: calls host_on_load() → i32
+    const WAT_ON_LOAD: &str = r#"
+        (module
+            (import "logos" "host_on_load" (func $hook (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                call $hook
+            )
+        )
+    "#;
+
+    // WAT: calls host_on_unload() → i32
+    const WAT_ON_UNLOAD: &str = r#"
+        (module
+            (import "logos" "host_on_unload" (func $hook (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                call $hook
+            )
+        )
+    "#;
+
+    // WAT: calls host_on_frame() → i32
+    const WAT_ON_FRAME: &str = r#"
+        (module
+            (import "logos" "host_on_frame" (func $hook (result i32)))
+            (memory (export "memory") 2)
+            (func (export "logos_init") (result i32)
+                i32.const 0
+            )
+            (func (export "logos_execute") (param i32 i32) (result i32)
+                call $hook
+            )
+        )
+    "#;
+
+    // Helper: make a PermissionSet with notification permissions
+    fn make_perms_with_notifications() -> PermissionSet {
+        let mut perms = PermissionSet::document_full();
+        perms.grant(PermissionKind::Notifications);
+        perms
+    }
+
+    // ── Test: host_get_selection ──────────────────────────────
+
+    #[test]
+    fn test_host_get_selection_empty() {
+        let mut rt = make_runtime(PermissionSet::read_only());
+        rt.load_wat(WAT_GET_SELECTION).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "get_selection failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_host_get_selection_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_GET_SELECTION).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without DocumentRead");
+    }
+
+    // ── Test: host_get_layer_by_id ───────────────────────────
+
+    #[test]
+    fn test_host_get_layer_by_id_found() {
+        let doc = make_doc();
+        let layer_id;
+        {
+            let d = doc.read().unwrap();
+            let layer = Layer::Rect(logos_core::RectLayer::new(10.0, 20.0, 100.0, 50.0));
+            layer_id = layer.id();
+            d.add_layer(layer).unwrap();
+        }
+        let mut rt = make_runtime(PermissionSet::read_only());
+        rt.load_wat(WAT_GET_LAYER_BY_ID).unwrap();
+        rt.register_document(doc);
+        // Pass the UUID string as the command (WAT reads ptr/len from params)
+        let result = rt.execute(&layer_id.to_string());
+        assert!(result.is_ok(), "get_layer_by_id failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_host_get_layer_by_id_not_found() {
+        let mut rt = make_runtime(PermissionSet::read_only());
+        rt.load_wat(WAT_GET_LAYER_BY_ID).unwrap();
+        rt.register_document(make_doc());
+        let fake_id = uuid::Uuid::new_v4().to_string();
+        let result = rt.execute(&fake_id);
+        assert!(result.is_ok(), "should return null, not error");
+    }
+
+    #[test]
+    fn test_host_get_layer_by_id_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_GET_LAYER_BY_ID).unwrap();
+        rt.register_document(make_doc());
+        let fake_id = uuid::Uuid::new_v4().to_string();
+        let result = rt.execute(&fake_id);
+        assert!(result.is_err(), "should fail without DocumentRead");
+    }
+
+    // ── Test: host_create_text ───────────────────────────────
+
+    #[test]
+    fn test_host_create_text() {
+        let doc = make_doc();
+        let mut rt = make_runtime(PermissionSet::document_full());
+        rt.load_wat(WAT_CREATE_TEXT).unwrap();
+        rt.register_document(doc.clone());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "create_text failed: {:?}", result.err());
+        // Verify the text layer was created
+        let d = doc.read().unwrap();
+        let root = d.root.read().unwrap();
+        assert_eq!(root.layers.len(), 1);
+        match &root.layers[0] {
+            Layer::Text(t) => {
+                assert_eq!(t.content, "Hello World");
+            }
+            other => panic!("expected Text layer, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_host_create_text_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::read_only());
+        rt.load_wat(WAT_CREATE_TEXT).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without DocumentWrite");
+    }
+
+    // ── Test: host_create_path ───────────────────────────────
+
+    #[test]
+    fn test_host_create_path() {
+        let doc = make_doc();
+        let mut rt = make_runtime(PermissionSet::document_full());
+        rt.load_wat(WAT_CREATE_PATH).unwrap();
+        rt.register_document(doc.clone());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "create_path failed: {:?}", result.err());
+        // Verify the path layer was created
+        let d = doc.read().unwrap();
+        let root = d.root.read().unwrap();
+        assert_eq!(root.layers.len(), 1);
+        match &root.layers[0] {
+            Layer::Path(p) => {
+                assert_eq!(p.commands.len(), 3); // moveTo, lineTo, close
+            }
+            other => panic!("expected Path layer, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_host_create_path_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::read_only());
+        rt.load_wat(WAT_CREATE_PATH).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without DocumentWrite");
+    }
+
+    // ── Test: host_set_selection ──────────────────────────────
+
+    #[test]
+    fn test_host_set_selection() {
+        let doc = make_doc();
+        let layer_id;
+        {
+            let d = doc.read().unwrap();
+            let layer = Layer::Rect(logos_core::RectLayer::new(0.0, 0.0, 50.0, 50.0));
+            layer_id = layer.id();
+            d.add_layer(layer).unwrap();
+        }
+        let mut rt = make_runtime(PermissionSet::document_full());
+        rt.load_wat(WAT_SET_SELECTION).unwrap();
+        rt.register_document(doc.clone());
+        // Pass JSON array of UUIDs as the command
+        let json = format!("[\"{}\"]", layer_id);
+        let result = rt.execute(&json);
+        assert!(result.is_ok(), "set_selection failed: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_host_set_selection_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::read_only());
+        rt.load_wat(WAT_SET_SELECTION).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("[]");
+        assert!(result.is_err(), "should fail without DocumentWrite");
+    }
+
+    // ── Test: host_clear_selection ────────────────────────────
+
+    #[test]
+    fn test_host_clear_selection() {
+        let mut rt = make_runtime(PermissionSet::document_full());
+        rt.load_wat(WAT_CLEAR_SELECTION).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "clear_selection failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+    }
+
+    #[test]
+    fn test_host_clear_selection_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_CLEAR_SELECTION).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without DocumentWrite");
+    }
+
+    // ── Test: host_on_selection_changed ───────────────────────
+
+    #[test]
+    fn test_host_on_selection_changed() {
+        let mut rt = make_runtime(PermissionSet::read_only());
+        rt.load_wat(WAT_ON_SELECTION_CHANGED).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "on_selection_changed failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+    }
+
+    #[test]
+    fn test_host_on_selection_changed_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_ON_SELECTION_CHANGED).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without DocumentRead");
+    }
+
+    // ── Test: host_get_camera ────────────────────────────────
+
+    #[test]
+    fn test_host_get_camera_default() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_GET_CAMERA).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "get_camera failed: {:?}", result.err());
+        // Default camera is (0, 0, zoom=1) — response is a buffer pointer
+    }
+
+    #[test]
+    fn test_host_get_camera_after_set() {
+        let mut rt = make_runtime(PermissionSet::none());
+        // First set camera, then get it
+        rt.set_camera(Camera::new(50.0, 75.0, 2.5));
+        let cam = rt.get_camera();
+        assert_eq!(cam.x, 50.0);
+        assert_eq!(cam.y, 75.0);
+        assert_eq!(cam.zoom, 2.5);
+    }
+
+    // ── Test: host_set_camera ────────────────────────────────
+
+    #[test]
+    fn test_host_set_camera() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_SET_CAMERA).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "set_camera failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+        // Verify camera was updated
+        let cam = rt.get_camera();
+        assert_eq!(cam.x, 100.0);
+        assert_eq!(cam.y, 200.0);
+        assert_eq!(cam.zoom, 2.0);
+    }
+
+    #[test]
+    fn test_host_set_camera_invalid_zoom() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_SET_CAMERA_INVALID).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail with zoom=0.0");
+    }
+
+    // ── Test: host_screen_to_world ───────────────────────────
+
+    #[test]
+    fn test_host_screen_to_world() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_SCREEN_TO_WORLD).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "screen_to_world failed: {:?}", result.err());
+        // Default camera (0,0,1.0) → screen coords = world coords
+    }
+
+    #[test]
+    fn test_host_screen_to_world_with_camera() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.set_camera(Camera::new(100.0, 200.0, 2.0));
+        rt.load_wat(WAT_SCREEN_TO_WORLD).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "screen_to_world with camera failed: {:?}", result.err());
+    }
+
+    // ── Test: host_show_toast ────────────────────────────────
+
+    #[test]
+    fn test_host_show_toast() {
+        let mut rt = make_runtime(make_perms_with_notifications());
+        rt.load_wat(WAT_SHOW_TOAST).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "show_toast failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+        // Verify notification was recorded
+        let notes = rt.take_notifications();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0], Notification::Toast("Layer created!".to_string()));
+    }
+
+    #[test]
+    fn test_host_show_toast_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_SHOW_TOAST).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without Notifications");
+    }
+
+    // ── Test: host_confirm ───────────────────────────────────
+
+    #[test]
+    fn test_host_confirm() {
+        let mut rt = make_runtime(make_perms_with_notifications());
+        rt.load_wat(WAT_CONFIRM).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "confirm failed: {:?}", result.err());
+        // Sandbox confirm always returns 1
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+        let notes = rt.take_notifications();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0], Notification::Confirm("Delete this?".to_string()));
+    }
+
+    #[test]
+    fn test_host_confirm_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_CONFIRM).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without Notifications");
+    }
+
+    // ── Test: host_prompt ────────────────────────────────────
+
+    #[test]
+    fn test_host_prompt() {
+        let mut rt = make_runtime(make_perms_with_notifications());
+        rt.load_wat(WAT_PROMPT).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "prompt failed: {:?}", result.err());
+        let notes = rt.take_notifications();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0], Notification::Prompt("Enter name:".to_string()));
+    }
+
+    #[test]
+    fn test_host_prompt_permission_denied() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_PROMPT).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_err(), "should fail without Notifications");
+    }
+
+    // ── Test: host_on_load ───────────────────────────────────
+
+    #[test]
+    fn test_host_on_load() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_ON_LOAD).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "on_load failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+    }
+
+    // ── Test: host_on_unload ─────────────────────────────────
+
+    #[test]
+    fn test_host_on_unload() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_ON_UNLOAD).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "on_unload failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+    }
+
+    // ── Test: host_on_frame ──────────────────────────────────
+
+    #[test]
+    fn test_host_on_frame() {
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(WAT_ON_FRAME).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok(), "on_frame failed: {:?}", result.err());
+        assert_eq!(result.unwrap(), PluginValue::Int(1));
+    }
+
+    // ── Test: Notification enum ──────────────────────────────
+
+    #[test]
+    fn test_notification_variants() {
+        let toast = Notification::Toast("msg".to_string());
+        let confirm = Notification::Confirm("q?".to_string());
+        let prompt = Notification::Prompt("name:".to_string());
+        // Verify Debug and PartialEq
+        assert_ne!(toast, confirm);
+        assert_ne!(confirm, prompt);
+        assert_eq!(toast.clone(), toast);
+        assert_eq!(format!("{:?}", toast), r#"Toast("msg")"#);
+    }
+
+    // ── Test: Camera API ─────────────────────────────────────
+
+    #[test]
+    fn test_camera_default() {
+        let cam = Camera::default();
+        assert_eq!(cam.x, 0.0);
+        assert_eq!(cam.y, 0.0);
+        assert_eq!(cam.zoom, 1.0);
+    }
+
+    #[test]
+    fn test_camera_screen_to_world() {
+        let cam = Camera::new(100.0, 200.0, 2.0);
+        let world = cam.screen_to_world(400.0, 300.0);
+        // world = cam + screen / zoom
+        // wx = 100 + 400 / 2 = 300
+        // wy = 200 + 300 / 2 = 350
+        assert!((world.x - 300.0).abs() < 0.001);
+        assert!((world.y - 350.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_camera_world_to_screen() {
+        let cam = Camera::new(100.0, 200.0, 2.0);
+        let screen = cam.world_to_screen(300.0, 350.0);
+        // screen = (world - cam) * zoom
+        // sx = (300 - 100) * 2 = 400
+        // sy = (350 - 200) * 2 = 300
+        assert!((screen.x - 400.0).abs() < 0.001);
+        assert!((screen.y - 300.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_camera_roundtrip() {
+        let cam = Camera::new(50.0, 75.0, 3.0);
+        let world = cam.screen_to_world(200.0, 300.0);
+        let back = cam.world_to_screen(world.x, world.y);
+        assert!((back.x - 200.0).abs() < 0.001);
+        assert!((back.y - 300.0).abs() < 0.001);
+    }
+
+    // ── Test: parse_path_commands ─────────────────────────────
+
+    #[test]
+    fn test_parse_path_commands_valid() {
+        let json = r#"[{"type":"moveTo","x":0,"y":0},{"type":"lineTo","x":100,"y":50},{"type":"close"}]"#;
+        let cmds = parse_path_commands(json).unwrap();
+        assert_eq!(cmds.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_path_commands_quad() {
+        let json = r#"[{"type":"quadTo","cx":50,"cy":100,"x":100,"y":0}]"#;
+        let cmds = parse_path_commands(json).unwrap();
+        assert_eq!(cmds.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_path_commands_bezier() {
+        let json = r#"[{"type":"bezierTo","cx1":1,"cy1":2,"cx2":3,"cy2":4,"x":5,"y":6}]"#;
+        let cmds = parse_path_commands(json).unwrap();
+        assert_eq!(cmds.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_path_commands_invalid_type() {
+        let json = r#"[{"type":"blah","x":0,"y":0}]"#;
+        let result = parse_path_commands(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_path_commands_invalid_json() {
+        let result = parse_path_commands("not json");
+        assert!(result.is_err());
+    }
+
+    // ── Test: take_notifications drains ───────────────────────
+
+    #[test]
+    fn test_take_notifications_drains() {
+        let mut rt = make_runtime(make_perms_with_notifications());
+        rt.load_wat(WAT_SHOW_TOAST).unwrap();
+        rt.register_document(make_doc());
+        rt.execute("test").unwrap();
+        let notes = rt.take_notifications();
+        assert_eq!(notes.len(), 1);
+        // Second take should be empty
+        let notes2 = rt.take_notifications();
+        assert_eq!(notes2.len(), 0);
+    }
+
+    // ── Test: multiple host calls accumulate across categories ─
+
+    #[test]
+    fn test_host_calls_across_categories() {
+        // WAT that calls both get_camera and on_load
+        let wat = r#"
+            (module
+                (import "logos" "host_get_camera" (func $cam (result i32)))
+                (import "logos" "host_on_load" (func $load (result i32)))
+                (memory (export "memory") 2)
+                (func (export "logos_init") (result i32)
+                    i32.const 0
+                )
+                (func (export "logos_execute") (param i32 i32) (result i32)
+                    call $cam
+                    drop
+                    call $load
+                )
+            )
+        "#;
+        let mut rt = make_runtime(PermissionSet::none());
+        rt.load_wat(wat).unwrap();
+        rt.register_document(make_doc());
+        let result = rt.execute("test");
+        assert!(result.is_ok());
+        assert_eq!(rt.host_calls(), 2);
     }
 }
