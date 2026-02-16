@@ -88,9 +88,11 @@ pub struct SpatialHash {
     cell_size: f32,
     /// Inverse of cell_size (cached to replace division with multiplication).
     inv_cell_size: f32,
-    /// Grid: cell → list of layer ids occupying that cell.
-    grid: FxHashMap<CellKey, Vec<Uuid>>,
-    /// Per-layer bounds cache for removal and precise hit testing.
+    /// Grid: cell → list of (id, aabb) entries.
+    /// Storing the AABB inline eliminates a hash lookup per candidate in
+    /// hit_test (saves ~10ns per candidate vs separate bounds map lookup).
+    grid: FxHashMap<CellKey, Vec<(Uuid, Aabb)>>,
+    /// Per-layer bounds cache for removal and cell-range computation.
     bounds: FxHashMap<Uuid, Aabb>,
 }
 
@@ -145,7 +147,7 @@ impl SpatialHash {
         let (min, max) = self.cell_range(&aabb);
         for cx in min.0..=max.0 {
             for cy in min.1..=max.1 {
-                self.grid.entry(CellKey(cx, cy)).or_default().push(id);
+                self.grid.entry(CellKey(cx, cy)).or_default().push((id, aabb));
             }
         }
     }
@@ -158,15 +160,12 @@ impl SpatialHash {
             for cx in min.0..=max.0 {
                 for cy in min.1..=max.1 {
                     let key = CellKey(cx, cy);
-                    if let Some(ids) = self.grid.get_mut(&key) {
+                    if let Some(entries) = self.grid.get_mut(&key) {
                         // swap_remove is O(1) vs retain's O(n).
-                        // Order within a cell isn't meaningful for spatial
-                        // queries — hit_test uses bounds.contains() for
-                        // correctness, not cell-vec ordering.
-                        if let Some(pos) = ids.iter().position(|&x| x == id) {
-                            ids.swap_remove(pos);
+                        if let Some(pos) = entries.iter().position(|&(eid, _)| eid == id) {
+                            entries.swap_remove(pos);
                         }
-                        if ids.is_empty() {
+                        if entries.is_empty() {
                             self.grid.remove(&key);
                         }
                     }
@@ -190,18 +189,17 @@ impl SpatialHash {
     ///
     /// Zero heap allocations.  Checks the center cell first (fast path),
     /// then only the 8 neighbours if no hit was found in the center.
+    /// Uses inline AABBs — no secondary hash lookup per candidate.
     #[inline]
     pub fn hit_test(&self, px: f32, py: f32) -> Option<Uuid> {
         let center = self.to_cell(px, py);
 
         // Fast path: check center cell only (handles >90% of cases when
         // layers are smaller than cell_size).
-        if let Some(ids) = self.grid.get(&center) {
-            for &id in ids.iter().rev() {
-                if let Some(aabb) = self.bounds.get(&id) {
-                    if aabb.contains(px, py) {
-                        return Some(id);
-                    }
+        if let Some(entries) = self.grid.get(&center) {
+            for &(id, ref aabb) in entries.iter().rev() {
+                if aabb.contains(px, py) {
+                    return Some(id);
                 }
             }
         }
@@ -213,12 +211,10 @@ impl SpatialHash {
                     continue; // already checked
                 }
                 let key = CellKey(center.0 + dx, center.1 + dy);
-                if let Some(ids) = self.grid.get(&key) {
-                    for &id in ids.iter().rev() {
-                        if let Some(aabb) = self.bounds.get(&id) {
-                            if aabb.contains(px, py) {
-                                return Some(id);
-                            }
+                if let Some(entries) = self.grid.get(&key) {
+                    for &(id, ref aabb) in entries.iter().rev() {
+                        if aabb.contains(px, py) {
+                            return Some(id);
                         }
                     }
                 }
@@ -236,13 +232,11 @@ impl SpatialHash {
         for dx in -1_i32..=1 {
             for dy in -1_i32..=1 {
                 let key = CellKey(center.0 + dx, center.1 + dy);
-                if let Some(ids) = self.grid.get(&key) {
-                    for &id in ids.iter().rev() {
+                if let Some(entries) = self.grid.get(&key) {
+                    for &(id, ref aabb) in entries.iter().rev() {
                         if seen.insert(id) {
-                            if let Some(aabb) = self.bounds.get(&id) {
-                                if aabb.contains(px, py) {
-                                    result.push(id);
-                                }
+                            if aabb.contains(px, py) {
+                                result.push(id);
                             }
                         }
                     }
@@ -261,13 +255,11 @@ impl SpatialHash {
         for cx in min.0..=max.0 {
             for cy in min.1..=max.1 {
                 let key = CellKey(cx, cy);
-                if let Some(ids) = self.grid.get(&key) {
-                    for &id in ids {
+                if let Some(entries) = self.grid.get(&key) {
+                    for &(id, ref aabb) in entries {
                         if seen.insert(id) {
-                            if let Some(aabb) = self.bounds.get(&id) {
-                                if aabb.intersects(region) {
-                                    result.push(id);
-                                }
+                            if aabb.intersects(region) {
+                                result.push(id);
                             }
                         }
                     }
@@ -301,9 +293,10 @@ impl SpatialHash {
     pub fn memory_bytes(&self) -> usize {
         let bounds_size = self.bounds.capacity()
             * (std::mem::size_of::<Uuid>() + std::mem::size_of::<Aabb>());
-        let grid_overhead: usize = self.grid.values().map(|v| v.capacity() * 16).sum();
+        let entry_size = std::mem::size_of::<(Uuid, Aabb)>();
+        let grid_overhead: usize = self.grid.values().map(|v| v.capacity() * entry_size).sum();
         let grid_keys = self.grid.capacity()
-            * (std::mem::size_of::<CellKey>() + std::mem::size_of::<Vec<Uuid>>());
+            * (std::mem::size_of::<CellKey>() + std::mem::size_of::<Vec<(Uuid, Aabb)>>());
         bounds_size + grid_overhead + grid_keys
     }
 }
@@ -614,10 +607,10 @@ mod tests {
         }
 
         let bytes_per_layer = sh.memory_bytes() / n;
-        // Target: < 128 bytes/layer (generous for HashMap overhead).
-        // Actual expectation with HashMap: ~80–120 bytes.
+        // Target: < 192 bytes/layer (accounts for inline AABB in grid cells).
+        // Actual expectation with HashMap: ~100–160 bytes.
         assert!(
-            bytes_per_layer < 128,
+            bytes_per_layer < 192,
             "Memory overhead too high: {} bytes/layer",
             bytes_per_layer
         );
