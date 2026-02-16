@@ -1,133 +1,263 @@
-# Contributing Guide #
+# Contributing to Logos
 
-Thank you for your interest in contributing to Penpot. This is a
-generic guide that details how to contribute to the project in a way that
-is efficient for everyone. If you are looking for specific documentation on
-different parts of the platform, please refer to the `docs/` directory,
-or the rendered version at the [Help Center](https://help.penpot.app/).
+Thank you for your interest in contributing to Logos! This guide covers
+everything you need to get started — from building the project to
+submitting your first pull request.
 
-## Reporting Bugs ##
+For architecture deep-dives, see the `docs/` directory or the
+rendered documentation at the [Help Center](https://help.penpot.app/).
 
-We are using [GitHub Issues](https://github.com/penpot/penpot/issues)
-for our public bugs. We keep a close eye on them and try to make it
-clear when we have an internal fix in progress. Before filing a new
-task, try to make sure your problem doesn't already exist.
+## Architecture Overview — 19 Crates
 
-If you found a bug, please report it, as far as possible, with:
+Logos is a Rust workspace with 19 crates organized into 7 layers:
 
-- a detailed explanation of steps to reproduce the error
-- the browser and browser version used
-- a dev tools console exception stack trace (if available)
+### Core Engine
+| Crate | Purpose | Tests |
+|-------|---------|-------|
+| `logos-core` | CRDT document model, layer operations, batch API | 47 |
+| `logos-layout` | Taffy constraint layout, spatial hash, hit testing | 59 |
+| `logos-render` | wgpu GPU pipeline, instance batching, frame cache | 47 |
+| `logos-text` | cosmic-text shaping, glyph atlas, typography | 48 |
 
-If you found a bug which you think is better to discuss in private (for
-example, security bugs), consider first sending an email to
-`support@penpot.app`.
+### Collaboration
+| Crate | Purpose | Tests |
+|-------|---------|-------|
+| `logos-collab` | WebSocket server, CRDT sync, RocksDB, presence, JWT auth | 213 |
 
-**We don't have a formal bug bounty program for security reports; this
-is an open source application, and your contribution will be recognized
-in the changelog.**
+### Platform Targets
+| Crate | Purpose | Tests |
+|-------|---------|-------|
+| `logos-desktop` | winit 0.30 + wgpu 24, UI modules (commands, panels, tabs) | 212 |
+| `logos-wasm` | WebGPU via wasm-bindgen, 23 JS-exported methods | 28 |
+
+### Extensibility
+| Crate | Purpose | Tests |
+|-------|---------|-------|
+| `logos-plugins` | Dual JS/WASM runtime, 21 host functions, TOML manifests | 596 |
+
+### AI
+| Crate | Purpose | Tests |
+|-------|---------|-------|
+| `logos-ai` | ONNX Runtime inference, quantized models, embeddings | 235 |
+
+### File Import (7 crates)
+| Crate | Purpose | Tests |
+|-------|---------|-------|
+| `logos-import-common` | Shared `ImportDocument` trait and types | — |
+| `logos-import-figma` | .fig binary parser (20 node types) | 9 |
+| `logos-import-svg` | Dependency-free XML + path parser | 17 |
+| `logos-import-sketch` | ZIP + JSON model mapping | 10 |
+| `logos-import-pdf` | Content stream tokenizer | 13 |
+| `logos-import-xd` | ZIP/AGC extraction | — |
+| `logos-import-canva` | JSON template parser | — |
+
+### Marketplace (3 crates)
+| Crate | Purpose | Tests |
+|-------|---------|-------|
+| `logos-marketplace-auth` | Ed25519 keypairs, JWT sessions | 32 |
+| `logos-marketplace-db` | PostgreSQL schema (7 tables) | 24 |
+| `logos-marketplace-api` | REST server with 18+ routes | 44 |
+
+**Total: 2,007 tests across 92,201 lines of Rust.**
+
+## Prerequisites
+
+- **Rust** 1.75+ (stable) — install via [rustup](https://rustup.rs/)
+- **System dependencies:**
+  - Linux: `sudo apt-get install libclang-dev libfontconfig1-dev`
+  - macOS: `brew install llvm fontconfig`
+  - Windows: Install Visual Studio Build Tools + LLVM
+- **WASM target** (optional): `rustup target add wasm32-unknown-unknown`
+
+## Building
+
+```bash
+# Clone the repository
+git clone https://github.com/navidrezadoost/Logos.git
+cd Logos
+
+# Build the entire workspace (19 crates)
+cargo build --workspace
+
+# Build a specific crate
+cargo build -p logos-desktop
+cargo build -p logos-core
+
+# Build the WASM web target
+cargo build --target wasm32-unknown-unknown -p logos-wasm
+
+# Release build
+cargo build --workspace --release
+```
+
+## Testing
+
+```bash
+# Run all workspace tests (2,007 tests)
+cargo test --workspace
+
+# Run tests for a specific crate
+cargo test -p logos-core
+cargo test -p logos-plugins
+cargo test -p logos-desktop
+
+# Run tests with output
+cargo test -p logos-core -- --nocapture
+
+# Run a specific test
+cargo test -p logos-plugins -- wasm_runtime::tests::test_fuel_limit
+
+# Skip GPU-dependent tests (if no GPU available)
+cargo test --workspace -- \
+  --skip "headless" --skip "surface" \
+  --skip "prepare_uploads" --skip "atlas" \
+  --skip "demo_scene_creates" --skip "font_registry"
+```
+
+## Benchmarks
+
+```bash
+# Run all benchmarks
+cargo bench --workspace
+
+# Run benchmarks for a specific crate
+cargo bench -p logos-core
+cargo bench -p logos-render
+
+# Results are saved to target/criterion/
+# Open target/criterion/report/index.html for interactive reports
+```
+
+## Reporting Bugs
+
+We use [GitHub Issues](https://github.com/navidrezadoost/Logos/issues)
+with structured templates. Before filing a new issue:
+
+1. Search existing issues to avoid duplicates
+2. Choose the appropriate template:
+   - **Bug Report** — crashes, performance issues, unexpected behavior
+   - **Feature Request** — new capabilities or improvements
+   - **Plugin Submission** — submit your plugin to the marketplace
+3. Include your Logos version, platform, and reproduction steps
+
+Security vulnerabilities should be reported privately via
+[GitHub Security Advisories](https://github.com/navidrezadoost/Logos/security/advisories/new).
 
 
-## Pull Requests ##
+## Pull Requests
 
-If you want to propose a change or bug fix via a pull request (PR),
-you should first carefully read the section **Developer's Certificate of
-Origin**. You must also format your code and commits according to the
-instructions below.
+Before submitting a PR, please read the **Developer's Certificate of
+Origin** section below. Format your code and commits according to these
+guidelines.
 
-If you intend to fix a bug, it's fine to submit a pull request right
-away, but we still recommend filing an issue detailing what you're
-fixing. This is helpful in case we don't accept that specific fix but
-want to keep track of the issue.
+**Bug fixes** — feel free to submit a PR directly. We still recommend
+filing an issue first so we can track it even if the specific fix isn't
+accepted.
 
-If you want to implement or start working on a new feature, please
-open a **question*- / **discussion*- issue for it. No PR
-will be accepted without a prior discussion about the changes,
-whether it is a new feature, an already planned one, or a quick win.
+**New features** — open a Discussion or Feature Request issue first.
+No PR will be accepted without prior discussion about the design.
 
-If it is your first PR, you can learn how to proceed from
-[this free video
-series](https://egghead.io/courses/how-to-contribute-to-an-open-source-project-on-github)
+**Good first issues** — look for the `good first issue` label for
+beginner-friendly tasks.
 
-We use the `easy fix` tag to indicate issues that are appropriate for beginners.
+### PR Checklist
 
-## Commit Guidelines ##
+- [ ] `cargo test --workspace` passes (2,007+ tests)
+- [ ] `cargo fmt --all -- --check` passes
+- [ ] `cargo clippy --workspace` has no new warnings
+- [ ] New code includes tests
+- [ ] Public APIs are documented with `///` doc comments
+- [ ] `CHANGELOG.md` is updated if applicable
 
-We have very precise rules on how our git commit messages must be formatted.
+## Commit Guidelines
 
-The commit message format is:
+We follow [Conventional Commits](https://www.conventionalcommits.org/) with
+scope. The format is:
 
 ```
-<type> <subject>
+<type>(<scope>): <subject>
 
 [body]
 
 [footer]
 ```
 
-Where type is:
+### Types
 
-- :bug: `:bug:` a commit that fixes a bug
-- :sparkles: `:sparkles:` a commit that adds an improvement
-- :tada: `:tada:` a commit with a new feature
-- :recycle: `:recycle:` a commit that introduces a refactor
-- :lipstick: `:lipstick:` a commit with cosmetic changes
-- :ambulance: `:ambulance:` a commit that fixes a critical bug
-- :books: `:books:` a commit that improves or adds documentation
-- :construction: `:construction:` a WIP commit
-- :boom: `:boom:` a commit with breaking changes
-- :wrench: `:wrench:` a commit for config updates
-- :zap: `:zap:` a commit with performance improvements
-- :whale: `:whale:` a commit for Docker-related stuff
-- :paperclip: `:paperclip:` a commit with other non-relevant changes
-- :arrow_up: `:arrow_up:` a commit with dependency updates
-- :arrow_down: `:arrow_down:` a commit with dependency downgrades
-- :fire: `:fire:` a commit that removes files or code
-- :globe_with_meridians: `:globe_with_meridians:` a commit that adds or updates
-  translations
+| Type | Description |
+|------|-------------|
+| `feat` | A new feature |
+| `fix` | A bug fix |
+| `perf` | Performance improvement |
+| `refactor` | Code change that neither fixes a bug nor adds a feature |
+| `docs` | Documentation only |
+| `test` | Adding or updating tests |
+| `ci` | CI/CD changes |
+| `chore` | Build process, dependencies, tooling |
 
-More info:
+### Scopes
 
- - https://gist.github.com/parmentf/035de27d6ed1dce0b36a
- - https://gist.github.com/rxaviers/7360908
+Use the crate name without the `logos-` prefix: `core`, `layout`, `render`,
+`text`, `collab`, `desktop`, `wasm`, `plugins`, `ai`, `import-figma`,
+`marketplace-auth`, etc.
 
-Each commit should have:
+### Examples
 
-- A concise subject using the imperative mood.
-- The subject should capitalize the first letter, omit the period
-  at the end, and be no longer than 65 characters.
-- A blank line between the subject line and the body.
-- An entry in the CHANGES.md file if applicable, referencing the
-  GitHub or Taiga issue/user story using these same rules.
-
-Examples of good commit messages:
-
-- `:bug: Fix unexpected error on launching modal`
-- `:bug: Set proper error message on generic error`
-- `:sparkles: Enable new modal for profile`
-- `:zap: Improve performance of dashboard navigation`
-- `:wrench: Update default backend configuration`
-- `:books: Add more documentation for authentication process`
-- `:ambulance: Fix critical bug on user registration process`
-- `:tada: Add new approach for user registration`
-
-## Formatting and Linting ##
-
-You will want to make sure your code is formatted and linted before submitting
-a PR. We use [cljfmt](https://github.com/weavejester/cljfmt) and
-[clj-kondo](https://github.com/clj-kondo/clj-kondo) for this. After installing
-them on your system, you can run them with:
-
-```bash
-# Check formatting
-./scripts/fmt
-
-# Lint
-./scripts/lint
+```
+feat(plugins): add viewport host functions for camera control
+fix(core): prevent panic on empty layer batch commit
+perf(render): reduce GPU uploads by 99.9% via dirty-slot tracking
+docs(desktop): add keyboard shortcut reference table
+test(collab): add WebSocket reconnection integration tests
+ci: add WASM build verification to release workflow
 ```
 
-Ideally, you should run these commands as git pre-commit hooks. A convenient way
-of defining them is to use [Husky](https://typicode.github.io/husky/#/).
+## Formatting and Linting
+
+All code must pass CI checks before merging:
+
+```bash
+# Format all Rust code
+cargo fmt --all
+
+# Check formatting (CI mode — fails on diff)
+cargo fmt --all -- --check
+
+# Run clippy lints
+cargo clippy --workspace -- -D warnings
+
+# Full pre-submit check (what CI runs)
+cargo fmt --all -- --check && \
+cargo clippy --workspace -- -D warnings && \
+cargo test --workspace
+```
+
+### Code Style
+
+- Use `rustfmt` defaults (no custom `rustfmt.toml`)
+- Document all public APIs with `///` doc comments and examples
+- Prefer `#[must_use]` on functions that return values
+- Use `thiserror` for error types, `anyhow` only in binaries
+- Keep functions under 50 lines; extract helpers for complex logic
+
+## Release Process
+
+1. All changes land on `main` via PR (CI must pass)
+2. Create a release branch: `release/vX.Y.Z`
+3. Update version in workspace `Cargo.toml` files
+4. Update `CHANGELOG.md` with the new version section
+5. Create PR to `main`, merge after review
+6. Tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+7. Push: `git push origin main --tags`
+8. CI automatically creates a GitHub Release with artifacts
+
+### Version Scheme
+
+- `vX.Y.Z-rc.N` — release candidates for testing
+- `vX.Y.Z` — stable releases
+- Major bumps for breaking API changes
+- Minor bumps for new features
+- Patch bumps for bug fixes
 
 ## Code of Conduct ##
 

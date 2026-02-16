@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/navidrezadoost/Logos/discussions
+    about: Ask questions, share ideas, and connect with other Logos users
+  - name: Documentation
+    url: https://help.penpot.app/
+    about: Check the documentation before filing an issue
+  - name: Security Vulnerabilities
+    url: https://github.com/navidrezadoost/Logos/security/advisories/new
+    about: Report security vulnerabilities privately
