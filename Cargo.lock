@@ -2170,6 +2170,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-marketplace-api"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-marketplace-auth",
+ "logos-marketplace-db",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-marketplace-auth"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-marketplace-db"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "log",
+ "logos-core",
+ "logos-marketplace-auth",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "logos-plugins"
 version = "0.1.0"
 dependencies = [
