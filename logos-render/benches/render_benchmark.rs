@@ -2,7 +2,15 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use logos_render::vertex::{RectInstance, CameraUniform, TextInstance};
-use logos_render::bridge::{collect_instances_direct, collect_instances_direct_into};
+use logos_render::bridge::{
+    collect_instances, collect_instances_direct, collect_instances_direct_into,
+    collect_instances_into, collect_instances_fast, prepare_layer_data,
+};
+use logos_core::{Layer, RectLayer};
+use logos_core::collab::CollabOp;
+use logos_layout::engine::LayoutEngine;
+use logos_layout::bridge::LayoutBridge;
+use uuid::Uuid;
 
 /// Generate `n` random-ish rect descriptors.
 fn make_rects(n: usize) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
@@ -146,6 +154,211 @@ fn bench_text_instance_batch(c: &mut Criterion) {
     });
 }
 
+// ===================================================================
+// End-to-end pipeline benchmarks (CPU-side: CRDT → Layout → Collect)
+// ===================================================================
+
+/// Helper: build a scene with N layers, compute layout, return (engine, layers).
+fn setup_scene(n: usize) -> (LayoutEngine, Vec<(Uuid, Layer)>) {
+    let mut engine = LayoutEngine::new();
+    let layers: Vec<(Uuid, Layer)> = (0..n)
+        .map(|i| {
+            let fi = i as f32;
+            let layer = Layer::Rect(RectLayer::new(
+                (fi * 7.3) % 1920.0,
+                (fi * 13.7) % 1080.0,
+                50.0 + (fi * 3.1) % 200.0,
+                30.0 + (fi * 5.7) % 150.0,
+            ));
+            let id = layer.id();
+            engine.add_or_update_layer(&layer).unwrap();
+            (id, layer)
+        })
+        .collect();
+    // Compute layout for each root (they're independent absolute layers)
+    for &(id, _) in &layers {
+        engine.compute_layout(id).unwrap();
+    }
+    (engine, layers)
+}
+
+/// End-to-end: layout compute → collect_instances_into → bytemuck cast
+/// This is the per-frame CPU path for a steady-state scene (no changes).
+fn bench_pipeline_steady_state(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pipeline_steady_state");
+
+    for &count in &[100, 1_000] {
+        let (engine, layers) = setup_scene(count);
+        let layer_refs: Vec<(Uuid, &Layer)> = layers.iter().map(|(id, l)| (*id, l)).collect();
+        let mut buf: Vec<RectInstance> = Vec::with_capacity(count);
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    collect_instances_into(&engine, black_box(&layer_refs), &mut buf);
+                    let bytes: &[u8] = bytemuck::cast_slice(&buf);
+                    black_box(bytes.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// End-to-end: single layer CRDT add → bridge flush → layout compute → collect
+/// This is the modification path (user adds a shape).
+fn bench_pipeline_add_layer(c: &mut Criterion) {
+    c.bench_function("pipeline_add_compute_collect", |b| {
+        b.iter(|| {
+            let mut bridge = LayoutBridge::new();
+            let mut engine = LayoutEngine::new();
+
+            let layer = Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0));
+            let id = layer.id();
+
+            bridge.push(CollabOp::AddLayer {
+                id,
+                parent_id: Uuid::nil(),
+                index: 0,
+                layer: layer.clone(),
+            });
+            bridge.flush(&mut engine).unwrap();
+            engine.compute_layout(id).unwrap();
+
+            let layers = vec![(id, &layer)];
+            let instances = collect_instances(&engine, black_box(&layers));
+            let bytes: &[u8] = bytemuck::cast_slice(&instances);
+            black_box(bytes.len());
+        });
+    });
+}
+
+/// End-to-end: modify property → recompute → collect (incremental path).
+/// Scene has 100 layers, we modify one and re-collect all.
+fn bench_pipeline_modify_recompute(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pipeline_modify_recompute");
+
+    for &count in &[100, 1_000] {
+        let (mut engine, layers) = setup_scene(count);
+        let layer_refs: Vec<(Uuid, &Layer)> = layers.iter().map(|(id, l)| (*id, l)).collect();
+        let mut buf: Vec<RectInstance> = Vec::with_capacity(count);
+        // Pick a root to compute under — since all are independent absolute,
+        // use the first one. But compute_layout needs dirty to work, so we
+        // mark one dirty via update_dimension.
+        let target_id = layers[0].0;
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    // 1. Modify one layer's width
+                    engine
+                        .update_dimension(
+                            target_id,
+                            logos_layout::bridge::DimAxis::Width,
+                            black_box(120.0),
+                        )
+                        .unwrap();
+                    // 2. Recompute layout (only dirty node recomputed by Taffy)
+                    engine.compute_layout(target_id).unwrap();
+                    // 3. Collect all instances
+                    collect_instances_into(&engine, black_box(&layer_refs), &mut buf);
+                    black_box(buf.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: collect_instances from layout engine (not the direct variant)
+fn bench_collect_instances_from_engine(c: &mut Criterion) {
+    let mut group = c.benchmark_group("collect_from_engine");
+
+    for &count in &[100, 1_000] {
+        let (engine, layers) = setup_scene(count);
+        let layer_refs: Vec<(Uuid, &Layer)> = layers.iter().map(|(id, l)| (*id, l)).collect();
+        let mut buf: Vec<RectInstance> = Vec::with_capacity(count);
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    collect_instances_into(&engine, black_box(&layer_refs), &mut buf);
+                    black_box(buf.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: fast-path collect using pre-computed colors + batch layout lookup
+fn bench_collect_instances_fast(c: &mut Criterion) {
+    let mut group = c.benchmark_group("collect_fast");
+
+    for &count in &[100, 1_000] {
+        let (engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let (ids, colors) = prepare_layer_data(&layer_refs);
+        let mut buf: Vec<RectInstance> = Vec::with_capacity(count);
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    collect_instances_fast(&engine, black_box(&ids), &colors, &mut buf);
+                    black_box(buf.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// End-to-end: modify → recompute → collect_fast (optimized pipeline)
+fn bench_pipeline_modify_recompute_fast(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pipeline_modify_fast");
+
+    for &count in &[100, 1_000] {
+        let (mut engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let (ids, colors) = prepare_layer_data(&layer_refs);
+        let mut buf: Vec<RectInstance> = Vec::with_capacity(count);
+        let target_id = layers[0].0;
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    engine
+                        .update_dimension(
+                            target_id,
+                            logos_layout::bridge::DimAxis::Width,
+                            black_box(120.0),
+                        )
+                        .unwrap();
+                    engine.compute_layout(target_id).unwrap();
+                    collect_instances_fast(&engine, black_box(&ids), &colors, &mut buf);
+                    black_box(buf.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_collect_instances,
@@ -156,5 +369,11 @@ criterion_group!(
     bench_bytemuck_cast,
     bench_text_instance_creation,
     bench_text_instance_batch,
+    bench_pipeline_steady_state,
+    bench_pipeline_add_layer,
+    bench_pipeline_modify_recompute,
+    bench_collect_instances_from_engine,
+    bench_collect_instances_fast,
+    bench_pipeline_modify_recompute_fast,
 );
 criterion_main!(benches);

@@ -256,11 +256,11 @@ impl LayoutEngine {
 
         self.taffy.compute_layout(root_node, Size::MAX_CONTENT)?;
 
-        // Reuse the node buffer to avoid per-call allocation.
+        // Walk only the subtree rooted at `root_node` instead of ALL nodes.
+        // For independent absolute nodes (the common case), this is O(1)
+        // instead of O(total_nodes).
         self.node_buf.clear();
-        self.node_buf.extend(
-            self.layer_to_node.iter().map(|(&id, &node)| (id, node)),
-        );
+        self.collect_subtree(root_node);
 
         for i in 0..self.node_buf.len() {
             let (id, node) = self.node_buf[i];
@@ -292,8 +292,24 @@ impl LayoutEngine {
             }
         }
 
-        self.dirty_nodes.clear();
+        // Only clear dirty nodes that belong to this subtree.
+        for &(id, _) in &self.node_buf {
+            self.dirty_nodes.remove(&id);
+        }
         Ok(())
+    }
+
+    /// Recursively collect (Uuid, NodeId) pairs for a subtree rooted at `node`.
+    fn collect_subtree(&mut self, node: NodeId) {
+        if let Some(&id) = self.node_to_layer.get(&node) {
+            self.node_buf.push((id, node));
+        }
+        // Use child_count + children to walk the subtree.
+        if let Ok(children) = self.taffy.children(node) {
+            for child in children {
+                self.collect_subtree(child);
+            }
+        }
     }
 
     // ---------------------------------------------------------------
@@ -303,6 +319,24 @@ impl LayoutEngine {
     /// Retrieve the cached layout for a layer.
     pub fn get_layout(&self, id: Uuid) -> Option<&Layout> {
         self.layout_results.get(&id)
+    }
+
+    /// Batch-lookup layouts for a list of IDs.
+    ///
+    /// Calls `f(index, id, layout)` for each ID that has a cached layout.
+    /// Avoids per-element hash lookup overhead from external callers by
+    /// inlining the FxHashMap access.
+    #[inline]
+    pub fn for_each_layout(
+        &self,
+        ids: &[Uuid],
+        mut f: impl FnMut(usize, Uuid, &Layout),
+    ) {
+        for (i, &id) in ids.iter().enumerate() {
+            if let Some(layout) = self.layout_results.get(&id) {
+                f(i, id, layout);
+            }
+        }
     }
 
     /// Number of nodes tracked by the engine.
