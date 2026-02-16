@@ -8,6 +8,7 @@ members = [
     "logos-layout",
     "logos-collab",
     "logos-plugins",
+    "logos-ai",
 ]
 resolver = "2"
 
