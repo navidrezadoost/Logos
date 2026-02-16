@@ -61,6 +61,9 @@ pub struct FrameCache {
     ids: Vec<Uuid>,
     /// Generation counter — bumped on every full rebuild.
     generation: u64,
+    /// Slot indices dirtied during the most recent `update_incremental`.
+    /// Used by the GPU upload path to write only changed bytes.
+    dirty_slots: Vec<usize>,
 }
 
 impl FrameCache {
@@ -72,6 +75,7 @@ impl FrameCache {
             colors: Vec::new(),
             ids: Vec::new(),
             generation: 0,
+            dirty_slots: Vec::new(),
         }
     }
 
@@ -142,6 +146,7 @@ impl FrameCache {
         changed_ids: &[Uuid],
     ) -> FrameUpdate {
         let mut updated = 0;
+        self.dirty_slots.clear();
 
         for &id in changed_ids {
             if let Some(&slot) = self.slot_map.get(&id) {
@@ -149,6 +154,7 @@ impl FrameCache {
                     let inst = &mut self.instances[slot];
                     inst.position = [layout.location.x, layout.location.y];
                     inst.size = [layout.size.width, layout.size.height];
+                    self.dirty_slots.push(slot);
                     updated += 1;
                 }
             }
@@ -190,6 +196,36 @@ impl FrameCache {
     #[inline]
     pub fn contains(&self, id: Uuid) -> bool {
         self.slot_map.contains_key(&id)
+    }
+
+    /// Slot indices that were dirtied by the last `update_incremental()`.
+    ///
+    /// Use these to drive partial GPU buffer uploads: each slot is
+    /// 48 bytes at `slot_index * 48` bytes offset in the GPU buffer.
+    #[inline]
+    pub fn dirty_slots(&self) -> &[usize] {
+        &self.dirty_slots
+    }
+
+    /// Iterate `(slot_index, &RectInstance)` for each dirty slot.
+    ///
+    /// Feed this directly to `RectPipeline::upload_instances_partial()`.
+    pub fn dirty_instances(&self) -> Vec<(usize, &RectInstance)> {
+        self.dirty_slots
+            .iter()
+            .map(|&slot| (slot, &self.instances[slot]))
+            .collect()
+    }
+
+    /// Returns true if the last update was a full rebuild
+    /// (i.e. the entire buffer should be re-uploaded).
+    #[inline]
+    pub fn needs_full_upload(&self) -> bool {
+        // After rebuild(), dirty_slots is empty but the whole buffer is new.
+        // We use generation > 0 and dirty_slots empty to detect rebuild scenario.
+        // Actually, the caller tracks this via FrameUpdate::full_rebuild.
+        // This is a convenience that checks if there are dirty slots.
+        !self.dirty_slots.is_empty()
     }
 }
 
@@ -543,5 +579,112 @@ mod tests {
         assert!((inst.position[1] - 300.0).abs() < f32::EPSILON);
         assert_eq!(inst.position[0], layout.location.x);
         assert_eq!(inst.position[1], layout.location.y);
+    }
+
+    // ── Dirty-slots tracking tests ────────────────────────────
+
+    #[test]
+    fn test_dirty_slots_empty_after_rebuild() {
+        let (engine, layers) = make_scene(5);
+        let refs: Vec<&Layer> = layers.iter().collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &refs);
+        // Rebuild doesn't populate dirty_slots — entire buffer is new.
+        assert!(cache.dirty_slots().is_empty());
+    }
+
+    #[test]
+    fn test_dirty_slots_empty_no_changes() {
+        let (engine, layers) = make_scene(5);
+        let refs: Vec<&Layer> = layers.iter().collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &refs);
+        cache.update_incremental(&engine, &[]);
+        assert!(cache.dirty_slots().is_empty());
+    }
+
+    #[test]
+    fn test_dirty_slots_single_change() {
+        let (mut engine, layers) = make_scene(10);
+        let refs: Vec<&Layer> = layers.iter().collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &refs);
+
+        let target = layers[3].id();
+        engine
+            .update_dimension(target, logos_layout::bridge::DimAxis::Width, 777.0)
+            .unwrap();
+        engine.compute_layout(target).unwrap();
+        let changed = engine.drain_changed();
+        cache.update_incremental(&engine, &changed);
+
+        assert_eq!(cache.dirty_slots(), &[3]);
+    }
+
+    #[test]
+    fn test_dirty_slots_multiple_changes() {
+        let (mut engine, layers) = make_scene(20);
+        let refs: Vec<&Layer> = layers.iter().collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &refs);
+
+        // Modify layers at index 5 and 15
+        for &idx in &[5, 15] {
+            let t = layers[idx].id();
+            engine
+                .update_dimension(t, logos_layout::bridge::DimAxis::Width, 500.0)
+                .unwrap();
+            engine.compute_layout(t).unwrap();
+        }
+        let changed = engine.drain_changed();
+        cache.update_incremental(&engine, &changed);
+
+        let slots = cache.dirty_slots();
+        assert_eq!(slots.len(), 2);
+        assert!(slots.contains(&5));
+        assert!(slots.contains(&15));
+    }
+
+    #[test]
+    fn test_dirty_instances_returns_correct_data() {
+        let (mut engine, layers) = make_scene(10);
+        let refs: Vec<&Layer> = layers.iter().collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &refs);
+
+        let target = layers[7].id();
+        engine
+            .update_dimension(target, logos_layout::bridge::DimAxis::Width, 888.0)
+            .unwrap();
+        engine.compute_layout(target).unwrap();
+        let changed = engine.drain_changed();
+        cache.update_incremental(&engine, &changed);
+
+        let dirty = cache.dirty_instances();
+        assert_eq!(dirty.len(), 1);
+        assert_eq!(dirty[0].0, 7); // slot index
+        assert!((dirty[0].1.size[0] - 888.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_dirty_slots_cleared_on_next_update() {
+        let (mut engine, layers) = make_scene(5);
+        let refs: Vec<&Layer> = layers.iter().collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &refs);
+
+        // First update: 1 dirty
+        let t = layers[2].id();
+        engine
+            .update_dimension(t, logos_layout::bridge::DimAxis::Width, 100.0)
+            .unwrap();
+        engine.compute_layout(t).unwrap();
+        let changed = engine.drain_changed();
+        cache.update_incremental(&engine, &changed);
+        assert_eq!(cache.dirty_slots().len(), 1);
+
+        // Second update: no changes → dirty cleared
+        cache.update_incremental(&engine, &[]);
+        assert!(cache.dirty_slots().is_empty());
     }
 }

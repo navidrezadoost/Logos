@@ -7,6 +7,7 @@ use logos_render::bridge::{
     collect_instances_into, collect_instances_fast, prepare_layer_data,
 };
 use logos_render::frame_cache::FrameCache;
+use logos_render::pipelines::rect::DrawIndexedIndirectArgs;
 use logos_core::{Layer, RectLayer};
 use logos_core::collab::CollabOp;
 use logos_layout::engine::LayoutEngine;
@@ -381,6 +382,9 @@ criterion_group!(
     bench_frame_cache_incremental_1,
     bench_frame_cache_incremental_10,
     bench_frame_cache_full_pipeline,
+    bench_partial_upload_prep,
+    bench_full_vs_partial_bytemuck,
+    bench_draw_indirect_args,
 );
 criterion_main!(benches);
 
@@ -588,4 +592,95 @@ fn bench_frame_cache_full_pipeline(c: &mut Criterion) {
     }
 
     group.finish();
+}
+
+// ===================================================================
+// GPU-driven benchmarks (partial uploads + draw indirect)
+// ===================================================================
+
+/// Benchmark: CPU-side preparation for partial upload (dirty_instances gathering)
+fn bench_partial_upload_prep(c: &mut Criterion) {
+    let mut group = c.benchmark_group("partial_upload_prep");
+
+    for &count in &[100, 1_000] {
+        let (mut engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &layer_refs);
+        let target = layers[0].0;
+
+        group.bench_with_input(
+            BenchmarkId::from_parameter(count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    engine
+                        .update_dimension(
+                            target,
+                            logos_layout::bridge::DimAxis::Width,
+                            black_box(120.0),
+                        )
+                        .unwrap();
+                    engine.compute_layout(target).unwrap();
+                    let changed = engine.drain_changed();
+                    cache.update_incremental(&engine, &changed);
+                    // Gather dirty instances for partial upload
+                    let dirty = cache.dirty_instances();
+                    black_box(dirty.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: bytemuck serialization — full buffer (48KB) vs 1-slot partial (48B)
+fn bench_full_vs_partial_bytemuck(c: &mut Criterion) {
+    let mut group = c.benchmark_group("upload_bytemuck");
+
+    for &count in &[100, 1_000] {
+        let (engine, layers) = setup_scene(count);
+        let layer_refs: Vec<&Layer> = layers.iter().map(|(_, l)| l).collect();
+        let mut cache = FrameCache::new();
+        cache.rebuild(&engine, &layer_refs);
+
+        // Full buffer serialization
+        group.bench_with_input(
+            BenchmarkId::new("full_cast", count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let bytes: &[u8] = bytemuck::cast_slice(black_box(cache.instances()));
+                    black_box(bytes.len());
+                });
+            },
+        );
+
+        // Single-slot serialization (what partial upload does per slot)
+        let single_inst = &cache.instances()[0];
+        group.bench_with_input(
+            BenchmarkId::new("single_slot", count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let bytes: &[u8] = bytemuck::bytes_of(black_box(single_inst));
+                    black_box(bytes.len());
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: DrawIndexedIndirectArgs creation + serialization
+fn bench_draw_indirect_args(c: &mut Criterion) {
+    c.bench_function("DrawIndexedIndirectArgs::new", |b| {
+        b.iter(|| {
+            let args = DrawIndexedIndirectArgs::new(black_box(1000));
+            let bytes = bytemuck::bytes_of(&args);
+            black_box(bytes.len());
+        });
+    });
 }
