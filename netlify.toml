@@ -1,0 +1,25 @@
+[build]
+  base = "docs/"
+  command = "npx @11ty/eleventy"
+  publish = "docs/_dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/api-reference/"
+  status = 301
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[context.deploy-preview]
+  command = "npx @11ty/eleventy"
+
+[context.branch-deploy]
+  command = "npx @11ty/eleventy"
