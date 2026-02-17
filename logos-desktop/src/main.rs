@@ -5,6 +5,7 @@
 //! pipeline for real-time design editing.
 
 mod state;
+pub mod file_io;
 pub mod presence;
 pub mod marketplace;
 pub mod commands;

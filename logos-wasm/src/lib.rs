@@ -29,12 +29,17 @@ pub mod app;
 /// Camera module — pure Rust, compiles on all targets.
 pub mod camera;
 
+/// Collaboration sync module — protocol state compiles everywhere,
+/// WebSocket transport is WASM-only.
+pub mod collab;
+
 /// Error types — compile on all targets for testing.
 pub mod error;
 
 #[cfg(target_arch = "wasm32")]
 pub use app::LogosApp;
 pub use camera::Camera;
+pub use collab::{WasmConnectionState, WasmSyncConfig, WasmSyncState};
 pub use error::WasmError;
 
 #[cfg(target_arch = "wasm32")]
