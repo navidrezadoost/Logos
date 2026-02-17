@@ -1,21 +1,21 @@
 {
-  "title": "Help center",
-  "url": "https://docs.penpot.app/",
-  "description": "Design freedom for teams.",
+  "title": "Logos Documentation",
+  "url": "https://docs.logos.dev/",
+  "description": "Logos — high-performance open-source design tool built in Rust.",
   "feed": {
-    "subtitle": "Penpot: design freedom for teams.",
+    "subtitle": "Logos: high-performance design tool.",
     "filename": "feed.xml",
     "path": "/feed/feed.xml",
-    "id": "https://docs.penpot.app/"
+    "id": "https://docs.logos.dev/"
   },
   "jsonfeed": {
     "path": "/feed/feed.json",
-    "url": "https://docs.penpot.app/feed/feed.json"
+    "url": "https://docs.logos.dev/feed/feed.json"
   },
   "author": {
-    "name": "Penpot",
-    "email": "hello@penpot.app",
-    "url": "https://penpot.app"
+    "name": "Logos",
+    "email": "hello@logos.dev",
+    "url": "https://logos.dev"
   },
-  "twitter": "@penpotapp"
+  "twitter": "@logosdesign"
 }
