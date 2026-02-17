@@ -396,6 +396,7 @@ impl Layer {
     }
 }
 
+pub mod style;
 pub mod ffi;
 pub mod collab;
 
