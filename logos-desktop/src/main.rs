@@ -14,6 +14,7 @@ pub mod toolbar;
 pub mod panels;
 pub mod palette;
 pub mod tabs;
+pub mod accessibility;
 
 use log::info;
 use std::sync::Arc;

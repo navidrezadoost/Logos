@@ -37,14 +37,20 @@ pub mod analytics;
 pub mod moderation;
 pub mod store;
 pub mod templates;
+pub mod sqlite;
 
-pub use publishers::PublisherRepo;
+pub use publishers::{PublisherRecord, PublisherRepo, PublisherStatus};
 pub use plugins::{PluginRecord, PluginRepo, PluginVersion, SubmissionStatus};
 pub use reviews::{Review, ReviewRepo, ReviewSummary};
 pub use analytics::{AnalyticsEvent, AnalyticsRepo, EventType, DownloadStats};
 pub use moderation::{ModerationAction, ModerationItem, ModerationQueue, ModerationStatus};
 pub use store::MarketplaceStore;
 pub use templates::{Template, TemplateCategory, TemplateGallery};
+pub use sqlite::{
+    SqliteConfig, QueryBuilder, SqlValue, MarketplaceQueries,
+    SQLITE_SCHEMA, SCHEMA_VERSION,
+    str_to_publisher_status, str_to_submission_status, str_to_event_type,
+};
 
 /// Database errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
