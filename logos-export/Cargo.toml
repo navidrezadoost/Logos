@@ -1,0 +1,20 @@
+[package]
+name = "logos-export"
+version = "0.1.0"
+edition = "2021"
+description = "SVG and PDF export for Logos documents"
+
+[dependencies]
+logos-core = { version = "0.1.0", path = "../logos-core" }
+logos-layout = { version = "0.1.0", path = "../logos-layout" }
+uuid = { version = "1.20.0", features = ["v4"] }
+thiserror = "2.0.18"
+log = "0.4.29"
+
+[dev-dependencies]
+criterion = "0.8.2"
+tempfile = "3"
+
+[[bench]]
+name = "export_benchmark"
+harness = false

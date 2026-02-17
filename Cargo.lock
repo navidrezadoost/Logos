@@ -2405,6 +2405,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-export"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.8.2",
+ "log",
+ "logos-core",
+ "logos-layout",
+ "tempfile",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "logos-import-canva"
 version = "0.1.0"
 dependencies = [
