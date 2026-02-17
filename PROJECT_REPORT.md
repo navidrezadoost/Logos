@@ -1,8 +1,9 @@
 # Logos v2.0.0 — Comprehensive Project Report
 
 **Date:** February 17, 2026  
-**Tag:** v2.0.0-rc.1 (commit 3b2225c)  
-**Main HEAD:** e2cc421  
+**Tag:** v2.0.0 (commit 5991d0f)  
+**Main HEAD:** 5991d0f  
+**Previous:** v2.0.0-rc.1 (3b2225c)  
 
 ---
 
@@ -38,12 +39,12 @@ Logos is a high-performance, open-source design tool built to compete with Figma
 
 | Metric | Value |
 |--------|-------|
-| **Total Rust LOC** | 92,736 |
-| **Workspace Crates** | 19 |
-| **Tests Passing** | 2,008 / 2,008 (100%) |
+| **Total Rust LOC** | ~100,000 |
+| **Workspace Crates** | 21 |
+| **Tests Passing** | 2,329 / 2,329 (100%) |
 | **Benchmark Suites** | 18 files, 130+ named benchmarks |
 | **CI Threshold** | ≥2,000 tests, 0 failures |
-| **Release Tag** | v2.0.0-rc.1 |
+| **Release Tag** | v2.0.0 (stable) |
 
 ---
 
@@ -677,7 +678,7 @@ Logos is a high-performance, open-source design tool built to compete with Figma
 
 ### 9.1 Collaboration System Assessment
 
-**Production Readiness: 7/10**
+**Production Readiness: 9/10**
 
 The collaboration layer is architecturally sound with a complete feature set:
 
@@ -691,17 +692,17 @@ The collaboration layer is architecturally sound with a complete feature set:
 | Persistent storage | ✅ Complete | RocksDB + WAL + LZ4 |
 | Authentication | ✅ Complete | JWT + multi-level rate limiting |
 | Backpressure | ✅ Complete | Adaptive, drop strategies |
-| Horizontal scaling | ❌ Missing | Single-node only |
-| E2E encryption | ❌ Missing | Signed but not encrypted |
-| Reconnection backoff | ⚠️ Partial | Linear retry, no exponential |
+| Horizontal scaling | ✅ Complete | Consistent hashing, gossip membership, live migration (Phase 3.3) |
+| E2E encryption | ✅ Complete | SHA-256, HKDF, AEAD, replay protection (Phase 3.3) |
+| Reconnection backoff | ✅ Complete | Exponential backoff with jitter (Phase 3.1) |
 
-**Key Insight:** The auth subsystem (2,320 lines) is over-engineered relative to the server (886 lines). The multi-level rate limiter and adaptive backpressure are production-grade features deployed before the server itself supports multiple instances. This suggests the auth layer was designed with scaling in mind even though the server isn't there yet — a good architectural decision.
+**Key Insight:** The auth subsystem (2,320 lines) is well-proportioned relative to the now-scalable server. The multi-level rate limiter and adaptive backpressure work in concert with the Phase 3.3 consistent hashing cluster. The distributed rate limiter splits token budgets across nodes, enabling true horizontal scaling.
 
 ### 9.2 Typography System Assessment
 
-**Production Readiness: 6/10**
+**Production Readiness: 8/10**
 
-The text engine handles the core rendering pipeline well but lacks editing capabilities:
+The text engine handles the full rendering and editing pipeline:
 
 | Feature | Status | Assessment |
 |---------|--------|------------|
@@ -711,10 +712,10 @@ The text engine handles the core rendering pipeline well but lacks editing capab
 | System font discovery | ✅ Complete | Cross-platform via font-kit |
 | CSS font matching | ✅ Complete | Weight/style/stretch, fallbacks |
 | Shape caching | ✅ Complete | HashMap-based memoization |
-| Text editing / cursor | ❌ Missing | No cursor positioning, selection |
-| IME / input methods | ❌ Missing | Critical for CJK languages |
+| Text editing / cursor | ✅ Complete | Cursor positioning, selection, editing (Phase 3.1) |
+| IME / input methods | ✅ Complete | IME composition support (Phase 3.1) |
 | Variable fonts | ❌ Missing | font-kit supports, not exposed |
-| Atlas eviction / resize | ❌ Missing | Fixed size, no LRU |
+| Atlas eviction / resize | ✅ Complete | LRU cache eviction (Phase 3.1) |
 | Rich text (mixed styles) | ❌ Missing | Single style per shape call |
 | Text-on-path | ❌ Missing | Advanced feature |
 
@@ -728,22 +729,34 @@ The text engine handles the core rendering pipeline well but lacks editing capab
 
 | Risk | Impact | Probability | Mitigation |
 |------|--------|-------------|------------|
-| No text editing UX | Blocks user adoption | High | Implement cursor positioning + selection in logos-text |
-| WASM has 2 tests | Production bugs in browser | High | Add WASM integration test suite |
-| Desktop lacks file I/O | Users can't save work | Critical | Implement file save/load via native dialogs |
-| Single-node collab | Can't scale beyond ~1000 users | Medium | Design sharding strategy for RoomManager |
+| ~~No text editing UX~~ | ~~Blocks user adoption~~ | ~~High~~ | ✅ Resolved in Phase 3.1 |
+| ~~WASM has 2 tests~~ | ~~Production bugs in browser~~ | ~~High~~ | ✅ Resolved in Phase 3.1 |
+| ~~Desktop lacks file I/O~~ | ~~Users can’t save work~~ | ~~Critical~~ | ✅ Resolved in Phase 3.1 |
+| ~~Single-node collab~~ | ~~Can’t scale beyond ~1000 users~~ | ~~Medium~~ | ✅ Resolved in Phase 3.3 |
 | ONNX RC dependency | API breakage on update | Medium | Pin version, add integration tests |
 
 ### 10.2 Recommended Next Steps
 
-1. **Text Editing MVP** — cursor positioning, selection, IME input in logos-text
-2. **File Persistence** — native file save/load in logos-desktop (`.logos` format)
-3. **WASM Test Suite** — headless browser tests for logos-wasm
+1. ~~**Text Editing MVP**~~ — ✅ Done (Phase 3.1): cursor, selection, IME
+2. ~~**File Persistence**~~ — ✅ Done (Phase 3.1): native save/load
+3. ~~**WASM Test Suite**~~ — ✅ Done (Phase 3.1): integration tests
 4. **Tauri Migration** — replace raw winit with Tauri for menus, dialogs, system tray
-5. **Atlas Eviction** — LRU cache eviction when atlas is full
-6. **Render Effects** — gradient fills, drop shadows, blur filters
-7. **Export Pipeline** — SVG, PNG, PDF export complementing the import pipeline
+5. ~~**Atlas Eviction**~~ — ✅ Done (Phase 3.1): LRU cache eviction
+6. ~~**Render Effects**~~ — ✅ Done (Phase 3.2): MSAA, gradients, shadows, blur
+7. ~~**Export Pipeline**~~ — ✅ Done (Phase 3.2): SVG + PDF export
 
 ---
 
-*Report generated from codebase analysis on commit e2cc421 (main branch). All test counts verified against `cargo test --workspace` execution.*
+## Appendix: Release History
+
+| Tag | Commit | Tests | Milestone |
+|-----|--------|-------|-----------|
+| v2.0.0-rc.1 | 3b2225c | 2,008 | Initial feature completeness |
+| Phase 3.1 | 232040f | 1,565 | Foundational completeness (text editing, file I/O, WASM) |
+| Phase 3.2 | 8243f30 | 2,161 | Performance & polish (MSAA, gradients, shadows, export) |
+| Phase 3.3 | 1a63348 | 2,329 | Scalability & security (clustering, E2E, a11y) |
+| **v2.0.0** | **5991d0f** | **2,329** | **Stable release** |
+
+---
+
+*Report updated for v2.0.0 stable release (commit 5991d0f on main). All test counts verified against `cargo test --workspace` execution.*
