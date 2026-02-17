@@ -20,10 +20,12 @@
 //! - **`fonts`** — System font discovery and CSS-style matching.
 
 pub mod atlas;
+pub mod editing;
 pub mod engine;
 pub mod fonts;
 
 // Re-exports for ergonomic use.
 pub use atlas::{Atlas, AtlasRegion};
+pub use editing::{CursorState, GlyphPosition, Selection, SelectionRect, TextEditor};
 pub use engine::{GlyphQuad, ShapedText, TextAlign, TextEngine, TextStyle};
 pub use fonts::{FontDescriptor, FontMatch, FontRegistry, FontStyle, GenericFamily};

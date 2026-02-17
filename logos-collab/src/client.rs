@@ -26,6 +26,49 @@ pub enum ConnectionState {
     Reconnecting,
 }
 
+/// Reconnection configuration with exponential backoff + jitter.
+///
+/// Formula: min(base_delay × 2^attempt, max_delay) × (0.75 + jitter)
+/// Reference: Kleppmann, Designing Data-Intensive Applications, §5
+#[derive(Debug, Clone)]
+pub struct ReconnectConfig {
+    /// Base delay in milliseconds (default: 1000).
+    pub base_delay_ms: u64,
+    /// Maximum delay in milliseconds (default: 30_000).
+    pub max_delay_ms: u64,
+    /// Maximum number of reconnection attempts (0 = unlimited).
+    pub max_attempts: u32,
+}
+
+impl Default for ReconnectConfig {
+    fn default() -> Self {
+        Self {
+            base_delay_ms: 1_000,
+            max_delay_ms: 30_000,
+            max_attempts: 0, // Unlimited
+        }
+    }
+}
+
+impl ReconnectConfig {
+    /// Compute the delay for the given attempt number.
+    ///
+    /// Uses deterministic jitter derived from peer_id for reproducibility.
+    pub fn delay_for_attempt(&self, attempt: u32, peer_id: &uuid::Uuid) -> std::time::Duration {
+        let base = self.base_delay_ms;
+        let exp = 1u64.checked_shl(attempt.min(20)).unwrap_or(u64::MAX);
+        let delay = base.saturating_mul(exp);
+        let capped = delay.min(self.max_delay_ms);
+
+        // Deterministic jitter: ±25% (range 0.75..1.25).
+        let seed = peer_id.as_u128() as u64 ^ (attempt as u64).wrapping_mul(7919);
+        let jitter_frac = (seed % 500) as f64 / 1000.0; // 0.0..0.5
+        let jittered = (capped as f64) * (0.75 + jitter_frac);
+
+        std::time::Duration::from_millis(jittered as u64)
+    }
+}
+
 /// Events emitted by the sync client.
 #[derive(Debug, Clone)]
 pub enum SyncEvent {
@@ -156,6 +199,12 @@ pub struct SyncClient {
 
     /// Server URL
     server_url: String,
+
+    /// Reconnection configuration (exponential backoff + jitter).
+    reconnect_config: ReconnectConfig,
+
+    /// Number of consecutive reconnection attempts.
+    reconnect_attempts: Arc<RwLock<u32>>,
 }
 
 impl SyncClient {
@@ -172,7 +221,21 @@ impl SyncClient {
             event_rx: Some(event_rx),
             event_tx,
             server_url: server_url.into(),
+            reconnect_config: ReconnectConfig::default(),
+            reconnect_attempts: Arc::new(RwLock::new(0)),
         }
+    }
+
+    /// Create a new sync client with custom reconnection config.
+    pub fn with_reconnect_config(
+        peer_info: PeerInfo,
+        doc_id: Uuid,
+        server_url: impl Into<String>,
+        config: ReconnectConfig,
+    ) -> Self {
+        let mut client = Self::new(peer_info, doc_id, server_url);
+        client.reconnect_config = config;
+        client
     }
 
     /// Take the event receiver (can only be called once).
@@ -329,6 +392,68 @@ impl SyncClient {
                 Err(ProtocolError::ConnectionClosed)
             }
         }
+    }
+
+    /// Reconnect with exponential backoff + jitter.
+    ///
+    /// Attempts to reconnect up to `max_attempts` times (0 = unlimited).
+    /// Each attempt waits `base_delay × 2^attempt` milliseconds with
+    /// ±25% jitter, capped at `max_delay`.
+    ///
+    /// Reference: Kleppmann, *Designing Data-Intensive Applications*, §5
+    pub async fn reconnect_with_backoff(&mut self) -> Result<(), ProtocolError> {
+        let max = self.reconnect_config.max_attempts;
+
+        loop {
+            let attempt = {
+                let attempts = self.reconnect_attempts.read().await;
+                *attempts
+            };
+
+            // Check attempt limit.
+            if max > 0 && attempt >= max {
+                log::warn!(
+                    "Reconnection failed after {attempt} attempts — giving up"
+                );
+                return Err(ProtocolError::ConnectionClosed);
+            }
+
+            *self.state.write().await = ConnectionState::Reconnecting;
+
+            let delay = self.reconnect_config.delay_for_attempt(attempt, &self.peer_info.peer_id);
+            log::info!(
+                "Reconnect attempt {} — waiting {:?}",
+                attempt + 1,
+                delay
+            );
+
+            tokio::time::sleep(delay).await;
+
+            match self.connect().await {
+                Ok(()) => {
+                    // Reset attempts on success.
+                    *self.reconnect_attempts.write().await = 0;
+                    log::info!("Reconnected successfully on attempt {}", attempt + 1);
+                    return Ok(());
+                }
+                Err(_e) => {
+                    // Increment attempts and retry.
+                    let mut attempts = self.reconnect_attempts.write().await;
+                    *attempts = attempt + 1;
+                    log::warn!("Reconnect attempt {} failed, retrying...", attempt + 1);
+                }
+            }
+        }
+    }
+
+    /// Get the current reconnect attempt count.
+    pub async fn reconnect_attempt_count(&self) -> u32 {
+        *self.reconnect_attempts.read().await
+    }
+
+    /// Get a reference to the reconnect configuration.
+    pub fn reconnect_config(&self) -> &ReconnectConfig {
+        &self.reconnect_config
     }
 
     /// Send a CRDT delta to the server.
@@ -563,5 +688,81 @@ mod tests {
         assert!(client.take_event_rx().is_some());
         // Second take should return None
         assert!(client.take_event_rx().is_none());
+    }
+
+    // ── Exponential backoff tests ───────────────────────────────
+
+    #[test]
+    fn test_reconnect_config_defaults() {
+        let config = ReconnectConfig::default();
+        assert_eq!(config.base_delay_ms, 1_000);
+        assert_eq!(config.max_delay_ms, 30_000);
+        assert_eq!(config.max_attempts, 0);
+    }
+
+    #[test]
+    fn test_backoff_delay_exponential_growth() {
+        let config = ReconnectConfig {
+            base_delay_ms: 1000,
+            max_delay_ms: 60_000,
+            max_attempts: 0,
+        };
+        let peer_id = Uuid::new_v4();
+
+        let d0 = config.delay_for_attempt(0, &peer_id).as_millis();
+        let d1 = config.delay_for_attempt(1, &peer_id).as_millis();
+        let d2 = config.delay_for_attempt(2, &peer_id).as_millis();
+
+        // Each delay should roughly double (with jitter).
+        assert!(d0 >= 750 && d0 <= 1250, "d0={d0} not in [750,1250]");
+        assert!(d1 >= 1500 && d1 <= 2500, "d1={d1} not in [1500,2500]");
+        assert!(d2 >= 3000 && d2 <= 5000, "d2={d2} not in [3000,5000]");
+    }
+
+    #[test]
+    fn test_backoff_delay_caps_at_max() {
+        let config = ReconnectConfig {
+            base_delay_ms: 1000,
+            max_delay_ms: 30_000,
+            max_attempts: 0,
+        };
+        let peer_id = Uuid::new_v4();
+
+        let d = config.delay_for_attempt(30, &peer_id).as_millis();
+        // Even at attempt 30, delay should be capped to ~30_000 * 1.25 = 37_500.
+        assert!(d <= 37_500, "delay should be capped, got {d}");
+    }
+
+    #[test]
+    fn test_backoff_jitter_varies_with_peer() {
+        let config = ReconnectConfig::default();
+        let peer_a = Uuid::from_u128(1);
+        let peer_b = Uuid::from_u128(2);
+
+        let da = config.delay_for_attempt(3, &peer_a);
+        let db = config.delay_for_attempt(3, &peer_b);
+        // Different peers should get different jittered delays.
+        // (They could theoretically collide, but it's extremely unlikely.)
+        // We just check they're both in the valid range.
+        assert!(da.as_millis() >= 6000 && da.as_millis() <= 10_000);
+        assert!(db.as_millis() >= 6000 && db.as_millis() <= 10_000);
+    }
+
+    #[tokio::test]
+    async fn test_client_with_reconnect_config() {
+        let info = PeerInfo::new("TestUser");
+        let config = ReconnectConfig {
+            base_delay_ms: 500,
+            max_delay_ms: 5000,
+            max_attempts: 3,
+        };
+        let client = SyncClient::with_reconnect_config(
+            info, Uuid::new_v4(), "ws://localhost:9090", config,
+        );
+
+        assert_eq!(client.reconnect_config().base_delay_ms, 500);
+        assert_eq!(client.reconnect_config().max_delay_ms, 5000);
+        assert_eq!(client.reconnect_config().max_attempts, 3);
+        assert_eq!(client.reconnect_attempt_count().await, 0);
     }
 }

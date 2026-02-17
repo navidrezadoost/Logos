@@ -56,7 +56,7 @@ pub use presence::{
     PresenceRoom, RemoteCursorState, Vec2, build_cursor_instances,
 };
 pub use server::{ServerConfig, ServerStats, SyncServer};
-pub use client::{ConnectionState, OfflineQueue, SyncClient, SyncEvent};
+pub use client::{ConnectionState, OfflineQueue, ReconnectConfig, SyncClient, SyncEvent};
 pub use storage::{
     DocumentStore, StoreConfig, StoreError, DocumentMetadata,
     DeltaLog, CompressedDelta, DeltaStats,
