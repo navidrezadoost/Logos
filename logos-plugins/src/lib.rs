@@ -40,6 +40,7 @@ pub mod examples;
 pub mod host;
 #[cfg(test)]
 mod integration_tests;
+pub mod js_migration;
 pub mod manifest;
 pub mod manager;
 pub mod marketplace;
@@ -54,6 +55,12 @@ pub mod signing;
 // Re-export key types for convenience
 pub use engine::{EventBus, JsEngine, UiBridge, WasmRuntime};
 pub use host::PluginHost;
+pub use js_migration::{
+    JsWasmBridge, WasmPayload, CompilationStats, DeprecationStatus,
+    MigrationAnalysis, MigrationSummary,
+    boa_deprecation_status, analyze_migration, analyze_all_migrations,
+    summarize_migrations,
+};
 pub use marketplace::{MarketplaceClient, PackageBuilder, TrustedPublishers};
 pub use marketplace_http::{ApiEndpoint, ApiError, ApiResponse, DownloadProgress, DownloadState, InstallTransaction, MarketplaceHttpClient, PluginUpdate, RateLimiter, RetryPolicy, TransactionState};
 pub use manager::{PluginInstance, PluginManager, PluginRuntime, PluginState};

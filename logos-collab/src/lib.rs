@@ -45,6 +45,8 @@ pub mod client;
 pub mod presence;
 pub mod storage;
 pub mod auth;
+pub mod cluster;
+pub mod encryption;
 
 // Re-exports for convenience
 pub use protocol::{
@@ -70,4 +72,13 @@ pub use auth::{
     AtomicGlobalLimiter, RejectionLevel,
     BackpressureChannel, BackpressureStats, DropStrategy,
     AdaptiveLimiter, AtomicDropCounter,
+};
+pub use cluster::{
+    ClusterManager, ClusterNode, ClusterStatus, DiscoveryConfig,
+    DistributedRateLimiter, GossipMessage, HashRing, MigrationState,
+    MigrationTask, NodeId, NodeLoad, NodeState, RateLimitSummary,
+};
+pub use encryption::{
+    AuthTag, CryptoError, DocumentCryptoContext, DocumentKey,
+    EncryptedPayload, KeyExchangePair, KeyStore, Nonce,
 };
