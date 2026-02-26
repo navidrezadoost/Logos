@@ -126,6 +126,8 @@ pub enum LayerType {
     Frame,
     Path,
     Group,
+    Artboard,
+    Drawer,
 }
 
 impl fmt::Display for LayerType {
@@ -137,6 +139,8 @@ impl fmt::Display for LayerType {
             Self::Frame => write!(f, "Frame"),
             Self::Path => write!(f, "Path"),
             Self::Group => write!(f, "Group"),
+            Self::Artboard => write!(f, "Artboard"),
+            Self::Drawer => write!(f, "Drawer"),
         }
     }
 }

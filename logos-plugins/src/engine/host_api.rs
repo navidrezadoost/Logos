@@ -1283,6 +1283,98 @@ fn layer_to_js_object(layer: &Layer, ctx: &mut Context) -> boa_engine::JsObject 
                     boa_engine::property::Attribute::all(),
                 );
         }
+        Layer::Artboard(ab) => {
+            builder
+                .property(
+                    JsString::from("type"),
+                    JsValue::new(JsString::from("artboard")),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("name"),
+                    JsValue::new(JsString::from(ab.name.as_str())),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("x"),
+                    JsValue::rational(ab.bounds.x as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("y"),
+                    JsValue::rational(ab.bounds.y as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("width"),
+                    JsValue::rational(ab.bounds.width as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("height"),
+                    JsValue::rational(ab.bounds.height as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("children"),
+                    JsValue::new(ab.children.len() as i32),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("clipContent"),
+                    JsValue::new(ab.clip_content),
+                    boa_engine::property::Attribute::all(),
+                );
+        }
+        Layer::Drawer(d) => {
+            let eff = d.effective_bounds();
+            builder
+                .property(
+                    JsString::from("type"),
+                    JsValue::new(JsString::from("drawer")),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("name"),
+                    JsValue::new(JsString::from(d.name.as_str())),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("x"),
+                    JsValue::rational(eff.x as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("y"),
+                    JsValue::rational(eff.y as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("width"),
+                    JsValue::rational(eff.width as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("height"),
+                    JsValue::rational(eff.height as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("children"),
+                    JsValue::new(d.children.len() as i32),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("edge"),
+                    JsValue::new(JsString::from(format!("{:?}", d.edge))),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("state"),
+                    JsValue::new(JsString::from(format!("{:?}", d.state))),
+                    boa_engine::property::Attribute::all(),
+                );
+        }
     }
 
     builder.build()

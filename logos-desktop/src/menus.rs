@@ -67,6 +67,8 @@ pub enum MenuAction {
     AddEllipse,
     AddText,
     AddFrame,
+    AddArtboard,
+    AddDrawer,
     GroupSelection,
     UngroupSelection,
     BringToFront,
@@ -134,6 +136,8 @@ impl MenuAction {
             Self::AddEllipse => "layer.add_ellipse",
             Self::AddText => "layer.add_text",
             Self::AddFrame => "layer.add_frame",
+            Self::AddArtboard => "layer.add_artboard",
+            Self::AddDrawer => "layer.add_drawer",
             Self::GroupSelection => "layer.group",
             Self::UngroupSelection => "layer.ungroup",
             Self::BringToFront => "layer.bring_front",
@@ -193,6 +197,8 @@ impl MenuAction {
             Self::AddEllipse => Command::AddEllipse,
             Self::AddText => Command::AddText,
             Self::AddFrame => Command::AddFrame,
+            Self::AddArtboard => Command::AddArtboard,
+            Self::AddDrawer => Command::AddDrawer,
             Self::GroupSelection => Command::GroupSelection,
             Self::UngroupSelection => Command::UngroupSelection,
             Self::BringToFront => Command::BringToFront,
@@ -229,6 +235,7 @@ impl MenuAction {
             Self::ResetZoom, Self::ToggleGrid, Self::ToggleRulers,
             Self::ToggleSnapToGrid, Self::ToggleFullscreen,
             Self::AddRectangle, Self::AddEllipse, Self::AddText, Self::AddFrame,
+            Self::AddArtboard, Self::AddDrawer,
             Self::GroupSelection, Self::UngroupSelection,
             Self::BringToFront, Self::SendToBack, Self::BringForward, Self::SendBackward,
             Self::ToolSelect, Self::ToolRectangle, Self::ToolEllipse,
@@ -387,6 +394,10 @@ impl AppMenuBar {
             "Add &Text", Some(Accelerator::new(None::<AccelModifiers>, Code::KeyT)));
         Self::add(&layer_menu, &mut id_map, MenuAction::AddFrame,
             "Add &Frame", Some(Accelerator::new(None::<AccelModifiers>, Code::KeyF)));
+        Self::add(&layer_menu, &mut id_map, MenuAction::AddArtboard,
+            "Add &Artboard", Some(Accelerator::new(None::<AccelModifiers>, Code::KeyA)));
+        Self::add(&layer_menu, &mut id_map, MenuAction::AddDrawer,
+            "Add &Drawer", Some(Accelerator::new(None::<AccelModifiers>, Code::KeyD)));
         layer_menu.append(&PredefinedMenuItem::separator()).ok();
         Self::add(&layer_menu, &mut id_map, MenuAction::GroupSelection,
             "&Group", accel(primary(), Code::KeyG));

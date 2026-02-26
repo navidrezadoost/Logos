@@ -175,6 +175,22 @@ impl SvgExporter {
                     )
                     .unwrap();
                 }
+                Layer::Artboard(_) | Layer::Drawer(_) => {
+                    // Render as a rect with the container's default color
+                    write!(
+                        svg,
+                        r#"{i}<rect x="{x:.p$}" y="{y:.p$}" width="{w:.p$}" height="{h:.p$}" fill="{fill}" opacity="0.9" />{nl}"#,
+                        i = indent,
+                        x = item.x,
+                        y = item.y,
+                        w = item.width,
+                        h = item.height,
+                        fill = default_color_for_layer(item.layer),
+                        p = p,
+                        nl = nl
+                    )
+                    .unwrap();
+                }
             }
         }
 
@@ -241,6 +257,8 @@ fn default_color_for_layer(layer: &Layer) -> &'static str {
         Layer::Text(_) => "#f5c842",    // Yellow
         Layer::Frame(_) => "#38383d",   // Dark gray
         Layer::Path(_) => "#8c3edb",    // Purple
+        Layer::Artboard(_) => "#f2f2f2", // Light gray
+        Layer::Drawer(_) => "#2e3340",  // Dark blue-gray
     }
 }
 

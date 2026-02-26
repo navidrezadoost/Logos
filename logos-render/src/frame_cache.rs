@@ -244,6 +244,10 @@ fn layer_color(layer: &Layer) -> [f32; 4] {
         Layer::Text(_) => COLOR_TEXT,
         Layer::Frame(_) => COLOR_FRAME,
         Layer::Path(_) => COLOR_PATH,
+        Layer::Artboard(ab) => {
+            if ab.background_visible { ab.background } else { [0.0; 4] }
+        }
+        Layer::Drawer(_) => [0.18, 0.20, 0.25, 0.9],
     }
 }
 

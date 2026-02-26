@@ -48,6 +48,8 @@ pub enum Command {
     AddEllipse,
     AddText,
     AddFrame,
+    AddArtboard,
+    AddDrawer,
     GroupSelection,
     UngroupSelection,
     BringToFront,
@@ -423,6 +425,10 @@ impl CommandRegistry {
             .with_icon("type"));
         self.register(CommandInfo::new("layer.add-frame", "Add Frame", CommandCategory::Layer)
             .with_description("Insert a new frame layer"));
+        self.register(CommandInfo::new("layer.add-artboard", "Add Artboard", CommandCategory::Layer)
+            .with_description("Insert a new artboard (top-level canvas)"));
+        self.register(CommandInfo::new("layer.add-drawer", "Add Drawer", CommandCategory::Layer)
+            .with_description("Insert a new edge-anchored drawer panel"));
         self.register(CommandInfo::new("layer.group", "Group Selection", CommandCategory::Layer)
             .with_description("Group selected layers into a frame"));
         self.register(CommandInfo::new("layer.ungroup", "Ungroup", CommandCategory::Layer)
@@ -614,6 +620,8 @@ pub fn command_to_id(cmd: &Command) -> &'static str {
         Command::AddEllipse => "layer.add-ellipse",
         Command::AddText => "layer.add-text",
         Command::AddFrame => "layer.add-frame",
+        Command::AddArtboard => "layer.add-artboard",
+        Command::AddDrawer => "layer.add-drawer",
         Command::GroupSelection => "layer.group",
         Command::UngroupSelection => "layer.ungroup",
         Command::BringToFront => "layer.bring-front",

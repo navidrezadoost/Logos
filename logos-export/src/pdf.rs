@@ -200,6 +200,22 @@ impl PdfExporter {
                     }
                     stream.push_str("S\n"); // stroke
                 }
+                Layer::Artboard(_) | Layer::Drawer(_) => {
+                    // Render as a filled rect (same as Rect/Frame)
+                    let (r, g, b) = default_pdf_color(item.layer);
+                    write!(
+                        stream,
+                        "{r:.3} {g:.3} {b:.3} rg\n{x:.2} {y:.2} {w:.2} {h:.2} re f\n",
+                        r = r,
+                        g = g,
+                        b = b,
+                        x = item.x,
+                        y = pdf_y,
+                        w = item.width,
+                        h = item.height,
+                    )
+                    .unwrap();
+                }
             }
         }
 
@@ -230,6 +246,8 @@ fn default_pdf_color(layer: &Layer) -> (f32, f32, f32) {
         Layer::Text(_) => (0.96, 0.78, 0.26),       // Yellow
         Layer::Frame(_) => (0.22, 0.22, 0.24),      // Dark gray
         Layer::Path(_) => (0.55, 0.24, 0.86),       // Purple
+        Layer::Artboard(_) => (0.95, 0.95, 0.95),   // Light gray
+        Layer::Drawer(_) => (0.18, 0.20, 0.25),     // Dark blue-gray
     }
 }
 

@@ -1,8 +1,9 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use uuid::Uuid;
 use taffy::prelude::*;
-use taffy::{TaffyTree, TaffyError, Style, Layout, NodeId};
+use taffy::{TaffyTree, TaffyError, Style, Layout, NodeId, Overflow};
 use logos_core::Layer;
+use logos_core::container::{LayoutDirection, DrawerState, Edge};
 use thiserror::Error;
 
 use crate::spatial::{Aabb, SpatialHash};
@@ -156,6 +157,98 @@ impl LayoutEngine {
                     bottom: LengthPercentageAuto::auto(),
                 },
                 ..Style::default()
+            },
+
+            // ─── Tri-Container Model ────────────────────────────
+
+            Layer::Artboard(ab) => Style {
+                display: Display::Flex,
+                flex_direction: FlexDirection::Column,
+                size: Size {
+                    width: Dimension::length(ab.bounds.width),
+                    height: Dimension::length(ab.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(ab.bounds.x),
+                    top: LengthPercentageAuto::length(ab.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                overflow: taffy::Point {
+                    x: if ab.clip_content { Overflow::Hidden } else { Overflow::Visible },
+                    y: if ab.clip_content { Overflow::Hidden } else { Overflow::Visible },
+                },
+                ..Style::default()
+            },
+
+            Layer::Drawer(drawer) => {
+                let eff = drawer.effective_bounds();
+                let al = &drawer.auto_layout;
+
+                let (flex_dir, cross, main_just) = if al.enabled {
+                    (
+                        match al.direction {
+                            LayoutDirection::Horizontal => FlexDirection::Row,
+                            LayoutDirection::Vertical => FlexDirection::Column,
+                        },
+                        match al.cross_align {
+                            logos_core::container::CrossAxisAlign::Start => AlignItems::FlexStart,
+                            logos_core::container::CrossAxisAlign::Center => AlignItems::Center,
+                            logos_core::container::CrossAxisAlign::End => AlignItems::FlexEnd,
+                            logos_core::container::CrossAxisAlign::Stretch => AlignItems::Stretch,
+                            logos_core::container::CrossAxisAlign::Baseline => AlignItems::Baseline,
+                        },
+                        match al.main_distribute {
+                            logos_core::container::MainAxisDistribution::Start => JustifyContent::FlexStart,
+                            logos_core::container::MainAxisDistribution::Center => JustifyContent::Center,
+                            logos_core::container::MainAxisDistribution::End => JustifyContent::FlexEnd,
+                            logos_core::container::MainAxisDistribution::SpaceBetween => JustifyContent::SpaceBetween,
+                            logos_core::container::MainAxisDistribution::SpaceAround => JustifyContent::SpaceAround,
+                            logos_core::container::MainAxisDistribution::SpaceEvenly => JustifyContent::SpaceEvenly,
+                        },
+                    )
+                } else {
+                    (FlexDirection::Column, AlignItems::FlexStart, JustifyContent::FlexStart)
+                };
+
+                Style {
+                    display: if al.enabled { Display::Flex } else { Display::Block },
+                    flex_direction: flex_dir,
+                    align_items: Some(cross),
+                    justify_content: Some(main_just),
+                    size: Size {
+                        width: Dimension::length(eff.width),
+                        height: Dimension::length(eff.height),
+                    },
+                    gap: if al.enabled {
+                        Size {
+                            width: LengthPercentage::length(al.gap),
+                            height: LengthPercentage::length(al.gap),
+                        }
+                    } else {
+                        Size::zero()
+                    },
+                    padding: if al.enabled {
+                        taffy::Rect {
+                            left: LengthPercentage::length(al.padding.left),
+                            right: LengthPercentage::length(al.padding.right),
+                            top: LengthPercentage::length(al.padding.top),
+                            bottom: LengthPercentage::length(al.padding.bottom),
+                        }
+                    } else {
+                        taffy::Rect::zero()
+                    },
+                    flex_wrap: if al.wrap { FlexWrap::Wrap } else { FlexWrap::NoWrap },
+                    position: Position::Absolute,
+                    inset: taffy::Rect {
+                        left: LengthPercentageAuto::length(eff.x),
+                        top: LengthPercentageAuto::length(eff.y),
+                        right: LengthPercentageAuto::auto(),
+                        bottom: LengthPercentageAuto::auto(),
+                    },
+                    ..Style::default()
+                }
             },
         }
     }
@@ -652,12 +745,18 @@ mod tests {
             children: vec![],
             bounds: LogosRect { x: 0.0, y: 0.0, width: 400.0, height: 300.0 },
         });
+        let artboard = Layer::Artboard(logos_core::container::ArtboardData::new(
+            "TestBoard", 0.0, 0.0, 1440.0, 900.0,
+        ));
+        let drawer = Layer::Drawer(logos_core::container::DrawerData::new(
+            "TestDrawer", Uuid::new_v4(), logos_core::container::Edge::Right, 300.0, 0.0,
+        ));
 
         let mut engine = LayoutEngine::new();
-        for layer in &[rect, ellipse, text, frame] {
+        for layer in &[rect, ellipse, text, frame, artboard, drawer] {
             engine.add_or_update_layer(layer).unwrap();
         }
-        assert_eq!(engine.node_count(), 4);
+        assert_eq!(engine.node_count(), 6);
     }
 
     // ---------------------------------------------------------------

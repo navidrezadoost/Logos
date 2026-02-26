@@ -396,6 +396,28 @@ fn layer_to_plugin_value(layer: &Layer) -> PluginValue {
                 PluginValue::Bool(p.closed),
             );
         }
+        Layer::Artboard(ab) => {
+            map.insert("type".to_string(), PluginValue::String("artboard".to_string()));
+            map.insert("name".to_string(), PluginValue::String(ab.name.clone()));
+            map.insert("x".to_string(), PluginValue::Float(ab.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(ab.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(ab.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(ab.bounds.height as f64));
+            map.insert("children".to_string(), PluginValue::Int(ab.children.len() as i64));
+            map.insert("clipContent".to_string(), PluginValue::Bool(ab.clip_content));
+        }
+        Layer::Drawer(d) => {
+            let eff = d.effective_bounds();
+            map.insert("type".to_string(), PluginValue::String("drawer".to_string()));
+            map.insert("name".to_string(), PluginValue::String(d.name.clone()));
+            map.insert("x".to_string(), PluginValue::Float(eff.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(eff.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(eff.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(eff.height as f64));
+            map.insert("children".to_string(), PluginValue::Int(d.children.len() as i64));
+            map.insert("edge".to_string(), PluginValue::String(format!("{:?}", d.edge)));
+            map.insert("state".to_string(), PluginValue::String(format!("{:?}", d.state)));
+        }
     }
     PluginValue::Object(map)
 }

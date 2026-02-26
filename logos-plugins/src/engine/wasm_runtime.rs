@@ -1115,6 +1115,38 @@ fn layer_to_json(layer: &Layer) -> serde_json::Value {
             "width": p.bounds.width,
             "height": p.bounds.height,
         }),
+        Layer::Artboard(ab) => {
+            let children: Vec<_> = ab.children.iter().map(layer_to_json).collect();
+            serde_json::json!({
+                "type": "artboard",
+                "id": ab.id.to_string(),
+                "name": ab.name,
+                "x": ab.bounds.x,
+                "y": ab.bounds.y,
+                "width": ab.bounds.width,
+                "height": ab.bounds.height,
+                "clipContent": ab.clip_content,
+                "children": children,
+            })
+        }
+        Layer::Drawer(d) => {
+            let eff = d.effective_bounds();
+            let children: Vec<_> = d.children.iter().map(layer_to_json).collect();
+            serde_json::json!({
+                "type": "drawer",
+                "id": d.id.to_string(),
+                "name": d.name,
+                "x": eff.x,
+                "y": eff.y,
+                "width": eff.width,
+                "height": eff.height,
+                "edge": format!("{:?}", d.edge),
+                "state": format!("{:?}", d.state),
+                "sizeOpen": d.size_open,
+                "sizeClosed": d.size_closed,
+                "children": children,
+            })
+        }
     }
 }
 

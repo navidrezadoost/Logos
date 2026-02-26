@@ -2,6 +2,8 @@ use serde::{Serialize, Deserialize};
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
+pub mod container;
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DocumentMetadata {
     pub author_id: Uuid,
@@ -328,6 +330,10 @@ pub enum Layer {
     Text(TextLayer),
     Frame(FrameLayer),
     Path(PathLayer),
+    /// Top-level canvas — see [`container::ArtboardData`].
+    Artboard(container::ArtboardData),
+    /// Edge-anchored slide-in panel — see [`container::DrawerData`].
+    Drawer(container::DrawerData),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -392,6 +398,31 @@ impl Layer {
             Layer::Text(l) => l.id,
             Layer::Frame(l) => l.id,
             Layer::Path(l) => l.id,
+            Layer::Artboard(a) => a.id,
+            Layer::Drawer(d) => d.id,
+        }
+    }
+
+    /// Returns the bounds rectangle for any layer variant.
+    pub fn bounds(&self) -> Rect {
+        match self {
+            Layer::Rect(l) => l.bounds,
+            Layer::Ellipse(l) => l.bounds,
+            Layer::Text(l) => l.bounds,
+            Layer::Frame(l) => l.bounds,
+            Layer::Path(l) => l.bounds,
+            Layer::Artboard(a) => a.bounds,
+            Layer::Drawer(d) => d.effective_bounds(),
+        }
+    }
+
+    /// Returns child layers if this is a container type, otherwise None.
+    pub fn children(&self) -> Option<&[Layer]> {
+        match self {
+            Layer::Frame(f) => Some(&f.children),
+            Layer::Artboard(a) => Some(&a.children),
+            Layer::Drawer(d) => Some(&d.children),
+            _ => None,
         }
     }
 }

@@ -274,6 +274,8 @@ fn layer_bounds(layer: &Layer) -> &Rect {
         Layer::Text(l) => &l.bounds,
         Layer::Frame(l) => &l.bounds,
         Layer::Path(l) => &l.bounds,
+        Layer::Artboard(a) => &a.bounds,
+        Layer::Drawer(d) => &d.bounds,
     }
 }
 

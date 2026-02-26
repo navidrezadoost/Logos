@@ -20,6 +20,7 @@ use uuid::Uuid;
 use logos_core::collab::CollabOp;
 use logos_core::Layer;
 use taffy::prelude::*;
+use taffy::Overflow;
 
 use crate::engine::{LayoutEngine, LayoutError};
 
@@ -214,6 +215,53 @@ impl LayoutBridge {
                 }
                 Ok(())
             }
+
+            // ─── Tri-Container: Artboard ────────────────────────
+            Layer::Artboard(ab) => {
+                // Artboard is a top-level flex container (column direction).
+                let style = Style {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    size: Size {
+                        width: Dimension::length(ab.bounds.width),
+                        height: Dimension::length(ab.bounds.height),
+                    },
+                    position: Position::Absolute,
+                    inset: taffy::Rect {
+                        left: LengthPercentageAuto::length(ab.bounds.x),
+                        top: LengthPercentageAuto::length(ab.bounds.y),
+                        right: LengthPercentageAuto::auto(),
+                        bottom: LengthPercentageAuto::auto(),
+                    },
+                    overflow: taffy::Point {
+                        x: if ab.clip_content { Overflow::Hidden } else { Overflow::Visible },
+                        y: if ab.clip_content { Overflow::Hidden } else { Overflow::Visible },
+                    },
+                    ..Style::default()
+                };
+                engine.add_layer(ab.id, parent_id, style)?;
+
+                for child in &ab.children {
+                    self.add_layer_recursive(engine, child, Some(ab.id))?;
+                }
+                Ok(())
+            }
+
+            // ─── Tri-Container: Drawer ──────────────────────────
+            Layer::Drawer(drawer) => {
+                // Delegate style computation to the layout engine's converter
+                // via add_or_update_layer (uses LayoutEngine::layer_to_style).
+                engine.add_or_update_layer(layer)?;
+                if let Some(pid) = parent_id {
+                    engine.reparent(drawer.id, pid)?;
+                }
+
+                for child in &drawer.children {
+                    self.add_layer_recursive(engine, child, Some(drawer.id))?;
+                }
+                Ok(())
+            }
+
             other => {
                 engine.add_or_update_layer(other)?;
                 // If there's a parent, we need to reparent.  add_or_update_layer
