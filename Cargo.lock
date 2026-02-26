@@ -2815,6 +2815,7 @@ dependencies = [
  "log",
  "logos-core",
  "logos-layout",
+ "serde",
  "tempfile",
  "thiserror 2.0.18",
  "uuid",

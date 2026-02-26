@@ -24,6 +24,8 @@
 
 pub mod svg;
 pub mod pdf;
+pub mod codegen;
+pub mod batch;
 
 use logos_core::Layer;
 use logos_layout::engine::LayoutEngine;
