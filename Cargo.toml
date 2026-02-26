@@ -20,6 +20,7 @@ members = [
     "logos-marketplace-db",
     "logos-marketplace-api",
     "logos-export",
+    "logos-prototyping",
 ]
 resolver = "2"
 
