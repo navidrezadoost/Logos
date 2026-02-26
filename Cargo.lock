@@ -2973,6 +2973,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-perf"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "criterion 0.8.2",
+ "log",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "logos-plugins"
 version = "0.1.0"
 dependencies = [
