@@ -21,6 +21,7 @@ members = [
     "logos-marketplace-api",
     "logos-export",
     "logos-prototyping",
+    "logos-components",
 ]
 resolver = "2"
 

@@ -2754,6 +2754,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-components"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.8.2",
+ "log",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "logos-core"
 version = "0.1.0"
 dependencies = [
