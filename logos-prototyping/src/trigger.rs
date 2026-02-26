@@ -94,6 +94,16 @@ pub enum Action {
     OpenUrl {
         url: String,
     },
+    /// Show an overlay (modal, tooltip, dropdown, etc.).
+    ShowOverlay {
+        overlay_config: crate::overlay::OverlayConfig,
+    },
+    /// Dismiss an active overlay by its content id.
+    DismissOverlay {
+        content_id: Uuid,
+    },
+    /// Dismiss the topmost overlay.
+    DismissTopOverlay,
     /// Execute multiple actions in sequence.
     Sequence(Vec<Action>),
 }

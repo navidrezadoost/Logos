@@ -10,6 +10,8 @@ use uuid::Uuid;
 
 use crate::animate::{AnimationValue, PropertyAnimation};
 use crate::flow::FlowGraph;
+use crate::overlay::{ActiveOverlay, OverlayStack, DismissReason};
+use crate::scroll::{ScrollConfig, ScrollState};
 use crate::state_machine::{StateMachine, StateId};
 use crate::timeline::Timeline;
 use crate::trigger::{Action, DrawerTargetState, InteractionTarget, TriggerKind};
@@ -120,6 +122,24 @@ pub enum PreviewEvent {
         layer_id: Uuid,
         trigger: TriggerKind,
     },
+    /// Overlay shown.
+    OverlayShown {
+        overlay_id: Uuid,
+        content_id: Uuid,
+        kind: crate::overlay::OverlayKind,
+    },
+    /// Overlay dismissed.
+    OverlayDismissed {
+        overlay_id: Uuid,
+        content_id: Uuid,
+        reason: crate::overlay::DismissReason,
+    },
+    /// Scroll position changed.
+    ScrollChanged {
+        container_id: Uuid,
+        offset_x: f64,
+        offset_y: f64,
+    },
 }
 
 // ── Preview Session ──────────────────────────────────────────────────
@@ -145,6 +165,10 @@ pub struct PreviewSession {
     pub drawer_states: HashMap<Uuid, DrawerTargetState>,
     /// Flow graph for navigation visualisation.
     pub flow_graph: Option<FlowGraph>,
+    /// Scroll states keyed by container id.
+    pub scroll_states: HashMap<Uuid, ScrollState>,
+    /// Active overlay stack (z-ordered, last = topmost).
+    pub overlay_stack: OverlayStack,
     /// Accumulated events since last flush.
     events: Vec<PreviewEvent>,
     /// Current preview time in ms.
@@ -165,6 +189,8 @@ impl PreviewSession {
             navigation_stack: Vec::new(),
             drawer_states: HashMap::new(),
             flow_graph: None,
+            scroll_states: HashMap::new(),
+            overlay_stack: OverlayStack::new(),
             events: Vec::new(),
             time_ms: 0,
             start_screen: None,
@@ -208,6 +234,14 @@ impl PreviewSession {
         self.navigation_stack.clear();
         self.active_animations.clear();
         self.drawer_states.clear();
+        self.overlay_stack.dismiss_all();
+        // Reset scroll positions to zero.
+        for state in self.scroll_states.values_mut() {
+            state.offset_x = 0.0;
+            state.offset_y = 0.0;
+            state.velocity_x = 0.0;
+            state.velocity_y = 0.0;
+        }
 
         // Reset all state machines to their default.
         for sm in self.state_machines.values_mut() {
@@ -418,6 +452,37 @@ impl PreviewSession {
             Action::OpenUrl { .. } => {
                 // No-op in preview; the host should handle this.
             }
+            Action::ShowOverlay { overlay_config } => {
+                let content_id = overlay_config.content_id;
+                let kind = overlay_config.kind;
+                let overlay = ActiveOverlay::new(overlay_config, self.time_ms);
+                let oid = overlay.id;
+                self.overlay_stack.push(overlay);
+                self.events.push(PreviewEvent::OverlayShown {
+                    overlay_id: oid,
+                    content_id,
+                    kind,
+                });
+            }
+            Action::DismissOverlay { content_id } => {
+                let dismissed = self.overlay_stack.dismiss_by_content(content_id);
+                for o in dismissed {
+                    self.events.push(PreviewEvent::OverlayDismissed {
+                        overlay_id: o.id,
+                        content_id: o.config.content_id,
+                        reason: DismissReason::ActionDismiss,
+                    });
+                }
+            }
+            Action::DismissTopOverlay => {
+                if let Some(o) = self.overlay_stack.pop() {
+                    self.events.push(PreviewEvent::OverlayDismissed {
+                        overlay_id: o.id,
+                        content_id: o.config.content_id,
+                        reason: DismissReason::ActionDismiss,
+                    });
+                }
+            }
             Action::Sequence(actions) => {
                 for a in actions {
                     self.execute_action(a);
@@ -472,6 +537,48 @@ impl PreviewSession {
                     .map(|v| (a.layer_id, a.animation.property.clone(), v))
             })
             .collect()
+    }
+
+    // ── Scroll ───────────────────────────────────────────────────
+
+    /// Register a scroll area for a container.
+    pub fn add_scroll_area(&mut self, container_id: Uuid, config: ScrollConfig) {
+        self.scroll_states
+            .insert(container_id, ScrollState::new(container_id, config));
+    }
+
+    /// Get the scroll state for a container.
+    pub fn scroll_state(&self, container_id: Uuid) -> Option<&ScrollState> {
+        self.scroll_states.get(&container_id)
+    }
+
+    /// Apply a scroll delta to a container.
+    pub fn scroll_by(&mut self, container_id: Uuid, dx: f64, dy: f64) {
+        if let Some(state) = self.scroll_states.get_mut(&container_id) {
+            state.scroll_by(dx, dy);
+            self.events.push(PreviewEvent::ScrollChanged {
+                container_id,
+                offset_x: state.offset_x,
+                offset_y: state.offset_y,
+            });
+        }
+    }
+
+    /// Get the number of active scroll areas.
+    pub fn scroll_area_count(&self) -> usize {
+        self.scroll_states.len()
+    }
+
+    // ── Overlays ─────────────────────────────────────────────────
+
+    /// Get the number of active overlays.
+    pub fn overlay_count(&self) -> usize {
+        self.overlay_stack.len()
+    }
+
+    /// Whether any blocking overlay is active.
+    pub fn has_blocking_overlay(&self) -> bool {
+        self.overlay_stack.has_blocking_overlay()
     }
 }
 

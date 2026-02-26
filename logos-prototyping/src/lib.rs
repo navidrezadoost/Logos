@@ -14,6 +14,8 @@ pub mod animate;
 pub mod timeline;
 pub mod preview;
 pub mod flow;
+pub mod scroll;
+pub mod overlay;
 
 // Re-exports for convenience
 pub use state_machine::{StateMachine, State, StateId, Transition, TransitionId};
@@ -22,3 +24,5 @@ pub use animate::{PropertyAnimation, EasingCurve, AnimationValue, Interpolatable
 pub use timeline::{Timeline, Keyframe, LoopMode, TimelineId};
 pub use preview::{PreviewSession, PreviewEvent, PreviewState};
 pub use flow::{FlowGraph, FlowNode, FlowEdge};
+pub use scroll::{ScrollConfig, ScrollState, ScrollEvent, OverflowBehavior};
+pub use overlay::{OverlayConfig, OverlayStack, ActiveOverlay, OverlayEvent, OverlayKind};
