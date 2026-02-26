@@ -22,6 +22,7 @@ members = [
     "logos-export",
     "logos-prototyping",
     "logos-components",
+    "logos-sync",
 ]
 resolver = "2"
 

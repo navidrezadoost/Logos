@@ -3018,6 +3018,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-sync"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.8.2",
+ "log",
+ "logos-components",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "logos-text"
 version = "0.1.0"
 dependencies = [
