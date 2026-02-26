@@ -2780,6 +2780,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-cursor-sync"
+version = "0.1.0"
+dependencies = [
+ "bincode 2.0.1",
+ "criterion 0.8.2",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "logos-desktop"
 version = "0.1.0"
 dependencies = [

@@ -55,7 +55,8 @@ pub use protocol::{
 pub use broadcast::{BroadcastGroup, BroadcastStats, RoomManager};
 pub use presence::{
     AwarenessMessage, CursorColor, CursorInstance, CursorRenderData,
-    PresenceRoom, RemoteCursorState, Vec2, build_cursor_instances,
+    EditingState, PresenceRoom, RemoteCursorState, Vec2, ViewportRect,
+    build_cursor_instances,
 };
 pub use server::{ServerConfig, ServerStats, SyncServer};
 pub use client::{ConnectionState, OfflineQueue, ReconnectConfig, SyncClient, SyncEvent};
