@@ -262,6 +262,19 @@ impl LayoutBridge {
                 Ok(())
             }
 
+            // ─── Section: organizational grouping ───────────────
+            Layer::Section(section) => {
+                engine.add_or_update_layer(layer)?;
+                if let Some(pid) = parent_id {
+                    engine.reparent(section.id, pid)?;
+                }
+
+                for child in &section.children {
+                    self.add_layer_recursive(engine, child, Some(section.id))?;
+                }
+                Ok(())
+            }
+
             other => {
                 engine.add_or_update_layer(other)?;
                 // If there's a parent, we need to reparent.  add_or_update_layer

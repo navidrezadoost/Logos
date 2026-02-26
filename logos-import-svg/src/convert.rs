@@ -276,8 +276,12 @@ fn layer_bounds(layer: &Layer) -> &Rect {
         Layer::Path(l) => &l.bounds,
         Layer::Artboard(a) => &a.bounds,
         Layer::Drawer(d) => &d.bounds,
+        // Sections have no intrinsic bounds; fall back to zero-rect.
+        Layer::Section(_) => &ZERO_RECT,
     }
 }
+
+static ZERO_RECT: Rect = Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
 
 #[cfg(test)]
 mod tests {

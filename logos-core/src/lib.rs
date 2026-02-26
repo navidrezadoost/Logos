@@ -334,6 +334,8 @@ pub enum Layer {
     Artboard(container::ArtboardData),
     /// Edge-anchored slide-in panel — see [`container::DrawerData`].
     Drawer(container::DrawerData),
+    /// Organizational grouping — see [`container::SectionData`].
+    Section(container::SectionData),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -400,6 +402,7 @@ impl Layer {
             Layer::Path(l) => l.id,
             Layer::Artboard(a) => a.id,
             Layer::Drawer(d) => d.id,
+            Layer::Section(s) => s.id,
         }
     }
 
@@ -413,6 +416,7 @@ impl Layer {
             Layer::Path(l) => l.bounds,
             Layer::Artboard(a) => a.bounds,
             Layer::Drawer(d) => d.effective_bounds(),
+            Layer::Section(s) => s.computed_bounds(),
         }
     }
 
@@ -422,6 +426,7 @@ impl Layer {
             Layer::Frame(f) => Some(&f.children),
             Layer::Artboard(a) => Some(&a.children),
             Layer::Drawer(d) => Some(&d.children),
+            Layer::Section(s) => Some(&s.children),
             _ => None,
         }
     }

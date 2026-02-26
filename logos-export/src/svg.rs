@@ -191,6 +191,9 @@ impl SvgExporter {
                     )
                     .unwrap();
                 }
+                Layer::Section(_) => {
+                    // Sections are non-renderable — skip in SVG output
+                }
             }
         }
 
@@ -259,6 +262,7 @@ fn default_color_for_layer(layer: &Layer) -> &'static str {
         Layer::Path(_) => "#8c3edb",    // Purple
         Layer::Artboard(_) => "#f2f2f2", // Light gray
         Layer::Drawer(_) => "#2e3340",  // Dark blue-gray
+        Layer::Section(_) => "#00000000", // Transparent (non-renderable)
     }
 }
 

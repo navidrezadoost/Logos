@@ -250,6 +250,13 @@ impl LayoutEngine {
                     ..Style::default()
                 }
             },
+
+            // Sections are non-renderable organizers — no intrinsic size.
+            Layer::Section(_) => Style {
+                display: Display::Block,
+                position: Position::Relative,
+                ..Style::default()
+            },
         }
     }
 

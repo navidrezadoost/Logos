@@ -24,6 +24,7 @@ members = [
     "logos-components",
     "logos-sync",
     "logos-perf",
+    "logos-section",
 ]
 resolver = "2"
 

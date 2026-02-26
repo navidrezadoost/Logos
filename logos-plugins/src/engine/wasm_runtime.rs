@@ -1147,6 +1147,21 @@ fn layer_to_json(layer: &Layer) -> serde_json::Value {
                 "children": children,
             })
         }
+        Layer::Section(s) => {
+            let eff = s.computed_bounds();
+            let children: Vec<_> = s.children.iter().map(layer_to_json).collect();
+            serde_json::json!({
+                "type": "section",
+                "id": s.id.to_string(),
+                "name": s.name,
+                "x": eff.x,
+                "y": eff.y,
+                "width": eff.width,
+                "height": eff.height,
+                "collapsed": s.is_collapsed,
+                "children": children,
+            })
+        }
     }
 }
 

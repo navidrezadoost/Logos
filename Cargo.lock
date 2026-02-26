@@ -3031,6 +3031,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-section"
+version = "0.1.0"
+dependencies = [
+ "logos-core",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "logos-sync"
 version = "0.1.0"
 dependencies = [

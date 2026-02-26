@@ -418,6 +418,17 @@ fn layer_to_plugin_value(layer: &Layer) -> PluginValue {
             map.insert("edge".to_string(), PluginValue::String(format!("{:?}", d.edge)));
             map.insert("state".to_string(), PluginValue::String(format!("{:?}", d.state)));
         }
+        Layer::Section(s) => {
+            let eff = s.computed_bounds();
+            map.insert("type".to_string(), PluginValue::String("section".to_string()));
+            map.insert("name".to_string(), PluginValue::String(s.name.clone()));
+            map.insert("x".to_string(), PluginValue::Float(eff.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(eff.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(eff.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(eff.height as f64));
+            map.insert("children".to_string(), PluginValue::Int(s.children.len() as i64));
+            map.insert("collapsed".to_string(), PluginValue::Bool(s.is_collapsed));
+        }
     }
     PluginValue::Object(map)
 }

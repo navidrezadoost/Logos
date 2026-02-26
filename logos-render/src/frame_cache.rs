@@ -248,6 +248,7 @@ fn layer_color(layer: &Layer) -> [f32; 4] {
             if ab.background_visible { ab.background } else { [0.0; 4] }
         }
         Layer::Drawer(_) => [0.18, 0.20, 0.25, 0.9],
+        Layer::Section(_) => [0.0, 0.0, 0.0, 0.0], // Sections are non-renderable
     }
 }
 

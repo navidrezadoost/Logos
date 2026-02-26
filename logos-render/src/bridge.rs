@@ -16,6 +16,7 @@ const COLOR_FRAME: [f32; 4] = [0.22, 0.22, 0.24, 0.8]; // Dark gray
 const COLOR_PATH: [f32; 4] = [0.55, 0.24, 0.86, 1.0]; // Purple
 const COLOR_ARTBOARD: [f32; 4] = [0.95, 0.95, 0.95, 1.0]; // Light gray (canvas bg)
 const COLOR_DRAWER: [f32; 4] = [0.18, 0.20, 0.25, 0.9]; // Dark blue-gray
+const COLOR_SECTION: [f32; 4] = [0.0, 0.0, 0.0, 0.0];   // Transparent (non-renderable)
 
 /// Build a list of `RectInstance`s from the layout engine's computed results.
 ///
@@ -45,6 +46,7 @@ pub fn collect_instances(
                 if ab.background_visible { ab.background } else { [0.0; 4] }
             }
             Layer::Drawer(_) => COLOR_DRAWER,
+            Layer::Section(_) => COLOR_SECTION,
         };
 
         let instance = RectInstance::new(
@@ -127,6 +129,7 @@ pub fn collect_instances_into(
                 if ab.background_visible { ab.background } else { [0.0; 4] }
             }
             Layer::Drawer(_) => COLOR_DRAWER,
+            Layer::Section(_) => COLOR_SECTION,
         };
         Some(RectInstance {
             position: [layout.location.x, layout.location.y],
@@ -186,6 +189,7 @@ pub fn prepare_layer_data(layers: &[&Layer]) -> (Vec<Uuid>, Vec<[f32; 4]>) {
                 if ab.background_visible { ab.background } else { COLOR_ARTBOARD }
             }
             Layer::Drawer(_) => COLOR_DRAWER,
+            Layer::Section(_) => COLOR_SECTION,
         })
         .collect();
     (ids, colors)

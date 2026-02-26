@@ -20,12 +20,13 @@ use crate::{Layer, Rect};
 // Container enum
 // ═══════════════════════════════════════════════════════════════════
 
-/// A design container — one of the three tri-model archetypes.
+/// A design container — one of the four container archetypes.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Container {
     Artboard(ArtboardData),
     Frame(FrameData),
     Drawer(DrawerData),
+    Section(SectionData),
 }
 
 impl Container {
@@ -35,6 +36,7 @@ impl Container {
             Container::Artboard(a) => a.id,
             Container::Frame(f) => f.id,
             Container::Drawer(d) => d.id,
+            Container::Section(s) => s.id,
         }
     }
 
@@ -44,6 +46,7 @@ impl Container {
             Container::Artboard(a) => a.bounds,
             Container::Frame(f) => f.bounds,
             Container::Drawer(d) => d.effective_bounds(),
+            Container::Section(s) => s.computed_bounds(),
         }
     }
 
@@ -53,6 +56,7 @@ impl Container {
             Container::Artboard(a) => &a.children,
             Container::Frame(f) => &f.children,
             Container::Drawer(d) => &d.children,
+            Container::Section(s) => &s.children,
         }
     }
 
@@ -62,6 +66,7 @@ impl Container {
             Container::Artboard(a) => &mut a.children,
             Container::Frame(f) => &mut f.children,
             Container::Drawer(d) => &mut d.children,
+            Container::Section(s) => &mut s.children,
         }
     }
 
@@ -71,7 +76,28 @@ impl Container {
             Container::Artboard(_) => "Artboard",
             Container::Frame(_) => "Frame",
             Container::Drawer(_) => "Drawer",
+            Container::Section(_) => "Section",
         }
+    }
+
+    /// Whether this container is a section (non-renderable organizer).
+    pub fn is_section(&self) -> bool {
+        matches!(self, Container::Section(_))
+    }
+
+    /// Whether this container is a top-level artboard.
+    pub fn is_artboard(&self) -> bool {
+        matches!(self, Container::Artboard(_))
+    }
+
+    /// Whether this container is a nestable frame.
+    pub fn is_frame(&self) -> bool {
+        matches!(self, Container::Frame(_))
+    }
+
+    /// Whether this container is a drawer.
+    pub fn is_drawer(&self) -> bool {
+        matches!(self, Container::Drawer(_))
     }
 }
 
@@ -526,6 +552,177 @@ pub struct PropertyOverride {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Section
+// ═══════════════════════════════════════════════════════════════════
+
+/// Color label for visual organization in the layers panel.
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum SectionColor {
+    None,
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Purple,
+    Pink,
+    Gray,
+}
+
+impl Default for SectionColor {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// A non-renderable organizational container.
+///
+/// Sections group artboards, frames, or other sections for project
+/// organization. They are invisible on the canvas but appear in the
+/// layers panel as collapsible groups. Think of them like folders.
+///
+/// Key properties:
+/// - **Not rendered** — no background, border, or effects.
+/// - **Optional bounds** — computed from children for canvas overlay.
+/// - **Collapsible** — can be collapsed in the layers panel.
+/// - **Color-coded** — optional label color.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SectionData {
+    pub id: Uuid,
+    /// Descriptive name shown in the layers panel.
+    pub name: String,
+    /// Whether the section is collapsed in the layers panel.
+    pub is_collapsed: bool,
+    /// Optional color label for visual distinction.
+    pub color: SectionColor,
+    /// Description / notes for the section.
+    pub description: String,
+    /// Child layers (can include Artboards, Frames, other Sections).
+    pub children: Vec<Layer>,
+    /// Whether child containers should be locked (read-only).
+    pub is_locked: bool,
+    /// Whether the section (and its children) is visible on the canvas.
+    pub is_visible: bool,
+}
+
+impl SectionData {
+    /// Create a new empty section.
+    pub fn new(name: &str) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.to_string(),
+            is_collapsed: false,
+            color: SectionColor::None,
+            description: String::new(),
+            children: Vec::new(),
+            is_locked: false,
+            is_visible: true,
+        }
+    }
+
+    /// Create a section with a color label.
+    pub fn with_color(name: &str, color: SectionColor) -> Self {
+        let mut s = Self::new(name);
+        s.color = color;
+        s
+    }
+
+    /// Compute bounding box from children.
+    ///
+    /// Since sections are non-renderable, they have no intrinsic
+    /// bounds. Instead, their bounds are the union of all children.
+    /// Returns a zero-rect if no children exist.
+    pub fn computed_bounds(&self) -> Rect {
+        if self.children.is_empty() {
+            return Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
+        }
+
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+
+        for child in &self.children {
+            let b = child_bounds(child);
+            min_x = min_x.min(b.x);
+            min_y = min_y.min(b.y);
+            max_x = max_x.max(b.x + b.width);
+            max_y = max_y.max(b.y + b.height);
+        }
+
+        Rect {
+            x: min_x,
+            y: min_y,
+            width: max_x - min_x,
+            height: max_y - min_y,
+        }
+    }
+
+    /// Add a child layer.
+    pub fn add_child(&mut self, layer: Layer) {
+        self.children.push(layer);
+    }
+
+    /// Number of direct children.
+    pub fn child_count(&self) -> usize {
+        self.children.len()
+    }
+
+    /// Recursively count all descendant layers.
+    pub fn deep_count(&self) -> usize {
+        fn count_layer(layer: &Layer) -> usize {
+            match layer {
+                Layer::Artboard(a) => 1 + a.children.iter().map(count_layer).sum::<usize>(),
+                Layer::Frame(f) => 1 + f.children.iter().map(|c| count_layer(c)).sum::<usize>(),
+                Layer::Drawer(d) => 1 + d.children.iter().map(count_layer).sum::<usize>(),
+                Layer::Section(s) => 1 + s.children.iter().map(count_layer).sum::<usize>(),
+                _ => 1,
+            }
+        }
+        self.children.iter().map(count_layer).sum()
+    }
+
+    /// Toggle collapsed state.
+    pub fn toggle_collapsed(&mut self) {
+        self.is_collapsed = !self.is_collapsed;
+    }
+
+    /// Toggle locked state.
+    pub fn toggle_locked(&mut self) {
+        self.is_locked = !self.is_locked;
+    }
+
+    /// Toggle visibility.
+    pub fn toggle_visible(&mut self) {
+        self.is_visible = !self.is_visible;
+    }
+
+    /// Set description.
+    pub fn set_description(&mut self, desc: impl Into<String>) {
+        self.description = desc.into();
+    }
+}
+
+/// Helper: extract bounds from any Layer variant.
+fn child_bounds(layer: &Layer) -> Rect {
+    match layer {
+        Layer::Rect(r) => r.bounds,
+        Layer::Ellipse(e) => e.bounds,
+        Layer::Text(t) => t.bounds,
+        Layer::Frame(f) => Rect {
+            x: f.bounds.x,
+            y: f.bounds.y,
+            width: f.bounds.width,
+            height: f.bounds.height,
+        },
+        Layer::Path(p) => p.bounds,
+        Layer::Artboard(a) => a.bounds,
+        Layer::Drawer(d) => d.effective_bounds(),
+        Layer::Section(s) => s.computed_bounds(),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Device presets
 // ═══════════════════════════════════════════════════════════════════
 
@@ -922,5 +1119,162 @@ mod tests {
         };
         assert_eq!(comp.overrides.len(), 1);
         assert_eq!(comp.overrides[0].path, "fill.color");
+    }
+
+    // ─── SectionData ────────────────────────────────────────────
+
+    #[test]
+    fn test_section_new() {
+        let s = SectionData::new("My Section");
+        assert_eq!(s.name, "My Section");
+        assert!(!s.is_collapsed);
+        assert!(s.is_visible);
+        assert!(!s.is_locked);
+        assert_eq!(s.color, SectionColor::None);
+        assert!(s.description.is_empty());
+        assert!(s.children.is_empty());
+    }
+
+    #[test]
+    fn test_section_with_color() {
+        let s = SectionData::with_color("Important", SectionColor::Red);
+        assert_eq!(s.name, "Important");
+        assert_eq!(s.color, SectionColor::Red);
+    }
+
+    #[test]
+    fn test_section_add_child() {
+        let mut s = SectionData::new("Root");
+        assert_eq!(s.child_count(), 0);
+        s.add_child(Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0)));
+        assert_eq!(s.child_count(), 1);
+    }
+
+    #[test]
+    fn test_section_computed_bounds_empty() {
+        let s = SectionData::new("Empty");
+        let b = s.computed_bounds();
+        assert_eq!(b.x, 0.0);
+        assert_eq!(b.y, 0.0);
+        assert_eq!(b.width, 0.0);
+        assert_eq!(b.height, 0.0);
+    }
+
+    #[test]
+    fn test_section_computed_bounds_single_child() {
+        let mut s = SectionData::new("Root");
+        s.add_child(Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0)));
+        let b = s.computed_bounds();
+        assert_eq!(b.x, 10.0);
+        assert_eq!(b.y, 20.0);
+        assert_eq!(b.width, 100.0);
+        assert_eq!(b.height, 50.0);
+    }
+
+    #[test]
+    fn test_section_computed_bounds_multiple_children() {
+        let mut s = SectionData::new("Root");
+        s.add_child(Layer::Rect(RectLayer::new(0.0, 0.0, 50.0, 50.0)));
+        s.add_child(Layer::Rect(RectLayer::new(100.0, 100.0, 50.0, 50.0)));
+        let b = s.computed_bounds();
+        assert_eq!(b.x, 0.0);
+        assert_eq!(b.y, 0.0);
+        assert_eq!(b.width, 150.0);
+        assert_eq!(b.height, 150.0);
+    }
+
+    #[test]
+    fn test_section_deep_count() {
+        let mut root = SectionData::new("Root");
+        root.add_child(Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0)));
+        let mut child = SectionData::new("Child");
+        child.add_child(Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0)));
+        root.add_child(Layer::Section(child));
+        // deep_count = 3 (rect + child_section(1 + rect inside))
+        assert_eq!(root.deep_count(), 3);
+    }
+
+    #[test]
+    fn test_section_toggle_collapsed() {
+        let mut s = SectionData::new("Root");
+        assert!(!s.is_collapsed);
+        s.toggle_collapsed();
+        assert!(s.is_collapsed);
+        s.toggle_collapsed();
+        assert!(!s.is_collapsed);
+    }
+
+    #[test]
+    fn test_section_toggle_locked() {
+        let mut s = SectionData::new("Root");
+        assert!(!s.is_locked);
+        s.toggle_locked();
+        assert!(s.is_locked);
+    }
+
+    #[test]
+    fn test_section_toggle_visible() {
+        let mut s = SectionData::new("Root");
+        assert!(s.is_visible);
+        s.toggle_visible();
+        assert!(!s.is_visible);
+    }
+
+    #[test]
+    fn test_section_set_description() {
+        let mut s = SectionData::new("Root");
+        s.set_description("Project screens");
+        assert_eq!(s.description, "Project screens");
+    }
+
+    #[test]
+    fn test_container_section_kind_name() {
+        let s = SectionData::new("Test");
+        let c = Container::Section(s);
+        assert_eq!(c.kind_name(), "Section");
+    }
+
+    #[test]
+    fn test_container_section_helpers() {
+        let c = Container::Section(SectionData::new("Test"));
+        assert!(c.is_section());
+        assert!(!c.is_artboard());
+        assert!(!c.is_frame());
+        assert!(!c.is_drawer());
+    }
+
+    #[test]
+    fn test_container_serde_roundtrip_section() {
+        let mut s = SectionData::new("Design System");
+        s.color = SectionColor::Blue;
+        s.set_description("Core components");
+        s.add_child(Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0)));
+        let c = Container::Section(s);
+
+        let json = serde_json::to_string(&c).unwrap();
+        let c2: Container = serde_json::from_str(&json).unwrap();
+        assert_eq!(c2.kind_name(), "Section");
+        assert_eq!(c2.children().len(), 1);
+    }
+
+    #[test]
+    fn test_section_color_default() {
+        let c = SectionColor::default();
+        assert_eq!(c, SectionColor::None);
+    }
+
+    #[test]
+    fn test_section_nested_bounds() {
+        let mut outer = SectionData::new("Outer");
+        let mut inner = SectionData::new("Inner");
+        inner.add_child(Layer::Rect(RectLayer::new(50.0, 50.0, 30.0, 30.0)));
+        outer.add_child(Layer::Section(inner));
+        outer.add_child(Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0)));
+
+        let b = outer.computed_bounds();
+        assert_eq!(b.x, 0.0);
+        assert_eq!(b.y, 0.0);
+        assert_eq!(b.width, 80.0);
+        assert_eq!(b.height, 80.0);
     }
 }

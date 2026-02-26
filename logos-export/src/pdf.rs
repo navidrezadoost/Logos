@@ -216,6 +216,9 @@ impl PdfExporter {
                     )
                     .unwrap();
                 }
+                Layer::Section(_) => {
+                    // Sections are non-renderable — skip in PDF output
+                }
             }
         }
 
@@ -248,6 +251,7 @@ fn default_pdf_color(layer: &Layer) -> (f32, f32, f32) {
         Layer::Path(_) => (0.55, 0.24, 0.86),       // Purple
         Layer::Artboard(_) => (0.95, 0.95, 0.95),   // Light gray
         Layer::Drawer(_) => (0.18, 0.20, 0.25),     // Dark blue-gray
+        Layer::Section(_) => (0.0, 0.0, 0.0),        // Transparent (unused)
     }
 }
 

@@ -1375,6 +1375,50 @@ fn layer_to_js_object(layer: &Layer, ctx: &mut Context) -> boa_engine::JsObject 
                     boa_engine::property::Attribute::all(),
                 );
         }
+        Layer::Section(s) => {
+            let eff = s.computed_bounds();
+            builder
+                .property(
+                    JsString::from("type"),
+                    JsValue::new(JsString::from("section")),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("name"),
+                    JsValue::new(JsString::from(s.name.as_str())),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("x"),
+                    JsValue::rational(eff.x as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("y"),
+                    JsValue::rational(eff.y as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("width"),
+                    JsValue::rational(eff.width as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("height"),
+                    JsValue::rational(eff.height as f64),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("children"),
+                    JsValue::new(s.children.len() as i32),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    JsString::from("collapsed"),
+                    JsValue::new(s.is_collapsed),
+                    boa_engine::property::Attribute::all(),
+                );
+        }
     }
 
     builder.build()
