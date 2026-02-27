@@ -3065,6 +3065,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-replay"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "logos-identity",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "logos-section"
 version = "0.1.0"
 dependencies = [

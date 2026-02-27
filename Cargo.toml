@@ -29,6 +29,7 @@ members = [
     "logos-comments",
     "logos-spreadsheet",
     "logos-identity",
+    "logos-replay",
 ]
 resolver = "2"
 
