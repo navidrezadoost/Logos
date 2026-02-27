@@ -3020,6 +3020,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-multiplayer"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "logos-identity",
+ "logos-replay",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "logos-perf"
 version = "0.1.0"
 dependencies = [
