@@ -9,6 +9,7 @@ bincode = { version = "2.0.1", features = ["serde"] }
 futures-util = "0.3.31"
 hmac = "0.12.1"
 log = "0.4.29"
+logos-identity = { path = "../logos-identity" }
 lz4_flex = "0.12.0"
 rand = "0.9.1"
 rocksdb = "0.24.0"

@@ -2,6 +2,9 @@
 //!
 //! Role-based access control determines who can create, edit, delete,
 //! and moderate comments.
+//!
+//! Uses `logos_identity::Role` as the canonical role type. The local
+//! `UserRole` alias preserves backward compatibility.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,60 +14,28 @@ use crate::ops::CommentOp;
 
 // ── User Roles ───────────────────────────────────────────────────────
 
-/// User role in the design project.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum UserRole {
-    /// View-only access.
-    Viewer,
-    /// Can comment but not edit designs.
-    Commenter,
-    /// Can edit designs and comment.
-    Editor,
-    /// Full control including moderation.
-    Admin,
-    /// Project owner — all permissions.
-    Owner,
+/// User role in the design project — now a re-export of the canonical type.
+pub type UserRole = logos_identity::Role;
+
+/// Extension trait bridging `logos_identity::Role` methods to the
+/// comment-domain vocabulary.
+pub trait CommentRoleExt {
+    fn can_edit_designs(&self) -> bool;
+    fn can_delete_any_comment(&self) -> bool;
+    fn can_resolve_any_thread(&self) -> bool;
 }
 
-impl UserRole {
-    pub fn can_view(&self) -> bool {
-        true // all roles can view
+impl CommentRoleExt for UserRole {
+    fn can_edit_designs(&self) -> bool {
+        self.can_edit()
     }
 
-    pub fn can_comment(&self) -> bool {
-        !matches!(self, Self::Viewer)
+    fn can_delete_any_comment(&self) -> bool {
+        logos_identity::Role::can_delete_any_comment(self)
     }
 
-    pub fn can_edit_designs(&self) -> bool {
-        matches!(self, Self::Editor | Self::Admin | Self::Owner)
-    }
-
-    pub fn can_moderate(&self) -> bool {
-        matches!(self, Self::Admin | Self::Owner)
-    }
-
-    pub fn can_delete_any_comment(&self) -> bool {
-        matches!(self, Self::Admin | Self::Owner)
-    }
-
-    pub fn can_resolve_any_thread(&self) -> bool {
-        matches!(self, Self::Admin | Self::Owner)
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Viewer => "Viewer",
-            Self::Commenter => "Commenter",
-            Self::Editor => "Editor",
-            Self::Admin => "Admin",
-            Self::Owner => "Owner",
-        }
-    }
-}
-
-impl Default for UserRole {
-    fn default() -> Self {
-        Self::Viewer
+    fn can_resolve_any_thread(&self) -> bool {
+        logos_identity::Role::can_resolve_any_thread(self)
     }
 }
 

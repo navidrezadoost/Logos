@@ -2740,6 +2740,7 @@ dependencies = [
  "futures-util",
  "hmac",
  "log",
+ "logos-identity",
  "lz4_flex 0.12.0",
  "rand",
  "rocksdb",
@@ -2759,6 +2760,7 @@ version = "0.1.0"
 dependencies = [
  "bincode 2.0.1",
  "criterion 0.8.2",
+ "logos-identity",
  "serde",
  "serde_json",
  "uuid",
@@ -2839,6 +2841,16 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "logos-identity"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
  "uuid",
 ]
 
@@ -3077,6 +3089,7 @@ dependencies = [
  "log",
  "logos-components",
  "logos-core",
+ "logos-identity",
  "serde",
  "serde_json",
  "uuid",

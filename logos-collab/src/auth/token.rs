@@ -260,6 +260,59 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
+// ── Bridge to logos-identity ────────────────────────────────────────
+
+/// Convert legacy `Claims` to the canonical `logos_identity::TokenClaims`.
+///
+/// Since `Claims` predates the identity layer, the conversion fills in
+/// defaults for fields not present in the legacy type (role = Editor,
+/// email = empty, permissions = editor permissions).
+impl From<Claims> for logos_identity::TokenClaims {
+    fn from(c: Claims) -> Self {
+        logos_identity::TokenClaims::new(
+            logos_identity::UserId::from(c.sub),
+            c.name,
+            String::new(),
+            logos_identity::Role::Editor,
+        )
+        .with_documents(c.docs)
+    }
+}
+
+/// `TokenEngine` implements `logos_identity::TokenProvider` so other
+/// crates can consume it through the unified trait.
+impl logos_identity::TokenProvider for TokenEngine {
+    fn issue(&self, claims: &logos_identity::TokenClaims) -> Result<String, logos_identity::IdentityError> {
+        // Downcast to legacy Claims for signing
+        let legacy = Claims {
+            sub: *claims.sub.as_uuid(),
+            iss: claims.iss.clone(),
+            iat: claims.iat,
+            exp: claims.exp,
+            name: claims.name.clone(),
+            docs: claims.document_ids.clone(),
+        };
+        TokenEngine::issue(self, &legacy)
+            .map_err(|e| logos_identity::IdentityError::TokenError(e.to_string()))
+    }
+
+    fn verify(&self, token: &str) -> Result<logos_identity::TokenClaims, logos_identity::IdentityError> {
+        let claims = TokenEngine::verify(self, token)
+            .map_err(|e| logos_identity::IdentityError::TokenError(e.to_string()))?;
+        Ok(claims.into())
+    }
+
+    fn revoke(&mut self, _jti: &str) -> Result<(), logos_identity::IdentityError> {
+        // TokenEngine is stateless — revocation requires an external blacklist.
+        Ok(())
+    }
+
+    fn is_revoked(&self, _jti: &str) -> Result<bool, logos_identity::IdentityError> {
+        // No revocation list in stateless engine.
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

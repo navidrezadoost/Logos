@@ -2,6 +2,9 @@
 //!
 //! Collaborative session orchestration — tracks users, permissions,
 //! activity state, and document-level session lifecycle.
+//!
+//! Uses `logos_identity::Role` as the canonical role type. The local
+//! `SessionUserRole` alias preserves backward compatibility.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -27,30 +30,17 @@ impl Default for SessionId {
 
 // ── User Role & Permissions ──────────────────────────────────────────
 
-/// Role of a user in a collaboration session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionUserRole {
-    /// Full editing privileges.
-    Editor,
-    /// Can view and comment, but not edit.
-    Commenter,
-    /// View-only.
-    Viewer,
-    /// Owner — can manage permissions and session.
-    Owner,
+/// Role of a user in a collaboration session — now a re-export of the canonical type.
+pub type SessionUserRole = logos_identity::Role;
+
+/// Extension trait for session-specific role queries.
+pub trait SessionRoleExt {
+    fn can_manage(&self) -> bool;
 }
 
-impl SessionUserRole {
-    pub fn can_edit(&self) -> bool {
-        matches!(self, Self::Editor | Self::Owner)
-    }
-
-    pub fn can_comment(&self) -> bool {
-        matches!(self, Self::Editor | Self::Commenter | Self::Owner)
-    }
-
-    pub fn can_manage(&self) -> bool {
-        matches!(self, Self::Owner)
+impl SessionRoleExt for SessionUserRole {
+    fn can_manage(&self) -> bool {
+        self.is_owner()
     }
 }
 
@@ -71,6 +61,16 @@ impl SessionPermission {
     pub fn from_role(role: SessionUserRole) -> Self {
         match role {
             SessionUserRole::Owner => Self {
+                can_edit_components: true,
+                can_edit_instances: true,
+                can_edit_styles: true,
+                can_edit_prototypes: true,
+                can_manage_libraries: true,
+                can_export: true,
+                can_invite: true,
+                can_comment: true,
+            },
+            SessionUserRole::Admin => Self {
                 can_edit_components: true,
                 can_edit_instances: true,
                 can_edit_styles: true,

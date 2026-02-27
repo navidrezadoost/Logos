@@ -7,6 +7,7 @@ description = "Collaboration sync logic for Logos — comments, component change
 [dependencies]
 logos-core = { path = "../logos-core" }
 logos-components = { path = "../logos-components" }
+logos-identity = { path = "../logos-identity" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
