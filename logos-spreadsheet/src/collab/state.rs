@@ -145,6 +145,13 @@ impl CollabState {
         self.clock
     }
 
+    /// Tick the clock and return a new [`OpTimestamp`] for the local site.
+    ///
+    /// Used for structural operations that don't produce a `CellOp`.
+    pub fn tick(&mut self) -> OpTimestamp {
+        OpTimestamp::new(self.clock.tick(), self.site_id)
+    }
+
     /// Session statistics.
     pub fn stats(&self) -> &CollabStats {
         &self.stats

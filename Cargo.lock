@@ -3063,6 +3063,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-spreadsheet"
+version = "0.3.0"
+dependencies = [
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "logos-sync"
 version = "0.1.0"
 dependencies = [

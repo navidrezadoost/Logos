@@ -64,6 +64,41 @@ impl Spreadsheet {
         self.properties
             .insert((col, row, property.to_string()), value);
     }
+
+    // -----------------------------------------------------------------------
+    // Structural operation support (pub(crate))
+    // -----------------------------------------------------------------------
+
+    /// Remove a cell, returning its value if it existed.
+    pub fn remove_cell(&mut self, col: u32, row: u32) -> Option<Value> {
+        self.cells.remove(&(col, row))
+    }
+
+    /// Read-only access to the raw cell map.
+    pub(crate) fn cells(&self) -> &HashMap<(u32, u32), Value> {
+        &self.cells
+    }
+
+    /// Read-only access to the raw property map.
+    pub(crate) fn properties(&self) -> &HashMap<(u32, u32, String), Value> {
+        &self.properties
+    }
+
+    /// Replace the entire cell map (used by structural ops after shifting).
+    pub(crate) fn replace_cells(&mut self, cells: HashMap<(u32, u32), Value>) {
+        self.cells = cells;
+    }
+
+    /// Replace the entire property map (used by structural ops after shifting).
+    pub(crate) fn replace_properties(&mut self, props: HashMap<(u32, u32, String), Value>) {
+        self.properties = props;
+    }
+
+    /// Update sheet dimensions.
+    pub fn set_dimensions(&mut self, max_cols: u32, max_rows: u32) {
+        self.max_cols = max_cols;
+        self.max_rows = max_rows;
+    }
 }
 
 impl CellDataProvider for Spreadsheet {

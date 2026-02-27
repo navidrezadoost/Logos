@@ -473,6 +473,269 @@ impl RecalcEngine {
         }
         self.cell_design_deps.insert(coord, deps);
     }
+
+    // -----------------------------------------------------------------------
+    // Structural operations
+    // -----------------------------------------------------------------------
+
+    /// Apply a structural operation (insert/delete rows/cols, move, resize).
+    ///
+    /// This shifts cell data, formula ASTs, formula strings, properties,
+    /// design deps, and rebuilds the dependency graph. A full recalculation
+    /// is triggered because the topology has changed.
+    ///
+    /// Returns a [`StructuralChange`] snapshot for undo.
+    pub fn apply_structural_op(
+        &mut self,
+        op: &crate::structural::StructuralOp,
+    ) -> crate::structural::StructuralChange {
+        use crate::structural::*;
+
+        // 1. Snapshot current state for undo
+        let cell_snapshot: Vec<(CellCoord, Value)> = self
+            .sheet
+            .cells()
+            .iter()
+            .map(|(&c, v)| (c, v.clone()))
+            .collect();
+        let formula_snapshot: Vec<(CellCoord, String, Expression)> = self
+            .formulas
+            .iter()
+            .map(|(&c, s)| {
+                let ast = self.asts.get(&c).cloned().unwrap_or(Expression::Literal(Value::Empty));
+                (c, s.clone(), ast)
+            })
+            .collect();
+        let property_snapshot: Vec<((u32, u32, String), Value)> = self
+            .sheet
+            .properties()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let old_max_cols = self.sheet.max_cols();
+        let old_max_rows = self.sheet.max_rows();
+
+        // 2. Shift cell data
+        let new_cells = shift_hashmap(self.sheet.cells(), op);
+        self.sheet.replace_cells(new_cells);
+
+        // 3. Shift properties
+        let new_props = shift_property_map(self.sheet.properties(), op);
+        self.sheet.replace_properties(new_props);
+
+        // 4. Shift formula store + AST store, adjust references inside ASTs
+        let mut new_formulas: HashMap<CellCoord, String> = HashMap::new();
+        let mut new_asts: HashMap<CellCoord, Expression> = HashMap::new();
+
+        for (old_coord, formula_src) in &self.formulas {
+            if let Some(new_coord) = shift_coord(*old_coord, op) {
+                let old_ast = self.asts.get(old_coord);
+                let (final_ast, final_src) = if let Some(ast) = old_ast {
+                    if let Some(shifted_ast) = shift_expression(ast, op) {
+                        let new_src = format!("={}", format_expression(&shifted_ast));
+                        (shifted_ast, new_src)
+                    } else {
+                        (ast.clone(), formula_src.clone())
+                    }
+                } else {
+                    // No AST — keep original string (shouldn't happen normally)
+                    continue;
+                };
+                new_formulas.insert(new_coord, final_src);
+                new_asts.insert(new_coord, final_ast);
+            }
+            // else: cell deleted, formula dropped
+        }
+        self.formulas = new_formulas;
+        self.asts = new_asts;
+
+        // 5. Shift design deps
+        let mut new_design_deps: HashMap<String, HashSet<CellCoord>> = HashMap::new();
+        for (key, coords) in &self.design_deps {
+            let mut new_coords = HashSet::new();
+            for &c in coords {
+                if let Some(nc) = shift_coord(c, op) {
+                    new_coords.insert(nc);
+                }
+            }
+            if !new_coords.is_empty() {
+                new_design_deps.insert(key.clone(), new_coords);
+            }
+        }
+        self.design_deps = new_design_deps;
+
+        let mut new_cell_design_deps: HashMap<CellCoord, HashSet<DesignDep>> = HashMap::new();
+        for (coord, deps) in &self.cell_design_deps {
+            if let Some(nc) = shift_coord(*coord, op) {
+                new_cell_design_deps.insert(nc, deps.clone());
+            }
+        }
+        self.cell_design_deps = new_cell_design_deps;
+
+        // 6. Update sheet dimensions for resize
+        if let StructuralOp::ResizeSheet { new_cols, new_rows } = op {
+            self.sheet.set_dimensions(*new_cols, *new_rows);
+        }
+        // Insert rows/cols may expand dimensions
+        match op {
+            StructuralOp::InsertRows { count, .. } => {
+                let (mc, mr) = (self.sheet.max_cols(), self.sheet.max_rows());
+                self.sheet.set_dimensions(mc, mr + count);
+            }
+            StructuralOp::InsertCols { count, .. } => {
+                let (mc, mr) = (self.sheet.max_cols(), self.sheet.max_rows());
+                self.sheet.set_dimensions(mc + count, mr);
+            }
+            StructuralOp::DeleteRows { count, .. } => {
+                let (mc, mr) = (self.sheet.max_cols(), self.sheet.max_rows());
+                self.sheet.set_dimensions(mc, mr.saturating_sub(*count));
+            }
+            StructuralOp::DeleteCols { count, .. } => {
+                let (mc, mr) = (self.sheet.max_cols(), self.sheet.max_rows());
+                self.sheet.set_dimensions(mc.saturating_sub(*count), mr);
+            }
+            _ => {}
+        }
+
+        // 7. Rebuild dependency graph from shifted ASTs
+        self.graph.clear();
+        for (coord, ast) in &self.asts {
+            let deps = extract_dependencies(ast);
+            self.graph.set_precedents(*coord, deps);
+        }
+
+        // 8. Full recalculation — must evaluate ALL formula cells, not just
+        //    those with precedents. Formulas whose refs were deleted now
+        //    evaluate to #REF!, but they may have no precedents in the graph.
+        for &coord in self.asts.keys() {
+            self.graph.mark_dirty(coord);
+        }
+        // Also mark raw-value cells that formulas depend on
+        let formula_coords: HashSet<CellCoord> = self.asts.keys().cloned().collect();
+        for coord in &formula_coords {
+            for p in self.graph.get_precedents(*coord) {
+                if !formula_coords.contains(&p) {
+                    self.graph.mark_dirty(p);
+                }
+            }
+        }
+        let _ = self.recalculate();
+
+        StructuralChange {
+            op: op.clone(),
+            cell_snapshot,
+            formula_snapshot,
+            property_snapshot,
+            old_max_cols,
+            old_max_rows,
+        }
+    }
+
+    /// Restore the spreadsheet to the state captured in a [`StructuralChange`].
+    ///
+    /// This is a full state restore — it replaces all cells, formulas,
+    /// properties, dimensions, and rebuilds the dependency graph.
+    pub fn undo_structural(
+        &mut self,
+        change: &crate::structural::StructuralChange,
+    ) {
+        // Restore cells
+        let mut cells = HashMap::new();
+        for (coord, val) in &change.cell_snapshot {
+            cells.insert(*coord, val.clone());
+        }
+        self.sheet.replace_cells(cells);
+
+        // Restore properties
+        let mut props = HashMap::new();
+        for (key, val) in &change.property_snapshot {
+            props.insert(key.clone(), val.clone());
+        }
+        self.sheet.replace_properties(props);
+
+        // Restore dimensions
+        self.sheet.set_dimensions(change.old_max_cols, change.old_max_rows);
+
+        // Restore formulas + ASTs
+        self.formulas.clear();
+        self.asts.clear();
+        for (coord, src, ast) in &change.formula_snapshot {
+            self.formulas.insert(*coord, src.clone());
+            self.asts.insert(*coord, ast.clone());
+        }
+
+        // Clear and rebuild design deps from restored formulas
+        self.design_deps.clear();
+        self.cell_design_deps.clear();
+        for (coord, ast) in &self.asts {
+            let dd = extract_design_deps(ast);
+            // Use our register helper… but we need to do it inline since
+            // we can't borrow &self and &mut self at the same time.
+            if !dd.is_empty() {
+                for dep in &dd {
+                    let key = dep.element.key().to_string();
+                    self.design_deps.entry(key).or_default().insert(*coord);
+                }
+                self.cell_design_deps.insert(*coord, dd);
+            }
+        }
+
+        // Rebuild dep graph
+        self.graph.clear();
+        for (coord, ast) in &self.asts {
+            let deps = extract_dependencies(ast);
+            self.graph.set_precedents(*coord, deps);
+        }
+
+        // Full recalc
+        let _ = self.recalculate_all();
+    }
+
+    // Convenience wrappers for common structural ops
+
+    /// Insert `count` empty rows at the given row index.
+    pub fn insert_rows(&mut self, at: u32, count: u32) -> crate::structural::StructuralChange {
+        self.apply_structural_op(&crate::structural::StructuralOp::InsertRows { at, count })
+    }
+
+    /// Delete `count` rows starting at the given row index.
+    pub fn delete_rows(&mut self, at: u32, count: u32) -> crate::structural::StructuralChange {
+        self.apply_structural_op(&crate::structural::StructuralOp::DeleteRows { at, count })
+    }
+
+    /// Insert `count` empty columns at the given column index.
+    pub fn insert_cols(&mut self, at: u32, count: u32) -> crate::structural::StructuralChange {
+        self.apply_structural_op(&crate::structural::StructuralOp::InsertCols { at, count })
+    }
+
+    /// Delete `count` columns starting at the given column index.
+    pub fn delete_cols(&mut self, at: u32, count: u32) -> crate::structural::StructuralChange {
+        self.apply_structural_op(&crate::structural::StructuralOp::DeleteCols { at, count })
+    }
+
+    /// Move a rectangular range to a new position.
+    pub fn move_range(
+        &mut self,
+        src_col: u32,
+        src_row: u32,
+        src_end_col: u32,
+        src_end_row: u32,
+        dst_col: u32,
+        dst_row: u32,
+    ) -> crate::structural::StructuralChange {
+        self.apply_structural_op(&crate::structural::StructuralOp::MoveRange {
+            src_col, src_row, src_end_col, src_end_row, dst_col, dst_row,
+        })
+    }
+
+    /// Resize the sheet, trimming out-of-bounds cells.
+    pub fn resize_sheet(
+        &mut self,
+        new_cols: u32,
+        new_rows: u32,
+    ) -> crate::structural::StructuralChange {
+        self.apply_structural_op(&crate::structural::StructuralOp::ResizeSheet { new_cols, new_rows })
+    }
 }
 
 // ---------------------------------------------------------------------------

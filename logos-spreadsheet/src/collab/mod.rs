@@ -36,7 +36,7 @@ pub mod presence;
 pub mod sync;
 
 // Re-exports
-pub use ops::{CellOp, CellPayload, LamportClock, OpBatch, OpTimestamp, SiteId};
+pub use ops::{CellOp, CellPayload, LamportClock, OpBatch, OpTimestamp, SiteId, StructuralCollapOp};
 pub use state::{ApplyResult, CollabState, CollabStats};
 pub use presence::{
     PeerColor, PeerCursorRenderData, PeerPresence, PresenceTracker,

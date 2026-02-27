@@ -74,6 +74,8 @@ pub struct CollabEngine {
     active: bool,
     /// Operation log for undo support: (op, inverse_payload).
     undo_stack: Vec<UndoEntry>,
+    /// Structural operation undo stack.
+    structural_undo_stack: Vec<crate::structural::StructuralChange>,
 }
 
 /// An entry in the undo stack.
@@ -95,6 +97,7 @@ impl CollabEngine {
             session_name: String::new(),
             active: false,
             undo_stack: Vec::new(),
+            structural_undo_stack: Vec::new(),
         }
     }
 
@@ -289,6 +292,38 @@ impl CollabEngine {
     /// Whether undo is available.
     pub fn can_undo(&self) -> bool {
         !self.undo_stack.is_empty()
+    }
+
+    // -----------------------------------------------------------------------
+    // Structural operations (collab-level)
+    // -----------------------------------------------------------------------
+
+    /// Record a local structural operation.
+    ///
+    /// Returns a [`StructuralCollapOp`] to broadcast to peers.
+    /// The caller is responsible for passing `change` (from
+    /// `RecalcEngine::apply_structural_op`) so it can be stored for undo.
+    pub fn local_structural_op(
+        &mut self,
+        op: crate::structural::StructuralOp,
+        change: crate::structural::StructuralChange,
+    ) -> super::ops::StructuralCollapOp {
+        let ts = self.state.tick();
+        self.structural_undo_stack.push(change);
+        super::ops::StructuralCollapOp::new(op, ts, self.state.site_id())
+    }
+
+    /// Undo the last structural operation.
+    ///
+    /// Returns the `StructuralChange` snapshot for the caller to apply
+    /// via `RecalcEngine::undo_structural`.
+    pub fn undo_structural(&mut self) -> Option<crate::structural::StructuralChange> {
+        self.structural_undo_stack.pop()
+    }
+
+    /// Whether a structural undo is available.
+    pub fn can_undo_structural(&self) -> bool {
+        !self.structural_undo_stack.is_empty()
     }
 }
 

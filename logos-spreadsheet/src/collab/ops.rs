@@ -273,6 +273,41 @@ impl OpBatch {
 }
 
 // ---------------------------------------------------------------------------
+// Structural operation (collab-level wrapper)
+// ---------------------------------------------------------------------------
+
+/// A structural change broadcast between peers.
+///
+/// Unlike [`CellOp`] which targets a single cell, this changes the
+/// spreadsheet topology. It carries a Lamport timestamp so peers can
+/// order structural ops relative to cell ops.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructuralCollapOp {
+    /// The structural operation.
+    pub op: crate::structural::StructuralOp,
+    /// Logical timestamp for ordering.
+    pub timestamp: OpTimestamp,
+    /// Originating site.
+    pub site_id: SiteId,
+}
+
+impl StructuralCollapOp {
+    pub fn new(
+        op: crate::structural::StructuralOp,
+        timestamp: OpTimestamp,
+        site_id: SiteId,
+    ) -> Self {
+        Self { op, timestamp, site_id }
+    }
+}
+
+impl fmt::Display for StructuralCollapOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "StructuralOp({:?}) @ {}", self.op, self.timestamp)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

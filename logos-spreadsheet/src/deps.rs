@@ -444,6 +444,13 @@ impl DependencyGraph {
         }
         false
     }
+
+    /// Clear the entire graph (for rebuild after structural ops).
+    pub fn clear(&mut self) {
+        self.dependents.clear();
+        self.precedents.clear();
+        self.dirty.clear();
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ pub mod functions;
 pub mod errors;
 pub mod deps;
 pub mod recalc;
+pub mod structural;
 pub mod ui;
 pub mod render;
 pub mod binding;
@@ -22,3 +23,4 @@ pub use render::{BatchConverter, DrawBatch, InstanceBridge, SpreadsheetFrame, Di
 pub use binding::{BindingRegistry, PropertyResolver, DesignRef, ElementRef, PropertyPath};
 pub use collab::{CollabEngine, CollabState, CellOp, CellPayload, SiteId};
 pub use chart::{ChartEngine, ChartSpec, ChartKind, DataSeries, ChartRenderData};
+pub use structural::{StructuralOp, StructuralChange, format_expression};
