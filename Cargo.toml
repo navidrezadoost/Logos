@@ -30,6 +30,7 @@ members = [
     "logos-spreadsheet",
     "logos-identity",
     "logos-replay",
+    "logos-history",
 ]
 resolver = "2"
 

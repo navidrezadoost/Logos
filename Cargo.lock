@@ -2845,6 +2845,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-history"
+version = "0.1.0"
+dependencies = [
+ "criterion 0.5.1",
+ "logos-identity",
+ "logos-replay",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
 name = "logos-identity"
 version = "0.1.0"
 dependencies = [
