@@ -34,10 +34,20 @@
 //! - [`signing`] — Ed25519 digital signatures, SHA-256 content hashing
 //! - [`packaging`] — .logos-plugin binary format, compression, icons
 //! - [`registry`] — Local plugin registry, install/upgrade/search
+//! - [`hot_reload`] — File watching, module reloading, debounce
+//! - [`crash_recovery`] — Crash reports, recovery policies, restart decisions
+//! - [`sandbox_monitor`] — Memory/execution tracking, health scores
+//! - [`update_scheduler`] — Update checking, scheduling, staged rollout
+//! - [`storage`] — Per-plugin key-value storage with quotas
+//! - [`discovery`] — Trending plugins, category browsing, recommendations
+//! - [`sdk`] — Plugin project scaffolding and templates
 
+pub mod crash_recovery;
+pub mod discovery;
 pub mod engine;
 pub mod examples;
 pub mod host;
+pub mod hot_reload;
 #[cfg(test)]
 mod integration_tests;
 pub mod js_migration;
@@ -50,7 +60,11 @@ pub mod permission_prompt;
 pub mod permissions;
 pub mod registry;
 pub mod runtime;
+pub mod sandbox_monitor;
+pub mod sdk;
 pub mod signing;
+pub mod storage;
+pub mod update_scheduler;
 
 // Re-export key types for convenience
 pub use engine::{EventBus, JsEngine, UiBridge, WasmRuntime};
@@ -71,3 +85,12 @@ pub use permission_prompt::{InstallApproval, PermissionDecision, PermissionPromp
 pub use registry::{InstalledPlugin, PluginFilter, PluginRegistry, RegistrySource};
 pub use runtime::{ExecutionStats, HostFn, PluginValue, ResourceLimits, RuntimeError, Sandbox};
 pub use signing::{CertificateChain, ContentHash, PluginKeyPair, PluginPublicKey, PluginSignature, SignatureVerifier, SigningContext, TrustCertificate, VerificationPolicy, VerificationResult};
+
+// Phase 12 re-exports
+pub use hot_reload::{FileWatcher, HotReloadManager, WatcherConfig, ReloadResult, ReloadEvent, ChangeKind, StatePreservation};
+pub use crash_recovery::{CrashRecoveryManager, CrashReport, CrashKind, RecoveryPolicy, RecoveryStrategy, RestartDecision};
+pub use sandbox_monitor::{SandboxDashboard, ResourceBudget, HealthScore, MemoryTracker, ExecutionMonitor};
+pub use update_scheduler::{UpdateScheduler, UpdatePolicy, PendingUpdate, UpdatePriority, UpdateAction, UpdateFrequency, AutoUpdateMode};
+pub use storage::{StorageManager, StorageQuota, StorageError};
+pub use discovery::{TrendingTracker, TrendingEntry, CategoryBrowser, PluginRecommender, Recommendation, RecommendationReason};
+pub use sdk::{PluginScaffold, ScaffoldConfig, TemplateKind, GeneratedFile};
