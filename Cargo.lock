@@ -2754,6 +2754,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-comments"
+version = "0.1.0"
+dependencies = [
+ "bincode 2.0.1",
+ "criterion 0.8.2",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "logos-components"
 version = "0.1.0"
 dependencies = [

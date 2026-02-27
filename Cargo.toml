@@ -26,6 +26,7 @@ members = [
     "logos-perf",
     "logos-section",
     "logos-cursor-sync",
+    "logos-comments",
 ]
 resolver = "2"
 
