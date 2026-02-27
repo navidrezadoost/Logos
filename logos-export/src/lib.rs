@@ -1,6 +1,6 @@
 //! # logos-export
 //!
-//! SVG and PDF export for Logos design documents.
+//! SVG, PDF, PNG export and asset packaging for Logos design documents.
 //!
 //! ## Architecture
 //!
@@ -12,8 +12,12 @@
 //!       │
 //!       ▼
 //!  ExportPipeline
-//!   ├── SvgExporter  ──── produces standalone SVG (XML)
-//!   └── PdfExporter  ──── produces minimal PDF 1.4
+//!   ├── SvgExporter   ──── produces standalone SVG (XML)
+//!   ├── PdfExporter   ──── produces minimal PDF 1.4
+//!   ├── PngExporter   ──── software rasterizer → PNG
+//!   ├── SvgOptimizer  ──── minify / optimize SVG output
+//!   ├── AssetPackager  ──── bundle artifacts + manifest
+//!   └── ExportProfile  ──── preset configs (Web/Print/iOS/Android)
 //! ```
 //!
 //! ## References
@@ -21,11 +25,18 @@
 //! - Foley et al., *Computer Graphics: Principles and Practice*, Ch. 22
 //! - SVG 1.1 Specification (W3C)
 //! - PDF Reference, Adobe, Version 1.4
+//! - PNG Specification (RFC 2083)
 
 pub mod svg;
 pub mod pdf;
 pub mod codegen;
 pub mod batch;
+pub mod color;
+pub mod png;
+pub mod optimize;
+pub mod asset_package;
+pub mod profile;
+pub mod pipeline;
 
 use logos_core::Layer;
 use logos_layout::engine::LayoutEngine;
@@ -35,6 +46,12 @@ use uuid::Uuid;
 // Re-exports
 pub use svg::SvgExporter;
 pub use pdf::PdfExporter;
+pub use png::PngExporter;
+pub use color::{Color, ColorSpace, ColorProfile};
+pub use optimize::SvgOptimizer;
+pub use asset_package::AssetPackager;
+pub use profile::ExportProfile;
+pub use pipeline::ExportPipeline;
 
 #[derive(Error, Debug)]
 pub enum ExportError {

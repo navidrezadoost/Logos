@@ -24,6 +24,7 @@
 //! - Android drawable-density naming (mdpi, hdpi, xhdpi, …)
 
 use crate::ExportPage;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // ───────────────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ use std::fmt;
 // ───────────────────────────────────────────────────────────────────
 
 /// All supported export formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExportFormat {
     Svg,
     Pdf,
@@ -155,12 +156,34 @@ impl Default for ExportScale {
     }
 }
 
+// Custom serde for ExportScale — serializes as the factor f32.
+impl Serialize for ExportScale {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f32(self.factor)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExportScale {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let factor = f32::deserialize(deserializer)?;
+        if (factor - 1.0).abs() < 0.001 {
+            Ok(ExportScale::X1)
+        } else if (factor - 2.0).abs() < 0.001 {
+            Ok(ExportScale::X2)
+        } else if (factor - 3.0).abs() < 0.001 {
+            Ok(ExportScale::X3)
+        } else {
+            Ok(ExportScale { factor, suffix: "", dpi: 96.0 * factor })
+        }
+    }
+}
+
 // ───────────────────────────────────────────────────────────────────
 // Suffix / naming strategy
 // ───────────────────────────────────────────────────────────────────
 
 /// Naming strategy for exported files.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NamingStrategy {
     /// Use layer name + scale suffix + format extension.
     /// e.g.  "icon@2x.svg"

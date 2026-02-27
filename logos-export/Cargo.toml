@@ -2,7 +2,7 @@
 name = "logos-export"
 version = "0.1.0"
 edition = "2021"
-description = "SVG and PDF export for Logos documents"
+description = "SVG, PDF, and PNG export with asset packaging for Logos documents"
 
 [dependencies]
 logos-core = { version = "0.1.0", path = "../logos-core" }
@@ -11,6 +11,7 @@ uuid = { version = "1.20.0", features = ["v4"] }
 thiserror = "2.0.18"
 log = "0.4.29"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 criterion = "0.8.2"
