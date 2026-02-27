@@ -66,5 +66,30 @@ pub use inference::onnx_session::OnnxSession;
 // Preprocessing
 pub use preprocess::{ImageTensor, TextTokenizer, TokenizerConfig};
 
+// Phase 12B: AI-powered design intelligence
+pub use inference::design_suggest::{
+    DesignAnalyzer, DesignContext, Suggestion, SuggestionKind, AnalyzerConfig,
+};
+pub use inference::accessibility::{
+    AccessibilityChecker, ContrastResult, WcagLevel, TouchTargetSpec, TouchTargetResult,
+    ColorBlindnessType, ReadabilitySpec, ReadabilityIssue,
+    relative_luminance, simulate_color_blindness,
+};
+pub use inference::color_harmony::{
+    HslColor, HarmonyScheme, Palette, PaletteGenerator, ColorTemperature,
+    classify_temperature,
+};
+pub use inference::smart_constraints::{
+    ConstraintInferrer, InferredConstraint, InferrerConfig,
+};
+pub use inference::component_recommend::{
+    ComponentRecommender, DesignElement, RecommendedComponent,
+    RecommendationReason, RecommenderConfig, RecommendationSummary,
+};
+pub use inference::pipeline::{
+    Pipeline, PipelineStep, StepKind, PipelineResult, PipelineRunner,
+    StepResult, PipelinePresets,
+};
+
 #[cfg(test)]
 mod integration_tests;
