@@ -1,0 +1,27 @@
+[package]
+name = "logos-rl-ux"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 15.2 — RL-UX production deployment: Q-table persistence, telemetry, A/B testing, reward modeling, and policy engine"
+license = "MPL-2.0"
+
+[dependencies]
+logos-core      = { path = "../logos-core" }
+logos-ai-agent  = { path = "../logos-ai-agent" }
+logos-agent-ui  = { path = "../logos-agent-ui" }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+log = "0.4"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "rl_benchmark"
+harness = false
+
+[features]
+default = []
+persist = []

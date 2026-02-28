@@ -34,6 +34,7 @@ members = [
     "logos-multiplayer",
     "logos-ai-agent",
     "logos-agent-ui",
+    "logos-rl-ux",
 ]
 resolver = "2"
 
