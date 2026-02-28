@@ -37,6 +37,7 @@ members = [
     "logos-rl-ux",
     "logos-agent-marketplace",
     "logos-multi-agent",
+    "logos-prompt-engine",
 ]
 resolver = "2"
 
