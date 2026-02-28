@@ -1,0 +1,26 @@
+[package]
+name = "logos-agent-marketplace"
+version = "0.1.0"
+edition = "2021"
+description = "Agent Marketplace — discovery, certification, ratings, and install for Logos agents"
+
+[dependencies]
+logos-core     = { path = "../logos-core" }
+logos-ai-agent = { path = "../logos-ai-agent" }
+logos-rl-ux    = { path = "../logos-rl-ux" }
+thiserror = "2"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+uuid        = { version = "1", features = ["v4"] }
+log         = "0.4"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "marketplace_benchmark"
+harness = false
+
+[features]
+default = []
+payments = []

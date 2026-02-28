@@ -35,6 +35,7 @@ members = [
     "logos-ai-agent",
     "logos-agent-ui",
     "logos-rl-ux",
+    "logos-agent-marketplace",
 ]
 resolver = "2"
 
