@@ -32,6 +32,7 @@ members = [
     "logos-replay",
     "logos-history",
     "logos-multiplayer",
+    "logos-ai-agent",
 ]
 resolver = "2"
 
