@@ -1,0 +1,27 @@
+[package]
+name = "logos-agent-ui"
+version = "0.1.0"
+edition = "2021"
+description = "UI Integration layer for Logos AI agents — chat panel, command palette, dispatcher, badges, context bridge"
+
+[features]
+default = []
+# Enable WebSocket transport (requires tokio)
+ws = ["dep:tokio"]
+
+[dependencies]
+logos-core      = { path = "../logos-core" }
+logos-ai-agent  = { path = "../logos-ai-agent" }
+thiserror       = "2"
+serde           = { version = "1", features = ["derive"] }
+serde_json      = "1"
+uuid            = { version = "1", features = ["v4"] }
+log             = "0.4"
+tokio           = { version = "1", features = ["sync", "time"], optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "ui_benchmark"
+harness = false
