@@ -1,0 +1,7 @@
+{
+  "eleventyNavigation": {
+    "key": "AI Assistant",
+    "parent": "User guide",
+    "order": 7
+  }
+}

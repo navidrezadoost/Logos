@@ -137,6 +137,62 @@ atlas.insert_glyph(glyph_id, &bitmap); // O(1) flat-array lookup
 
 ---
 
+### logos-ai
+
+**AI-powered design assistance** — heuristic analysis, WCAG accessibility, color harmony, constraint inference, and component recommendations.
+
+| Module | Description |
+|--------|-------------|
+| `design_suggest` | Alignment, spacing, overlap, hierarchy detection |
+| `accessibility` | WCAG contrast ratios, touch targets, CVD simulation, readability |
+| `color_harmony` | HSL conversions, harmony schemes, palette generation, temperature |
+| `smart_constraints` | Alignment rails, equal spacing, grid detection, aspect ratios |
+| `component_recommend` | Pattern detection, style matching, node savings calculation |
+| `pipeline` | Workflow orchestration, step handlers, presets |
+
+**Key types:**
+
+```rust
+use logos_ai::{
+    DesignAnalyzer, AccessibilityChecker, PaletteGenerator, 
+    ConstraintInferrer, ComponentRecommender, PipelineRunner
+};
+
+// Design suggestions
+let analyzer = DesignAnalyzer::new(AnalyzerConfig::default());
+let suggestions = analyzer.analyze(&context);
+
+// Accessibility
+let checker = AccessibilityChecker::new();
+let result = checker.check_contrast(fg_color, bg_color);
+assert!(result.passes(WcagLevel::AA));
+
+// Color harmony
+let generator = PaletteGenerator::new();
+let palette = generator.generate(base, HarmonyScheme::Triadic);
+
+// Smart constraints
+let inferrer = ConstraintInferrer::new(InferrerConfig::default());
+let constraints = inferrer.infer_all(&elements);
+
+// Component recommendations
+let recommender = ComponentRecommender::new(RecommenderConfig::default());
+let summary = recommender.recommend_all(&design_elements);
+
+// Pipeline
+let runner = PipelineRunner::new().with_defaults();
+let result = runner.run(&PipelinePresets::design_review());
+```
+
+**Tests:** 371 (237 ML infrastructure + 134 heuristic modules)
+
+**Performance:** All heuristic checks complete in <5ms for typical designs (50 layers). ML inference (ONNX models) requires `onnx` feature flag.
+
+**Detailed docs:** [logos-ai API Reference](/api-reference/logos-ai/)  
+**Crate docs:** `cargo doc -p logos-ai --open`
+
+---
+
 ## Collaboration
 
 ### logos-collab
