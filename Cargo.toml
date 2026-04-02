@@ -43,6 +43,7 @@ members = [
     "logos-agent-analytics",
     "logos-agent-sso",
     "logos-agent-quota",
+    "logos-agent-ab",
 ]
 resolver = "2"
 
