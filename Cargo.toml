@@ -42,6 +42,7 @@ members = [
     "logos-agent-versioning",
     "logos-agent-analytics",
     "logos-agent-sso",
+    "logos-agent-quota",
 ]
 resolver = "2"
 
