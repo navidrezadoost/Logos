@@ -40,6 +40,7 @@ members = [
     "logos-prompt-engine",
     "logos-agent-sandbox",
     "logos-agent-versioning",
+    "logos-agent-analytics",
 ]
 resolver = "2"
 
