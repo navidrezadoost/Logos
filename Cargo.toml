@@ -41,6 +41,7 @@ members = [
     "logos-agent-sandbox",
     "logos-agent-versioning",
     "logos-agent-analytics",
+    "logos-agent-sso",
 ]
 resolver = "2"
 
