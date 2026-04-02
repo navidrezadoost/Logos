@@ -157,6 +157,40 @@ impl ExampleLibrary {
         domains
     }
 
+    /// Select examples dynamically: prefer `difficulty`-matched ones, but fall
+    /// back to easier ones if the exact level has fewer than `max_n` examples.
+    pub fn dynamic_select(
+        &self,
+        domain: &TaskDomain,
+        difficulty: Difficulty,
+        max_n: usize,
+    ) -> Vec<&FewShotExample> {
+        let mut found = self.best_for(domain, difficulty, max_n);
+        if found.len() < max_n {
+            // Backfill with easier examples not already in the list.
+            let fallback = self.find_by_domain(domain, max_n * 2);
+            for ex in fallback {
+                if found.len() >= max_n {
+                    break;
+                }
+                if !found.iter().any(|e| e.id == ex.id) {
+                    found.push(ex);
+                }
+            }
+        }
+        found
+    }
+
+    /// Count examples for a given domain.
+    pub fn count_by_domain(&self, domain: &TaskDomain) -> usize {
+        self.examples.iter().filter(|e| e.matches_domain(domain)).count()
+    }
+
+    /// Count examples for a given difficulty across all domains.
+    pub fn count_by_difficulty(&self, difficulty: Difficulty) -> usize {
+        self.examples.iter().filter(|e| e.difficulty == difficulty).count()
+    }
+
     /// Inject examples as user/assistant turn pairs at the start of a prompt
     /// (after any existing system message).
     pub fn inject_into(&self, prompt: Prompt, examples: &[&FewShotExample]) -> Prompt {
@@ -312,6 +346,128 @@ impl ExampleLibrary {
                 ),
             ],
         ).with_tags(&["typography", "scale"]));
+
+        // ── Code (new)
+        self.add(FewShotExample::new(
+            "code-tokens-01", TaskDomain::Code, Difficulty::Medium,
+            "Export design tokens as CSS custom properties",
+            vec![
+                ExampleTurn::user("Generate CSS custom properties from our colour tokens."),
+                ExampleTurn::assistant(
+                    ":root {\n\
+                     --color-primary-500: #2563EB;\n\
+                     --color-primary-700: #1D4ED8;\n\
+                     --color-primary-100: #DBEAFE;\n\
+                     --color-surface:     #F8FAFC;\n\
+                     --color-on-surface:  #0F172A;\n\
+                     }\n\
+                     /* Generated from Logos token export v1 */"
+                ),
+            ],
+        ).with_tags(&["code", "tokens", "css"]));
+
+        self.add(FewShotExample::new(
+            "code-component-02", TaskDomain::Code, Difficulty::Hard,
+            "Generate a React component from a Logos frame",
+            vec![
+                ExampleTurn::user("Generate a TypeScript React component for the 'Card' frame."),
+                ExampleTurn::assistant(
+                    "```tsx\nimport React from 'react';\n\n\
+                     interface CardProps {\n  title: string;\n  body: string;\n  imageUrl?: string;\n}\n\n\
+                     export const Card: React.FC<CardProps> = ({ title, body, imageUrl }) => (\n\
+                     <div className=\"card\" role=\"article\" aria-label={title}>\n\
+                     {imageUrl && <img src={imageUrl} alt=\"\" aria-hidden />}\n\
+                     <h2 className=\"card__title\">{title}</h2>\n\
+                     <p className=\"card__body\">{body}</p>\n\
+                     </div>\n);\n```\n\
+                     Accessibility: role=article, aria-label, aria-hidden on decorative image."
+                ),
+            ],
+        ).with_tags(&["code", "react", "typescript", "accessibility"]));
+
+        // ── Animation (new)
+        self.add(FewShotExample::new(
+            "animation-microinteraction-01", TaskDomain::Animation, Difficulty::Easy,
+            "Add a hover micro-interaction to a button",
+            vec![
+                ExampleTurn::user("Add a subtle hover animation to the primary button."),
+                ExampleTurn::assistant(
+                    "Applying hover micro-interaction to 'PrimaryButton':\n\
+                     - Scale: 1.0 → 1.03 (ease-out, 150 ms)\n\
+                     - Shadow: 0 4 px → 0 8 px rgba(0,0,0,0.15)\n\
+                     - Cursor: default → pointer\n\
+                     Respect prefers-reduced-motion: disable scale/shadow when set."
+                ),
+            ],
+        ).with_tags(&["animation", "interaction", "button"]));
+
+        self.add(FewShotExample::new(
+            "animation-transition-02", TaskDomain::Animation, Difficulty::Hard,
+            "Design a complex page-transition sequence",
+            vec![
+                ExampleTurn::user("Create a multi-phase page-transition from Dashboard to Detail."),
+                ExampleTurn::assistant(
+                    "Phase 1 (0–100 ms): Current page fades out (opacity 1→0, ease-in).\n\
+                     Phase 2 (80–200 ms): Shared element 'HeroCard' scales to fill viewport (ease-out).\n\
+                     Phase 3 (200–350 ms): Detail page content staggers in from bottom (+24 px, opacity 0→1).\n\
+                     Total duration: 350 ms. Uses CSS @keyframes + JS Web Animations API.\n\
+                     Fallback: instant transition when prefers-reduced-motion: reduce."
+                ),
+            ],
+        ).with_tags(&["animation", "transition", "advanced"]));
+
+        // ── Grouping (new)
+        self.add(FewShotExample::new(
+            "grouping-naming-01", TaskDomain::Grouping, Difficulty::Easy,
+            "Apply a consistent layer naming convention",
+            vec![
+                ExampleTurn::user("My layer names are messy — how should I rename them?"),
+                ExampleTurn::assistant(
+                    "Recommended naming convention (BEM-inspired):\n\
+                     - Wrappers: PageName/SectionName/ComponentName\n\
+                     - Variants: Button/Primary, Button/Secondary, Button/Ghost\n\
+                     - States: Input/Default, Input/Focus, Input/Error\n\
+                     - Utilities: Spacer/16, Divider/Horizontal\n\
+                     Avoid: 'Rectangle 1', 'Group 34'. Use descriptive, hierarchical names."
+                ),
+            ],
+        ).with_tags(&["grouping", "naming", "organisation"]));
+
+        // ── Layout — Hard (new)
+        self.add(FewShotExample::new(
+            "layout-responsive-03", TaskDomain::Layout, Difficulty::Hard,
+            "Build a fully responsive 3-breakpoint layout",
+            vec![
+                ExampleTurn::user("Create a layout that works on mobile (320 px), tablet (768 px), and desktop (1440 px)."),
+                ExampleTurn::assistant(
+                    "Breakpoint strategy:\n\
+                     Mobile  (320–767 px): single column, 16 px gutters, full-width nav drawer.\n\
+                     Tablet  (768–1439 px): 2-column grid (sidebar 240 px + content), 24 px gutters.\n\
+                     Desktop (1440 px+): 12-column, 80 px columns, 24 px gutters, max-width 1440 px.\n\
+                     Component changes: Navbar → bottom tab bar on mobile; Cards stack vertically.\n\
+                     Typography scales: body 14/16/16 px, heading 20/24/32 px per breakpoint."
+                ),
+            ],
+        ).with_tags(&["layout", "responsive", "breakpoints", "grid"]));
+
+        // ── Accessibility — Hard (new)
+        self.add(FewShotExample::new(
+            "a11y-full-audit-03", TaskDomain::Accessibility, Difficulty::Hard,
+            "Full WCAG 2.1 AA audit of a complex form",
+            vec![
+                ExampleTurn::user("Audit the 6-field registration form for WCAG 2.1 AA compliance."),
+                ExampleTurn::assistant(
+                    "Audit findings and fixes:\n\
+                     1. Labels — all 6 inputs now have explicit <label for=...> bindings.\n\
+                     2. Contrast — placeholder text #9CA3AF on white = 2.33:1 ❌ → changed to #6B7280 = 4.44:1 ✓\n\
+                     3. Error messages — added role='alert' and aria-describedby linking to inline errors.\n\
+                     4. Password field — added aria-describedby for password requirements section.\n\
+                     5. Focus order — tabIndex removed from decorative dividers (was interrupting flow).\n\
+                     6. Submit button — aria-busy='true' injected during async submission.\n\
+                     All 6 fields pass WCAG 2.1 AA after fixes."
+                ),
+            ],
+        ).with_tags(&["accessibility", "audit", "forms", "wcag"]));
     }
 }
 

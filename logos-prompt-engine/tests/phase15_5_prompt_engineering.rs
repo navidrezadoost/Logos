@@ -2,7 +2,13 @@
 //!
 //! Each scenario exercises an end-to-end workflow spanning multiple modules.
 
+#![allow(unused_imports)]
+
 use logos_prompt_engine::*;
+use logos_prompt_engine::generator::{PromptGenerator, TaskSpec, select_cot_strategy};
+use logos_prompt_engine::training::{
+    RubricCriterion, RubricEvaluator, TrainingConfig, TrainingSession,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scenario 1: Few-shot → Prompt injection → CoT wrapping → Refinement pipeline
@@ -264,4 +270,317 @@ fn scenario_focused_critique_specific_issue() {
     assert!(prompt.contains("Missing mobile responsive behaviour"));
     assert!(prompt.contains("Design a navigation bar"));
     assert!(prompt.contains("Improved Response:"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW PHASE 15.5 TESTS — PromptGenerator, Training, advanced few-shot
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── PromptGenerator integration ──────────────────────────────────────────────
+
+#[test]
+fn generator_end_to_end_layout_medium() {
+    let gen = PromptGenerator::new();
+    let spec = TaskSpec::new(
+        "Design a responsive dashboard",
+        TaskDomain::Layout,
+        Difficulty::Medium,
+    );
+    let result = gen.generate(&spec);
+    // Should have at least system + user = 2 messages; examples push it higher
+    assert!(result.message_count() >= 2);
+    assert!(result.has_cot());
+    assert_eq!(result.strategy_label(), "StepByStep");
+    assert_eq!(result.domain_label(), "Layout");
+}
+
+#[test]
+fn generator_no_cot_returns_strategy_none() {
+    let gen = PromptGenerator::new();
+    let spec = TaskSpec::new("Quick layout", TaskDomain::Layout, Difficulty::Easy)
+        .without_cot();
+    let result = gen.generate(&spec);
+    assert!(!result.has_cot());
+    assert_eq!(result.strategy_label(), "none");
+}
+
+#[test]
+fn generator_hard_accessibility_uses_task_decomposition() {
+    let gen = PromptGenerator::new();
+    let spec = TaskSpec::new(
+        "Full WCAG audit",
+        TaskDomain::Accessibility,
+        Difficulty::Hard,
+    );
+    let result = gen.generate(&spec);
+    assert_eq!(result.strategy_label(), "TaskDecomposition");
+}
+
+#[test]
+fn generator_metadata_includes_examples_used() {
+    let gen = PromptGenerator::new();
+    let spec = TaskSpec::new("Apply brand colours", TaskDomain::Colors, Difficulty::Easy);
+    let result = gen.generate(&spec);
+    let meta_examples = result
+        .payload
+        .metadata
+        .get("examples_used")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(0);
+    // examples_used must equal what's recorded on the struct
+    assert_eq!(meta_examples, result.examples_used);
+}
+
+#[test]
+fn generator_custom_system_template_with_user_level() {
+    let gen = PromptGenerator::new().with_system_template(
+        "lvl",
+        "Level: {{user_level}} | Domain: {{domain}} | Task: {{task}}.",
+    );
+    let spec = TaskSpec::new("Draw a chart", TaskDomain::Code, Difficulty::Medium)
+        .with_user_level("expert");
+    let result = gen.generate(&spec);
+    let sys_content = result
+        .payload
+        .messages
+        .iter()
+        .find(|m| matches!(m.role, Role::System))
+        .map(|m| m.content.as_str())
+        .unwrap_or("");
+    assert!(sys_content.contains("expert"));
+    assert!(sys_content.contains("Code"));
+}
+
+#[test]
+fn generator_max_examples_zero_still_builds_prompt() {
+    let gen = PromptGenerator::new();
+    let spec = TaskSpec::new("task", TaskDomain::Animation, Difficulty::Easy)
+        .with_examples(0);
+    let result = gen.generate(&spec);
+    assert_eq!(result.examples_used, 0);
+    // A prompt with 0 examples still has at least system + user
+    assert!(result.message_count() >= 2);
+}
+
+#[test]
+fn generator_estimated_tokens_increases_with_more_examples() {
+    let gen = PromptGenerator::new();
+    let spec_few  = TaskSpec::new("t", TaskDomain::Layout, Difficulty::Easy).with_examples(1);
+    let spec_many = TaskSpec::new("t", TaskDomain::Layout, Difficulty::Easy).with_examples(5);
+    let few_tokens  = gen.generate(&spec_few).estimated_tokens();
+    let many_tokens = gen.generate(&spec_many).estimated_tokens();
+    assert!(many_tokens >= few_tokens);
+}
+
+// ── TrainingSession integration ───────────────────────────────────────────────
+
+#[test]
+fn training_full_pipeline_reaches_certification() {
+    let mut evaluator = RubricEvaluator::new();
+    evaluator.add_criterion(RubricCriterion::new("contrast", 1.0, "WCAG contrast"));
+    evaluator.add_criterion(RubricCriterion::new("aria", 0.8, "ARIA labels"));
+
+    let mut session = TrainingSession::new(
+        "cert-01",
+        "Design accessible icon button",
+        TrainingConfig::default().with_threshold(0.8),
+        evaluator,
+    );
+
+    // Round 0: partial
+    session.start("blue icon button", &["contrast", "aria"], 0);
+    assert!(!session.is_certified());
+
+    // Round 1: improved — both keywords present → score = 1.0
+    session.train_round(
+        "blue icon button with contrast ratio 4.6:1 and aria-label=\"Close\"",
+        "Added contrast ratio and aria-label",
+        &["contrast", "aria"],
+        1,
+    );
+    assert!(session.is_certified());
+    assert!(session.is_done());
+}
+
+#[test]
+fn training_score_trajectory_is_recorded() {
+    let mut ev = RubricEvaluator::new();
+    ev.add_criterion(RubricCriterion::new("keyword", 1.0, ""));
+
+    let mut s = TrainingSession::new("t2", "task", TrainingConfig::default(), ev);
+    s.start("no match", &["keyword"], 0);
+    s.train_round("keyword present now", "improved", &["keyword"], 1);
+    let traj = s.score_trajectory();
+    assert_eq!(traj.len(), 2);
+    assert!(traj[1] > traj[0]);
+}
+
+#[test]
+fn training_best_score_equals_max_of_trajectory() {
+    let ev = RubricEvaluator::new();
+    let mut s = TrainingSession::new("t3", "task", TrainingConfig::default(), ev);
+    s.scores = vec![0.3, 0.9, 0.5];
+    let best = s.best_score();
+    assert!((best - 0.9).abs() < 0.001);
+}
+
+#[test]
+fn training_session_certification_tag_propagates() {
+    let config = TrainingConfig::default().with_tag("phase-15.5-advanced");
+    let s = TrainingSession::new("t4", "task", config, RubricEvaluator::new());
+    assert_eq!(s.certification_tag(), Some("phase-15.5-advanced"));
+}
+
+// ── Dynamic few-shot selection ────────────────────────────────────────────────
+
+#[test]
+fn dynamic_select_falls_back_to_easier_examples() {
+    let lib = ExampleLibrary::with_builtins();
+    // Colors has Easy examples but likely no Hard — dynamic_select should fill from fallback
+    let selected = lib.dynamic_select(&TaskDomain::Colors, Difficulty::Hard, 2);
+    // We asked for 2; should get at most 2 and at least whatever domain has
+    assert!(selected.len() <= 2);
+    assert!(selected.iter().all(|e| e.domain == TaskDomain::Colors));
+}
+
+#[test]
+fn dynamic_select_respects_max_n() {
+    let lib = ExampleLibrary::with_builtins();
+    let selected = lib.dynamic_select(&TaskDomain::Layout, Difficulty::Easy, 1);
+    assert!(selected.len() <= 1);
+}
+
+#[test]
+fn count_by_domain_code_has_examples() {
+    let lib = ExampleLibrary::with_builtins();
+    // New code examples were added in this phase
+    assert!(lib.count_by_domain(&TaskDomain::Code) >= 2);
+}
+
+#[test]
+fn count_by_difficulty_hard_has_examples() {
+    let lib = ExampleLibrary::with_builtins();
+    // Hard examples for Layout, Accessibility, Animation, Code were added
+    assert!(lib.count_by_difficulty(Difficulty::Hard) >= 4);
+}
+
+// ── End-to-end: Generator → Training loop ────────────────────────────────────
+
+#[test]
+fn scenario_generator_feeds_training_loop() {
+    // Build a prompt with the generator, then simulate a training session
+    let gen = PromptGenerator::new();
+    let spec = TaskSpec::new(
+        "Make the icon button accessible",
+        TaskDomain::Accessibility,
+        Difficulty::Medium,
+    );
+    let generated = gen.generate(&spec);
+
+    // Verify prompt quality before handing it to the training loop
+    assert!(generated.has_cot());
+    assert!(generated.estimated_tokens() > 0);
+
+    // Simulate training based on the generated task description
+    let mut ev = RubricEvaluator::new();
+    ev.add_criterion(RubricCriterion::new("accessible", 1.0, ""));
+    ev.add_criterion(RubricCriterion::new("aria", 1.0, ""));
+
+    let mut training = TrainingSession::new(
+        "sess-gen-train",
+        &spec.description,
+        TrainingConfig::default(),
+        ev,
+    );
+    training.start("button is small", &["accessible", "aria"], 0);
+    training.train_round(
+        "accessible icon button with aria-label and focus ring",
+        "Added aria and accessible keyword",
+        &["accessible", "aria"],
+        1,
+    );
+
+    assert!(training.is_certified());
+    assert!(training.score_trajectory().len() == 2);
+}
+
+#[test]
+fn scenario_selfcheck_cot_plus_refinement() {
+    // SelfCheck strategy wraps the prompt, then a refinement session improves it
+    let base = Prompt::new()
+        .system("You are a layout expert.")
+        .user("Design a sidebar.");
+    let wrapped = CotInstruction::new(CotStrategy::SelfCheck).wrap(base);
+
+    // System should contain "Initial Answer" marker from SelfCheck instruction
+    let sys = wrapped.system_messages();
+    assert!(!sys.is_empty());
+    assert!(sys[0].content.contains("Initial Answer"));
+
+    // Now run a refinement session tied to this task
+    let mut session = RefinementSession::new(
+        "sess-selfcheck",
+        "Design a sidebar",
+        RefinementConfig { max_rounds: 2, require_improvement: true, early_stop_patience: 2 },
+    );
+    session.start("Sidebar: 200 px, nav links.", 0);
+    session.add_round_auto_detect(
+        "Sidebar: 200 px, nav links, collapsible on mobile, aria-navigation.",
+        "Added mobile + accessibility",
+        1,
+    );
+    assert_eq!(session.round_count(), 2);
+    assert!(session.best_response().unwrap().contains("aria"));
+}
+
+#[test]
+fn scenario_full_advanced_pipeline_all_modules() {
+    // Full pipeline: TemplateRegistry → ExampleLibrary → PromptGenerator →
+    // CotInstruction → RefinementSession → FeedbackStore
+
+    // 1. Custom template
+    let gen = PromptGenerator::new().with_system_template(
+        "advanced",
+        "Expert agent for {{domain}} ({{difficulty}}). Task: {{task}}.",
+    );
+
+    // 2. Generate a hard typography prompt
+    let spec = TaskSpec::new(
+        "Implement a responsive variable-font system",
+        TaskDomain::Typography,
+        Difficulty::Hard,
+    ).with_examples(2);
+    let generated = gen.generate(&spec);
+    assert!(generated.has_cot());
+    assert_eq!(generated.strategy_label(), "TaskDecomposition");
+
+    // 3. Training session validates response quality
+    let mut ev = RubricEvaluator::new();
+    ev.add_criterion(RubricCriterion::new("variable-font", 1.0, ""));
+    ev.add_criterion(RubricCriterion::new("responsive", 0.9, ""));
+
+    let mut training = TrainingSession::new(
+        "sess-advanced",
+        &spec.description,
+        TrainingConfig::default().with_tag("phase-15.5"),
+        ev,
+    );
+    training.start("set font-size based on viewport", &["variable-font", "responsive"], 0);
+    training.train_round(
+        "Use variable-font with responsive clamp(): font-size: clamp(14px, 2vw, 20px).",
+        "Added variable-font keyword and responsive sizing",
+        &["variable-font", "responsive"],
+        1,
+    );
+    training.finalize();
+
+    assert!(training.is_certified());
+    assert_eq!(training.certification_tag(), Some("phase-15.5"));
+
+    // 4. Feedback store records quality
+    let mut store = FeedbackStore::new();
+    store.add(FeedbackAnnotation::new("sess-advanced", 0, "auto", 0.5, "partial", 0));
+    store.add(FeedbackAnnotation::new("sess-advanced", 1, "auto", 1.0, "certified", 1));
+    let avg = store.average_score_for("sess-advanced").unwrap();
+    assert!(avg > 0.7);
 }
