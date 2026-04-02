@@ -1,0 +1,13 @@
+[package]
+name = "logos-agent-versioning"
+version = "0.1.0"
+edition = "2021"
+description = "Agent Version Rollback system for Logos — snapshot, compare, and restore agent configurations"
+authors = ["Logos Contributors"]
+license = "MPL-2.0"
+
+[dependencies]
+thiserror = "2"
+serde     = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
