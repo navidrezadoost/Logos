@@ -2858,6 +2858,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-agent-sandbox"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logos-ai-agent",
+ "logos-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "logos-agent-ui"
 version = "0.1.0"
 dependencies = [
