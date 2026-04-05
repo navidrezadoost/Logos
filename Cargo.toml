@@ -45,6 +45,7 @@ members = [
     "logos-agent-quota",
     "logos-agent-ab",
     "logos-agent-tracing",
+    "logos-agent-workflow",
 ]
 resolver = "2"
 
