@@ -236,12 +236,86 @@ impl UndoStack {
     }
 }
 
+// ── Workspace / document mode ───────────────────────────────────────────────
+
+/// Top-level workspace organisation mode.
+///
+/// - `FlatPage` — Canva-style: every frame lives directly on a page.
+/// - `ArtboardSection` — Figma/XD-style: Artboard → Section → Frame hierarchy.
+/// - `Hybrid` — Both modes active simultaneously (default).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WorkspaceMode {
+    /// Canva-style flat layout: pages contain frames directly.
+    FlatPage,
+    /// Figma/XD-style: artboards organised inside sections.
+    ArtboardSection,
+    /// Hybrid mode — both organisational styles active (the default).
+    #[default]
+    Hybrid,
+}
+
+impl WorkspaceMode {
+    /// Returns `true` if artboard-based organisation is supported.
+    pub fn supports_artboards(&self) -> bool {
+        matches!(self, WorkspaceMode::ArtboardSection | WorkspaceMode::Hybrid)
+    }
+
+    /// Returns `true` if flat (page-level) frame layout is supported.
+    pub fn supports_flat(&self) -> bool {
+        matches!(self, WorkspaceMode::FlatPage | WorkspaceMode::Hybrid)
+    }
+
+    /// Human-readable label.
+    pub fn label(&self) -> &'static str {
+        match self {
+            WorkspaceMode::FlatPage => "Flat Page",
+            WorkspaceMode::ArtboardSection => "Artboard / Section",
+            WorkspaceMode::Hybrid => "Hybrid",
+        }
+    }
+}
+
+/// Document-level mode settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DocumentMode {
+    /// Active workspace organisation mode.
+    pub mode: WorkspaceMode,
+    /// When `true` the grid/ruler overlay is visible in the editor.
+    pub show_grid: bool,
+    /// When `true` Snap-to-objects is active.
+    pub snap_to_objects: bool,
+}
+
+impl Default for DocumentMode {
+    fn default() -> Self {
+        Self {
+            mode: WorkspaceMode::Hybrid,
+            show_grid: false,
+            snap_to_objects: true,
+        }
+    }
+}
+
+impl DocumentMode {
+    pub fn new(mode: WorkspaceMode) -> Self {
+        Self { mode, ..Self::default() }
+    }
+
+    pub fn flat() -> Self { Self::new(WorkspaceMode::FlatPage) }
+    pub fn artboard() -> Self { Self::new(WorkspaceMode::ArtboardSection) }
+    pub fn hybrid() -> Self { Self::new(WorkspaceMode::Hybrid) }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Document {
     pub id: Uuid,
     pub version: u32,
     pub root: Arc<RwLock<Page>>,
     pub metadata: DocumentMetadata,
+    /// Workspace / organisation mode for this document.
+    pub doc_mode: DocumentMode,
     /// Currently selected layer IDs.
     #[serde(skip)]
     pub selection: Arc<RwLock<Vec<Uuid>>>,
@@ -258,8 +332,16 @@ impl Document {
                 created_at: 0,
                 updated_at: 0,
             },
+            doc_mode: DocumentMode::default(),
             selection: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    /// Create a document with a specific workspace mode.
+    pub fn with_mode(mode: WorkspaceMode) -> Self {
+        let mut d = Self::new();
+        d.doc_mode = DocumentMode::new(mode);
+        d
     }
 
     /// Adds a layer to the root page. Thread-safe.
@@ -435,6 +517,7 @@ impl Layer {
 pub mod style;
 pub mod ffi;
 pub mod collab;
+pub mod constraint;
 
 #[cfg(test)]
 mod tests {

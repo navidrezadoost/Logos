@@ -530,25 +530,181 @@ impl DrawerData {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Component reference (for future component/instance system)
+// ═══════════════════════════════════════════════════════════════════
+// Component reference + variants
 // ═══════════════════════════════════════════════════════════════════
 
-/// A reference to a reusable component (for future instance override system).
-#[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct ComponentRef {
-    /// The component ID being referenced.
-    pub component_id: Uuid,
-    /// Property overrides applied on top of the component definition.
-    pub overrides: Vec<PropertyOverride>,
-}
-
 /// A single property override on a component instance.
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct PropertyOverride {
     /// Dot-separated path to the overridden property (e.g. "fill.color").
     pub path: String,
     /// Serialized override value.
     pub value: serde_json::Value,
+}
+
+impl PropertyOverride {
+    pub fn new(path: impl Into<String>, value: serde_json::Value) -> Self {
+        Self { path: path.into(), value }
+    }
+}
+
+/// Interaction / presentation state of a component variant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum VariantState {
+    /// The resting state (always present).
+    #[default]
+    Default,
+    /// Pointer is hovering over the component.
+    Hover,
+    /// The component is being pressed / activated.
+    Active,
+    /// The component is non-interactive.
+    Disabled,
+    /// The component (e.g. an input) has keyboard focus.
+    Focus,
+    /// The component shows a validation error.
+    Error,
+}
+
+impl VariantState {
+    /// Human-readable label for the state.
+    pub fn label(&self) -> &'static str {
+        match self {
+            VariantState::Default => "Default",
+            VariantState::Hover => "Hover",
+            VariantState::Active => "Active",
+            VariantState::Disabled => "Disabled",
+            VariantState::Focus => "Focus",
+            VariantState::Error => "Error",
+        }
+    }
+
+    /// All defined variant states, in declaration order.
+    pub fn all() -> &'static [VariantState] {
+        &[
+            VariantState::Default,
+            VariantState::Hover,
+            VariantState::Active,
+            VariantState::Disabled,
+            VariantState::Focus,
+            VariantState::Error,
+        ]
+    }
+}
+
+/// A state-specific override set for a component variant.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ComponentVariant {
+    /// The UI state this variant applies to.
+    pub state: VariantState,
+    /// Property overrides active in this state.
+    pub overrides: Vec<PropertyOverride>,
+}
+
+impl ComponentVariant {
+    /// Create an empty variant for the given state.
+    pub fn new(state: VariantState) -> Self {
+        Self { state, overrides: Vec::new() }
+    }
+
+    /// Add or replace an override at `path`.
+    pub fn set_override(&mut self, path: impl Into<String>, value: serde_json::Value) {
+        let path = path.into();
+        if let Some(o) = self.overrides.iter_mut().find(|o| o.path == path) {
+            o.value = value;
+        } else {
+            self.overrides.push(PropertyOverride::new(path, value));
+        }
+    }
+
+    /// Remove an override by path.  Returns `true` if one was removed.
+    pub fn remove_override(&mut self, path: &str) -> bool {
+        let before = self.overrides.len();
+        self.overrides.retain(|o| o.path != path);
+        self.overrides.len() < before
+    }
+}
+
+/// A reference to a reusable component, with optional per-state variant overrides.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ComponentRef {
+    /// The component ID being referenced.
+    pub component_id: Uuid,
+    /// Base property overrides applied on top of the component definition.
+    pub overrides: Vec<PropertyOverride>,
+    /// Per-state variant overrides.
+    pub variants: Vec<ComponentVariant>,
+    /// Currently active interaction state.
+    pub current_state: VariantState,
+}
+
+impl ComponentRef {
+    /// Create a new instance reference with no overrides.
+    pub fn new(component_id: Uuid) -> Self {
+        Self {
+            component_id,
+            overrides: Vec::new(),
+            variants: Vec::new(),
+            current_state: VariantState::Default,
+        }
+    }
+
+    /// Switch the active state.
+    pub fn set_state(&mut self, state: VariantState) {
+        self.current_state = state;
+    }
+
+    /// Add or replace the `ComponentVariant` for a given state.
+    ///
+    /// If a variant for that state already exists it is replaced.
+    pub fn add_variant(&mut self, variant: ComponentVariant) {
+        if let Some(existing) = self.variants.iter_mut().find(|v| v.state == variant.state) {
+            *existing = variant;
+        } else {
+            self.variants.push(variant);
+        }
+    }
+
+    /// Remove the variant for `state`, if present.  Returns `true` on removal.
+    pub fn remove_variant(&mut self, state: VariantState) -> bool {
+        let before = self.variants.len();
+        self.variants.retain(|v| v.state != state);
+        self.variants.len() < before
+    }
+
+    /// Get the variant for `state`, if one exists.
+    pub fn get_variant(&self, state: VariantState) -> Option<&ComponentVariant> {
+        self.variants.iter().find(|v| v.state == state)
+    }
+
+    /// Merge the base overrides with the active state's overrides.
+    ///
+    /// State overrides shadow base overrides for the same property path.
+    /// The returned `Vec` is a fresh allocation.
+    pub fn get_active_overrides(&self) -> Vec<PropertyOverride> {
+        let mut merged: Vec<PropertyOverride> = self.overrides.clone();
+        if let Some(variant) = self.get_variant(self.current_state) {
+            for state_override in &variant.overrides {
+                if let Some(base) = merged.iter_mut().find(|o| o.path == state_override.path) {
+                    base.value = state_override.value.clone();
+                } else {
+                    merged.push(state_override.clone());
+                }
+            }
+        }
+        merged
+    }
+
+    /// Convenience: set a base (state-independent) override.
+    pub fn set_base_override(&mut self, path: impl Into<String>, value: serde_json::Value) {
+        let path = path.into();
+        if let Some(o) = self.overrides.iter_mut().find(|o| o.path == path) {
+            o.value = value;
+        } else {
+            self.overrides.push(PropertyOverride::new(path, value));
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1116,6 +1272,8 @@ mod tests {
                 path: "fill.color".to_string(),
                 value: serde_json::json!("#ff0000"),
             }],
+            variants: vec![],
+            current_state: VariantState::Default,
         };
         assert_eq!(comp.overrides.len(), 1);
         assert_eq!(comp.overrides[0].path, "fill.color");
@@ -1276,5 +1434,155 @@ mod tests {
         assert_eq!(b.y, 0.0);
         assert_eq!(b.width, 80.0);
         assert_eq!(b.height, 80.0);
+    }
+
+    // ── ComponentRef + VariantState tests ───────────────────────────────────
+
+    #[test]
+    fn test_variant_state_default() {
+        let s = VariantState::default();
+        assert_eq!(s, VariantState::Default);
+    }
+
+    #[test]
+    fn test_variant_state_all_has_six_entries() {
+        assert_eq!(VariantState::all().len(), 6);
+    }
+
+    #[test]
+    fn test_variant_state_label() {
+        assert_eq!(VariantState::Hover.label(), "Hover");
+        assert_eq!(VariantState::Error.label(), "Error");
+    }
+
+    #[test]
+    fn test_component_ref_new() {
+        let id = Uuid::new_v4();
+        let cr = ComponentRef::new(id);
+        assert_eq!(cr.component_id, id);
+        assert_eq!(cr.current_state, VariantState::Default);
+        assert!(cr.variants.is_empty());
+        assert!(cr.overrides.is_empty());
+    }
+
+    #[test]
+    fn test_set_state() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.set_state(VariantState::Hover);
+        assert_eq!(cr.current_state, VariantState::Hover);
+    }
+
+    #[test]
+    fn test_add_variant_new() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.add_variant(ComponentVariant::new(VariantState::Hover));
+        assert_eq!(cr.variants.len(), 1);
+    }
+
+    #[test]
+    fn test_add_variant_replaces_existing() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        let mut v1 = ComponentVariant::new(VariantState::Hover);
+        v1.set_override("color", serde_json::json!("red"));
+        cr.add_variant(v1);
+        let mut v2 = ComponentVariant::new(VariantState::Hover);
+        v2.set_override("color", serde_json::json!("blue"));
+        cr.add_variant(v2);
+        assert_eq!(cr.variants.len(), 1);
+        let v = cr.get_variant(VariantState::Hover).unwrap();
+        assert_eq!(v.overrides[0].value, serde_json::json!("blue"));
+    }
+
+    #[test]
+    fn test_remove_variant() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.add_variant(ComponentVariant::new(VariantState::Active));
+        assert!(cr.remove_variant(VariantState::Active));
+        assert!(cr.variants.is_empty());
+    }
+
+    #[test]
+    fn test_remove_variant_not_found() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        assert!(!cr.remove_variant(VariantState::Focus));
+    }
+
+    #[test]
+    fn test_get_active_overrides_base_only() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.set_base_override("fill", serde_json::json!("green"));
+        let active = cr.get_active_overrides();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].value, serde_json::json!("green"));
+    }
+
+    #[test]
+    fn test_get_active_overrides_state_shadows_base() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.set_base_override("fill", serde_json::json!("green"));
+        let mut hover = ComponentVariant::new(VariantState::Hover);
+        hover.set_override("fill", serde_json::json!("blue"));
+        cr.add_variant(hover);
+        cr.set_state(VariantState::Hover);
+        let active = cr.get_active_overrides();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].value, serde_json::json!("blue"));
+    }
+
+    #[test]
+    fn test_get_active_overrides_state_adds_extra() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.set_base_override("fill", serde_json::json!("green"));
+        let mut hover = ComponentVariant::new(VariantState::Hover);
+        hover.set_override("opacity", serde_json::json!(0.5));
+        cr.add_variant(hover);
+        cr.set_state(VariantState::Hover);
+        let active = cr.get_active_overrides();
+        assert_eq!(active.len(), 2);
+    }
+
+    #[test]
+    fn test_get_active_overrides_no_matching_state() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.set_base_override("x", serde_json::json!(10));
+        cr.set_state(VariantState::Disabled);
+        let active = cr.get_active_overrides();
+        assert_eq!(active.len(), 1);
+    }
+
+    #[test]
+    fn test_component_variant_remove_override() {
+        let mut v = ComponentVariant::new(VariantState::Focus);
+        v.set_override("border", serde_json::json!("2px solid blue"));
+        assert!(v.remove_override("border"));
+        assert!(v.overrides.is_empty());
+    }
+
+    #[test]
+    fn test_property_override_new_helper() {
+        let o = PropertyOverride::new("a.b.c", serde_json::json!(42));
+        assert_eq!(o.path, "a.b.c");
+        assert_eq!(o.value, serde_json::json!(42));
+    }
+
+    #[test]
+    fn test_component_ref_serde_roundtrip() {
+        let mut cr = ComponentRef::new(Uuid::new_v4());
+        cr.set_base_override("fill", serde_json::json!("red"));
+        let mut hover = ComponentVariant::new(VariantState::Hover);
+        hover.set_override("fill", serde_json::json!("blue"));
+        cr.add_variant(hover);
+        let json = serde_json::to_string(&cr).unwrap();
+        let back: ComponentRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.component_id, cr.component_id);
+        assert_eq!(back.variants.len(), 1);
+    }
+
+    #[test]
+    fn test_variant_state_serde() {
+        let s = VariantState::Error;
+        let j = serde_json::to_string(&s).unwrap();
+        let back: VariantState = serde_json::from_str(&j).unwrap();
+        assert_eq!(back, VariantState::Error);
     }
 }
