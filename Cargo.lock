@@ -2888,6 +2888,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-agent-rollback"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "logos-agent-sandbox"
 version = "0.1.0"
 dependencies = [
