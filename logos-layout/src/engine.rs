@@ -565,6 +565,48 @@ impl LayoutEngine {
         self.dirty_nodes.insert(id);
         Ok(())
     }
+
+    /// Inject a pre-computed layout result directly, bypassing Taffy.
+    ///
+    /// Used by the `HybridLayoutEngine`'s grid-expansion pass to register
+    /// the bounds of repeat-grid cell virtual nodes (which have no Taffy
+    /// node – cell positions are computed geometrically by `RepeatGrid`).
+    ///
+    /// Also refreshes the embedded spatial index for the given ID.
+    pub fn inject_layout(
+        &mut self,
+        id: Uuid,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    ) {
+        use taffy::{Layout, Point as TaffyPoint, Size as TaffySize};
+        let new_layout = Layout {
+            location: TaffyPoint { x, y },
+            size: TaffySize { width, height },
+            content_size: TaffySize { width, height },
+            ..Layout::default()
+        };
+
+        let changed = match self.layout_results.get(&id) {
+            Some(prev) => {
+                prev.location.x != x
+                    || prev.location.y != y
+                    || prev.size.width != width
+                    || prev.size.height != height
+            }
+            None => true,
+        };
+
+        if changed {
+            let aabb = crate::spatial::Aabb::from_rect(x, y, width, height);
+            self.spatial.insert(id, aabb);
+            self.recently_changed.push(id);
+        }
+
+        self.layout_results.insert(id, new_layout);
+    }
 }
 
 // ===================================================================
