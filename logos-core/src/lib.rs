@@ -518,6 +518,7 @@ pub mod style;
 pub mod ffi;
 pub mod collab;
 pub mod constraint;
+pub mod persistence;
 
 #[cfg(test)]
 mod tests {

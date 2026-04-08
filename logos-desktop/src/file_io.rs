@@ -26,6 +26,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use logos_core::Document;
+use logos_core::persistence::DocumentSnapshot;
 use serde_json;
 
 /// Magic bytes identifying a `.logos` file.
@@ -193,6 +194,85 @@ pub fn ensure_save_dir() -> io::Result<PathBuf> {
     let dir = default_save_dir();
     fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// Save a [`DocumentSnapshot`] (document + component registry + grids) to a
+/// `.logos` file.
+///
+/// Uses the same binary envelope as [`save_document`]: magic header + optional
+/// LZ4 compression + JSON payload.
+pub fn save_snapshot(
+    snapshot: &DocumentSnapshot,
+    path: impl AsRef<Path>,
+    compress: bool,
+) -> Result<PathBuf, FileError> {
+    let path = path.as_ref();
+    let json = serde_json::to_vec(snapshot)
+        .map_err(|e| FileError::Serialization(e.to_string()))?;
+
+    let (payload, flags) = if compress {
+        let compressed = lz4_flex::compress_prepend_size(&json);
+        (compressed, FLAG_COMPRESSED)
+    } else {
+        (json, 0u32)
+    };
+
+    let mut file = fs::File::create(path)?;
+    file.write_all(MAGIC)?;
+    file.write_all(&FORMAT_VERSION.to_le_bytes())?;
+    file.write_all(&flags.to_le_bytes())?;
+    file.write_all(&(payload.len() as u64).to_le_bytes())?;
+    file.write_all(&payload)?;
+    file.flush()?;
+
+    log::info!(
+        "Saved snapshot to {}: {} bytes (compressed={compress})",
+        path.display(),
+        HEADER_SIZE + payload.len(),
+    );
+    Ok(path.to_path_buf())
+}
+
+/// Load a [`DocumentSnapshot`] from a `.logos` file.
+pub fn load_snapshot(path: impl AsRef<Path>) -> Result<DocumentSnapshot, FileError> {
+    let path = path.as_ref();
+    let mut file = fs::File::open(path)?;
+
+    // Read and validate header.
+    let mut header = [0u8; HEADER_SIZE];
+    file.read_exact(&mut header).map_err(|_| FileError::Truncated)?;
+
+    if &header[0..4] != MAGIC {
+        return Err(FileError::InvalidMagic);
+    }
+    let version = u32::from_le_bytes(header[4..8].try_into().unwrap());
+    if version != FORMAT_VERSION {
+        return Err(FileError::UnsupportedVersion(version));
+    }
+    let flags = u32::from_le_bytes(header[8..12].try_into().unwrap());
+    let payload_len = u64::from_le_bytes(header[12..20].try_into().unwrap()) as usize;
+
+    let mut payload = vec![0u8; payload_len];
+    file.read_exact(&mut payload).map_err(|_| FileError::Truncated)?;
+
+    let json_bytes = if flags & FLAG_COMPRESSED != 0 {
+        lz4_flex::decompress_size_prepended(&payload)
+            .map_err(|e| FileError::Decompression(e.to_string()))?
+    } else {
+        payload
+    };
+
+    let snapshot: DocumentSnapshot = serde_json::from_slice(&json_bytes)
+        .map_err(|e| FileError::Serialization(e.to_string()))?;
+
+    log::info!(
+        "Loaded snapshot from {}: {} layers, {} components, {} grids",
+        path.display(),
+        snapshot.document.root.read().map(|p| p.layers.len()).unwrap_or(0),
+        snapshot.component_count(),
+        snapshot.grid_count(),
+    );
+    Ok(snapshot)
 }
 
 // ===================================================================

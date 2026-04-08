@@ -4,10 +4,15 @@
 //! It holds the CRDT document, layout engine, spatial index (via engine),
 //! GPU renderer, camera, text engine, and interaction state (selection/hover).
 
+use std::collections::HashMap;
+use std::path::Path;
 use logos_core::{Document, Layer, RectLayer};
 use logos_core::WorkspaceMode;
-use logos_core::container::VariantState;
+use logos_core::container::{ComponentRef, VariantState};
+use logos_core::persistence::DocumentSnapshot;
+use logos_core::constraint::{Constraints, ConstraintOverlay, compute_overlay};
 use logos_layout::hybrid::HybridLayoutEngine;
+use logos_layout::repeat_grid::RepeatGrid;
 use logos_render::vertex::{CameraUniform, RectInstance, TextInstance};
 use logos_render::renderer::{FrameStats, Renderer};
 use logos_render::context::GpuContext;
@@ -120,6 +125,10 @@ pub struct AppState {
     pub presence: DesktopPresence,
     /// Variants panel state model.
     pub variant_panel: VariantPanel,
+    /// Component registry: layer-id → ComponentRef (persistent variant state).
+    pub component_registry: HashMap<Uuid, ComponentRef>,
+    /// Repeat grids owned by the document.
+    pub grids: Vec<RepeatGrid>,
     /// Cached rect instance buffer, rebuilt each frame.
     instances: Vec<RectInstance>,
     /// Cached text instance buffer, rebuilt each frame.
@@ -155,6 +164,8 @@ impl AppState {
             atlas,
             presence,
             variant_panel,
+            component_registry: HashMap::new(),
+            grids: Vec::new(),
             instances: Vec::new(),
             text_instances: Vec::new(),
             needs_redraw: true,
@@ -634,6 +645,107 @@ impl AppState {
         }
         drop(page);
         self.needs_redraw = true;
+    }
+
+    // ── Persistence ────────────────────────────────────────────────────────
+
+    /// Serialize the full document + component registry + grids to a `.logos`
+    /// file at `path`.
+    pub fn save_document(&self, path: &Path) -> std::io::Result<()> {
+        let grids_json: Vec<serde_json::Value> = self
+            .grids
+            .iter()
+            .map(|g| serde_json::to_value(g).unwrap_or_default())
+            .collect();
+        let snapshot =
+            DocumentSnapshot::capture(&self.document, &self.component_registry, &grids_json);
+        crate::file_io::save_snapshot(&snapshot, path, false)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("{e:?}")))?;
+        Ok(())
+    }
+
+    /// Load a document snapshot from `path`, replacing the current document,
+    /// component registry, and grids.
+    pub fn load_document(&mut self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+        let snapshot = crate::file_io::load_snapshot(path)?;
+        let (doc, registry, grids_json) = snapshot.restore();
+        self.document = doc;
+        self.component_registry = registry;
+        self.grids = grids_json
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+        self.needs_redraw = true;
+        Ok(())
+    }
+
+    // ── Variant preview ────────────────────────────────────────────────────
+
+    /// Begin a hover-preview for `state` on layer `id` — does not commit.
+    pub fn preview_variant(&mut self, _id: Uuid, state: VariantState) {
+        self.variant_panel.begin_preview(state);
+        self.needs_redraw = true;
+    }
+
+    /// Cancel the in-flight preview without changing the active state.
+    pub fn cancel_preview(&mut self) {
+        self.variant_panel.end_preview();
+        self.needs_redraw = true;
+    }
+
+    /// Commit the in-flight preview as the new active state for layer `id`.
+    pub fn commit_variant_preview(&mut self, id: Uuid) {
+        if self.variant_panel.commit_preview() {
+            let state = self.variant_panel.active_state;
+            self.set_variant_state(id, state);
+        }
+    }
+
+    // ── Constraint overlay ─────────────────────────────────────────────────
+
+    /// Compute constraint overlay descriptors for all currently selected layers.
+    ///
+    /// Returns one [`ConstraintOverlay`] per selected layer that has constraints
+    /// registered in the layout engine.  The parent bounds default to the
+    /// viewport when no explicit parent is available.
+    pub fn constraint_overlays_for_selection(&self) -> Vec<ConstraintOverlay> {
+        let mut overlays = Vec::new();
+        let selected_id = match self.interaction.selected {
+            Some(id) => id,
+            None => return overlays,
+        };
+
+        let constraints = match self.layout_engine.get_constraints(selected_id) {
+            Some(c) => *c,
+            None => Constraints::default(),
+        };
+
+        // Attempt to get layer bounds from the layout engine.
+        let bounds = if let Some(layout) = self.layout_engine.get_layout(selected_id) {
+            logos_core::Rect {
+                x: layout.location.x,
+                y: layout.location.y,
+                width: layout.size.width,
+                height: layout.size.height,
+            }
+        } else {
+            logos_core::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            }
+        };
+
+        let parent_bounds = logos_core::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: self.camera.viewport_width,
+            height: self.camera.viewport_height,
+        };
+
+        overlays.push(compute_overlay(selected_id, &constraints, bounds, parent_bounds));
+        overlays
     }
 }
 

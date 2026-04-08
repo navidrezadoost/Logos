@@ -32,6 +32,10 @@ pub struct VariantPanel {
     /// The state currently selected for preview.
     pub active_state: VariantState,
 
+    /// A temporary preview state shown on hover (hover-preview pattern).
+    /// `None` when no in-flight preview is active.
+    pub preview_state: Option<VariantState>,
+
     /// Merged property overrides for the `active_state` (base + state-specific).
     pub overrides: Vec<PropertyOverride>,
 
@@ -52,6 +56,7 @@ impl VariantPanel {
             inspected_id: None,
             available_states: Vec::new(),
             active_state: VariantState::Default,
+            preview_state: None,
             overrides: Vec::new(),
             workspace_mode: mode,
             show_all_states: true,
@@ -118,6 +123,46 @@ impl VariantPanel {
     /// Toggle the expanded / collapsed state list view.
     pub fn toggle_show_all(&mut self) {
         self.show_all_states = !self.show_all_states;
+    }
+
+    // ── Live preview ──────────────────────────────────────────────────
+
+    /// Begin a hover-preview for `state` without committing the active state.
+    ///
+    /// Callers should call [`end_preview`] when the hover leaves, or
+    /// [`commit_preview`] when the user clicks to confirm.
+    pub fn begin_preview(&mut self, state: VariantState) {
+        self.preview_state = Some(state);
+    }
+
+    /// Cancel the in-flight preview and revert to `active_state`.
+    pub fn end_preview(&mut self) {
+        self.preview_state = None;
+    }
+
+    /// Commit the current preview as the new active state.
+    ///
+    /// Returns `true` if the active state actually changed (i.e. a preview
+    /// was set and it differed from the current `active_state`).
+    pub fn commit_preview(&mut self) -> bool {
+        if let Some(preview) = self.preview_state.take() {
+            if preview != self.active_state {
+                self.active_state = preview;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The state to use for rendering: `preview_state` if in-flight, otherwise
+    /// `active_state`.
+    pub fn active_display_state(&self) -> VariantState {
+        self.preview_state.unwrap_or(self.active_state)
+    }
+
+    /// `true` if a hover-preview is currently in-flight.
+    pub fn is_previewing(&self) -> bool {
+        self.preview_state.is_some()
     }
 }
 

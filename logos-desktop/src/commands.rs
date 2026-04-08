@@ -7,9 +7,11 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
 use uuid::Uuid;
 use logos_core::WorkspaceMode;
 use logos_core::container::VariantState;
+use logos_layout::repeat_grid::DataSource;
 
 // ── Command Enum ────────────────────────────────────────────────
 
@@ -97,7 +99,19 @@ pub enum Command {
     SetVariantState { id: Uuid, state: VariantState },
     /// Change the active workspace / document layout mode.
     SetWorkspaceMode { mode: WorkspaceMode },
-}
+    // ── Document persistence ──────────────────────────────────────────────
+    /// Save the document with full variant overrides + grids to a path.
+    SaveDocumentPath { path: PathBuf },
+    /// Load a document snapshot from a `.logos` file.
+    LoadDocumentPath { path: PathBuf },
+
+    // ── Repeat Grid data binding ──────────────────────────────────────────────
+    /// Attach a named data source to a repeat grid.
+    BindGridDataSource { grid_id: Uuid, source: DataSource },
+    /// Remove a data source from a repeat grid by name.
+    UnbindGridDataSource { grid_id: Uuid, name: String },
+    /// Trigger auto-fill on a repeat grid (distributes attached source values).
+    AutoFillGrid { grid_id: Uuid },}
 
 /// Supported export formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -504,6 +518,24 @@ impl CommandRegistry {
         self.register(CommandInfo::new("workspace.set-mode", "Set Workspace Mode", CommandCategory::View)
             .with_description("Switch between Flat Page, Artboard/Section, and Hybrid layout modes")
             .with_icon("layout"));
+
+        // Document persistence
+        self.register(CommandInfo::new("document.save", "Save Document (Path)", CommandCategory::Document)
+            .with_description("Save the document with variant overrides and grids to a specified path")
+            .with_icon("save"));
+        self.register(CommandInfo::new("document.load", "Load Document (Path)", CommandCategory::Document)
+            .with_description("Load a document snapshot from a .logos file")
+            .with_icon("folder-open"));
+
+        // Repeat Grid data binding
+        self.register(CommandInfo::new("grid.bind-source", "Bind Grid Data Source", CommandCategory::Layer)
+            .with_description("Attach a named data source to a repeat grid")
+            .with_icon("database"));
+        self.register(CommandInfo::new("grid.unbind-source", "Unbind Grid Data Source", CommandCategory::Layer)
+            .with_description("Remove a data source from a repeat grid by name"));
+        self.register(CommandInfo::new("grid.auto-fill", "Auto-Fill Grid", CommandCategory::Layer)
+            .with_description("Distribute attached data-source values across all grid cells")
+            .with_icon("grid"));
     }
 }
 
@@ -672,6 +704,11 @@ pub fn command_to_id(cmd: &Command) -> &'static str {
         Command::UninstallPlugin { .. } => "plugin.uninstall",
         Command::SetVariantState { .. } => "variant.set-state",
         Command::SetWorkspaceMode { .. } => "workspace.set-mode",
+        Command::SaveDocumentPath { .. } => "document.save",
+        Command::LoadDocumentPath { .. } => "document.load",
+        Command::BindGridDataSource { .. } => "grid.bind-source",
+        Command::UnbindGridDataSource { .. } => "grid.unbind-source",
+        Command::AutoFillGrid { .. } => "grid.auto-fill",
     }
 }
 

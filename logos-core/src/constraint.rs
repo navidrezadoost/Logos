@@ -213,6 +213,172 @@ fn axis_constraint_v(v: VerticalConstraint) -> AxisMode {
     }
 }
 
+// ── Constraint Visualisation ────────────────────────────────────────────────────
+
+use uuid::Uuid;
+
+/// Which axis a [`PinAnchor`] applies to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Axis {
+    Horizontal,
+    Vertical,
+}
+
+/// What kind of constraint the anchor visually represents.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AnchorKind {
+    /// Fixed-distance pin to one edge.
+    Pin,
+    /// Proportional scale anchor.
+    Scale,
+    /// Centred on the parent axis.
+    Center,
+    /// Stretches between two margins (both edges pinned).
+    Stretch,
+}
+
+/// A single visual anchor produced by [`compute_overlay`].
+///
+/// Consumers (renderers, overlay painters) iterate the `anchors` list on a
+/// [`ConstraintOverlay`] to draw pin/scale/center/stretch handles.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PinAnchor {
+    /// Which axis this anchor belongs to.
+    pub axis: Axis,
+    /// Visual kind of the anchor.
+    pub kind: AnchorKind,
+    /// World-space (parent-local) coordinate along the axis.
+    pub position: f32,
+    /// Extent of the anchor span (0.0 for point pins).
+    pub length: f32,
+}
+
+/// Per-layer overlay descriptor assembled from constraints + bounds.
+///
+/// Used by the canvas overlay to draw constraint handles on the selected layer.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ConstraintOverlay {
+    /// The layer this overlay describes.
+    pub layer_id: Uuid,
+    /// Active horizontal constraint.
+    pub h_constraint: HorizontalConstraint,
+    /// Active vertical constraint.
+    pub v_constraint: VerticalConstraint,
+    /// Individual anchor lines to render.
+    pub anchors: Vec<PinAnchor>,
+}
+
+/// Compute a [`ConstraintOverlay`] for a layer given its constraints and bounds.
+///
+/// # Parameters
+/// - `layer_id`      — the layer's unique identifier.
+/// - `constraints`   — the constraint pair attached to the layer.
+/// - `bounds`        — the layer rect in parent-local coordinates.
+/// - `parent_bounds` — the parent container's rect.
+///
+/// Each axis constraint contributes anchors as follows:
+/// - `Left`/`Right`/`Center`/`Scale`  → 1 anchor for that axis.
+/// - `LeftAndRight` / `TopAndBottom`  → 2 `Stretch` anchors (one per edge).
+pub fn compute_overlay(
+    layer_id: Uuid,
+    constraints: &Constraints,
+    bounds: Rect,
+    parent_bounds: Rect,
+) -> ConstraintOverlay {
+    let mut anchors = Vec::new();
+
+    // ── Horizontal ──
+    match constraints.horizontal {
+        HorizontalConstraint::Left => anchors.push(PinAnchor {
+            axis: Axis::Horizontal,
+            kind: AnchorKind::Pin,
+            position: bounds.x,
+            length: 0.0,
+        }),
+        HorizontalConstraint::Right => anchors.push(PinAnchor {
+            axis: Axis::Horizontal,
+            kind: AnchorKind::Pin,
+            position: parent_bounds.width - (bounds.x + bounds.width),
+            length: 0.0,
+        }),
+        HorizontalConstraint::LeftAndRight => {
+            anchors.push(PinAnchor {
+                axis: Axis::Horizontal,
+                kind: AnchorKind::Stretch,
+                position: bounds.x,
+                length: 0.0,
+            });
+            anchors.push(PinAnchor {
+                axis: Axis::Horizontal,
+                kind: AnchorKind::Stretch,
+                position: parent_bounds.width - (bounds.x + bounds.width),
+                length: 0.0,
+            });
+        }
+        HorizontalConstraint::Center => anchors.push(PinAnchor {
+            axis: Axis::Horizontal,
+            kind: AnchorKind::Center,
+            position: bounds.x + bounds.width / 2.0,
+            length: 0.0,
+        }),
+        HorizontalConstraint::Scale => anchors.push(PinAnchor {
+            axis: Axis::Horizontal,
+            kind: AnchorKind::Scale,
+            position: bounds.x,
+            length: bounds.width,
+        }),
+    }
+
+    // ── Vertical ──
+    match constraints.vertical {
+        VerticalConstraint::Top => anchors.push(PinAnchor {
+            axis: Axis::Vertical,
+            kind: AnchorKind::Pin,
+            position: bounds.y,
+            length: 0.0,
+        }),
+        VerticalConstraint::Bottom => anchors.push(PinAnchor {
+            axis: Axis::Vertical,
+            kind: AnchorKind::Pin,
+            position: parent_bounds.height - (bounds.y + bounds.height),
+            length: 0.0,
+        }),
+        VerticalConstraint::TopAndBottom => {
+            anchors.push(PinAnchor {
+                axis: Axis::Vertical,
+                kind: AnchorKind::Stretch,
+                position: bounds.y,
+                length: 0.0,
+            });
+            anchors.push(PinAnchor {
+                axis: Axis::Vertical,
+                kind: AnchorKind::Stretch,
+                position: parent_bounds.height - (bounds.y + bounds.height),
+                length: 0.0,
+            });
+        }
+        VerticalConstraint::Center => anchors.push(PinAnchor {
+            axis: Axis::Vertical,
+            kind: AnchorKind::Center,
+            position: bounds.y + bounds.height / 2.0,
+            length: 0.0,
+        }),
+        VerticalConstraint::Scale => anchors.push(PinAnchor {
+            axis: Axis::Vertical,
+            kind: AnchorKind::Scale,
+            position: bounds.y,
+            length: bounds.height,
+        }),
+    }
+
+    ConstraintOverlay {
+        layer_id,
+        h_constraint: constraints.horizontal,
+        v_constraint: constraints.vertical,
+        anchors,
+    }
+}
+
 // ── Unit tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

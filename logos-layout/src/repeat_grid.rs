@@ -50,6 +50,59 @@ impl DataOverride {
     }
 }
 
+// ── DataSource ──────────────────────────────────────────────────────────────────
+
+/// A named data source that can be attached to a [`RepeatGrid`] and used to
+/// automatically populate cell overrides via [`RepeatGrid::auto_fill`].
+///
+/// `column` identifies which layer-path property this source binds to (e.g.
+/// `"label.text"` or `"background.fill"`).  Values cycle through `values`
+/// if the grid has more cells than values in the list.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DataSource {
+    /// Unique human-readable name (used by [`RepeatGrid::detach_data_source`]).
+    pub name: String,
+    /// Dot-separated layer-path this source binds to (e.g. `"label.text"`).
+    pub column: String,
+    /// Ordered list of values to distribute across cells.
+    pub values: Vec<serde_json::Value>,
+}
+
+impl DataSource {
+    /// Create a new data source.
+    pub fn new(
+        name: impl Into<String>,
+        column: impl Into<String>,
+        values: Vec<serde_json::Value>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            column: column.into(),
+            values,
+        }
+    }
+
+    /// Return the value for the given linear cell index, cycling if needed.
+    ///
+    /// Returns `serde_json::Value::Null` if `values` is empty.
+    pub fn value_for_index(&self, idx: usize) -> &serde_json::Value {
+        if self.values.is_empty() {
+            return &serde_json::Value::Null;
+        }
+        &self.values[idx % self.values.len()]
+    }
+
+    /// Number of values in this source.
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// `true` if the source has no values.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+}
+
 // ── RepeatGrid ────────────────────────────────────────────────────────────────
 
 /// A grid that repeats a set of template layers in `rows × columns` cells.
@@ -79,6 +132,8 @@ pub struct RepeatGrid {
     pub origin_x: f32,
     /// Position of the grid's top-left corner in parent-local coordinates.
     pub origin_y: f32,
+    /// Named data sources attached to this grid.
+    pub data_sources: Vec<DataSource>,
 }
 
 impl RepeatGrid {
@@ -100,6 +155,7 @@ impl RepeatGrid {
             data_overrides: Vec::new(),
             origin_x: 0.0,
             origin_y: 0.0,
+            data_sources: Vec::new(),
         }
     }
 
@@ -270,6 +326,65 @@ impl RepeatGrid {
             let last = self.columns - 1;
             self.data_overrides.retain(|o| o.col != last);
             self.columns -= 1;
+        }
+    }
+
+    // ── Data source binding ──────────────────────────────────────────────────
+
+    /// Attach a [`DataSource`] to this grid.
+    ///
+    /// If a source with the same name already exists it is replaced.
+    pub fn attach_data_source(&mut self, source: DataSource) {
+        // Replace if duplicate name.
+        for existing in &mut self.data_sources {
+            if existing.name == source.name {
+                *existing = source;
+                return;
+            }
+        }
+        self.data_sources.push(source);
+    }
+
+    /// Detach a source by name. Returns `true` if a source was removed.
+    pub fn detach_data_source(&mut self, name: &str) -> bool {
+        let before = self.data_sources.len();
+        self.data_sources.retain(|s| s.name != name);
+        self.data_sources.len() < before
+    }
+
+    /// Number of attached data sources.
+    pub fn source_count(&self) -> usize {
+        self.data_sources.len()
+    }
+
+    /// Remove all attached data sources.
+    pub fn clear_data_sources(&mut self) {
+        self.data_sources.clear();
+    }
+
+    /// Distribute attached data-source values into [`DataOverride`] entries.
+    ///
+    /// For each attached source, iterates every cell in row-major order and
+    /// writes a `DataOverride` for `source.column`.  Existing overrides for
+    /// the same path are replaced.  Sources with empty `values` produce no
+    /// overrides.
+    pub fn auto_fill(&mut self) {
+        let rows = self.rows;
+        let columns = self.columns;
+        // Collect sources first to avoid borrow issues.
+        let sources: Vec<DataSource> = self.data_sources.clone();
+        for source in &sources {
+            if source.is_empty() {
+                continue;
+            }
+            let mut cell_idx = 0usize;
+            for row in 0..rows {
+                for col in 0..columns {
+                    let value = source.value_for_index(cell_idx).clone();
+                    self.set_data_override(row, col, &source.column, value);
+                    cell_idx += 1;
+                }
+            }
         }
     }
 }
