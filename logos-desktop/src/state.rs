@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 use crate::presence::DesktopPresence;
 use crate::variants::VariantPanel;
+use crate::undo::{UndoAction, UndoStack};
+use crate::accessibility::AccessibilityNode;
 
 /// Interactive state for selection / hover.
 #[derive(Debug, Clone, Default)]
@@ -129,6 +131,8 @@ pub struct AppState {
     pub component_registry: HashMap<Uuid, ComponentRef>,
     /// Repeat grids owned by the document.
     pub grids: Vec<RepeatGrid>,
+    /// Desktop-level undo / redo stack (richer than logos-core UndoStack).
+    pub undo_stack: UndoStack,
     /// Cached rect instance buffer, rebuilt each frame.
     instances: Vec<RectInstance>,
     /// Cached text instance buffer, rebuilt each frame.
@@ -166,6 +170,7 @@ impl AppState {
             variant_panel,
             component_registry: HashMap::new(),
             grids: Vec::new(),
+            undo_stack: UndoStack::new(200),
             instances: Vec::new(),
             text_instances: Vec::new(),
             needs_redraw: true,
@@ -592,23 +597,31 @@ impl AppState {
     /// across recomputes) and the variant panel (so the inspector is in sync).
     /// Sets the dirty flag so the next frame redraws.
     pub fn set_variant_state(&mut self, id: Uuid, state: VariantState) {
+        // Capture old state before mutating for undo record.
+        let old_state = self.variant_panel.active_state;
+
         // Update the document's ComponentRef.
-        // The document stores layers in a page tree; we find the layer by ID
-        // and call set_state on its ComponentRef if it has one.
-        // Phase 2 keeps this in-memory (no persistence) as specced.
         use logos_core::Layer;
         {
             let page = self.document.root.read().unwrap();
             for layer in &page.layers {
                 if layer.id() == id {
-                    // Only component-ref bearing layers would have state; for
-                    // now we record the intent in the variant panel regardless.
                     break;
                 }
             }
         }
         // Propagate to the panel regardless (panel is authoritative for UI).
         self.variant_panel.set_state(state);
+
+        // Record the change for undo if it actually modified something.
+        if old_state != state {
+            self.undo_stack.push(UndoAction::SetVariantState {
+                layer_id: id,
+                old_state,
+                new_state: state,
+            });
+        }
+
         self.needs_redraw = true;
     }
 
@@ -746,6 +759,47 @@ impl AppState {
 
         overlays.push(compute_overlay(selected_id, &constraints, bounds, parent_bounds));
         overlays
+    }
+
+    // ── Undo / Redo ────────────────────────────────────────────────────────
+
+    /// Push `action` onto the desktop undo stack (clears any redo future).
+    pub fn push_undo(&mut self, action: UndoAction) {
+        self.undo_stack.push(action);
+    }
+
+    /// Step backward in history.  Returns the `UndoAction` that was undone
+    /// (the caller should apply its inverse to the data model) or `None`.
+    pub fn undo(&mut self) -> Option<UndoAction> {
+        let action = self.undo_stack.undo()?;
+        self.needs_redraw = true;
+        Some(action)
+    }
+
+    /// Step forward in history.  Returns the `UndoAction` to re-apply or `None`.
+    pub fn redo(&mut self) -> Option<UndoAction> {
+        let action = self.undo_stack.redo()?;
+        self.needs_redraw = true;
+        Some(action)
+    }
+
+    /// `true` if there is an action available to undo.
+    pub fn can_undo(&self) -> bool {
+        self.undo_stack.can_undo()
+    }
+
+    /// `true` if there is an action available to redo.
+    pub fn can_redo(&self) -> bool {
+        self.undo_stack.can_redo()
+    }
+
+    // ── Variant accessibility ──────────────────────────────────────────────
+
+    /// Build accessibility nodes for the current variant panel state.
+    ///
+    /// Delegates to [`VariantPanel::to_accessibility_nodes`].
+    pub fn build_variant_accessibility(&self) -> Vec<AccessibilityNode> {
+        self.variant_panel.to_accessibility_nodes()
     }
 }
 

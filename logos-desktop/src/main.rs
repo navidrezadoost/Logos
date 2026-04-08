@@ -23,6 +23,7 @@ pub mod dialogs;
 pub mod tray;
 pub mod updater;
 pub mod variants;
+pub mod undo;
 
 use log::info;
 use std::sync::Arc;

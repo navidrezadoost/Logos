@@ -8,6 +8,8 @@
 pub mod commands;
 pub mod panels;
 pub mod variants;
+pub mod undo;
+pub mod accessibility;
 
 // ── Require desktop-ui feature (GTK / wgpu / winit) ─────────────────────────
 #[cfg(feature = "desktop-ui")]
@@ -22,8 +24,6 @@ pub mod toolbar;
 pub mod palette;
 #[cfg(feature = "desktop-ui")]
 pub mod tabs;
-#[cfg(feature = "desktop-ui")]
-pub mod accessibility;
 #[cfg(feature = "desktop-ui")]
 pub mod menus;
 #[cfg(feature = "desktop-ui")]

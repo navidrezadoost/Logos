@@ -9,6 +9,7 @@
 use uuid::Uuid;
 use logos_core::WorkspaceMode;
 use logos_core::container::{ComponentRef, PropertyOverride, VariantState};
+use crate::accessibility::{AccessibilityNode, AriaRole};
 #[cfg(test)] use serde_json::json;
 
 // ── VariantPanel ────────────────────────────────────────────────────────────
@@ -164,6 +165,113 @@ impl VariantPanel {
     pub fn is_previewing(&self) -> bool {
         self.preview_state.is_some()
     }
+
+    // ── Thumbnails ────────────────────────────────────────────────────
+
+    /// Build a [`VariantThumbnail`] representation for every available state.
+    ///
+    /// Each thumbnail captures a snapshot of the state's label, override
+    /// count, whether it is the currently active state, and whether it is
+    /// the display state (preview or active).
+    pub fn build_thumbnails(&self) -> Vec<VariantThumbnail> {
+        self.available_states
+            .iter()
+            .map(|&state| {
+                let label = self.accessibility_label_for_state(state);
+                let override_count = self.overrides.len(); // per current panel overrides
+                let is_active = self.active_state == state;
+                let is_display_state = self.active_display_state() == state;
+                VariantThumbnail {
+                    state,
+                    label,
+                    override_count,
+                    base_color: None,
+                    is_active,
+                    is_display_state,
+                }
+            })
+            .collect()
+    }
+
+    /// Return the thumbnail for a specific `state`, or `None` if that state
+    /// has no explicit variant entry on the inspected component.
+    pub fn thumbnail_for_state(&self, state: VariantState) -> Option<VariantThumbnail> {
+        self.build_thumbnails().into_iter().find(|t| t.state == state)
+    }
+
+    /// Number of thumbnails (= number of available states).
+    pub fn thumbnail_count(&self) -> usize {
+        self.available_states.len()
+    }
+
+    // ── Accessibility ────────────────────────────────────────────────
+
+    /// Build an ordered list of [`AccessibilityNode`]s for the variants panel.
+    ///
+    /// One `List` node acts as the container; one `ListItem` child is created
+    /// per available state.  The active state is marked as `selected`.
+    pub fn to_accessibility_nodes(&self) -> Vec<AccessibilityNode> {
+        let container_label = match self.inspected_id {
+            Some(id) => format!("Variants for layer {}", id),
+            None => "Variants panel".to_string(),
+        };
+
+        let mut container = AccessibilityNode::new(AriaRole::List, container_label);
+        let mut nodes: Vec<AccessibilityNode> = Vec::new();
+
+        for &state in &self.available_states {
+            let label = self.accessibility_label_for_state(state);
+            let mut item = AccessibilityNode::new(AriaRole::ListItem, label);
+            item.selected = self.active_state == state;
+            item.parent = Some(container.id);
+            container.children.push(item.id);
+            nodes.push(item);
+        }
+
+        let mut result = vec![container];
+        result.extend(nodes);
+        result
+    }
+
+    /// Human-readable accessibility label for `state`.
+    ///
+    /// Returns a sentence like `"Default state"`, `"Hover state"`, etc.
+    pub fn accessibility_label_for_state(&self, state: VariantState) -> String {
+        let name = match state {
+            VariantState::Default  => "Default",
+            VariantState::Hover    => "Hover",
+            VariantState::Active   => "Active",
+            VariantState::Focus    => "Focus",
+            VariantState::Disabled => "Disabled",
+            VariantState::Error    => "Error",
+        };
+        format!("{} state", name)
+    }
+}
+
+// ── VariantThumbnail ─────────────────────────────────────────────────────────
+
+/// A lightweight descriptor used to render a thumbnail row in the Variants
+/// panel for one component state.
+///
+/// Built from [`VariantPanel::build_thumbnails`]; does not own a GPU texture
+/// — rendering is delegated to the caller which can map `state` to a cached
+/// bitmap.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariantThumbnail {
+    /// The variant state this thumbnail represents.
+    pub state: VariantState,
+    /// Human-readable label (e.g. `"Hover state"`).
+    pub label: String,
+    /// Number of overrides active for the current panel state (informational).
+    pub override_count: usize,
+    /// Optional representative color sampled from the variant (CSS hex string).
+    /// `None` when no color has been calculated yet.
+    pub base_color: Option<String>,
+    /// `true` when this state is the currently committed active state.
+    pub is_active: bool,
+    /// `true` when this state is the display state (preview or active).
+    pub is_display_state: bool,
 }
 
 impl Default for VariantPanel {
