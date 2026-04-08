@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::fmt;
 use uuid::Uuid;
+use logos_core::WorkspaceMode;
+use logos_core::container::VariantState;
 
 // ── Command Enum ────────────────────────────────────────────────
 
@@ -89,6 +91,12 @@ pub enum Command {
     OpenPluginManager,
     InstallPlugin { plugin_id: String },
     UninstallPlugin { plugin_id: String },
+
+    // ── Variants / WorkspaceMode ─────────────────
+    /// Switch the interactive variant state for a component layer.
+    SetVariantState { id: Uuid, state: VariantState },
+    /// Change the active workspace / document layout mode.
+    SetWorkspaceMode { mode: WorkspaceMode },
 }
 
 /// Supported export formats.
@@ -154,6 +162,8 @@ pub enum PanelId {
     History,
     ColorPicker,
     Typography,
+    /// Component variants + WorkspaceMode selector.
+    Variants,
 }
 
 impl fmt::Display for PanelId {
@@ -166,6 +176,7 @@ impl fmt::Display for PanelId {
             Self::History => "History",
             Self::ColorPicker => "Color Picker",
             Self::Typography => "Typography",
+            Self::Variants => "Variants",
         };
         write!(f, "{name}")
     }
@@ -485,6 +496,14 @@ impl CommandRegistry {
         // Plugins
         self.register(CommandInfo::new("plugin.manager", "Plugin Manager", CommandCategory::Plugin)
             .with_description("Browse and manage plugins"));
+
+        // Variants / WorkspaceMode
+        self.register(CommandInfo::new("variant.set-state", "Set Variant State", CommandCategory::Layer)
+            .with_description("Switch the interactive state of a component variant")
+            .with_icon("layers"));
+        self.register(CommandInfo::new("workspace.set-mode", "Set Workspace Mode", CommandCategory::View)
+            .with_description("Switch between Flat Page, Artboard/Section, and Hybrid layout modes")
+            .with_icon("layout"));
     }
 }
 
@@ -651,6 +670,8 @@ pub fn command_to_id(cmd: &Command) -> &'static str {
         Command::OpenPluginManager => "plugin.manager",
         Command::InstallPlugin { .. } => "plugin.install",
         Command::UninstallPlugin { .. } => "plugin.uninstall",
+        Command::SetVariantState { .. } => "variant.set-state",
+        Command::SetWorkspaceMode { .. } => "workspace.set-mode",
     }
 }
 

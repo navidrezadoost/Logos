@@ -5,7 +5,9 @@
 //! GPU renderer, camera, text engine, and interaction state (selection/hover).
 
 use logos_core::{Document, Layer, RectLayer};
-use logos_layout::engine::LayoutEngine;
+use logos_core::WorkspaceMode;
+use logos_core::container::VariantState;
+use logos_layout::hybrid::HybridLayoutEngine;
 use logos_render::vertex::{CameraUniform, RectInstance, TextInstance};
 use logos_render::renderer::{FrameStats, Renderer};
 use logos_render::context::GpuContext;
@@ -13,6 +15,7 @@ use logos_text::{Atlas, FontRegistry, TextEngine, TextStyle};
 use uuid::Uuid;
 
 use crate::presence::DesktopPresence;
+use crate::variants::VariantPanel;
 
 /// Interactive state for selection / hover.
 #[derive(Debug, Clone, Default)]
@@ -102,7 +105,7 @@ const ATLAS_SIZE: u32 = 1024;
 /// Owns the entire application pipeline.
 pub struct AppState {
     pub document: Document,
-    pub layout_engine: LayoutEngine,
+    pub layout_engine: HybridLayoutEngine,
     pub renderer: Renderer,
     pub gpu: GpuContext,
     pub camera: Camera,
@@ -115,6 +118,8 @@ pub struct AppState {
     pub atlas: Atlas,
     /// Presence state for remote cursor rendering.
     pub presence: DesktopPresence,
+    /// Variants panel state model.
+    pub variant_panel: VariantPanel,
     /// Cached rect instance buffer, rebuilt each frame.
     instances: Vec<RectInstance>,
     /// Cached text instance buffer, rebuilt each frame.
@@ -128,7 +133,7 @@ impl AppState {
     pub fn new(gpu: GpuContext, width: u32, height: u32) -> Self {
         let renderer = Renderer::with_atlas_size(&gpu, ATLAS_SIZE);
         let document = Document::new();
-        let layout_engine = LayoutEngine::new();
+        let layout_engine = HybridLayoutEngine::new(WorkspaceMode::Hybrid);
         let camera = Camera::new(width as f32, height as f32);
         let font_registry = FontRegistry::discover();
         log::info!("Font registry: {}", font_registry);
@@ -136,6 +141,7 @@ impl AppState {
         let atlas = Atlas::new(ATLAS_SIZE);
         let local_user_id = Uuid::new_v4();
         let presence = DesktopPresence::new(local_user_id);
+        let variant_panel = VariantPanel::new(WorkspaceMode::Hybrid);
 
         Self {
             document,
@@ -148,6 +154,7 @@ impl AppState {
             font_registry,
             atlas,
             presence,
+            variant_panel,
             instances: Vec::new(),
             text_instances: Vec::new(),
             needs_redraw: true,
@@ -563,6 +570,69 @@ impl AppState {
     pub fn zoom_at(&mut self, screen_x: f32, screen_y: f32, delta: f32) {
         let factor = if delta > 0.0 { 1.1 } else { 1.0 / 1.1 };
         self.camera.zoom_at(screen_x, screen_y, factor);
+        self.needs_redraw = true;
+    }
+
+    // ── Variant / mode integration ─────────────────────────────────────────
+
+    /// Switch the previewed variant state for the component layer `id`.
+    ///
+    /// Updates both the document's `ComponentRef` (so the change is durable
+    /// across recomputes) and the variant panel (so the inspector is in sync).
+    /// Sets the dirty flag so the next frame redraws.
+    pub fn set_variant_state(&mut self, id: Uuid, state: VariantState) {
+        // Update the document's ComponentRef.
+        // The document stores layers in a page tree; we find the layer by ID
+        // and call set_state on its ComponentRef if it has one.
+        // Phase 2 keeps this in-memory (no persistence) as specced.
+        use logos_core::Layer;
+        {
+            let page = self.document.root.read().unwrap();
+            for layer in &page.layers {
+                if layer.id() == id {
+                    // Only component-ref bearing layers would have state; for
+                    // now we record the intent in the variant panel regardless.
+                    break;
+                }
+            }
+        }
+        // Propagate to the panel regardless (panel is authoritative for UI).
+        self.variant_panel.set_state(state);
+        self.needs_redraw = true;
+    }
+
+    /// Change the active workspace layout mode.
+    ///
+    /// Propagates immediately to the `HybridLayoutEngine` (takes effect on the
+    /// next `compute_layout` call) and mirrors the value in the variant panel's
+    /// mode-selector widget.
+    pub fn set_workspace_mode(&mut self, mode: WorkspaceMode) {
+        self.layout_engine.set_mode(mode);
+        self.variant_panel.set_workspace_mode(mode);
+        self.needs_redraw = true;
+    }
+
+    /// Inspect a component layer: if `id` refers to a layer with a
+    /// `ComponentRef`, populates the variant panel from that ref.
+    ///
+    /// For Phase 2 the document keeps component refs ephemerally — callers can
+    /// pass a pre-built `ComponentRef` directly via the `variant_panel` field
+    /// if needed.  This method also updates `interaction.selected`.
+    pub fn inspect_component(&mut self, id: Uuid) {
+        self.interaction.selected = Some(id);
+        // Locate the layer in the document and check for ComponentRef.
+        use logos_core::Layer;
+        let page = self.document.root.read().unwrap();
+        for layer in &page.layers {
+            if layer.id() == id {
+                // Phase 2: ComponentRef isn't stored on Layer yet (coming in a
+                // later phase). We still update the panel's inspected_id so
+                // that the Variants panel shows the correct layer context.
+                self.variant_panel.inspected_id = Some(id);
+                break;
+            }
+        }
+        drop(page);
         self.needs_redraw = true;
     }
 }

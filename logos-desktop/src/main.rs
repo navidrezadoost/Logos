@@ -22,6 +22,7 @@ pub mod menus;
 pub mod dialogs;
 pub mod tray;
 pub mod updater;
+pub mod variants;
 
 use log::info;
 use std::sync::Arc;

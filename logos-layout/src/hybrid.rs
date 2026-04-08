@@ -442,6 +442,30 @@ impl HybridLayoutEngine {
         self.engine.dirty_count()
     }
 
+    /// Compatibility shim: add or update a layer using the `logos_core::Layer`
+    /// convenience path (same as `LayoutEngine::add_or_update_layer`).
+    ///
+    /// The layer is registered in `child_info` with zero-origin bounds so that
+    /// the constraint pre-pass can locate it; actual bounds are populated after
+    /// the first `compute()` / `inject_layout` cycle.
+    pub fn add_or_update_layer(&mut self, layer: &logos_core::Layer) -> Result<(), HybridError> {
+        self.engine.add_or_update_layer(layer)?;
+        let id = layer.id();
+        // Register in child_info with a zero-origin rect so constraint lookups
+        // succeed even before the first compute.
+        self.child_info.entry(id).or_insert_with(|| ChildInfo {
+            bounds: logos_core::Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 },
+            parent_id: None,
+        });
+        Ok(())
+    }
+
+    /// Alias for `compute()` — provides drop-in compatibility with call sites
+    /// that previously used `LayoutEngine::compute_layout`.
+    pub fn compute_layout(&mut self, root_id: Uuid) -> Result<(), HybridError> {
+        self.compute(root_id)
+    }
+
     /// Read-only access to the inner `LayoutEngine` (for tests / advanced use).
     pub fn inner(&self) -> &LayoutEngine {
         &self.engine

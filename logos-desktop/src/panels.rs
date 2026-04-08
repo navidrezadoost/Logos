@@ -672,6 +672,8 @@ impl PanelManager {
             .with_width(260.0, 200.0, 360.0));
         self.register(PanelDescriptor::new(PanelId::Typography, "Typography", "type", DockSide::Right)
             .with_width(260.0, 200.0, 360.0));
+        self.register(PanelDescriptor::new(PanelId::Variants, "Variants", "layers", DockSide::Right)
+            .with_width(280.0, 220.0, 450.0));
     }
 }
 
@@ -690,7 +692,7 @@ mod tests {
     #[test]
     fn test_panel_manager_defaults() {
         let mgr = PanelManager::new();
-        assert_eq!(mgr.panel_count(), 7);
+        assert_eq!(mgr.panel_count(), 8);
         assert!(mgr.visible_count() > 0);
     }
 
@@ -761,7 +763,7 @@ mod tests {
         let mut mgr = PanelManager::new();
         mgr.hide_all();
         mgr.show_all();
-        assert_eq!(mgr.visible_count(), 7);
+        assert_eq!(mgr.visible_count(), 8);
     }
 
     #[test]
