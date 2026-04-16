@@ -60,6 +60,22 @@ the Penpot charts stored there.
 
 ## Install Penpot Chart
 
+If you are working directly from this repository, you can also install the
+in-repo chart scaffold:
+
+```bash
+helm install logos ./deploy/helm/logos
+```
+
+Or with custom values:
+
+```bash
+helm install logos ./deploy/helm/logos -f my-values.yaml
+```
+
+This chart mirrors the core self-hosted stack and is intended as a baseline
+for Kubernetes-based on-premise deployments.
+
 To install the chart with the release name `my-release`:
 
 ```bash

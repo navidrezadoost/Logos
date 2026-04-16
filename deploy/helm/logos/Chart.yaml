@@ -1,0 +1,6 @@
+apiVersion: v2
+name: logos
+description: Helm chart for self-hosted Logos deployment
+kind: application
+version: 0.1.0
+appVersion: "latest"

@@ -1,0 +1,63 @@
+{{- if .Values.mcp.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "logos.fullname" . }}-mcp
+  labels:
+    {{- include "logos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  replicas: {{ .Values.mcp.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "logos.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp
+  template:
+    metadata:
+      labels:
+        {{- include "logos.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp
+          image: "{{ .Values.mcp.image.repository }}:{{ .Values.mcp.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.mcp.probes.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.mcp.probes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.mcp.probes.periodSeconds }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.mcp.probes.path }}
+              port: http
+            initialDelaySeconds: {{ add .Values.mcp.probes.initialDelaySeconds 10 }}
+            periodSeconds: {{ .Values.mcp.probes.periodSeconds }}
+          resources:
+            {{- toYaml .Values.mcp.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "logos.fullname" . }}-mcp
+  labels:
+    {{- include "logos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+spec:
+  type: {{ .Values.mcp.service.type }}
+  selector:
+    {{- include "logos.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+  ports:
+    - name: http
+      port: {{ .Values.mcp.service.port }}
+      targetPort: http
+{{- end }}

@@ -26,6 +26,7 @@ These are the main options to configure your Penpot instance:
 1. Deploy with [docker compose][2]
 2. Use Kubernetes in its different flavors:
     - Deploy the [official Helm Chart][3]
+    - Or use the in-repo Helm scaffold at `deploy/helm/logos`
     - Deploy in [Openshift][4]
     - Deploy in [Rancher][5]
 3. Other official options:
