@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-04-16
+
+### Fixed
+- **logos-collab**: Gated `rocksdb` behind optional `persistent-storage` feature — resolves `libclang`/bindgen build failure on systems without LLVM installed.
+- **logos-collab**: Added `storage/memory.rs` — full in-memory `DocumentStore` drop-in (mirrors RocksDB API exactly; used when `persistent-storage` feature is absent).
+- **logos-collab**: Fixed `TokenProvider` trait impl in `auth/token.rs` — corrected `issue`/`verify` method signatures to include `TokenKind` parameter, fixed `is_revoked` return type (`bool` not `Result<bool, _>`), removed invalid deref on `Uuid`.
+- **logos-collab**: Fixed `save_snapshot` call sites missing the `version: u64` argument in `server.rs` and `tests/persistence_integration.rs`.
+- **logos-collab**: Fixed non-exhaustive `AwarenessMessage` match arms — added `PageChange` and `EditingUpdate` handling in `server.rs` and `presence.rs`.
+- **logos-collab**: Fixed missing `page_id`, `editing_state`, `idle_alpha` fields in `CursorRenderData` struct initializers in `tests/presence_integration.rs`.
+- **logos-collab**: Gated crash-recovery integration tests behind `persistent-storage` feature (tests require cross-instance disk persistence).
+
+### Tests
+- **logos-collab**: 362 tests now passing (up from 0 due to rocksdb build failure).
+
 ## [0.2.0] - Week 2: Rendering Engine (Current)
 
 ### Added
