@@ -80,7 +80,7 @@ fn test_document_roundtrip_via_store() {
     let (_doc, state) = make_doc_with_text("Hello, persistence world!");
 
     // Save
-    store.save_snapshot(doc_id, &state).unwrap();
+    store.save_snapshot(doc_id, 0, &state).unwrap();
 
     // Load into fresh doc
     let loaded = store.load_snapshot(doc_id).unwrap();
@@ -109,7 +109,7 @@ fn test_document_roundtrip_with_deltas() {
 
     // Create initial doc and save snapshot
     let (doc, state) = make_doc_with_text("Initial");
-    store.save_snapshot(doc_id, &state).unwrap();
+    store.save_snapshot(doc_id, 0, &state).unwrap();
 
     // Make several deltas
     for i in 0..10 {
@@ -145,6 +145,7 @@ fn test_document_roundtrip_with_deltas() {
 
 // ─── Crash Recovery ──────────────────────────────────────────────────────────
 
+#[cfg(feature = "persistent-storage")]
 #[tokio::test]
 async fn test_crash_recovery_snapshot_survives_restart() {
     let dir = tempdir().unwrap();
@@ -160,7 +161,7 @@ async fn test_crash_recovery_snapshot_survives_restart() {
         let store = DocumentStore::open(store_config).unwrap();
 
         let (_, state) = make_doc_with_text("Data that must survive a crash");
-        store.save_snapshot(doc_id, &state).unwrap();
+        store.save_snapshot(doc_id, 0, &state).unwrap();
 
         // Store dropped here — simulates crash
     }
@@ -187,6 +188,7 @@ async fn test_crash_recovery_snapshot_survives_restart() {
     }
 }
 
+#[cfg(feature = "persistent-storage")]
 #[tokio::test]
 async fn test_crash_recovery_deltas_survive() {
     let dir = tempdir().unwrap();
@@ -202,7 +204,7 @@ async fn test_crash_recovery_deltas_survive() {
         let store = DocumentStore::open(store_config).unwrap();
 
         let (doc, state) = make_doc_with_text("Base");
-        store.save_snapshot(doc_id, &state).unwrap();
+        store.save_snapshot(doc_id, 0, &state).unwrap();
 
         for i in 0..5 {
             let delta = make_delta(&doc, &format!(" delta{i}"));
@@ -228,6 +230,7 @@ async fn test_crash_recovery_deltas_survive() {
     }
 }
 
+#[cfg(feature = "persistent-storage")]
 #[tokio::test]
 async fn test_crash_recovery_multiple_documents() {
     let dir = tempdir().unwrap();
@@ -244,7 +247,7 @@ async fn test_crash_recovery_multiple_documents() {
 
         for (i, doc_id) in doc_ids.iter().enumerate() {
             let (_, state) = make_doc_with_text(&format!("Document {i} content"));
-            store.save_snapshot(*doc_id, &state).unwrap();
+            store.save_snapshot(*doc_id, 0, &state).unwrap();
         }
     }
 
@@ -413,8 +416,8 @@ fn test_multi_document_isolation() {
     let (_, state_a) = make_doc_with_text("Document A exclusive content");
     let (_, state_b) = make_doc_with_text("Document B exclusive content");
 
-    store.save_snapshot(doc_a, &state_a).unwrap();
-    store.save_snapshot(doc_b, &state_b).unwrap();
+    store.save_snapshot(doc_a, 0, &state_a).unwrap();
+    store.save_snapshot(doc_b, 0, &state_b).unwrap();
 
     // Store deltas for each
     for i in 0..10 {
@@ -465,6 +468,7 @@ async fn test_server_in_memory_mode_no_store() {
     assert!(server.store().is_none());
 }
 
+#[cfg(feature = "persistent-storage")]
 #[tokio::test]
 async fn test_server_recovery_preserves_content() {
     let dir = tempdir().unwrap();
@@ -479,7 +483,7 @@ async fn test_server_recovery_preserves_content() {
         };
         let store = DocumentStore::open(store_config).unwrap();
         let (_, state) = make_doc_with_text("Recoverable design file content");
-        store.save_snapshot(doc_id, &state).unwrap();
+        store.save_snapshot(doc_id, 0, &state).unwrap();
     }
 
     // Server recovery
@@ -507,11 +511,11 @@ fn test_snapshot_overwrite_preserves_latest() {
 
     // Save v1
     let (_, state_v1) = make_doc_with_text("Version 1");
-    store.save_snapshot(doc_id, &state_v1).unwrap();
+    store.save_snapshot(doc_id, 0, &state_v1).unwrap();
 
     // Save v2 (overwrites)
     let (_, state_v2) = make_doc_with_text("Version 2 — latest");
-    store.save_snapshot(doc_id, &state_v2).unwrap();
+    store.save_snapshot(doc_id, 0, &state_v2).unwrap();
 
     // Load should get v2
     let loaded = store.load_snapshot(doc_id).unwrap();
@@ -542,7 +546,7 @@ fn test_large_document_persistence() {
     let large_content = repetitive_text(500_000);
     let (_, state) = make_doc_with_text(&large_content);
 
-    store.save_snapshot(doc_id, &state).unwrap();
+    store.save_snapshot(doc_id, 0, &state).unwrap();
 
     let loaded = store.load_snapshot(doc_id).unwrap();
     let doc2 = Doc::new();

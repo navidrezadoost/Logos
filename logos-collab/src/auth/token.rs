@@ -282,10 +282,10 @@ impl From<Claims> for logos_identity::TokenClaims {
 /// `TokenEngine` implements `logos_identity::TokenProvider` so other
 /// crates can consume it through the unified trait.
 impl logos_identity::TokenProvider for TokenEngine {
-    fn issue(&self, claims: &logos_identity::TokenClaims) -> Result<String, logos_identity::IdentityError> {
+    fn issue(&self, claims: &logos_identity::TokenClaims, _kind: logos_identity::TokenKind) -> Result<String, logos_identity::IdentityError> {
         // Downcast to legacy Claims for signing
         let legacy = Claims {
-            sub: *claims.sub.as_uuid(),
+            sub: claims.sub.as_uuid(),
             iss: claims.iss.clone(),
             iat: claims.iat,
             exp: claims.exp,
@@ -296,7 +296,7 @@ impl logos_identity::TokenProvider for TokenEngine {
             .map_err(|e| logos_identity::IdentityError::TokenError(e.to_string()))
     }
 
-    fn verify(&self, token: &str) -> Result<logos_identity::TokenClaims, logos_identity::IdentityError> {
+    fn verify(&self, token: &str, _kind: logos_identity::TokenKind) -> Result<logos_identity::TokenClaims, logos_identity::IdentityError> {
         let claims = TokenEngine::verify(self, token)
             .map_err(|e| logos_identity::IdentityError::TokenError(e.to_string()))?;
         Ok(claims.into())
@@ -307,9 +307,9 @@ impl logos_identity::TokenProvider for TokenEngine {
         Ok(())
     }
 
-    fn is_revoked(&self, _jti: &str) -> Result<bool, logos_identity::IdentityError> {
+    fn is_revoked(&self, _jti: &str) -> bool {
         // No revocation list in stateless engine.
-        Ok(false)
+        false
     }
 }
 

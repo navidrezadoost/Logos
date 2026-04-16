@@ -30,10 +30,20 @@
 //!
 //! Reference: Kleppmann — Designing Data-Intensive Applications, Chapter 3
 
+#[cfg(feature = "persistent-storage")]
 pub mod rocks;
+
 pub mod delta;
 pub mod wal;
+pub mod memory;
 
+// When persistent-storage is enabled, re-export the RocksDB-backed store.
+#[cfg(feature = "persistent-storage")]
 pub use rocks::{DocumentStore, StoreConfig, StoreError, DocumentMetadata};
+
+// When persistent-storage is disabled, fall back to the in-memory store.
+#[cfg(not(feature = "persistent-storage"))]
+pub use memory::{DocumentStore, StoreConfig, StoreError, DocumentMetadata};
+
 pub use delta::{DeltaLog, CompressedDelta, DeltaStats};
 pub use wal::{WriteAheadLog, WalEntry, WalConfig, WalError};

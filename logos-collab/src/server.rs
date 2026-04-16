@@ -205,7 +205,7 @@ impl SyncServer {
                             }
                         }
                         PersistenceCommand::SaveSnapshot { doc_id, snapshot, compact_version } => {
-                            match store_clone.save_snapshot(doc_id, &snapshot) {
+                            match store_clone.save_snapshot(doc_id, compact_version, &snapshot) {
                                 Ok(_) => {
                                     let _ = store_clone.compact_deltas(doc_id, compact_version);
                                     snapshots_counter.fetch_add(1, Ordering::Relaxed);
@@ -599,6 +599,12 @@ impl SyncServer {
                                                         AwarenessMessage::Selection { user_id, layer_ids } => {
                                                             log::debug!("Presence: {} selected {} layers in room {}", user_id, layer_ids.len(), did);
                                                         }
+                                                        AwarenessMessage::PageChange { user_id, page_id } => {
+                                                            log::debug!("Presence: {} changed to page {} in room {}", user_id, page_id, did);
+                                                        }
+                                                        AwarenessMessage::EditingUpdate { user_id, state } => {
+                                                            log::debug!("Presence: {} editing state {:?} in room {}", user_id, state, did);
+                                                        }
                                                     }
                                                 }
 
@@ -836,6 +842,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(feature = "persistent-storage")]
     async fn test_server_recovery_with_storage() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("db");
@@ -860,7 +867,7 @@ mod tests {
                 let txn = yrs::Transact::transact(&doc);
                 txn.encode_state_as_update_v1(&yrs::StateVector::default())
             };
-            store.save_snapshot(doc_id, &snapshot).unwrap();
+            store.save_snapshot(doc_id, 0, &snapshot).unwrap();
         }
 
         // Create server pointing to same storage and recover

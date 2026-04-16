@@ -246,6 +246,9 @@ async fn test_build_cursor_instances_for_gpu() {
             user_name: "Alice".into(),
             selection: vec![],
             user_id: Uuid::new_v4(),
+            page_id: None,
+            editing_state: Default::default(),
+            idle_alpha: 1.0,
         },
         CursorRenderData {
             position: Vec2::new(300.0, 400.0),
@@ -253,6 +256,9 @@ async fn test_build_cursor_instances_for_gpu() {
             user_name: "Bob".into(),
             selection: vec![Uuid::new_v4()],
             user_id: Uuid::new_v4(),
+            page_id: None,
+            editing_state: Default::default(),
+            idle_alpha: 1.0,
         },
     ];
 

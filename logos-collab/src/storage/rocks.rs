@@ -1,5 +1,9 @@
 //! RocksDB-backed persistent document store.
 //!
+//! This module is only compiled when the `persistent-storage` feature is
+//! enabled.  It requires `libclang` to be installed (needed by bindgen
+//! which generates the RocksDB FFI bindings).
+//!
 //! Column families:
 //! - `documents` — Full Yrs document snapshots (LZ4 compressed)
 //! - `deltas`    — Incremental CRDT deltas (LZ4 compressed, keyed by doc_id:version)
