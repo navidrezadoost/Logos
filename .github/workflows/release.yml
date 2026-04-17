@@ -1,0 +1,185 @@
+name: Release – Multi-Platform Build
+
+# Triggers on version tags (e.g. v1.0.0, v1.2.3-rc1).
+# Produces signed installers for Linux, macOS, and Windows, then
+# attaches them to a GitHub Release.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v1.0.0)"
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Bump this when you need a fresh cache
+  CACHE_VERSION: v1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Matrix: build a native installer on each platform runner
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  build:
+    name: Build – ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux ──────────────────────────────────────────────────────────
+          - platform: linux
+            os: ubuntu-22.04
+            bundle_targets: appimage,deb
+            artifact_glob: "target/release/bundle/**/*.{AppImage,deb}"
+            extra_deps: |
+              sudo apt-get update
+              sudo apt-get install -y \
+                libclang-dev libfontconfig1-dev \
+                libgtk-3-dev libglib2.0-dev \
+                libwebkit2gtk-4.1-dev \
+                libxdo-dev libssl-dev \
+                pkg-config rpm
+
+          # ── macOS (Apple Silicon runner) ───────────────────────────────────
+          - platform: macos
+            os: macos-14
+            bundle_targets: dmg,app
+            artifact_glob: "target/release/bundle/**/*.{dmg,app}"
+            extra_deps: |
+              brew install create-dmg
+
+          # ── Windows ────────────────────────────────────────────────────────
+          - platform: windows
+            os: windows-2022
+            bundle_targets: msi,nsis
+            artifact_glob: "target/release/bundle/**/*.{msi,exe}"
+            extra_deps: ""
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Platform dependencies ───────────────────────────────────────────────
+      - name: Install platform dependencies
+        if: matrix.extra_deps != ''
+        shell: bash
+        run: ${{ matrix.extra_deps }}
+
+      # ── Rust toolchain ──────────────────────────────────────────────────────
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      # ── Cargo cache ─────────────────────────────────────────────────────────
+      - name: Cache Cargo registry & build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ env.CACHE_VERSION }}-${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ matrix.os }}-cargo-
+
+      # ── Run test suite (no-default-features for the pure crates) ────────────
+      - name: Test workspace (no native UI deps)
+        shell: bash
+        run: |
+          cargo test \
+            -p logos-core \
+            -p logos-layout \
+            -p logos-text \
+            -p logos-render \
+            -p logos-collab \
+            -p logos-plugins \
+            -p logos-desktop --no-default-features \
+            -p logos-ai \
+            2>&1 | tee test_output.txt
+          PASSED=$(grep -oP '\d+ passed' test_output.txt | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
+          echo "Tests passed: $PASSED"
+          if [ "$PASSED" -lt 1150 ]; then
+            echo "ERROR: Expected >=1150 tests, got $PASSED"
+            exit 1
+          fi
+
+      # ── Build the native desktop binary ─────────────────────────────────────
+      - name: Build logos-desktop (release)
+        shell: bash
+        run: cargo build -p logos-desktop --release
+
+      # ── Install Tauri CLI ────────────────────────────────────────────────────
+      - name: Install Tauri CLI
+        shell: bash
+        run: cargo install tauri-cli --version "^2" --locked
+
+      # ── Run Tauri bundle ─────────────────────────────────────────────────────
+      - name: Bundle installers
+        shell: bash
+        working-directory: logos-desktop
+        run: cargo tauri build --bundles ${{ matrix.bundle_targets }}
+
+      # ── Collect artefacts ────────────────────────────────────────────────────
+      - name: Collect bundle artefacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          find target/release/bundle -type f \
+            \( -name "*.AppImage" -o -name "*.deb" -o -name "*.dmg" \
+               -o -name "*.msi" -o -name "*.exe" \) \
+            -exec cp {} dist/ \;
+          ls -lh dist/
+
+      # ── Upload artefacts to the GitHub Release ───────────────────────────────
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-release: publish checksums
+# ─────────────────────────────────────────────────────────────────────────────
+  checksums:
+    name: Publish checksums
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload checksums to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

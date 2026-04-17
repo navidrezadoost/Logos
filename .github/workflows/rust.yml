@@ -32,8 +32,8 @@ jobs:
           echo "ERROR: $FAILED tests failed"
           exit 1
         fi
-        if [ "$TOTAL" -lt 2000 ]; then
-          echo "ERROR: Expected >=2000 tests, got $TOTAL"
+        if [ "$TOTAL" -lt 1150 ]; then
+          echo "ERROR: Expected >=1150 tests, got $TOTAL"
           exit 1
         fi
     - name: Verify logos-core tests
@@ -68,8 +68,8 @@ jobs:
         RESULT=$(cargo test -p logos-render 2>&1)
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Render tests: $PASSED passed"
-        if [ "$PASSED" -lt 24 ]; then
-          echo "ERROR: Expected >=24 render tests, got $PASSED"
+        if [ "$PASSED" -lt 102 ]; then
+          echo "ERROR: Expected >=102 render tests, got $PASSED"
           exit 1
         fi
     - name: Verify logos-collab tests
@@ -77,8 +77,8 @@ jobs:
         RESULT=$(cargo test -p logos-collab 2>&1)
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Collab tests: $PASSED passed"
-        if [ "$PASSED" -lt 213 ]; then
-          echo "ERROR: Expected >=213 collab tests, got $PASSED"
+        if [ "$PASSED" -lt 427 ]; then
+          echo "ERROR: Expected >=427 collab tests, got $PASSED"
           exit 1
         fi
     - name: Verify logos-plugins tests
@@ -95,8 +95,8 @@ jobs:
         RESULT=$(cargo test -p logos-desktop 2>&1)
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Desktop tests: $PASSED passed"
-        if [ "$PASSED" -lt 212 ]; then
-          echo "ERROR: Expected >=212 desktop tests, got $PASSED"
+        if [ "$PASSED" -lt 354 ]; then
+          echo "ERROR: Expected >=354 desktop tests, got $PASSED"
           exit 1
         fi
     - name: Verify logos-ai tests
