@@ -30,6 +30,16 @@ pub struct DocumentSnapshot {
     pub timestamp: std::time::Instant,
 }
 
+/// Position / ordering metadata stored in the `"layer_positions"` Yrs map.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct LayerPosition {
+    /// Parent layer UUID. `None` means root level.
+    pub parent_id: Option<Uuid>,
+    /// Z-order index inside the parent (0 = bottom).
+    /// `u32::MAX` means "append at end".
+    pub z_index: u32,
+}
+
 /// CRDT Operations (must be idempotent)
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum CollabOp {
@@ -66,6 +76,8 @@ pub struct CollaborationEngine {
     // Yjs map references
     layers_map: MapRef,
     _metadata_map: MapRef,
+    /// Ordering / parent metadata for layers (step 1a).
+    positions_map: MapRef,
     
     /// Pre-allocated buffer for binary serialization (amortizes allocation)
     serialize_buf: Vec<u8>,
@@ -81,6 +93,7 @@ impl CollaborationEngine {
         let doc = Doc::new();
         let layers_map = doc.get_or_insert_map("layers");
         let metadata_map = doc.get_or_insert_map("metadata");
+        let positions_map = doc.get_or_insert_map("layer_positions");
         
         // Capture initial state vector before `doc` is moved into Self.
         let initial_sv = {
@@ -102,6 +115,7 @@ impl CollaborationEngine {
             _version: Arc::new(AtomicU64::new(0)),
             layers_map,
             _metadata_map: metadata_map,
+            positions_map,
             serialize_buf: Vec::with_capacity(256),
             last_encoded_sv: initial_sv,
         }
@@ -260,6 +274,265 @@ impl CollaborationEngine {
         let txn = yrs::Transact::transact(&self.doc);
         self.layers_map.keys(&txn).map(|v| v.to_string()).collect()
     }
+
+    // ═══════════ Step 1a: Complete CRDT Operations ═══════════
+
+    /// Delete a layer by its UUID and return the delta to broadcast.
+    ///
+    /// Returns `CollabError::InvalidOperation` if the layer does not
+    /// exist in the CRDT map.
+    pub fn delete_layer_local(&mut self, id: Uuid) -> Result<Vec<u8>, CollabError> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = id.hyphenated().encode_lower(&mut uuid_buf);
+
+        // Verify existence first (read transaction)
+        {
+            let txn = yrs::Transact::transact(&self.doc);
+            if self.layers_map.get(&txn, &*key).is_none() {
+                return Err(CollabError::InvalidOperation(
+                    format!("layer {} does not exist", id),
+                ));
+            }
+        }
+
+        // Remove in a write transaction
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+        self.layers_map.remove(&mut txn, &*key);
+
+        // Also remove any position metadata if present
+        self.positions_map.remove(&mut txn, &*key);
+
+        Ok(txn.encode_update_v1())
+    }
+
+    /// Move a layer to a new parent / z-index.
+    ///
+    /// Stores the ordering metadata in a separate Yrs map (`"layer_positions"`)
+    /// so that `reconstruct_layers()` can rebuild the tree. If `parent_id` is
+    /// `None` the layer is at the root level. If `index` is `None` the layer
+    /// is appended at the end.
+    ///
+    /// Returns `CollabError::InvalidOperation` if the target layer does not
+    /// exist.
+    pub fn move_layer_local(
+        &mut self,
+        id: Uuid,
+        parent_id: Option<Uuid>,
+        index: Option<u32>,
+    ) -> Result<Vec<u8>, CollabError> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = id.hyphenated().encode_lower(&mut uuid_buf);
+
+        // Verify existence
+        {
+            let txn = yrs::Transact::transact(&self.doc);
+            if self.layers_map.get(&txn, &*key).is_none() {
+                return Err(CollabError::InvalidOperation(
+                    format!("layer {} does not exist", id),
+                ));
+            }
+        }
+
+        let pos = LayerPosition {
+            parent_id,
+            z_index: index.unwrap_or(u32::MAX),
+        };
+
+        self.serialize_buf.clear();
+        bincode::serialize_into(&mut self.serialize_buf, &pos)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+        self.positions_map.insert(
+            &mut txn,
+            &*key,
+            yrs::Any::Buffer(Arc::from(self.serialize_buf.as_slice())),
+        );
+
+        Ok(txn.encode_update_v1())
+    }
+
+    /// Modify a serialised property on a layer.
+    ///
+    /// Reads the layer blob from the Yrs map, round-trips it through
+    /// serde_json so the caller can address fields by name
+    /// (e.g. `"bounds.x"`, `"content"`, `"closed"`), writes back
+    /// the updated blob, and returns the delta.
+    ///
+    /// A dot-separated `property` path is supported to one level of
+    /// nesting (e.g. `"bounds.width"`).
+    pub fn modify_property_local(
+        &mut self,
+        id: Uuid,
+        property: &str,
+        value: Value,
+    ) -> Result<Vec<u8>, CollabError> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = id.hyphenated().encode_lower(&mut uuid_buf);
+
+        // ── 1. Read existing blob ──
+        let blob = {
+            let txn = yrs::Transact::transact(&self.doc);
+            match self.layers_map.get(&txn, &*key) {
+                Some(yrs::Value::Any(yrs::Any::Buffer(buf))) => buf.to_vec(),
+                _ => {
+                    return Err(CollabError::InvalidOperation(
+                        format!("layer {} does not exist", id),
+                    ));
+                }
+            }
+        };
+
+        // ── 2. Deserialize → Layer → JSON value ──
+        let layer: Layer = bincode::deserialize(&blob)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        let mut json: Value = serde_json::to_value(&layer)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        // ── 3. Apply property (supports dot-path) ──
+        let parts: Vec<&str> = property.split('.').collect();
+        match parts.len() {
+            1 => {
+                if let Some(obj) = json.as_object_mut() {
+                    // Layer is a tagged enum, so the JSON looks like:
+                    //   { "Rect": { "id": "...", "bounds": {...} } }
+                    // We need to drill into the variant.
+                    let variant_val = obj.values_mut().next().ok_or_else(|| {
+                        CollabError::InvalidOperation("empty variant wrapper".into())
+                    })?;
+                    if let Some(inner) = variant_val.as_object_mut() {
+                        inner.insert(parts[0].to_string(), value);
+                    } else {
+                        return Err(CollabError::InvalidOperation(
+                            format!("variant value is not an object"),
+                        ));
+                    }
+                } else {
+                    return Err(CollabError::InvalidOperation(
+                        "layer JSON is not an object".into(),
+                    ));
+                }
+            }
+            2 => {
+                if let Some(obj) = json.as_object_mut() {
+                    let variant_val = obj.values_mut().next().ok_or_else(|| {
+                        CollabError::InvalidOperation("empty variant wrapper".into())
+                    })?;
+                    if let Some(inner) = variant_val.as_object_mut() {
+                        let parent_field = inner
+                            .get_mut(parts[0])
+                            .ok_or_else(|| {
+                                CollabError::InvalidOperation(
+                                    format!("field '{}' not found", parts[0]),
+                                )
+                            })?;
+                        if let Some(nested) = parent_field.as_object_mut() {
+                            nested.insert(parts[1].to_string(), value);
+                        } else {
+                            return Err(CollabError::InvalidOperation(
+                                format!("field '{}' is not an object", parts[0]),
+                            ));
+                        }
+                    } else {
+                        return Err(CollabError::InvalidOperation(
+                            "variant value is not an object".into(),
+                        ));
+                    }
+                } else {
+                    return Err(CollabError::InvalidOperation(
+                        "layer JSON is not an object".into(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(CollabError::InvalidOperation(
+                    "property path deeper than 2 levels is not supported".into(),
+                ));
+            }
+        }
+
+        // ── 4. Round-trip back: JSON → Layer → bincode ──
+        let updated_layer: Layer = serde_json::from_value(json)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        self.serialize_buf.clear();
+        bincode::serialize_into(&mut self.serialize_buf, &updated_layer)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        // ── 5. Write back into Yrs ──
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+        self.layers_map.insert(
+            &mut txn,
+            &*key,
+            yrs::Any::Buffer(Arc::from(self.serialize_buf.as_slice())),
+        );
+
+        Ok(txn.encode_update_v1())
+    }
+
+    /// Reconstruct all layers stored in the CRDT map.
+    ///
+    /// Returns a `Vec<Layer>` by deserializing every blob in the
+    /// `"layers"` Yrs map. Ordering is determined by the optional
+    /// position metadata in the `"layer_positions"` map; layers
+    /// without position data sort after positioned ones.
+    pub fn reconstruct_layers(&self) -> Result<Vec<Layer>, CollabError> {
+        let txn = yrs::Transact::transact(&self.doc);
+
+        let mut entries: Vec<(String, Layer, u32)> = Vec::new();
+
+        for (key, value) in self.layers_map.iter(&txn) {
+            if let yrs::Value::Any(yrs::Any::Buffer(buf)) = value {
+                let layer: Layer = bincode::deserialize(&buf)
+                    .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+                // Try to read z-index from position metadata
+                let z = match self.positions_map.get(&txn, &key) {
+                    Some(yrs::Value::Any(yrs::Any::Buffer(pos_buf))) => {
+                        let pos: LayerPosition = bincode::deserialize(&pos_buf)
+                            .unwrap_or(LayerPosition { parent_id: None, z_index: u32::MAX });
+                        pos.z_index
+                    }
+                    _ => u32::MAX,
+                };
+
+                entries.push((key.to_string(), layer, z));
+            }
+        }
+
+        // Sort by z-index (stable — preserves insertion order for equal z)
+        entries.sort_by_key(|(_, _, z)| *z);
+
+        Ok(entries.into_iter().map(|(_, layer, _)| layer).collect())
+    }
+
+    /// Read a single layer by UUID, returning `None` if absent.
+    pub fn get_layer(&self, id: Uuid) -> Option<Layer> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = id.hyphenated().encode_lower(&mut uuid_buf);
+        let txn = yrs::Transact::transact(&self.doc);
+        match self.layers_map.get(&txn, &*key) {
+            Some(yrs::Value::Any(yrs::Any::Buffer(buf))) => {
+                bincode::deserialize(&buf).ok()
+            }
+            _ => None,
+        }
+    }
+
+    /// Read position metadata for a layer if it has been set via
+    /// `move_layer_local`.
+    pub fn get_layer_position(&self, id: Uuid) -> Option<LayerPosition> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = id.hyphenated().encode_lower(&mut uuid_buf);
+        let txn = yrs::Transact::transact(&self.doc);
+        match self.positions_map.get(&txn, &*key) {
+            Some(yrs::Value::Any(yrs::Any::Buffer(buf))) => {
+                bincode::deserialize(&buf).ok()
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -406,22 +679,494 @@ mod tests {
         assert_eq!(engine2.get_layer_count(), 1);
     }
     
-    // Placeholder tests for remaining requirements
+    // ═══════════ Step 1a: Delete Layer Tests ═══════════
+
     #[test]
-    fn test_layer_property_sync() {
-         // TODO: Implement property sync test when properties are editable.
-         // For now, removing ignore and just passing since we don't have modify_layer logic exposed yet except add/remove.
-         // Or we can simulate modification if CollabOp had it.
-         // The CollabOp enum has ModifyProperty but no method to trigger it yet.
-         // We'll leave it as a basic check for now.
-         assert!(true);
+    fn test_delete_layer_produces_delta() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 50.0, 50.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+        assert_eq!(engine.get_layer_count(), 1);
+
+        let delta = engine.delete_layer_local(id).unwrap();
+        assert!(!delta.is_empty());
+        assert_eq!(engine.get_layer_count(), 0);
     }
 
     #[test]
-    fn test_delete_layer_propagation() {
-        // TODO: Implement delete layer test when delete is implemented
-        // CollabOp has DeleteLayer but no method in engine.
-        assert!(true);
+    fn test_delete_layer_remote_convergence() {
+        let doc = Document::new();
+        let mut e1 = CollaborationEngine::new(&doc);
+        let mut e2 = CollaborationEngine::new(&doc);
+
+        let layer = Layer::Rect(RectLayer::new(5.0, 5.0, 30.0, 30.0));
+        let id = layer.id();
+
+        // Add on e1, sync to e2
+        let add_delta = e1.add_layer_local(layer).unwrap();
+        e2.apply_remote_update(&add_delta).unwrap();
+        assert_eq!(e2.get_layer_count(), 1);
+
+        // Delete on e1, sync to e2
+        let del_delta = e1.delete_layer_local(id).unwrap();
+        e2.apply_remote_update(&del_delta).unwrap();
+        assert_eq!(e2.get_layer_count(), 0);
+    }
+
+    #[test]
+    fn test_delete_nonexistent_layer_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let bogus_id = Uuid::new_v4();
+        let result = engine.delete_layer_local(bogus_id);
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_delete_one_of_many() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+
+        let l1 = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let l2 = Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0));
+        let l3 = Layer::Rect(RectLayer::new(2.0, 0.0, 10.0, 10.0));
+        let id2 = l2.id();
+        engine.add_layers_batch(&[l1, l2, l3]).unwrap();
+        assert_eq!(engine.get_layer_count(), 3);
+
+        engine.delete_layer_local(id2).unwrap();
+        assert_eq!(engine.get_layer_count(), 2);
+        assert!(!engine.get_all_layer_ids().contains(&id2.to_string()));
+    }
+
+    #[test]
+    fn test_delete_then_readd() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 20.0, 20.0));
+        let id = layer.id();
+        engine.add_layer_local(layer.clone()).unwrap();
+        engine.delete_layer_local(id).unwrap();
+        assert_eq!(engine.get_layer_count(), 0);
+        // Re-add the same layer (same UUID)
+        engine.add_layer_local(layer).unwrap();
+        assert_eq!(engine.get_layer_count(), 1);
+    }
+
+    #[test]
+    fn test_delete_cleans_position_metadata() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+        engine.move_layer_local(id, None, Some(5)).unwrap();
+        assert!(engine.get_layer_position(id).is_some());
+        engine.delete_layer_local(id).unwrap();
+        assert!(engine.get_layer_position(id).is_none());
+    }
+
+    // ═══════════ Step 1a: Move Layer Tests ═══════════
+
+    #[test]
+    fn test_move_layer_produces_delta() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 50.0, 50.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        let delta = engine.move_layer_local(id, None, Some(3)).unwrap();
+        assert!(!delta.is_empty());
+    }
+
+    #[test]
+    fn test_move_layer_stores_position() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 50.0, 50.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        let parent = Uuid::new_v4();
+        engine.move_layer_local(id, Some(parent), Some(7)).unwrap();
+
+        let pos = engine.get_layer_position(id).unwrap();
+        assert_eq!(pos.parent_id, Some(parent));
+        assert_eq!(pos.z_index, 7);
+    }
+
+    #[test]
+    fn test_move_nonexistent_layer_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let result = engine.move_layer_local(Uuid::new_v4(), None, Some(0));
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_move_layer_remote_convergence() {
+        let doc = Document::new();
+        let mut e1 = CollaborationEngine::new(&doc);
+        let mut e2 = CollaborationEngine::new(&doc);
+
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let id = layer.id();
+        let add_delta = e1.add_layer_local(layer).unwrap();
+        e2.apply_remote_update(&add_delta).unwrap();
+
+        let move_delta = e1.move_layer_local(id, None, Some(4)).unwrap();
+        e2.apply_remote_update(&move_delta).unwrap();
+
+        let pos = e2.get_layer_position(id).unwrap();
+        assert_eq!(pos.z_index, 4);
+    }
+
+    #[test]
+    fn test_move_updates_existing_position() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        engine.move_layer_local(id, None, Some(2)).unwrap();
+        assert_eq!(engine.get_layer_position(id).unwrap().z_index, 2);
+
+        engine.move_layer_local(id, None, Some(9)).unwrap();
+        assert_eq!(engine.get_layer_position(id).unwrap().z_index, 9);
+    }
+
+    #[test]
+    fn test_move_none_index_appends() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        engine.move_layer_local(id, None, None).unwrap();
+        let pos = engine.get_layer_position(id).unwrap();
+        assert_eq!(pos.z_index, u32::MAX);
+    }
+
+    // ═══════════ Step 1a: Modify Property Tests ═══════════
+
+    #[test]
+    fn test_modify_bounds_x() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        let delta = engine.modify_property_local(
+            id, "bounds.x", serde_json::json!(99.0),
+        ).unwrap();
+        assert!(!delta.is_empty());
+
+        let restored = engine.get_layer(id).unwrap();
+        assert_eq!(restored.bounds().x, 99.0);
+        // Other fields unchanged
+        assert_eq!(restored.bounds().y, 20.0);
+        assert_eq!(restored.bounds().width, 100.0);
+    }
+
+    #[test]
+    fn test_modify_bounds_width() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 50.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        engine.modify_property_local(id, "bounds.width", serde_json::json!(200.0)).unwrap();
+        let restored = engine.get_layer(id).unwrap();
+        assert_eq!(restored.bounds().width, 200.0);
+    }
+
+    #[test]
+    fn test_modify_text_content() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Text(crate::TextLayer::new("hello", 0.0, 0.0, 100.0, 30.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        engine.modify_property_local(id, "content", serde_json::json!("world")).unwrap();
+        let restored = engine.get_layer(id).unwrap();
+        if let Layer::Text(t) = restored {
+            assert_eq!(t.content, "world");
+        } else {
+            panic!("expected Text layer");
+        }
+    }
+
+    #[test]
+    fn test_modify_nonexistent_layer_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let result = engine.modify_property_local(
+            Uuid::new_v4(), "bounds.x", serde_json::json!(0.0),
+        );
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_modify_remote_convergence() {
+        let doc = Document::new();
+        let mut e1 = CollaborationEngine::new(&doc);
+        let mut e2 = CollaborationEngine::new(&doc);
+
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 80.0, 40.0));
+        let id = layer.id();
+
+        let add_d = e1.add_layer_local(layer).unwrap();
+        e2.apply_remote_update(&add_d).unwrap();
+
+        let mod_d = e1.modify_property_local(id, "bounds.height", serde_json::json!(99.0)).unwrap();
+        e2.apply_remote_update(&mod_d).unwrap();
+
+        let remote = e2.get_layer(id).unwrap();
+        assert_eq!(remote.bounds().height, 99.0);
+    }
+
+    #[test]
+    fn test_modify_deep_path_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        let result = engine.modify_property_local(
+            id, "a.b.c", serde_json::json!(1),
+        );
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_modify_preserves_id() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        engine.modify_property_local(id, "bounds.x", serde_json::json!(42.0)).unwrap();
+        let restored = engine.get_layer(id).unwrap();
+        assert_eq!(restored.id(), id);
+    }
+
+    // ═══════════ Step 1a: Reconstruct Layers Tests ═══════════
+
+    #[test]
+    fn test_reconstruct_empty() {
+        let doc = Document::new();
+        let engine = CollaborationEngine::new(&doc);
+        let layers = engine.reconstruct_layers().unwrap();
+        assert!(layers.is_empty());
+    }
+
+    #[test]
+    fn test_reconstruct_single() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let rect = RectLayer::new(7.0, 8.0, 90.0, 40.0);
+        let id = rect.id;
+        engine.add_layer_local(Layer::Rect(rect)).unwrap();
+
+        let layers = engine.reconstruct_layers().unwrap();
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].id(), id);
+        assert_eq!(layers[0].bounds().x, 7.0);
+    }
+
+    #[test]
+    fn test_reconstruct_multiple() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let ids: Vec<Uuid> = (0..5).map(|i| {
+            let layer = Layer::Rect(RectLayer::new(i as f32, 0.0, 10.0, 10.0));
+            let id = layer.id();
+            engine.add_layer_local(layer).unwrap();
+            id
+        }).collect();
+
+        let layers = engine.reconstruct_layers().unwrap();
+        assert_eq!(layers.len(), 5);
+        for id in &ids {
+            assert!(layers.iter().any(|l| l.id() == *id));
+        }
+    }
+
+    #[test]
+    fn test_reconstruct_after_delete() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let l1 = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let l2 = Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0));
+        let id1 = l1.id();
+        let id2 = l2.id();
+        engine.add_layers_batch(&[l1, l2]).unwrap();
+
+        engine.delete_layer_local(id1).unwrap();
+        let layers = engine.reconstruct_layers().unwrap();
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].id(), id2);
+    }
+
+    #[test]
+    fn test_reconstruct_respects_z_order() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+
+        let l1 = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let l2 = Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0));
+        let l3 = Layer::Rect(RectLayer::new(2.0, 0.0, 10.0, 10.0));
+        let id1 = l1.id();
+        let id2 = l2.id();
+        let id3 = l3.id();
+        engine.add_layers_batch(&[l1, l2, l3]).unwrap();
+
+        // Assign reverse z-order
+        engine.move_layer_local(id3, None, Some(0)).unwrap();
+        engine.move_layer_local(id2, None, Some(1)).unwrap();
+        engine.move_layer_local(id1, None, Some(2)).unwrap();
+
+        let layers = engine.reconstruct_layers().unwrap();
+        assert_eq!(layers[0].id(), id3);
+        assert_eq!(layers[1].id(), id2);
+        assert_eq!(layers[2].id(), id1);
+    }
+
+    #[test]
+    fn test_reconstruct_after_modify() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(1.0, 2.0, 30.0, 40.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+        engine.modify_property_local(id, "bounds.x", serde_json::json!(99.0)).unwrap();
+
+        let layers = engine.reconstruct_layers().unwrap();
+        assert_eq!(layers.len(), 1);
+        assert_eq!(layers[0].bounds().x, 99.0);
+    }
+
+    #[test]
+    fn test_reconstruct_from_remote() {
+        let doc = Document::new();
+        let mut e1 = CollaborationEngine::new(&doc);
+        let mut e2 = CollaborationEngine::new(&doc);
+
+        let l1 = Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0));
+        let l2 = Layer::Rect(RectLayer::new(2.0, 0.0, 10.0, 10.0));
+        let id1 = l1.id();
+        let id2 = l2.id();
+
+        let d1 = e1.add_layer_local(l1).unwrap();
+        let d2 = e1.add_layer_local(l2).unwrap();
+        e2.apply_remote_update(&d1).unwrap();
+        e2.apply_remote_update(&d2).unwrap();
+
+        let layers = e2.reconstruct_layers().unwrap();
+        assert_eq!(layers.len(), 2);
+        assert!(layers.iter().any(|l| l.id() == id1));
+        assert!(layers.iter().any(|l| l.id() == id2));
+    }
+
+    // ═══════════ Step 1a: get_layer helper tests ═══════════
+
+    #[test]
+    fn test_get_layer_found() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(5.0, 6.0, 70.0, 80.0));
+        let id = layer.id();
+        engine.add_layer_local(layer).unwrap();
+
+        let found = engine.get_layer(id).unwrap();
+        assert_eq!(found.id(), id);
+        assert_eq!(found.bounds().x, 5.0);
+    }
+
+    #[test]
+    fn test_get_layer_not_found() {
+        let doc = Document::new();
+        let engine = CollaborationEngine::new(&doc);
+        assert!(engine.get_layer(Uuid::new_v4()).is_none());
+    }
+
+    // ═══════════ Step 1a: Combined workflow tests ═══════════
+
+    #[test]
+    fn test_add_modify_delete_reconstruct() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+
+        // Add 3 layers
+        let la = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let lb = Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0));
+        let lc = Layer::Rect(RectLayer::new(2.0, 0.0, 10.0, 10.0));
+        let ida = la.id(); let idb = lb.id(); let idc = lc.id();
+        engine.add_layers_batch(&[la, lb, lc]).unwrap();
+
+        // Modify B
+        engine.modify_property_local(idb, "bounds.x", serde_json::json!(99.0)).unwrap();
+
+        // Delete A
+        engine.delete_layer_local(ida).unwrap();
+
+        // Move C to z-index 0
+        engine.move_layer_local(idc, None, Some(0)).unwrap();
+
+        let layers = engine.reconstruct_layers().unwrap();
+        assert_eq!(layers.len(), 2);
+        // C should come first (z=0), B should come second (z=MAX)
+        assert_eq!(layers[0].id(), idc);
+        assert_eq!(layers[1].id(), idb);
+        assert_eq!(layers[1].bounds().x, 99.0);
+    }
+
+    #[test]
+    fn test_full_workflow_two_engines() {
+        let doc = Document::new();
+        let mut e1 = CollaborationEngine::new(&doc);
+        let mut e2 = CollaborationEngine::new(&doc);
+
+        // e1: add layer
+        let layer = Layer::Rect(RectLayer::new(10.0, 20.0, 100.0, 50.0));
+        let id = layer.id();
+        let d_add = e1.add_layer_local(layer).unwrap();
+        e2.apply_remote_update(&d_add).unwrap();
+
+        // e1: modify
+        let d_mod = e1.modify_property_local(id, "bounds.width", serde_json::json!(200.0)).unwrap();
+        e2.apply_remote_update(&d_mod).unwrap();
+
+        // e1: move
+        let d_move = e1.move_layer_local(id, None, Some(0)).unwrap();
+        e2.apply_remote_update(&d_move).unwrap();
+
+        // Both engines should agree
+        let l1 = e1.get_layer(id).unwrap();
+        let l2 = e2.get_layer(id).unwrap();
+        assert_eq!(l1.bounds().width, 200.0);
+        assert_eq!(l2.bounds().width, 200.0);
+
+        let p1 = e1.get_layer_position(id).unwrap();
+        let p2 = e2.get_layer_position(id).unwrap();
+        assert_eq!(p1.z_index, 0);
+        assert_eq!(p2.z_index, 0);
+
+        // e1: delete
+        let d_del = e1.delete_layer_local(id).unwrap();
+        e2.apply_remote_update(&d_del).unwrap();
+        assert_eq!(e1.get_layer_count(), 0);
+        assert_eq!(e2.get_layer_count(), 0);
     }
 
     // ═══════════ Batch Operations Tests ═══════════
