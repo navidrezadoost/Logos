@@ -47,11 +47,13 @@ pub mod storage;
 pub mod auth;
 pub mod cluster;
 pub mod encryption;
+pub mod bridge;
 
 // Re-exports for convenience
 pub use protocol::{
     AwarenessState, MessageType, PeerInfo, ProtocolError, SyncMessage,
 };
+pub use bridge::{CollabBridge, BridgeError, BridgeEvent};
 pub use broadcast::{BroadcastGroup, BroadcastStats, RoomManager};
 pub use presence::{
     AwarenessMessage, CursorColor, CursorInstance, CursorRenderData,
