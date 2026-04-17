@@ -1,3 +1,5 @@
+pub mod tree;
+
 use yrs::*;
 use yrs::types::{Map, MapRef};
 use yrs::updates::decoder::Decode;
@@ -7,6 +9,7 @@ use uuid::Uuid;
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use crate::{Document, Page, Layer};
+use tree::{PageMeta, TreePosition, PageSnapshot, build_layer_tree};
 
 // Custom error type for collaboration operations
 #[derive(Debug, Clone)]
@@ -78,6 +81,8 @@ pub struct CollaborationEngine {
     _metadata_map: MapRef,
     /// Ordering / parent metadata for layers (step 1a).
     positions_map: MapRef,
+    /// Page metadata map (step 1b).
+    pages_map: MapRef,
     
     /// Pre-allocated buffer for binary serialization (amortizes allocation)
     serialize_buf: Vec<u8>,
@@ -94,6 +99,7 @@ impl CollaborationEngine {
         let layers_map = doc.get_or_insert_map("layers");
         let metadata_map = doc.get_or_insert_map("metadata");
         let positions_map = doc.get_or_insert_map("layer_positions");
+        let pages_map = doc.get_or_insert_map("pages");
         
         // Capture initial state vector before `doc` is moved into Self.
         let initial_sv = {
@@ -116,6 +122,7 @@ impl CollaborationEngine {
             layers_map,
             _metadata_map: metadata_map,
             positions_map,
+            pages_map,
             serialize_buf: Vec::with_capacity(256),
             last_encoded_sv: initial_sv,
         }
@@ -532,6 +539,331 @@ impl CollaborationEngine {
             }
             _ => None,
         }
+    }
+
+    // ═══════════ Step 1b: Page-Aware Tree Operations ═══════════
+
+    /// Create a new page and return the delta.
+    pub fn create_page(&mut self, name: &str) -> Result<(Uuid, Vec<u8>), CollabError> {
+        let page_id = Uuid::new_v4();
+        let page_count = {
+            let txn = yrs::Transact::transact(&self.doc);
+            self.pages_map.len(&txn)
+        };
+
+        let meta = PageMeta {
+            id: page_id,
+            name: name.to_string(),
+            z_index: page_count,
+        };
+
+        self.serialize_buf.clear();
+        bincode::serialize_into(&mut self.serialize_buf, &meta)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = page_id.hyphenated().encode_lower(&mut uuid_buf);
+
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+        self.pages_map.insert(
+            &mut txn,
+            &*key,
+            yrs::Any::Buffer(Arc::from(self.serialize_buf.as_slice())),
+        );
+
+        Ok((page_id, txn.encode_update_v1()))
+    }
+
+    /// Rename a page.
+    pub fn rename_page(&mut self, page_id: Uuid, new_name: &str) -> Result<Vec<u8>, CollabError> {
+        let mut meta = self.get_page_meta(page_id)
+            .ok_or_else(|| CollabError::InvalidOperation(
+                format!("page {} does not exist", page_id),
+            ))?;
+        meta.name = new_name.to_string();
+        self.write_page_meta(&meta)
+    }
+
+    /// Reorder a page (set its z_index).
+    pub fn reorder_page(&mut self, page_id: Uuid, z_index: u32) -> Result<Vec<u8>, CollabError> {
+        let mut meta = self.get_page_meta(page_id)
+            .ok_or_else(|| CollabError::InvalidOperation(
+                format!("page {} does not exist", page_id),
+            ))?;
+        meta.z_index = z_index;
+        self.write_page_meta(&meta)
+    }
+
+    /// Delete a page and all layers on it.
+    pub fn delete_page(&mut self, page_id: Uuid) -> Result<Vec<u8>, CollabError> {
+        // Verify page exists
+        if self.get_page_meta(page_id).is_none() {
+            return Err(CollabError::InvalidOperation(
+                format!("page {} does not exist", page_id),
+            ));
+        }
+
+        // Collect layer IDs on this page
+        let layer_ids = self.layer_ids_on_page(page_id);
+
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+
+        // Remove all layers + positions
+        for lid in &layer_ids {
+            let key = lid.hyphenated().encode_lower(&mut uuid_buf);
+            self.layers_map.remove(&mut txn, &*key);
+            self.positions_map.remove(&mut txn, &*key);
+        }
+
+        // Remove the page itself
+        let page_key = page_id.hyphenated().encode_lower(&mut uuid_buf);
+        self.pages_map.remove(&mut txn, &*page_key);
+
+        Ok(txn.encode_update_v1())
+    }
+
+    /// Add a layer to a specific page.
+    ///
+    /// This is the page-aware version of `add_layer_local`.
+    pub fn add_layer_to_page(
+        &mut self,
+        layer: Layer,
+        page_id: Uuid,
+        parent_id: Option<Uuid>,
+        z_index: Option<u32>,
+    ) -> Result<Vec<u8>, CollabError> {
+        // Verify page exists
+        if self.get_page_meta(page_id).is_none() {
+            return Err(CollabError::InvalidOperation(
+                format!("page {} does not exist", page_id),
+            ));
+        }
+
+        let layer_id = layer.id();
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+
+        // Write layer blob
+        self.serialize_buf.clear();
+        bincode::serialize_into(&mut self.serialize_buf, &layer)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        let key = layer_id.hyphenated().encode_lower(&mut uuid_buf);
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+        self.layers_map.insert(
+            &mut txn,
+            &*key,
+            yrs::Any::Buffer(Arc::from(self.serialize_buf.as_slice())),
+        );
+
+        // Write tree position
+        let tree_pos = TreePosition {
+            page_id,
+            parent_id,
+            z_index: z_index.unwrap_or(u32::MAX),
+        };
+
+        // Reuse serialize_buf (txn is still open — Yrs already copied the
+        // buffer into its internal state when we called insert above)
+        let pos_bytes = bincode::serialize(&tree_pos)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        self.positions_map.insert(
+            &mut txn,
+            &*key,
+            yrs::Any::Buffer(Arc::from(pos_bytes.as_slice())),
+        );
+
+        Ok(txn.encode_update_v1())
+    }
+
+    /// Move a layer to a different page and/or parent.
+    pub fn move_layer_to_page(
+        &mut self,
+        layer_id: Uuid,
+        page_id: Uuid,
+        parent_id: Option<Uuid>,
+        z_index: Option<u32>,
+    ) -> Result<Vec<u8>, CollabError> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = layer_id.hyphenated().encode_lower(&mut uuid_buf);
+
+        // Verify layer exists
+        {
+            let txn = yrs::Transact::transact(&self.doc);
+            if self.layers_map.get(&txn, &*key).is_none() {
+                return Err(CollabError::InvalidOperation(
+                    format!("layer {} does not exist", layer_id),
+                ));
+            }
+        }
+
+        // Verify target page exists
+        if self.get_page_meta(page_id).is_none() {
+            return Err(CollabError::InvalidOperation(
+                format!("page {} does not exist", page_id),
+            ));
+        }
+
+        let tree_pos = TreePosition {
+            page_id,
+            parent_id,
+            z_index: z_index.unwrap_or(u32::MAX),
+        };
+
+        let pos_bytes = bincode::serialize(&tree_pos)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+        self.positions_map.insert(
+            &mut txn,
+            &*key,
+            yrs::Any::Buffer(Arc::from(pos_bytes.as_slice())),
+        );
+
+        Ok(txn.encode_update_v1())
+    }
+
+    /// Reconstruct a single page as a `PageSnapshot`.
+    pub fn reconstruct_page(&self, page_id: Uuid) -> Result<PageSnapshot, CollabError> {
+        let meta = self.get_page_meta(page_id)
+            .ok_or_else(|| CollabError::InvalidOperation(
+                format!("page {} does not exist", page_id),
+            ))?;
+
+        let all = self.collect_all_layer_entries()?;
+        let layers = build_layer_tree(&all, page_id);
+
+        Ok(PageSnapshot { meta, layers })
+    }
+
+    /// Reconstruct all pages in tab order.
+    pub fn reconstruct_all_pages(&self) -> Result<Vec<PageSnapshot>, CollabError> {
+        let mut pages = self.list_pages();
+        pages.sort_by_key(|p| p.z_index);
+
+        let all = self.collect_all_layer_entries()?;
+
+        let mut snapshots = Vec::with_capacity(pages.len());
+        for meta in pages {
+            let layers = build_layer_tree(&all, meta.id);
+            snapshots.push(PageSnapshot { meta, layers });
+        }
+        Ok(snapshots)
+    }
+
+    /// List all pages (unsorted).
+    pub fn list_pages(&self) -> Vec<PageMeta> {
+        let txn = yrs::Transact::transact(&self.doc);
+        let mut pages = Vec::new();
+        for (_key, value) in self.pages_map.iter(&txn) {
+            if let yrs::Value::Any(yrs::Any::Buffer(buf)) = value {
+                if let Ok(meta) = bincode::deserialize::<PageMeta>(&buf) {
+                    pages.push(meta);
+                }
+            }
+        }
+        pages
+    }
+
+    /// Get page count.
+    pub fn page_count(&self) -> u32 {
+        let txn = yrs::Transact::transact(&self.doc);
+        self.pages_map.len(&txn)
+    }
+
+    /// Read a single page meta by ID.
+    pub fn get_page_meta(&self, page_id: Uuid) -> Option<PageMeta> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = page_id.hyphenated().encode_lower(&mut uuid_buf);
+        let txn = yrs::Transact::transact(&self.doc);
+        match self.pages_map.get(&txn, &*key) {
+            Some(yrs::Value::Any(yrs::Any::Buffer(buf))) => {
+                bincode::deserialize(&buf).ok()
+            }
+            _ => None,
+        }
+    }
+
+    /// Read a tree position for a layer.
+    pub fn get_tree_position(&self, layer_id: Uuid) -> Option<TreePosition> {
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = layer_id.hyphenated().encode_lower(&mut uuid_buf);
+        let txn = yrs::Transact::transact(&self.doc);
+        match self.positions_map.get(&txn, &*key) {
+            Some(yrs::Value::Any(yrs::Any::Buffer(buf))) => {
+                bincode::deserialize(&buf).ok()
+            }
+            _ => None,
+        }
+    }
+
+    // ── private helpers ──
+
+    fn write_page_meta(&mut self, meta: &PageMeta) -> Result<Vec<u8>, CollabError> {
+        self.serialize_buf.clear();
+        bincode::serialize_into(&mut self.serialize_buf, meta)
+            .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+
+        let mut uuid_buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+        let key = meta.id.hyphenated().encode_lower(&mut uuid_buf);
+
+        let mut txn = yrs::Transact::transact_mut(&self.doc);
+        self.pages_map.insert(
+            &mut txn,
+            &*key,
+            yrs::Any::Buffer(Arc::from(self.serialize_buf.as_slice())),
+        );
+
+        Ok(txn.encode_update_v1())
+    }
+
+    fn layer_ids_on_page(&self, page_id: Uuid) -> Vec<Uuid> {
+        let txn = yrs::Transact::transact(&self.doc);
+        let mut ids = Vec::new();
+        for (_key, value) in self.positions_map.iter(&txn) {
+            if let yrs::Value::Any(yrs::Any::Buffer(buf)) = value {
+                if let Ok(tp) = bincode::deserialize::<TreePosition>(&buf) {
+                    if tp.page_id == page_id {
+                        // The key is the layer UUID — parse it
+                        if let Ok(layer_id) = Uuid::parse_str(&_key) {
+                            ids.push(layer_id);
+                        }
+                    }
+                }
+            }
+        }
+        ids
+    }
+
+    fn collect_all_layer_entries(&self) -> Result<Vec<(Uuid, Layer, TreePosition)>, CollabError> {
+        let txn = yrs::Transact::transact(&self.doc);
+        let mut entries = Vec::new();
+
+        for (key, value) in self.layers_map.iter(&txn) {
+            if let yrs::Value::Any(yrs::Any::Buffer(buf)) = value {
+                let layer: Layer = bincode::deserialize(&buf)
+                    .map_err(|e| CollabError::SerializationError(e.to_string()))?;
+                let layer_id = layer.id();
+
+                // Try to find TreePosition
+                let pos = match self.positions_map.get(&txn, &key) {
+                    Some(yrs::Value::Any(yrs::Any::Buffer(pos_buf))) => {
+                        bincode::deserialize::<TreePosition>(&pos_buf).ok()
+                    }
+                    _ => None,
+                };
+
+                if let Some(tp) = pos {
+                    entries.push((layer_id, layer, tp));
+                }
+                // Layers without position data are ignored in page
+                // reconstruction (they belong to the legacy flat model
+                // from step 1a).
+            }
+        }
+
+        Ok(entries)
     }
 }
 
@@ -1386,5 +1718,349 @@ mod tests {
         engine2.apply_remote_update(&delta1).unwrap();
         engine2.apply_remote_update(&delta2).unwrap();
         assert_eq!(engine2.get_layer_count(), 2);
+    }
+
+    // ═══════════ Step 1b: Page-Aware Tree Tests ═══════════
+
+    #[test]
+    fn test_create_page() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, delta) = engine.create_page("Home").unwrap();
+        assert!(!delta.is_empty());
+        assert_eq!(engine.page_count(), 1);
+        let meta = engine.get_page_meta(pid).unwrap();
+        assert_eq!(meta.name, "Home");
+        assert_eq!(meta.z_index, 0);
+    }
+
+    #[test]
+    fn test_create_multiple_pages_auto_index() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (p1, _) = engine.create_page("Home").unwrap();
+        let (p2, _) = engine.create_page("Settings").unwrap();
+        let (p3, _) = engine.create_page("Profile").unwrap();
+
+        assert_eq!(engine.page_count(), 3);
+        assert_eq!(engine.get_page_meta(p1).unwrap().z_index, 0);
+        assert_eq!(engine.get_page_meta(p2).unwrap().z_index, 1);
+        assert_eq!(engine.get_page_meta(p3).unwrap().z_index, 2);
+    }
+
+    #[test]
+    fn test_rename_page() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, _) = engine.create_page("Old Name").unwrap();
+        engine.rename_page(pid, "New Name").unwrap();
+        assert_eq!(engine.get_page_meta(pid).unwrap().name, "New Name");
+    }
+
+    #[test]
+    fn test_rename_nonexistent_page_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let result = engine.rename_page(Uuid::new_v4(), "Nope");
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_reorder_page() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (p1, _) = engine.create_page("A").unwrap();
+        let (p2, _) = engine.create_page("B").unwrap();
+
+        engine.reorder_page(p2, 0).unwrap();
+        engine.reorder_page(p1, 1).unwrap();
+
+        assert_eq!(engine.get_page_meta(p2).unwrap().z_index, 0);
+        assert_eq!(engine.get_page_meta(p1).unwrap().z_index, 1);
+    }
+
+    #[test]
+    fn test_delete_page() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, _) = engine.create_page("Temp").unwrap();
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let lid = layer.id();
+        engine.add_layer_to_page(layer, pid, None, None).unwrap();
+
+        assert_eq!(engine.page_count(), 1);
+        assert_eq!(engine.get_layer_count(), 1);
+
+        engine.delete_page(pid).unwrap();
+        assert_eq!(engine.page_count(), 0);
+        assert_eq!(engine.get_layer_count(), 0);
+        assert!(engine.get_layer(lid).is_none());
+    }
+
+    #[test]
+    fn test_delete_nonexistent_page_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let result = engine.delete_page(Uuid::new_v4());
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_add_layer_to_page() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, _) = engine.create_page("Main").unwrap();
+
+        let layer = Layer::Rect(RectLayer::new(5.0, 5.0, 20.0, 20.0));
+        let lid = layer.id();
+        let delta = engine.add_layer_to_page(layer, pid, None, Some(0)).unwrap();
+        assert!(!delta.is_empty());
+
+        let tp = engine.get_tree_position(lid).unwrap();
+        assert_eq!(tp.page_id, pid);
+        assert_eq!(tp.parent_id, None);
+        assert_eq!(tp.z_index, 0);
+    }
+
+    #[test]
+    fn test_add_layer_to_nonexistent_page_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let result = engine.add_layer_to_page(layer, Uuid::new_v4(), None, None);
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_reconstruct_page() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, _) = engine.create_page("Design").unwrap();
+
+        let r1 = Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0));
+        let r2 = Layer::Rect(RectLayer::new(2.0, 0.0, 10.0, 10.0));
+        let id1 = r1.id();
+        let id2 = r2.id();
+        engine.add_layer_to_page(r1, pid, None, Some(1)).unwrap();
+        engine.add_layer_to_page(r2, pid, None, Some(0)).unwrap();
+
+        let snap = engine.reconstruct_page(pid).unwrap();
+        assert_eq!(snap.meta.name, "Design");
+        assert_eq!(snap.layers.len(), 2);
+        // z-order: r2 (z=0) before r1 (z=1)
+        assert_eq!(snap.layers[0].id(), id2);
+        assert_eq!(snap.layers[1].id(), id1);
+    }
+
+    #[test]
+    fn test_reconstruct_page_with_nesting() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, _) = engine.create_page("Nested").unwrap();
+
+        let frame = Layer::Frame(crate::FrameLayer {
+            id: Uuid::new_v4(),
+            children: Vec::new(),
+            bounds: crate::Rect { x: 0.0, y: 0.0, width: 200.0, height: 200.0 },
+        });
+        let fid = frame.id();
+        let child = Layer::Rect(RectLayer::new(10.0, 10.0, 30.0, 30.0));
+        let cid = child.id();
+
+        engine.add_layer_to_page(frame, pid, None, Some(0)).unwrap();
+        engine.add_layer_to_page(child, pid, Some(fid), Some(0)).unwrap();
+
+        let snap = engine.reconstruct_page(pid).unwrap();
+        assert_eq!(snap.layers.len(), 1);
+        if let Layer::Frame(f) = &snap.layers[0] {
+            assert_eq!(f.children.len(), 1);
+            assert_eq!(f.children[0].id(), cid);
+        } else {
+            panic!("expected Frame");
+        }
+    }
+
+    #[test]
+    fn test_reconstruct_all_pages() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (p1, _) = engine.create_page("First").unwrap();
+        let (p2, _) = engine.create_page("Second").unwrap();
+
+        engine.add_layer_to_page(
+            Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0)),
+            p1, None, None,
+        ).unwrap();
+        engine.add_layer_to_page(
+            Layer::Rect(RectLayer::new(2.0, 0.0, 10.0, 10.0)),
+            p2, None, None,
+        ).unwrap();
+        engine.add_layer_to_page(
+            Layer::Rect(RectLayer::new(3.0, 0.0, 10.0, 10.0)),
+            p2, None, None,
+        ).unwrap();
+
+        let pages = engine.reconstruct_all_pages().unwrap();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].meta.name, "First");
+        assert_eq!(pages[0].layers.len(), 1);
+        assert_eq!(pages[1].meta.name, "Second");
+        assert_eq!(pages[1].layers.len(), 2);
+    }
+
+    #[test]
+    fn test_move_layer_to_page() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (p1, _) = engine.create_page("Source").unwrap();
+        let (p2, _) = engine.create_page("Target").unwrap();
+
+        let layer = Layer::Rect(RectLayer::new(10.0, 10.0, 40.0, 40.0));
+        let lid = layer.id();
+        engine.add_layer_to_page(layer, p1, None, Some(0)).unwrap();
+
+        // Move from p1 → p2
+        engine.move_layer_to_page(lid, p2, None, Some(0)).unwrap();
+
+        let tp = engine.get_tree_position(lid).unwrap();
+        assert_eq!(tp.page_id, p2);
+
+        // p1 should be empty, p2 should have the layer
+        let snap1 = engine.reconstruct_page(p1).unwrap();
+        assert!(snap1.layers.is_empty());
+        let snap2 = engine.reconstruct_page(p2).unwrap();
+        assert_eq!(snap2.layers.len(), 1);
+        assert_eq!(snap2.layers[0].id(), lid);
+    }
+
+    #[test]
+    fn test_move_nonexistent_layer_to_page_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, _) = engine.create_page("X").unwrap();
+        let result = engine.move_layer_to_page(Uuid::new_v4(), pid, None, None);
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_move_layer_to_nonexistent_page_errors() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (pid, _) = engine.create_page("X").unwrap();
+        let layer = Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0));
+        let lid = layer.id();
+        engine.add_layer_to_page(layer, pid, None, None).unwrap();
+        let result = engine.move_layer_to_page(lid, Uuid::new_v4(), None, None);
+        assert!(matches!(result, Err(CollabError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn test_page_operations_remote_convergence() {
+        let doc = Document::new();
+        let mut e1 = CollaborationEngine::new(&doc);
+        let mut e2 = CollaborationEngine::new(&doc);
+
+        // e1: create page + add layer
+        let (pid, d_page) = e1.create_page("Shared").unwrap();
+        e2.apply_remote_update(&d_page).unwrap();
+
+        let layer = Layer::Rect(RectLayer::new(5.0, 5.0, 50.0, 50.0));
+        let lid = layer.id();
+        let d_layer = e1.add_layer_to_page(layer, pid, None, Some(0)).unwrap();
+        e2.apply_remote_update(&d_layer).unwrap();
+
+        // e2 should see the page and layer
+        assert_eq!(e2.page_count(), 1);
+        let meta = e2.get_page_meta(pid).unwrap();
+        assert_eq!(meta.name, "Shared");
+
+        let snap = e2.reconstruct_page(pid).unwrap();
+        assert_eq!(snap.layers.len(), 1);
+        assert_eq!(snap.layers[0].id(), lid);
+    }
+
+    #[test]
+    fn test_list_pages_sorted() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        engine.create_page("C").unwrap();
+        engine.create_page("A").unwrap();
+        engine.create_page("B").unwrap();
+
+        let pages = engine.reconstruct_all_pages().unwrap();
+        assert_eq!(pages.len(), 3);
+        // Pages come out in z_index order: C(0), A(1), B(2)
+        assert_eq!(pages[0].meta.name, "C");
+        assert_eq!(pages[1].meta.name, "A");
+        assert_eq!(pages[2].meta.name, "B");
+    }
+
+    #[test]
+    fn test_delete_page_preserves_other_pages() {
+        let doc = Document::new();
+        let mut engine = CollaborationEngine::new(&doc);
+        let (p1, _) = engine.create_page("Keep").unwrap();
+        let (p2, _) = engine.create_page("Delete").unwrap();
+
+        engine.add_layer_to_page(
+            Layer::Rect(RectLayer::new(0.0, 0.0, 10.0, 10.0)),
+            p1, None, None,
+        ).unwrap();
+        engine.add_layer_to_page(
+            Layer::Rect(RectLayer::new(1.0, 0.0, 10.0, 10.0)),
+            p2, None, None,
+        ).unwrap();
+
+        engine.delete_page(p2).unwrap();
+
+        assert_eq!(engine.page_count(), 1);
+        let snap = engine.reconstruct_page(p1).unwrap();
+        assert_eq!(snap.layers.len(), 1);
+    }
+
+    #[test]
+    fn test_full_page_workflow() {
+        let doc = Document::new();
+        let mut e1 = CollaborationEngine::new(&doc);
+        let mut e2 = CollaborationEngine::new(&doc);
+
+        // 1. Create two pages on e1
+        let (home, d1) = e1.create_page("Home").unwrap();
+        let (settings, d2) = e1.create_page("Settings").unwrap();
+        e2.apply_remote_update(&d1).unwrap();
+        e2.apply_remote_update(&d2).unwrap();
+
+        // 2. Add layers on e1
+        let rect = Layer::Rect(RectLayer::new(0.0, 0.0, 100.0, 100.0));
+        let rid = rect.id();
+        let d3 = e1.add_layer_to_page(rect, home, None, Some(0)).unwrap();
+        e2.apply_remote_update(&d3).unwrap();
+
+        // 3. Move layer from Home → Settings
+        let d4 = e1.move_layer_to_page(rid, settings, None, Some(0)).unwrap();
+        e2.apply_remote_update(&d4).unwrap();
+
+        // 4. Rename Settings page
+        let d5 = e1.rename_page(settings, "Preferences").unwrap();
+        e2.apply_remote_update(&d5).unwrap();
+
+        // 5. Both engines should agree
+        let pages1 = e1.reconstruct_all_pages().unwrap();
+        let pages2 = e2.reconstruct_all_pages().unwrap();
+
+        assert_eq!(pages1.len(), 2);
+        assert_eq!(pages2.len(), 2);
+
+        // Home is empty
+        assert!(pages1[0].layers.is_empty());
+        assert!(pages2[0].layers.is_empty());
+
+        // Preferences has the rect
+        assert_eq!(pages1[1].meta.name, "Preferences");
+        assert_eq!(pages2[1].meta.name, "Preferences");
+        assert_eq!(pages1[1].layers.len(), 1);
+        assert_eq!(pages2[1].layers.len(), 1);
+        assert_eq!(pages1[1].layers[0].id(), rid);
+        assert_eq!(pages2[1].layers[0].id(), rid);
     }
 }
