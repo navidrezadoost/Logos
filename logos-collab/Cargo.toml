@@ -29,8 +29,9 @@ yrs = "0.25.0"
 logos-core = { path = "../logos-core" }
 
 [dev-dependencies]
-serde_json = "1.0"
 criterion = "0.8.2"
+logos-core = { path = "../logos-core" }
+serde_json = "1.0"
 tempfile = "3.19.1"
 
 [[bench]]
