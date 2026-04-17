@@ -195,7 +195,7 @@ impl ViewportRect {
 }
 
 /// HSL to RGB conversion helper.
-fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     if s == 0.0 {
         return (l, l, l); // Achromatic
     }
