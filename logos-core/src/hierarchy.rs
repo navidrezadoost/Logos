@@ -51,7 +51,9 @@ impl LayerCategory {
     /// Classify a `Layer` into a `LayerCategory`.
     pub fn of(layer: &Layer) -> Self {
         match layer {
-            Layer::Rect(_) | Layer::Ellipse(_) | Layer::Text(_) | Layer::Path(_) => {
+            Layer::Rect(_) | Layer::Ellipse(_) | Layer::Text(_) | Layer::Path(_)
+            | Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
+            | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => {
                 LayerCategory::Shape
             }
             Layer::Frame(_) => LayerCategory::Frame,

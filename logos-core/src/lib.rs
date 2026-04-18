@@ -438,20 +438,51 @@ pub enum Layer {
     Drawer(container::DrawerData),
     /// Organizational grouping — see [`container::SectionData`].
     Section(container::SectionData),
+    // ── Phase 2 shape toolkit ─────────────────────────────────────────────────
+    Line(LineLayer),
+    Polygon(PolygonLayer),
+    Star(StarLayer),
+    BooleanGroup(BooleanGroupLayer),
+    VectorNetwork(VectorNetworkLayer),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct RectLayer { 
-    pub id: Uuid, 
-    pub bounds: Rect 
+pub struct RectLayer {
+    pub id: Uuid,
+    pub bounds: Rect,
+    /// Corner smoothing in [0.0, 1.0]. 0 = sharp corners, 1 = full superellipse (iOS-style squircle).
+    #[serde(default)]
+    pub corner_smoothing: f32,
+    /// Uniform corner radius in logical pixels, applied before smoothing.
+    #[serde(default)]
+    pub corner_radius: f32,
 }
 
 impl RectLayer {
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             id: Uuid::new_v4(),
-            bounds: Rect { x, y, width, height }
+            bounds: Rect { x, y, width, height },
+            corner_smoothing: 0.0,
+            corner_radius: 0.0,
         }
+    }
+
+    /// Builder: set corner radius.
+    pub fn with_corner_radius(mut self, r: f32) -> Self {
+        self.corner_radius = r.max(0.0);
+        self
+    }
+
+    /// Builder: set corner smoothing (superellipse factor). Clamped to [0.0, 1.0].
+    pub fn with_corner_smoothing(mut self, s: f32) -> Self {
+        self.corner_smoothing = s.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Returns true when the rect renders as a superellipse (squircle).
+    pub fn is_squircle(&self) -> bool {
+        self.corner_radius > 0.0 && self.corner_smoothing > 0.0
     }
 }
 
@@ -488,10 +519,237 @@ impl TextLayer {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct FrameLayer { 
-    pub id: Uuid, 
-    pub children: Vec<Layer>, 
-    pub bounds: Rect 
+pub struct FrameLayer {
+    pub id: Uuid,
+    pub children: Vec<Layer>,
+    pub bounds: Rect,
+}
+
+// ── Phase 2 Shape Types ───────────────────────────────────────────────────────
+
+/// A straight line between two points.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct LineLayer {
+    pub id: Uuid,
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+    /// Stroke width in logical pixels.
+    pub stroke_width: f32,
+}
+
+impl LineLayer {
+    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+        Self { id: Uuid::new_v4(), x1, y1, x2, y2, stroke_width: 1.0 }
+    }
+
+    pub fn with_stroke_width(mut self, w: f32) -> Self {
+        self.stroke_width = w.max(0.0);
+        self
+    }
+
+    pub fn length(&self) -> f32 {
+        let dx = self.x2 - self.x1;
+        let dy = self.y2 - self.y1;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    pub fn bounds(&self) -> Rect {
+        let min_x = self.x1.min(self.x2);
+        let min_y = self.y1.min(self.y2);
+        let max_x = self.x1.max(self.x2);
+        let max_y = self.y1.max(self.y2);
+        Rect { x: min_x, y: min_y, width: (max_x - min_x).max(self.stroke_width), height: (max_y - min_y).max(self.stroke_width) }
+    }
+}
+
+/// A regular polygon with N sides inscribed within `bounds`.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PolygonLayer {
+    pub id: Uuid,
+    pub bounds: Rect,
+    /// Number of sides (minimum 3).
+    pub sides: u32,
+}
+
+impl PolygonLayer {
+    pub fn new(x: f32, y: f32, width: f32, height: f32, sides: u32) -> Self {
+        Self { id: Uuid::new_v4(), bounds: Rect { x, y, width, height }, sides: sides.max(3) }
+    }
+
+    /// Returns the vertices in normalised [0,1] space (top-centre first).
+    pub fn vertices_normalised(&self) -> Vec<(f32, f32)> {
+        let n = self.sides as usize;
+        (0..n).map(|i| {
+            let angle = (i as f32) * std::f32::consts::TAU / (n as f32) - std::f32::consts::FRAC_PI_2;
+            (0.5 + 0.5 * angle.cos(), 0.5 + 0.5 * angle.sin())
+        }).collect()
+    }
+}
+
+/// A star shape with N points.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct StarLayer {
+    pub id: Uuid,
+    pub bounds: Rect,
+    /// Number of star points (minimum 3).
+    pub points: u32,
+    /// Ratio of inner radius to outer radius in (0.0, 1.0).
+    pub inner_ratio: f32,
+}
+
+impl StarLayer {
+    pub fn new(x: f32, y: f32, width: f32, height: f32, points: u32) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            bounds: Rect { x, y, width, height },
+            points: points.max(3),
+            inner_ratio: 0.382,  // golden-ratio default
+        }
+    }
+
+    pub fn with_inner_ratio(mut self, r: f32) -> Self {
+        self.inner_ratio = r.clamp(0.01, 0.99);
+        self
+    }
+
+    /// Returns outer + inner vertex pairs in normalised [0,1] space.
+    pub fn vertices_normalised(&self) -> Vec<(f32, f32)> {
+        let n = self.points as usize;
+        let mut verts = Vec::with_capacity(n * 2);
+        for i in 0..(n * 2) {
+            let angle = (i as f32) * std::f32::consts::TAU / (n as f32 * 2.0)
+                - std::f32::consts::FRAC_PI_2;
+            let r = if i % 2 == 0 { 0.5 } else { 0.5 * self.inner_ratio };
+            verts.push((0.5 + r * angle.cos(), 0.5 + r * angle.sin()));
+        }
+        verts
+    }
+}
+
+/// Boolean operation for combining shapes.
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum BooleanOp {
+    Union,
+    Subtract,
+    Intersect,
+    Exclude,
+}
+
+impl std::fmt::Display for BooleanOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BooleanOp::Union     => write!(f, "union"),
+            BooleanOp::Subtract  => write!(f, "subtract"),
+            BooleanOp::Intersect => write!(f, "intersect"),
+            BooleanOp::Exclude   => write!(f, "exclude"),
+        }
+    }
+}
+
+/// A group of shape layers combined by a boolean operation.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct BooleanGroupLayer {
+    pub id: Uuid,
+    pub op: BooleanOp,
+    pub children: Vec<Layer>,
+    /// Cached bounding box of the result.
+    pub bounds: Rect,
+}
+
+impl BooleanGroupLayer {
+    pub fn new(op: BooleanOp) -> Self {
+        Self { id: Uuid::new_v4(), op, children: Vec::new(), bounds: Rect::default() }
+    }
+
+    pub fn with_child(mut self, layer: Layer) -> Self {
+        self.children.push(layer);
+        self
+    }
+}
+
+// ── Vector Network (Figma-style) ──────────────────────────────────────────────
+
+/// A node in a vector network.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub struct VNNode {
+    pub id: Uuid,
+    pub x: f32,
+    pub y: f32,
+}
+
+impl VNNode {
+    pub fn new(x: f32, y: f32) -> Self { Self { id: Uuid::new_v4(), x, y } }
+}
+
+/// A cubic bezier edge between two nodes in a vector network.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct VNEdge {
+    pub id: Uuid,
+    pub from_node: Uuid,
+    pub to_node: Uuid,
+    /// Control point leaving `from_node`.
+    pub cp_from: (f32, f32),
+    /// Control point arriving at `to_node`.
+    pub cp_to: (f32, f32),
+}
+
+impl VNEdge {
+    pub fn new(from_node: Uuid, to_node: Uuid) -> Self {
+        Self { id: Uuid::new_v4(), from_node, to_node, cp_from: (0.0, 0.0), cp_to: (0.0, 0.0) }
+    }
+
+    pub fn with_control_points(mut self, cp_from: (f32, f32), cp_to: (f32, f32)) -> Self {
+        self.cp_from = cp_from;
+        self.cp_to = cp_to;
+        self
+    }
+}
+
+/// A multi-branch vector network layer (Figma-style).
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct VectorNetworkLayer {
+    pub id: Uuid,
+    pub nodes: Vec<VNNode>,
+    pub edges: Vec<VNEdge>,
+    pub bounds: Rect,
+}
+
+impl VectorNetworkLayer {
+    pub fn new() -> Self {
+        Self { id: Uuid::new_v4(), nodes: Vec::new(), edges: Vec::new(), bounds: Rect::default() }
+    }
+
+    pub fn add_node(&mut self, x: f32, y: f32) -> Uuid {
+        let n = VNNode::new(x, y);
+        let id = n.id;
+        self.nodes.push(n);
+        self.recompute_bounds();
+        id
+    }
+
+    pub fn add_edge(&mut self, from: Uuid, to: Uuid) -> Option<Uuid> {
+        let has_from = self.nodes.iter().any(|n| n.id == from);
+        let has_to = self.nodes.iter().any(|n| n.id == to);
+        if !has_from || !has_to { return None; }
+        let e = VNEdge::new(from, to);
+        let id = e.id;
+        self.edges.push(e);
+        Some(id)
+    }
+
+    pub fn node_count(&self) -> usize { self.nodes.len() }
+    pub fn edge_count(&self) -> usize { self.edges.len() }
+
+    fn recompute_bounds(&mut self) {
+        if self.nodes.is_empty() { return; }
+        let min_x = self.nodes.iter().map(|n| n.x).fold(f32::MAX, f32::min);
+        let min_y = self.nodes.iter().map(|n| n.y).fold(f32::MAX, f32::min);
+        let max_x = self.nodes.iter().map(|n| n.x).fold(f32::MIN, f32::max);
+        let max_y = self.nodes.iter().map(|n| n.y).fold(f32::MIN, f32::max);
+        self.bounds = Rect { x: min_x, y: min_y, width: (max_x - min_x).max(1.0), height: (max_y - min_y).max(1.0) };
+    }
 }
 
 impl Layer {
@@ -505,6 +763,11 @@ impl Layer {
             Layer::Artboard(a) => a.id,
             Layer::Drawer(d) => d.id,
             Layer::Section(s) => s.id,
+            Layer::Line(l) => l.id,
+            Layer::Polygon(l) => l.id,
+            Layer::Star(l) => l.id,
+            Layer::BooleanGroup(l) => l.id,
+            Layer::VectorNetwork(l) => l.id,
         }
     }
 
@@ -519,6 +782,11 @@ impl Layer {
             Layer::Artboard(a) => a.bounds,
             Layer::Drawer(d) => d.effective_bounds(),
             Layer::Section(s) => s.computed_bounds(),
+            Layer::Line(l) => l.bounds(),
+            Layer::Polygon(l) => l.bounds,
+            Layer::Star(l) => l.bounds,
+            Layer::BooleanGroup(l) => l.bounds,
+            Layer::VectorNetwork(l) => l.bounds,
         }
     }
 
@@ -529,6 +797,7 @@ impl Layer {
             Layer::Artboard(a) => Some(&a.children),
             Layer::Drawer(d) => Some(&d.children),
             Layer::Section(s) => Some(&s.children),
+            Layer::BooleanGroup(b) => Some(&b.children),
             _ => None,
         }
     }

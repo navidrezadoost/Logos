@@ -17,6 +17,8 @@ fn make_rect() -> logos_core::Layer {
     logos_core::Layer::Rect(RectLayer {
         id: Uuid::new_v4(),
         bounds: Rect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     })
 }
 

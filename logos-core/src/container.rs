@@ -875,6 +875,11 @@ fn child_bounds(layer: &Layer) -> Rect {
         Layer::Artboard(a) => a.bounds,
         Layer::Drawer(d) => d.effective_bounds(),
         Layer::Section(s) => s.computed_bounds(),
+        Layer::Line(l) => l.bounds(),
+        Layer::Polygon(l) => l.bounds,
+        Layer::Star(l) => l.bounds,
+        Layer::BooleanGroup(l) => l.bounds,
+        Layer::VectorNetwork(l) => l.bounds,
     }
 }
 
