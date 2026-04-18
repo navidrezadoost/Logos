@@ -16,6 +16,8 @@ pub mod preview;
 pub mod flow;
 pub mod scroll;
 pub mod overlay;
+pub mod lottie;
+pub mod anim_svg;
 
 // Re-exports for convenience
 pub use state_machine::{StateMachine, State, StateId, Transition, TransitionId};
