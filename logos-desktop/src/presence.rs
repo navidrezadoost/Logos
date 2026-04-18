@@ -62,7 +62,9 @@ impl DesktopPresence {
             AwarenessMessage::Cursor { .. }
             | AwarenessMessage::Selection { .. }
             | AwarenessMessage::Join { .. }
-            | AwarenessMessage::Leave { .. } => {
+            | AwarenessMessage::Leave { .. }
+            | AwarenessMessage::PageChange { .. }
+            | AwarenessMessage::EditingUpdate { .. } => {
                 self.dirty = true;
                 true
             }
