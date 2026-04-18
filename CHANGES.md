@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-04-18
+
+### Added – Option C: AI Agent Track
+
+- **logos-agent-versioning / `storage.rs`**: Content-addressed SHA-256 blob store with deduplication and quota enforcement (10 new tests; 70 total in crate).
+- **logos-agent-tracing / `logging.rs`**: Structured JSON logging — level filtering, token-bucket rate limiter, trace-context correlation, runtime level changes (10 new tests; 116 total in crate).
+- **logos-agent-marketplace / `submission.rs`**: Developer portal submission API — full lifecycle from Draft → InReview → ChangesRequested → Approved → Published, per-publisher filtering, metadata (10 new tests; 73 total in crate).
+
+### Fixed
+- **logos-desktop**: Added missing `AwarenessMessage::PageChange` and `AwarenessMessage::EditingUpdate` arms to `handle_presence_message` match (non-exhaustive pattern left from Phase 14).
+
 ## [Unreleased] - 2026-04-16
 
 ### Fixed
