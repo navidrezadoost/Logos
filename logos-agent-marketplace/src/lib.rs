@@ -8,6 +8,7 @@ pub mod registry;
 pub mod ratings;
 pub mod install;
 pub mod certification;
+pub mod submission;
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
@@ -37,6 +38,9 @@ pub use certification::{
     CertificationLevel, CertificationRegistry, CertificationRequest,
     CertificationResult, Certifier, CheckResult, CheckSeverity,
 };
+
+// Submission portal
+pub use submission::{Submission, SubmissionStatus, SubmissionStore, SubmissionError};
 
 // ── Error type ────────────────────────────────────────────────────────────────
 

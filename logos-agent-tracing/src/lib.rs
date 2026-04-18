@@ -40,8 +40,10 @@ pub mod span;
 pub mod collector;
 pub mod histogram;
 pub mod alert;
+pub mod logging;
 
 pub use span::{Tracer, Span, SpanContext, SpanId, TraceId, SpanKind, SpanStatus, SpanEvent, TracerError};
 pub use collector::{SpanCollector, TraceStore, TraceQuery, CollectorError};
 pub use histogram::{LatencyHistogram, ErrorRateTracker, BucketBounds, HistogramSnapshot};
 pub use alert::{AlertCondition, AlertEvaluator, AlertSeverity, AlertFired, WebhookNotifier, NotifierError, ConditionKind};
+pub use logging::{StructuredLogger, LogRecord, LogLevel, LogRateLimiter};
