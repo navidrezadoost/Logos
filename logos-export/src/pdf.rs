@@ -219,6 +219,18 @@ impl PdfExporter {
                 Layer::Section(_) => {
                     // Sections are non-renderable — skip in PDF output
                 }
+                Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
+                | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => {
+                    // Render as a filled rect approximation
+                    let (r, g, b) = default_pdf_color(item.layer);
+                    write!(
+                        stream,
+                        "{r:.3} {g:.3} {b:.3} rg\n{x:.2} {y:.2} {w:.2} {h:.2} re f\n",
+                        r = r, g = g, b = b,
+                        x = item.x, y = pdf_y, w = item.width, h = item.height,
+                    )
+                    .unwrap();
+                }
             }
         }
 
@@ -252,6 +264,11 @@ fn default_pdf_color(layer: &Layer) -> (f32, f32, f32) {
         Layer::Artboard(_) => (0.95, 0.95, 0.95),   // Light gray
         Layer::Drawer(_) => (0.18, 0.20, 0.25),     // Dark blue-gray
         Layer::Section(_) => (0.0, 0.0, 0.0),        // Transparent (unused)
+        Layer::Line(_) => (0.2, 0.2, 0.2),
+        Layer::Polygon(_) => (0.4, 0.2, 0.8),
+        Layer::Star(_) => (0.8, 0.6, 0.1),
+        Layer::BooleanGroup(_) => (0.3, 0.3, 0.3),
+        Layer::VectorNetwork(_) => (0.1, 0.5, 0.9),
     }
 }
 

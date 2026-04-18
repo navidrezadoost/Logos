@@ -81,6 +81,8 @@ fn convert_shape(node: &XdNode) -> Option<Layer> {
             Some(Layer::Rect(RectLayer {
                 id: uuid::Uuid::new_v4(),
                 bounds,
+                corner_radius: 0.0,
+                corner_smoothing: 0.0,
             }))
         }
         _ => {
@@ -88,6 +90,8 @@ fn convert_shape(node: &XdNode) -> Option<Layer> {
             Some(Layer::Rect(RectLayer {
                 id: uuid::Uuid::new_v4(),
                 bounds,
+                corner_radius: 0.0,
+                corner_smoothing: 0.0,
             }))
         }
     }

@@ -257,6 +257,80 @@ impl LayoutEngine {
                 position: Position::Relative,
                 ..Style::default()
             },
+            // Phase 2 shapes: use their bounding box for layout.
+            Layer::Line(l) => {
+                let b = l.bounds();
+                Style {
+                    size: Size {
+                        width: Dimension::length(b.width),
+                        height: Dimension::length(b.height),
+                    },
+                    position: Position::Absolute,
+                    inset: taffy::Rect {
+                        left: LengthPercentageAuto::length(b.x),
+                        top: LengthPercentageAuto::length(b.y),
+                        right: LengthPercentageAuto::auto(),
+                        bottom: LengthPercentageAuto::auto(),
+                    },
+                    ..Style::default()
+                }
+            },
+            Layer::Polygon(p) => Style {
+                size: Size {
+                    width: Dimension::length(p.bounds.width),
+                    height: Dimension::length(p.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(p.bounds.x),
+                    top: LengthPercentageAuto::length(p.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
+            Layer::Star(s) => Style {
+                size: Size {
+                    width: Dimension::length(s.bounds.width),
+                    height: Dimension::length(s.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(s.bounds.x),
+                    top: LengthPercentageAuto::length(s.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
+            Layer::BooleanGroup(bg) => Style {
+                size: Size {
+                    width: Dimension::length(bg.bounds.width),
+                    height: Dimension::length(bg.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(bg.bounds.x),
+                    top: LengthPercentageAuto::length(bg.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
+            Layer::VectorNetwork(vn) => Style {
+                size: Size {
+                    width: Dimension::length(vn.bounds.width),
+                    height: Dimension::length(vn.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(vn.bounds.x),
+                    top: LengthPercentageAuto::length(vn.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
         }
     }
 
@@ -724,6 +798,8 @@ mod tests {
         let updated_rect = RectLayer {
             id,
             bounds: LogosRect { x: 0.0, y: 0.0, width: 200.0, height: 100.0 },
+            corner_radius: 0.0,
+            corner_smoothing: 0.0,
         };
         let updated = Layer::Rect(updated_rect);
         engine.add_or_update_layer(&updated).unwrap();

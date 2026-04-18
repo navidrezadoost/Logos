@@ -450,6 +450,8 @@ mod tests {
         Layer::Rect(RectLayer {
             id,
             bounds: Rect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 },
+            corner_radius: 0.0,
+            corner_smoothing: 0.0,
         })
     }
 

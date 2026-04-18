@@ -249,6 +249,8 @@ fn layer_color(layer: &Layer) -> [f32; 4] {
         }
         Layer::Drawer(_) => [0.18, 0.20, 0.25, 0.9],
         Layer::Section(_) => [0.0, 0.0, 0.0, 0.0], // Sections are non-renderable
+        Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
+        | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => COLOR_PATH,
     }
 }
 

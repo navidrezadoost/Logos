@@ -79,6 +79,8 @@ fn convert_element(element: &PdfElement, page_height: f32) -> Option<Layer> {
                     width: *width,
                     height: *height,
                 },
+                corner_radius: 0.0,
+                corner_smoothing: 0.0,
             }))
         }
         PdfElement::Path { commands } => {
@@ -107,6 +109,8 @@ fn convert_element(element: &PdfElement, page_height: f32) -> Option<Layer> {
                     width: *width,
                     height: *height,
                 },
+                corner_radius: 0.0,
+                corner_smoothing: 0.0,
             }))
         }
     }

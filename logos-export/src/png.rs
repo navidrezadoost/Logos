@@ -354,6 +354,10 @@ impl PngExporter {
                 Layer::Section(_) => {
                     // Sections are structural — skip
                 }
+                Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
+                | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => {
+                    buf.fill_rect(x, y, lw, lh, color);
+                }
             }
         }
         buf
@@ -388,6 +392,11 @@ fn default_raster_color(layer: &Layer) -> Color {
         Layer::Path(_) => Color::from([0.3, 0.3, 0.8, 1.0]),
         Layer::Artboard(_) | Layer::Drawer(_) => Color::from([0.95, 0.95, 0.95, 0.9]),
         Layer::Section(_) => Color::TRANSPARENT,
+        Layer::Line(_) => Color::from([0.2, 0.2, 0.2, 1.0]),
+        Layer::Polygon(_) => Color::from([0.4, 0.2, 0.8, 1.0]),
+        Layer::Star(_) => Color::from([0.8, 0.6, 0.1, 1.0]),
+        Layer::BooleanGroup(_) => Color::from([0.3, 0.3, 0.3, 1.0]),
+        Layer::VectorNetwork(_) => Color::from([0.1, 0.5, 0.9, 1.0]),
     }
 }
 

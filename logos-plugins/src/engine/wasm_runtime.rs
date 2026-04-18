@@ -1162,6 +1162,22 @@ fn layer_to_json(layer: &Layer) -> serde_json::Value {
                 "children": children,
             })
         }
+        Layer::Line(l) => {
+            let b = l.bounds();
+            serde_json::json!({"type": "line", "id": l.id.to_string(), "x": b.x, "y": b.y, "width": b.width, "height": b.height})
+        }
+        Layer::Polygon(p) => {
+            serde_json::json!({"type": "polygon", "id": p.id.to_string(), "x": p.bounds.x, "y": p.bounds.y, "width": p.bounds.width, "height": p.bounds.height, "sides": p.sides})
+        }
+        Layer::Star(s) => {
+            serde_json::json!({"type": "star", "id": s.id.to_string(), "x": s.bounds.x, "y": s.bounds.y, "width": s.bounds.width, "height": s.bounds.height, "points": s.points})
+        }
+        Layer::BooleanGroup(bg) => {
+            serde_json::json!({"type": "boolean_group", "id": bg.id.to_string(), "x": bg.bounds.x, "y": bg.bounds.y, "width": bg.bounds.width, "height": bg.bounds.height})
+        }
+        Layer::VectorNetwork(vn) => {
+            serde_json::json!({"type": "vector_network", "id": vn.id.to_string(), "x": vn.bounds.x, "y": vn.bounds.y, "width": vn.bounds.width, "height": vn.bounds.height})
+        }
     }
 }
 

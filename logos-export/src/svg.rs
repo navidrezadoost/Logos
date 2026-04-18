@@ -194,6 +194,26 @@ impl SvgExporter {
                 Layer::Section(_) => {
                     // Sections are non-renderable — skip in SVG output
                 }
+                Layer::Line(_)
+                | Layer::Polygon(_)
+                | Layer::Star(_)
+                | Layer::BooleanGroup(_)
+                | Layer::VectorNetwork(_) => {
+                    // Phase 2 shapes: render as a placeholder rect
+                    write!(
+                        svg,
+                        r#"{i}<rect x="{x:.p$}" y="{y:.p$}" width="{w:.p$}" height="{h:.p$}" fill="{fill}" opacity="0.7" />{nl}"#,
+                        i = indent,
+                        x = item.x,
+                        y = item.y,
+                        w = item.width,
+                        h = item.height,
+                        fill = default_color_for_layer(item.layer),
+                        p = p,
+                        nl = nl
+                    )
+                    .unwrap();
+                }
             }
         }
 
@@ -263,6 +283,11 @@ fn default_color_for_layer(layer: &Layer) -> &'static str {
         Layer::Artboard(_) => "#f2f2f2", // Light gray
         Layer::Drawer(_) => "#2e3340",  // Dark blue-gray
         Layer::Section(_) => "#00000000", // Transparent (non-renderable)
+        Layer::Line(_) => "#333333",
+        Layer::Polygon(_) => "#6633cc",
+        Layer::Star(_) => "#cc9900",
+        Layer::BooleanGroup(_) => "#555555",
+        Layer::VectorNetwork(_) => "#1a80e6",
     }
 }
 

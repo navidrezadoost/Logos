@@ -276,6 +276,8 @@ pub fn stress_test(n: usize) -> (LayoutProfile, LayoutProfile) {
             width: 100.0,
             height: 100.0,
         },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     });
     engine.add_or_update_layer(&modified_layer).unwrap();
 

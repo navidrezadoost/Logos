@@ -103,6 +103,8 @@ fn rect_with_id(id: Uuid, x: f32, y: f32, w: f32, h: f32) -> Layer {
     Layer::Rect(RectLayer {
         id,
         bounds: Rect { x, y, width: w, height: h },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     })
 }
 

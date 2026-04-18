@@ -94,6 +94,11 @@ impl LayerStyleData {
             Layer::Artboard(a) => ("artboard".to_string(), a.name.clone(), None),
             Layer::Drawer(d) => ("drawer".to_string(), d.name.clone(), None),
             Layer::Section(s) => ("section".to_string(), s.name.clone(), None),
+            Layer::Line(_) => ("line".to_string(), "line".to_string(), None),
+            Layer::Polygon(_) => ("polygon".to_string(), "polygon".to_string(), None),
+            Layer::Star(_) => ("star".to_string(), "star".to_string(), None),
+            Layer::BooleanGroup(_) => ("boolean_group".to_string(), "boolean_group".to_string(), None),
+            Layer::VectorNetwork(_) => ("vector_network".to_string(), "vector_network".to_string(), None),
         };
 
         Self {

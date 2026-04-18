@@ -60,6 +60,8 @@ fn convert_rect(layer: &SketchLayer) -> Option<Layer> {
             width: layer.frame.width as f32,
             height: layer.frame.height as f32,
         },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     }))
 }
 

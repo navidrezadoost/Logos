@@ -59,6 +59,8 @@ fn convert_rect(element: &CanvaElement) -> Option<Layer> {
             width: element.width as f32,
             height: element.height as f32,
         },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     }))
 }
 
@@ -103,6 +105,8 @@ fn convert_image(element: &CanvaElement) -> Option<Layer> {
             width: element.width as f32,
             height: element.height as f32,
         },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     }))
 }
 

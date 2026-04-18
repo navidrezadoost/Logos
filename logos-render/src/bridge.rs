@@ -47,6 +47,7 @@ pub fn collect_instances(
             }
             Layer::Drawer(_) => COLOR_DRAWER,
             Layer::Section(_) => COLOR_SECTION,
+            Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_) | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => COLOR_PATH,
         };
 
         let instance = RectInstance::new(
@@ -130,6 +131,7 @@ pub fn collect_instances_into(
             }
             Layer::Drawer(_) => COLOR_DRAWER,
             Layer::Section(_) => COLOR_SECTION,
+            Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_) | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => COLOR_PATH,
         };
         Some(RectInstance {
             position: [layout.location.x, layout.location.y],
@@ -190,6 +192,7 @@ pub fn prepare_layer_data(layers: &[&Layer]) -> (Vec<Uuid>, Vec<[f32; 4]>) {
             }
             Layer::Drawer(_) => COLOR_DRAWER,
             Layer::Section(_) => COLOR_SECTION,
+            Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_) | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => COLOR_PATH,
         })
         .collect();
     (ids, colors)

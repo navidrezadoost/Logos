@@ -57,6 +57,8 @@ fn modify_layer_bounds(
     let updated = Layer::Rect(RectLayer {
         id,
         bounds: Rect { x, y, width: w, height: h },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     });
     engine.add_or_update_layer(&updated).unwrap();
     engine.compute_layout(id).unwrap();

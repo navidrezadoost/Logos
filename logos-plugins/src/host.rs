@@ -429,6 +429,45 @@ fn layer_to_plugin_value(layer: &Layer) -> PluginValue {
             map.insert("children".to_string(), PluginValue::Int(s.children.len() as i64));
             map.insert("collapsed".to_string(), PluginValue::Bool(s.is_collapsed));
         }
+        Layer::Line(l) => {
+            let b = l.bounds();
+            map.insert("type".to_string(), PluginValue::String("line".to_string()));
+            map.insert("x".to_string(), PluginValue::Float(b.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(b.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(b.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(b.height as f64));
+        }
+        Layer::Polygon(p) => {
+            map.insert("type".to_string(), PluginValue::String("polygon".to_string()));
+            map.insert("x".to_string(), PluginValue::Float(p.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(p.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(p.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(p.bounds.height as f64));
+            map.insert("sides".to_string(), PluginValue::Int(p.sides as i64));
+        }
+        Layer::Star(s) => {
+            map.insert("type".to_string(), PluginValue::String("star".to_string()));
+            map.insert("x".to_string(), PluginValue::Float(s.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(s.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(s.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(s.bounds.height as f64));
+            map.insert("points".to_string(), PluginValue::Int(s.points as i64));
+        }
+        Layer::BooleanGroup(bg) => {
+            map.insert("type".to_string(), PluginValue::String("boolean_group".to_string()));
+            map.insert("x".to_string(), PluginValue::Float(bg.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(bg.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(bg.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(bg.bounds.height as f64));
+            map.insert("children".to_string(), PluginValue::Int(bg.children.len() as i64));
+        }
+        Layer::VectorNetwork(vn) => {
+            map.insert("type".to_string(), PluginValue::String("vector_network".to_string()));
+            map.insert("x".to_string(), PluginValue::Float(vn.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(vn.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(vn.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(vn.bounds.height as f64));
+        }
     }
     PluginValue::Object(map)
 }

@@ -72,6 +72,8 @@ fn convert_rect(node: &SvgNode) -> Option<Layer> {
             width: w,
             height: h,
         },
+        corner_radius: 0.0,
+        corner_smoothing: 0.0,
     }))
 }
 
@@ -278,6 +280,11 @@ fn layer_bounds(layer: &Layer) -> &Rect {
         Layer::Drawer(d) => &d.bounds,
         // Sections have no intrinsic bounds; fall back to zero-rect.
         Layer::Section(_) => &ZERO_RECT,
+        Layer::Line(_) => &ZERO_RECT,
+        Layer::Polygon(l) => &l.bounds,
+        Layer::Star(l) => &l.bounds,
+        Layer::BooleanGroup(l) => &l.bounds,
+        Layer::VectorNetwork(l) => &l.bounds,
     }
 }
 

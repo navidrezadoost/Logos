@@ -1419,6 +1419,50 @@ fn layer_to_js_object(layer: &Layer, ctx: &mut Context) -> boa_engine::JsObject 
                     boa_engine::property::Attribute::all(),
                 );
         }
+        Layer::Line(l) => {
+            let b = l.bounds();
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("line")), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(b.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(b.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(b.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(b.height as f64), boa_engine::property::Attribute::all());
+        }
+        Layer::Polygon(p) => {
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("polygon")), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(p.bounds.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(p.bounds.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(p.bounds.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(p.bounds.height as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("sides"), JsValue::new(p.sides as i32), boa_engine::property::Attribute::all());
+        }
+        Layer::Star(s) => {
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("star")), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(s.bounds.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(s.bounds.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(s.bounds.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(s.bounds.height as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("points"), JsValue::new(s.points as i32), boa_engine::property::Attribute::all());
+        }
+        Layer::BooleanGroup(bg) => {
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("boolean_group")), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(bg.bounds.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(bg.bounds.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(bg.bounds.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(bg.bounds.height as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("children"), JsValue::new(bg.children.len() as i32), boa_engine::property::Attribute::all());
+        }
+        Layer::VectorNetwork(vn) => {
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("vector_network")), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(vn.bounds.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(vn.bounds.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(vn.bounds.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(vn.bounds.height as f64), boa_engine::property::Attribute::all());
+        }
     }
 
     builder.build()

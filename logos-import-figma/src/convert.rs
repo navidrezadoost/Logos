@@ -244,6 +244,8 @@ impl FigmaConverter {
         RectLayer {
             id: self.make_uuid(&node.base.id),
             bounds: self.convert_bounds(node),
+            corner_radius: 0.0,
+            corner_smoothing: 0.0,
         }
     }
 
