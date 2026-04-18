@@ -38,6 +38,8 @@ pub mod moderation;
 pub mod store;
 pub mod templates;
 pub mod sqlite;
+pub mod certification;
+pub mod versioning;
 
 pub use publishers::{PublisherRecord, PublisherRepo, PublisherStatus};
 pub use plugins::{PluginRecord, PluginRepo, PluginVersion, SubmissionStatus};
@@ -46,6 +48,8 @@ pub use analytics::{AnalyticsEvent, AnalyticsRepo, EventType, DownloadStats};
 pub use moderation::{ModerationAction, ModerationItem, ModerationQueue, ModerationStatus};
 pub use store::MarketplaceStore;
 pub use templates::{Template, TemplateCategory, TemplateGallery};
+pub use certification::{BadgeLevel, CertificationRepo, CertificationScore, SandboxResult, compute_score};
+pub use versioning::{SemVer, VersionEntry, VersionRegistry, VersionError};
 pub use sqlite::{
     SqliteConfig, QueryBuilder, SqlValue, MarketplaceQueries,
     SQLITE_SCHEMA, SCHEMA_VERSION,

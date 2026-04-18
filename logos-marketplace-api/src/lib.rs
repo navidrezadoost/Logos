@@ -58,6 +58,7 @@ pub mod request;
 pub mod response;
 pub mod middleware;
 pub mod server;
+pub mod install;
 
 pub use handlers::{PublisherHandlers, PluginHandlers, ReviewHandlers, ModerationHandlers, TemplateHandlers};
 pub use router::{Route, Router, HttpMethod};
@@ -65,6 +66,7 @@ pub use request::ApiRequest;
 pub use response::{ApiResponse, StatusCode};
 pub use middleware::AuthMiddleware;
 pub use server::MarketplaceServer;
+pub use install::{InstallHandlers, InstallRecord, InstallRepo};
 
 /// API errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
