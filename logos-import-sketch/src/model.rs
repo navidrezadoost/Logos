@@ -32,6 +32,22 @@ pub struct SketchLayer {
     pub opacity: f64,
 }
 
+impl Default for SketchLayer {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            class: "rectangle".to_string(),
+            isVisible: true,
+            frame: SketchFrame::default(),
+            layers: Vec::new(),
+            attributed_string: None,
+            rotation: 0.0,
+            opacity: 1.0,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }

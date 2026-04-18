@@ -35,6 +35,23 @@ pub struct XdNode {
     pub children: Vec<XdNode>,
 }
 
+impl Default for XdNode {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            node_type: "shape".to_string(),
+            shape_type: String::new(),
+            transform: XdTransform::default(),
+            bounds: XdBounds { x: 0.0, y: 0.0, width: 100.0, height: 100.0 },
+            text_content: String::new(),
+            visible: true,
+            opacity: 1.0,
+            children: Vec::new(),
+        }
+    }
+}
+
 fn default_visible() -> bool {
     true
 }

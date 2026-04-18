@@ -16,6 +16,7 @@ members = [
     "logos-import-pdf",
     "logos-import-xd",
     "logos-import-canva",
+    "logos-migrate",
     "logos-marketplace-auth",
     "logos-marketplace-db",
     "logos-marketplace-api",
