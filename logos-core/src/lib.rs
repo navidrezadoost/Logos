@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 pub mod container;
+pub mod hierarchy;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DocumentMetadata {
@@ -346,6 +347,25 @@ impl Document {
 
     /// Adds a layer to the root page. Thread-safe.
     pub fn add_layer(&self, layer: Layer) -> Result<(), String> {
+        let mut page = self.root.write().map_err(|e| e.to_string())?;
+        page.layers.push(layer);
+        Ok(())
+    }
+
+    /// Adds a layer to the root page, enforcing `WorkspaceMode` hierarchy rules.
+    ///
+    /// `parent` is the container that will hold the new layer. Pass
+    /// `ContainerKind::Root` when placing directly on the page.
+    ///
+    /// Returns `Err` if the placement violates the current mode or universal
+    /// structural constraints.
+    pub fn add_layer_validated(
+        &self,
+        layer: Layer,
+        parent: hierarchy::ContainerKind,
+    ) -> Result<(), String> {
+        hierarchy::validate_add_layer(self.doc_mode.mode, parent, &layer)
+            .map_err(|e| e.to_string())?;
         let mut page = self.root.write().map_err(|e| e.to_string())?;
         page.layers.push(layer);
         Ok(())

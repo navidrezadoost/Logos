@@ -49,6 +49,23 @@ pub enum TriggerKind {
     OnScroll,
     /// Double click / double tap.
     OnDoubleClick,
+    /// Mouse / pointer button pressed (not yet released).
+    MouseDown,
+    /// Mouse / pointer button released.
+    MouseUp,
+    /// Time-based trigger that fires after the layer is visible for `delay_ms`.
+    ///
+    /// Distinct from `OnDelay` to allow both an initial delay and a repeat delay
+    /// on the same interaction target.
+    AfterDelay {
+        /// Milliseconds to wait before firing.
+        delay_ms: u64,
+    },
+    /// Gamepad / controller button press.
+    Gamepad {
+        /// Platform-agnostic button label (e.g. `"A"`, `"B"`, `"DPad_Up"`).
+        button: String,
+    },
 }
 
 /// Cardinal swipe direction.
@@ -385,5 +402,162 @@ mod tests {
         } else {
             panic!("wrong variant");
         }
+    }
+
+    // ─── New trigger variants (Phase 1) ─────────────────────────────
+
+    // TRIG-01: MouseDown trigger can be created and matched.
+    #[test]
+    fn trig_01_mouse_down_creation() {
+        let t = Trigger::new(TriggerKind::MouseDown, Action::GoBack);
+        assert_eq!(t.kind, TriggerKind::MouseDown);
+        assert!(t.enabled);
+    }
+
+    // TRIG-02: MouseUp trigger can be created and matched.
+    #[test]
+    fn trig_02_mouse_up_creation() {
+        let t = Trigger::new(TriggerKind::MouseUp, Action::GoBack);
+        assert_eq!(t.kind, TriggerKind::MouseUp);
+        assert!(t.enabled);
+    }
+
+    // TRIG-03: AfterDelay stores delay_ms correctly.
+    #[test]
+    fn trig_03_after_delay_stores_delay() {
+        let t = Trigger::new(TriggerKind::AfterDelay { delay_ms: 2000 }, Action::GoBack);
+        if let TriggerKind::AfterDelay { delay_ms } = t.kind {
+            assert_eq!(delay_ms, 2000);
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    // TRIG-04: Gamepad stores button label correctly.
+    #[test]
+    fn trig_04_gamepad_stores_button() {
+        let t = Trigger::new(TriggerKind::Gamepad { button: "A".into() }, Action::GoBack);
+        if let TriggerKind::Gamepad { button } = &t.kind {
+            assert_eq!(button, "A");
+        } else {
+            panic!("wrong variant");
+        }
+    }
+
+    // TRIG-05: MouseDown can be matched on an InteractionTarget.
+    #[test]
+    fn trig_05_mouse_down_matching() {
+        let layer = Uuid::new_v4();
+        let target = InteractionTarget::new(layer)
+            .with_trigger(Trigger::new(TriggerKind::MouseDown, Action::GoBack));
+        assert_eq!(target.matching_triggers(&TriggerKind::MouseDown).len(), 1);
+        assert_eq!(target.matching_triggers(&TriggerKind::MouseUp).len(), 0);
+    }
+
+    // TRIG-06: MouseUp can be matched on an InteractionTarget.
+    #[test]
+    fn trig_06_mouse_up_matching() {
+        let layer = Uuid::new_v4();
+        let target = InteractionTarget::new(layer)
+            .with_trigger(Trigger::new(TriggerKind::MouseUp, Action::GoBack));
+        assert_eq!(target.matching_triggers(&TriggerKind::MouseUp).len(), 1);
+    }
+
+    // TRIG-07: AfterDelay with different delay_ms values are distinct.
+    #[test]
+    fn trig_07_after_delay_distinct_values() {
+        let k1 = TriggerKind::AfterDelay { delay_ms: 500 };
+        let k2 = TriggerKind::AfterDelay { delay_ms: 1000 };
+        assert_ne!(k1, k2);
+    }
+
+    // TRIG-08: Gamepad with different buttons are distinct.
+    #[test]
+    fn trig_08_gamepad_distinct_buttons() {
+        let ka = TriggerKind::Gamepad { button: "A".into() };
+        let kb = TriggerKind::Gamepad { button: "B".into() };
+        assert_ne!(ka, kb);
+    }
+
+    // TRIG-09: MouseDown and MouseUp are distinct kinds.
+    #[test]
+    fn trig_09_mouse_down_up_distinct() {
+        assert_ne!(TriggerKind::MouseDown, TriggerKind::MouseUp);
+    }
+
+    // TRIG-10: AfterDelay serde roundtrip.
+    #[test]
+    fn trig_10_after_delay_serde_roundtrip() {
+        let k = TriggerKind::AfterDelay { delay_ms: 750 };
+        let json = serde_json::to_string(&k).unwrap();
+        let back: TriggerKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, k);
+    }
+
+    // TRIG-11: Gamepad serde roundtrip.
+    #[test]
+    fn trig_11_gamepad_serde_roundtrip() {
+        let k = TriggerKind::Gamepad { button: "DPad_Up".into() };
+        let json = serde_json::to_string(&k).unwrap();
+        let back: TriggerKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, k);
+    }
+
+    // TRIG-12: MouseDown serde roundtrip.
+    #[test]
+    fn trig_12_mouse_down_serde_roundtrip() {
+        let k = TriggerKind::MouseDown;
+        let json = serde_json::to_string(&k).unwrap();
+        let back: TriggerKind = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, k);
+    }
+
+    // TRIG-13: Disabled AfterDelay is not matched.
+    #[test]
+    fn trig_13_disabled_after_delay_not_matched() {
+        let layer = Uuid::new_v4();
+        let target = InteractionTarget::new(layer)
+            .with_trigger(
+                Trigger::new(TriggerKind::AfterDelay { delay_ms: 500 }, Action::GoBack)
+                    .disabled(),
+            );
+        assert_eq!(
+            target.matching_triggers(&TriggerKind::AfterDelay { delay_ms: 500 }).len(),
+            0
+        );
+    }
+
+    // TRIG-14: All four new triggers can coexist on one InteractionTarget.
+    #[test]
+    fn trig_14_all_new_triggers_on_target() {
+        let layer = Uuid::new_v4();
+        let target = InteractionTarget::new(layer)
+            .with_trigger(Trigger::new(TriggerKind::MouseDown, Action::GoBack))
+            .with_trigger(Trigger::new(TriggerKind::MouseUp, Action::GoBack))
+            .with_trigger(Trigger::new(TriggerKind::AfterDelay { delay_ms: 300 }, Action::GoBack))
+            .with_trigger(Trigger::new(TriggerKind::Gamepad { button: "X".into() }, Action::GoBack));
+        assert_eq!(target.active_trigger_count(), 4);
+    }
+
+    // TRIG-15: Trigger kind list includes all 14 variants.
+    #[test]
+    fn trig_15_total_trigger_kind_count() {
+        let kinds: Vec<TriggerKind> = vec![
+            TriggerKind::OnClick,
+            TriggerKind::OnHoverEnter,
+            TriggerKind::OnHoverExit,
+            TriggerKind::OnDrag { threshold_px: 10.0 },
+            TriggerKind::OnDelay { delay_ms: 500 },
+            TriggerKind::OnSwipe { direction: SwipeDirection::Left, min_velocity: 100.0 },
+            TriggerKind::OnLongPress { duration_ms: 800 },
+            TriggerKind::OnKeyPress { key: "Space".into() },
+            TriggerKind::OnScroll,
+            TriggerKind::OnDoubleClick,
+            TriggerKind::MouseDown,
+            TriggerKind::MouseUp,
+            TriggerKind::AfterDelay { delay_ms: 1000 },
+            TriggerKind::Gamepad { button: "Start".into() },
+        ];
+        assert_eq!(kinds.len(), 14);
     }
 }
