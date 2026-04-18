@@ -17,6 +17,7 @@ pub mod version;
 pub mod registry;
 pub mod rollback;
 pub mod diff;
+pub mod storage;
 
 // ── Flat re-exports ───────────────────────────────────────────────────────────
 
@@ -26,3 +27,4 @@ pub use rollback::{
     RollbackManager, RollbackPolicy, RollbackRequest, RollbackResult, RollbackStatus,
 };
 pub use diff::{VersionDiff, DiffEntry, ChangeKind};
+pub use storage::{BlobStore, StorageError};
