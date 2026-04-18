@@ -15,6 +15,75 @@ pub struct DocumentMetadata {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SpatialHash {
     pub cell_size: f32,
+    /// Internal buckets: cell key → list of (layer_id, bounds).
+    #[serde(default)]
+    cells: std::collections::HashMap<(i32, i32), Vec<(Uuid, Rect)>>,
+}
+
+impl SpatialHash {
+    pub fn new(cell_size: f32) -> Self {
+        Self { cell_size: cell_size.max(1.0), cells: Default::default() }
+    }
+
+    fn cell_keys(&self, rect: Rect) -> Vec<(i32, i32)> {
+        let min_cx = (rect.x / self.cell_size).floor() as i32;
+        let min_cy = (rect.y / self.cell_size).floor() as i32;
+        let max_cx = ((rect.x + rect.width)  / self.cell_size).floor() as i32;
+        let max_cy = ((rect.y + rect.height) / self.cell_size).floor() as i32;
+        let mut keys = Vec::new();
+        for cx in min_cx..=max_cx {
+            for cy in min_cy..=max_cy {
+                keys.push((cx, cy));
+            }
+        }
+        keys
+    }
+
+    /// Insert a layer into the spatial index.
+    pub fn insert(&mut self, id: Uuid, bounds: Rect) {
+        for key in self.cell_keys(bounds) {
+            self.cells.entry(key).or_default().push((id, bounds));
+        }
+    }
+
+    /// Remove a layer from the spatial index.
+    pub fn remove(&mut self, id: Uuid) {
+        for bucket in self.cells.values_mut() {
+            bucket.retain(|(lid, _)| *lid != id);
+        }
+        self.cells.retain(|_, v| !v.is_empty());
+    }
+
+    /// Return ids of all layers whose bounds intersect `query_rect`.
+    pub fn query(&self, query_rect: Rect) -> Vec<Uuid> {
+        let mut seen = std::collections::HashSet::new();
+        let mut result = Vec::new();
+        for key in self.cell_keys(query_rect) {
+            if let Some(bucket) = self.cells.get(&key) {
+                for (id, bounds) in bucket {
+                    if seen.insert(*id) && rects_intersect(*bounds, query_rect) {
+                        result.push(*id);
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    pub fn entry_count(&self) -> usize {
+        self.cells.values().map(|v| v.len()).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.cells.values().all(|v| v.is_empty())
+    }
+}
+
+fn rects_intersect(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.width
+        && a.x + a.width > b.x
+        && a.y < b.y + b.height
+        && a.y + a.height > b.y
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, Default)]
@@ -237,6 +306,30 @@ impl UndoStack {
     }
 }
 
+// ── Document diff ──────────────────────────────────────────────────────────
+
+/// Describes the structural difference between two snapshots of a `Document`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DocumentPatch {
+    /// IDs present in `after` but not in `before`.
+    pub added: Vec<Uuid>,
+    /// IDs present in `before` but not in `after`.
+    pub removed: Vec<Uuid>,
+    /// IDs whose bounding rectangle changed between snapshots.
+    pub moved: Vec<Uuid>,
+}
+
+impl DocumentPatch {
+    /// Returns `true` when no structural changes were detected.
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.moved.is_empty()
+    }
+    /// Total number of changed layer IDs across all categories.
+    pub fn total_changes(&self) -> usize {
+        self.added.len() + self.removed.len() + self.moved.len()
+    }
+}
+
 // ── Workspace / document mode ───────────────────────────────────────────────
 
 /// Top-level workspace organisation mode.
@@ -320,6 +413,8 @@ pub struct Document {
     /// Currently selected layer IDs.
     #[serde(skip)]
     pub selection: Arc<RwLock<Vec<Uuid>>>,
+    /// Animation clips attached to this document.
+    pub animation_library: crate::animation::AnimationLibrary,
 }
 
 impl Document {
@@ -335,6 +430,7 @@ impl Document {
             },
             doc_mode: DocumentMode::default(),
             selection: Arc::new(RwLock::new(Vec::new())),
+            animation_library: crate::animation::AnimationLibrary::new(),
         }
     }
 
@@ -403,6 +499,40 @@ impl Document {
     pub fn find_layer_by_id(&self, id: Uuid) -> Result<Option<Layer>, String> {
         let page = self.root.read().map_err(|e| e.to_string())?;
         Ok(page.layers.iter().find(|l| l.id() == id).cloned())
+    }
+
+    /// Compute the structural diff between `self` (before) and `other` (after).
+    ///
+    /// Returns a [`DocumentPatch`] indicating which layer IDs were added,
+    /// removed, or moved (bounding-rect changed by more than 0.5 units).
+    pub fn diff(&self, other: &Document) -> Result<DocumentPatch, String> {
+        let before_page = self.root.read().map_err(|e| e.to_string())?;
+        let after_page  = other.root.read().map_err(|e| e.to_string())?;
+
+        let before_map: std::collections::HashMap<Uuid, Rect> =
+            before_page.layers.iter().map(|l| (l.id(), l.bounds())).collect();
+        let after_map: std::collections::HashMap<Uuid, Rect> =
+            after_page.layers.iter().map(|l| (l.id(), l.bounds())).collect();
+
+        let added: Vec<Uuid> = after_map.keys()
+            .filter(|id| !before_map.contains_key(id))
+            .copied().collect();
+        let removed: Vec<Uuid> = before_map.keys()
+            .filter(|id| !after_map.contains_key(id))
+            .copied().collect();
+        let moved: Vec<Uuid> = before_map.iter()
+            .filter_map(|(id, br)| {
+                after_map.get(id).and_then(|ar| {
+                    let changed = (ar.x - br.x).abs() > 0.5
+                        || (ar.y - br.y).abs() > 0.5
+                        || (ar.width - br.width).abs() > 0.5
+                        || (ar.height - br.height).abs() > 0.5;
+                    if changed { Some(*id) } else { None }
+                })
+            })
+            .collect();
+
+        Ok(DocumentPatch { added, removed, moved })
     }
 }
 
