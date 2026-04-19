@@ -574,6 +574,10 @@ pub enum Layer {
     Star(StarLayer),
     BooleanGroup(BooleanGroupLayer),
     VectorNetwork(VectorNetworkLayer),
+    // ── Multimedia layer types ────────────────────────────────────────────────
+    Image(ImageLayer),
+    Audio(AudioLayer),
+    Video(VideoLayer),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -882,6 +886,88 @@ impl VectorNetworkLayer {
     }
 }
 
+// ── Multimedia Layer Types ────────────────────────────────────────────────────
+
+/// An image embedded in the canvas.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ImageLayer {
+    pub id: Uuid,
+    pub bounds: Rect,
+    pub path: std::path::PathBuf,
+    #[serde(default)]
+    pub crop_rect: Option<Rect>,
+    #[serde(default)]
+    pub rotation: f32,
+}
+
+impl ImageLayer {
+    pub fn new(path: std::path::PathBuf, x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { id: Uuid::new_v4(), bounds: Rect { x, y, width, height }, path, crop_rect: None, rotation: 0.0 }
+    }
+    pub fn with_crop(mut self, crop: Rect) -> Self { self.crop_rect = Some(crop); self }
+    pub fn with_rotation(mut self, degrees: f32) -> Self { self.rotation = degrees; self }
+}
+
+/// An audio track placed in the canvas / timeline.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct AudioLayer {
+    pub id: Uuid,
+    pub bounds: Rect,
+    pub path: std::path::PathBuf,
+    #[serde(default)]
+    pub duration_secs: f64,
+    #[serde(default)]
+    pub autoplay: bool,
+    #[serde(default)]
+    pub loop_playback: bool,
+    #[serde(default = "default_media_volume")]
+    pub volume: f32,
+}
+
+fn default_media_volume() -> f32 { 1.0 }
+
+impl AudioLayer {
+    pub fn new(path: std::path::PathBuf, x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { id: Uuid::new_v4(), bounds: Rect { x, y, width, height }, path, duration_secs: 0.0, autoplay: false, loop_playback: false, volume: 1.0 }
+    }
+    pub fn with_autoplay(mut self) -> Self { self.autoplay = true; self }
+    pub fn with_loop(mut self) -> Self { self.loop_playback = true; self }
+    pub fn with_volume(mut self, v: f32) -> Self { self.volume = v.clamp(0.0, 1.0); self }
+    pub fn with_duration(mut self, secs: f64) -> Self { self.duration_secs = secs; self }
+}
+
+/// A video track placed in the canvas / prototype.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct VideoLayer {
+    pub id: Uuid,
+    pub bounds: Rect,
+    pub path: std::path::PathBuf,
+    #[serde(default)]
+    pub duration_secs: f64,
+    #[serde(default)]
+    pub autoplay: bool,
+    #[serde(default)]
+    pub loop_playback: bool,
+    #[serde(default = "default_media_volume")]
+    pub volume: f32,
+    #[serde(default)]
+    pub muted: bool,
+    #[serde(default)]
+    pub poster_path: Option<std::path::PathBuf>,
+}
+
+impl VideoLayer {
+    pub fn new(path: std::path::PathBuf, x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { id: Uuid::new_v4(), bounds: Rect { x, y, width, height }, path, duration_secs: 0.0, autoplay: false, loop_playback: false, volume: 1.0, muted: false, poster_path: None }
+    }
+    pub fn with_autoplay(mut self) -> Self { self.autoplay = true; self }
+    pub fn with_loop(mut self) -> Self { self.loop_playback = true; self }
+    pub fn with_muted(mut self) -> Self { self.muted = true; self }
+    pub fn with_volume(mut self, v: f32) -> Self { self.volume = v.clamp(0.0, 1.0); self }
+    pub fn with_duration(mut self, secs: f64) -> Self { self.duration_secs = secs; self }
+    pub fn with_poster(mut self, p: std::path::PathBuf) -> Self { self.poster_path = Some(p); self }
+}
+
 impl Layer {
     pub fn id(&self) -> Uuid {
         match self {
@@ -898,6 +984,9 @@ impl Layer {
             Layer::Star(l) => l.id,
             Layer::BooleanGroup(l) => l.id,
             Layer::VectorNetwork(l) => l.id,
+            Layer::Image(l) => l.id,
+            Layer::Audio(l) => l.id,
+            Layer::Video(l) => l.id,
         }
     }
 
@@ -917,6 +1006,9 @@ impl Layer {
             Layer::Star(l) => l.bounds,
             Layer::BooleanGroup(l) => l.bounds,
             Layer::VectorNetwork(l) => l.bounds,
+            Layer::Image(l) => l.bounds,
+            Layer::Audio(l) => l.bounds,
+            Layer::Video(l) => l.bounds,
         }
     }
 

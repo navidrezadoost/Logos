@@ -53,7 +53,8 @@ impl LayerCategory {
         match layer {
             Layer::Rect(_) | Layer::Ellipse(_) | Layer::Text(_) | Layer::Path(_)
             | Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
-            | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => {
+            | Layer::BooleanGroup(_) | Layer::VectorNetwork(_)
+            | Layer::Image(_) | Layer::Audio(_) | Layer::Video(_) => {
                 LayerCategory::Shape
             }
             Layer::Frame(_) => LayerCategory::Frame,

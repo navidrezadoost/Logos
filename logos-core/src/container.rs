@@ -880,6 +880,9 @@ fn child_bounds(layer: &Layer) -> Rect {
         Layer::Star(l) => l.bounds,
         Layer::BooleanGroup(l) => l.bounds,
         Layer::VectorNetwork(l) => l.bounds,
+        Layer::Image(l) => l.bounds,
+        Layer::Audio(l) => l.bounds,
+        Layer::Video(l) => l.bounds,
     }
 }
 

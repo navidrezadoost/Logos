@@ -2774,25 +2774,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "libxdo"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00333b8756a3d28e78def82067a377de7fa61b24909000aeaa2b446a948d14db"
-dependencies = [
- "libxdo-sys",
-]
-
-[[package]]
-name = "libxdo-sys"
-version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db23b9e7e2b7831bbd8aac0bbeeeb7b68cbebc162b227e7052e8e55829a09212"
-dependencies = [
- "libc",
- "x11",
-]
-
-[[package]]
 name = "libz-sys"
 version = "1.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3057,6 +3038,7 @@ dependencies = [
  "serde",
  "serde_json",
  "taffy",
+ "thiserror 1.0.69",
  "uuid",
  "yrs",
 ]
@@ -3292,6 +3274,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-migrate"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "logos-core",
+ "logos-import-common",
+ "logos-import-figma",
+ "logos-import-sketch",
+ "logos-import-xd",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "logos-multi-agent"
 version = "0.1.0"
 dependencies = [
@@ -3369,6 +3368,7 @@ dependencies = [
  "logos-core",
  "serde",
  "serde_json",
+ "thiserror 1.0.69",
  "uuid",
 ]
 
@@ -3638,7 +3638,6 @@ dependencies = [
  "dpi",
  "gtk",
  "keyboard-types",
- "libxdo",
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",
  "objc2-core-foundation",
@@ -7547,16 +7546,6 @@ name = "writeable"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
-
-[[package]]
-name = "x11"
-version = "2.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "502da5464ccd04011667b11c435cb992822c2c0dbde1770c988480d312a0db2e"
-dependencies = [
- "libc",
- "pkg-config",
-]
 
 [[package]]
 name = "x11-dl"
