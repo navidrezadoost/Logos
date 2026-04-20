@@ -11,6 +11,7 @@ pub mod variants;
 pub mod undo;
 pub mod accessibility;
 pub mod bundle;
+pub mod interaction;
 
 // ── Require desktop-ui feature (GTK / wgpu / winit) ─────────────────────────
 #[cfg(feature = "desktop-ui")]
