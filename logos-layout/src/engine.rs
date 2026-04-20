@@ -331,6 +331,48 @@ impl LayoutEngine {
                 },
                 ..Style::default()
             },
+            Layer::Image(img) => Style {
+                size: Size {
+                    width: Dimension::length(img.bounds.width),
+                    height: Dimension::length(img.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(img.bounds.x),
+                    top: LengthPercentageAuto::length(img.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
+            Layer::Audio(aud) => Style {
+                size: Size {
+                    width: Dimension::length(aud.bounds.width),
+                    height: Dimension::length(aud.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(aud.bounds.x),
+                    top: LengthPercentageAuto::length(aud.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
+            Layer::Video(vid) => Style {
+                size: Size {
+                    width: Dimension::length(vid.bounds.width),
+                    height: Dimension::length(vid.bounds.height),
+                },
+                position: Position::Absolute,
+                inset: taffy::Rect {
+                    left: LengthPercentageAuto::length(vid.bounds.x),
+                    top: LengthPercentageAuto::length(vid.bounds.y),
+                    right: LengthPercentageAuto::auto(),
+                    bottom: LengthPercentageAuto::auto(),
+                },
+                ..Style::default()
+            },
         }
     }
 

@@ -1463,6 +1463,33 @@ fn layer_to_js_object(layer: &Layer, ctx: &mut Context) -> boa_engine::JsObject 
                 .property(JsString::from("width"), JsValue::rational(vn.bounds.width as f64), boa_engine::property::Attribute::all())
                 .property(JsString::from("height"), JsValue::rational(vn.bounds.height as f64), boa_engine::property::Attribute::all());
         }
+        Layer::Image(img) => {
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("image")), boa_engine::property::Attribute::all())
+                .property(JsString::from("path"), JsValue::new(JsString::from(img.path.to_string_lossy().as_ref())), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(img.bounds.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(img.bounds.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(img.bounds.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(img.bounds.height as f64), boa_engine::property::Attribute::all());
+        }
+        Layer::Audio(aud) => {
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("audio")), boa_engine::property::Attribute::all())
+                .property(JsString::from("path"), JsValue::new(JsString::from(aud.path.to_string_lossy().as_ref())), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(aud.bounds.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(aud.bounds.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(aud.bounds.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(aud.bounds.height as f64), boa_engine::property::Attribute::all());
+        }
+        Layer::Video(vid) => {
+            builder
+                .property(JsString::from("type"), JsValue::new(JsString::from("video")), boa_engine::property::Attribute::all())
+                .property(JsString::from("path"), JsValue::new(JsString::from(vid.path.to_string_lossy().as_ref())), boa_engine::property::Attribute::all())
+                .property(JsString::from("x"), JsValue::rational(vid.bounds.x as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("y"), JsValue::rational(vid.bounds.y as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("width"), JsValue::rational(vid.bounds.width as f64), boa_engine::property::Attribute::all())
+                .property(JsString::from("height"), JsValue::rational(vid.bounds.height as f64), boa_engine::property::Attribute::all());
+        }
     }
 
     builder.build()

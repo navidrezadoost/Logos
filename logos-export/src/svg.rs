@@ -198,7 +198,10 @@ impl SvgExporter {
                 | Layer::Polygon(_)
                 | Layer::Star(_)
                 | Layer::BooleanGroup(_)
-                | Layer::VectorNetwork(_) => {
+                | Layer::VectorNetwork(_)
+                | Layer::Image(_)
+                | Layer::Audio(_)
+                | Layer::Video(_) => {
                     // Phase 2 shapes: render as a placeholder rect
                     write!(
                         svg,
@@ -288,6 +291,9 @@ fn default_color_for_layer(layer: &Layer) -> &'static str {
         Layer::Star(_) => "#cc9900",
         Layer::BooleanGroup(_) => "#555555",
         Layer::VectorNetwork(_) => "#1a80e6",
+        Layer::Image(_) => "#42f587",    // Green
+        Layer::Audio(_) => "#f542d4",    // Magenta
+        Layer::Video(_) => "#42d4f5",    // Cyan
     }
 }
 

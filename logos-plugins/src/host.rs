@@ -468,6 +468,30 @@ fn layer_to_plugin_value(layer: &Layer) -> PluginValue {
             map.insert("width".to_string(), PluginValue::Float(vn.bounds.width as f64));
             map.insert("height".to_string(), PluginValue::Float(vn.bounds.height as f64));
         }
+        Layer::Image(img) => {
+            map.insert("type".to_string(), PluginValue::String("image".to_string()));
+            map.insert("path".to_string(), PluginValue::String(img.path.to_string_lossy().to_string()));
+            map.insert("x".to_string(), PluginValue::Float(img.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(img.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(img.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(img.bounds.height as f64));
+        }
+        Layer::Audio(aud) => {
+            map.insert("type".to_string(), PluginValue::String("audio".to_string()));
+            map.insert("path".to_string(), PluginValue::String(aud.path.to_string_lossy().to_string()));
+            map.insert("x".to_string(), PluginValue::Float(aud.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(aud.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(aud.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(aud.bounds.height as f64));
+        }
+        Layer::Video(vid) => {
+            map.insert("type".to_string(), PluginValue::String("video".to_string()));
+            map.insert("path".to_string(), PluginValue::String(vid.path.to_string_lossy().to_string()));
+            map.insert("x".to_string(), PluginValue::Float(vid.bounds.x as f64));
+            map.insert("y".to_string(), PluginValue::Float(vid.bounds.y as f64));
+            map.insert("width".to_string(), PluginValue::Float(vid.bounds.width as f64));
+            map.insert("height".to_string(), PluginValue::Float(vid.bounds.height as f64));
+        }
     }
     PluginValue::Object(map)
 }

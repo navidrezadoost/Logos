@@ -355,7 +355,8 @@ impl PngExporter {
                     // Sections are structural — skip
                 }
                 Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
-                | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => {
+                | Layer::BooleanGroup(_) | Layer::VectorNetwork(_)
+                | Layer::Image(_) | Layer::Audio(_) | Layer::Video(_) => {
                     buf.fill_rect(x, y, lw, lh, color);
                 }
             }
@@ -397,6 +398,9 @@ fn default_raster_color(layer: &Layer) -> Color {
         Layer::Star(_) => Color::from([0.8, 0.6, 0.1, 1.0]),
         Layer::BooleanGroup(_) => Color::from([0.3, 0.3, 0.3, 1.0]),
         Layer::VectorNetwork(_) => Color::from([0.1, 0.5, 0.9, 1.0]),
+        Layer::Image(_) => Color::from([0.26, 0.96, 0.53, 1.0]),  // Green
+        Layer::Audio(_) => Color::from([0.96, 0.26, 0.83, 1.0]),  // Magenta
+        Layer::Video(_) => Color::from([0.26, 0.83, 0.96, 1.0]),  // Cyan
     }
 }
 

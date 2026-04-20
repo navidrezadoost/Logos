@@ -1178,6 +1178,15 @@ fn layer_to_json(layer: &Layer) -> serde_json::Value {
         Layer::VectorNetwork(vn) => {
             serde_json::json!({"type": "vector_network", "id": vn.id.to_string(), "x": vn.bounds.x, "y": vn.bounds.y, "width": vn.bounds.width, "height": vn.bounds.height})
         }
+        Layer::Image(img) => {
+            serde_json::json!({"type": "image", "id": img.id.to_string(), "path": img.path, "x": img.bounds.x, "y": img.bounds.y, "width": img.bounds.width, "height": img.bounds.height})
+        }
+        Layer::Audio(aud) => {
+            serde_json::json!({"type": "audio", "id": aud.id.to_string(), "path": aud.path, "x": aud.bounds.x, "y": aud.bounds.y, "width": aud.bounds.width, "height": aud.bounds.height})
+        }
+        Layer::Video(vid) => {
+            serde_json::json!({"type": "video", "id": vid.id.to_string(), "path": vid.path, "x": vid.bounds.x, "y": vid.bounds.y, "width": vid.bounds.width, "height": vid.bounds.height})
+        }
     }
 }
 

@@ -251,6 +251,9 @@ fn layer_color(layer: &Layer) -> [f32; 4] {
         Layer::Section(_) => [0.0, 0.0, 0.0, 0.0], // Sections are non-renderable
         Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
         | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => COLOR_PATH,
+        Layer::Image(_) => [0.26, 0.96, 0.53, 1.0],  // Green
+        Layer::Audio(_) => [0.96, 0.26, 0.83, 1.0],  // Magenta
+        Layer::Video(_) => [0.26, 0.83, 0.96, 1.0],  // Cyan
     }
 }
 

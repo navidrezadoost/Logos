@@ -220,7 +220,8 @@ impl PdfExporter {
                     // Sections are non-renderable — skip in PDF output
                 }
                 Layer::Line(_) | Layer::Polygon(_) | Layer::Star(_)
-                | Layer::BooleanGroup(_) | Layer::VectorNetwork(_) => {
+                | Layer::BooleanGroup(_) | Layer::VectorNetwork(_)
+                | Layer::Image(_) | Layer::Audio(_) | Layer::Video(_) => {
                     // Render as a filled rect approximation
                     let (r, g, b) = default_pdf_color(item.layer);
                     write!(
@@ -269,6 +270,9 @@ fn default_pdf_color(layer: &Layer) -> (f32, f32, f32) {
         Layer::Star(_) => (0.8, 0.6, 0.1),
         Layer::BooleanGroup(_) => (0.3, 0.3, 0.3),
         Layer::VectorNetwork(_) => (0.1, 0.5, 0.9),
+        Layer::Image(_) => (0.26, 0.96, 0.53),  // Green
+        Layer::Audio(_) => (0.96, 0.26, 0.83),  // Magenta
+        Layer::Video(_) => (0.26, 0.83, 0.96),  // Cyan
     }
 }
 

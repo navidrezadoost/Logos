@@ -99,6 +99,9 @@ impl LayerStyleData {
             Layer::Star(_) => ("star".to_string(), "star".to_string(), None),
             Layer::BooleanGroup(_) => ("boolean_group".to_string(), "boolean_group".to_string(), None),
             Layer::VectorNetwork(_) => ("vector_network".to_string(), "vector_network".to_string(), None),
+            Layer::Image(img) => ("image".to_string(), format!("image_{}", &img.id.to_string()[..8]), None),
+            Layer::Audio(aud) => ("audio".to_string(), format!("audio_{}", &aud.id.to_string()[..8]), None),
+            Layer::Video(vid) => ("video".to_string(), format!("video_{}", &vid.id.to_string()[..8]), None),
         };
 
         Self {

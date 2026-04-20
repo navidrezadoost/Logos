@@ -284,8 +284,9 @@ fn layer_bounds(layer: &Layer) -> &Rect {
         Layer::Polygon(l) => &l.bounds,
         Layer::Star(l) => &l.bounds,
         Layer::BooleanGroup(l) => &l.bounds,
-        Layer::VectorNetwork(l) => &l.bounds,
-    }
+        Layer::VectorNetwork(l) => &l.bounds,        Layer::Image(l) => &l.bounds,
+        Layer::Audio(l) => &l.bounds,
+        Layer::Video(l) => &l.bounds,    }
 }
 
 static ZERO_RECT: Rect = Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 };
