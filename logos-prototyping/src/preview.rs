@@ -140,6 +140,10 @@ pub enum PreviewEvent {
         offset_x: f64,
         offset_y: f64,
     },
+    /// A generic string notification from a new action type.
+    CustomNotification {
+        message: String,
+    },
 }
 
 // ── Preview Session ──────────────────────────────────────────────────
@@ -171,6 +175,8 @@ pub struct PreviewSession {
     pub overlay_stack: OverlayStack,
     /// Accumulated events since last flush.
     events: Vec<PreviewEvent>,
+    /// Runtime variables (name → JSON value).
+    pub variables: HashMap<String, serde_json::Value>,
     /// Current preview time in ms.
     pub time_ms: u64,
     /// Starting screen id.
@@ -192,6 +198,7 @@ impl PreviewSession {
             scroll_states: HashMap::new(),
             overlay_stack: OverlayStack::new(),
             events: Vec::new(),
+            variables: HashMap::new(),
             time_ms: 0,
             start_screen: None,
         }
@@ -487,6 +494,151 @@ impl PreviewSession {
                 for a in actions {
                     self.execute_action(a);
                 }
+            }
+
+            // ── Sound (host handles actual playback) ──────────────────────────
+            Action::PlaySound { .. }
+            | Action::PauseSound { .. }
+            | Action::StopSound { .. }
+            | Action::SetVolume { .. } => {
+                // Preview engine delegates sound to the host; no-op here.
+            }
+
+            // ── Animation ─────────────────────────────────────────────────────
+            Action::StartAnimation { layer_id, animation_name } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("start_animation:{}:{}", layer_id, animation_name),
+                });
+            }
+            Action::StopAnimation { layer_id, animation_name } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("stop_animation:{}:{}", layer_id, animation_name),
+                });
+            }
+            Action::PauseAnimation { layer_id, animation_name } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("pause_animation:{}:{}", layer_id, animation_name),
+                });
+            }
+            Action::ResumeAnimation { layer_id, animation_name } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("resume_animation:{}:{}", layer_id, animation_name),
+                });
+            }
+            Action::SeekAnimation { layer_id, animation_name, time_ms } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("seek_animation:{}:{}:{}", layer_id, animation_name, time_ms),
+                });
+            }
+
+            // ── Layer / Style ─────────────────────────────────────────────────
+            Action::SetVisibility { layer_id, visible } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("set_visibility:{}:{}", layer_id, visible),
+                });
+            }
+            Action::SetOpacity { layer_id, opacity, duration_ms: _ } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("set_opacity:{}:{}", layer_id, opacity),
+                });
+            }
+            Action::AddCssClass { layer_id, class_name } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("add_class:{}:{}", layer_id, class_name),
+                });
+            }
+            Action::RemoveCssClass { layer_id, class_name } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("remove_class:{}:{}", layer_id, class_name),
+                });
+            }
+            Action::ToggleCssClass { layer_id, class_name } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("toggle_class:{}:{}", layer_id, class_name),
+                });
+            }
+            Action::SetStyleProperty { layer_id, property, value, transition_ms: _ } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("set_style:{}:{}:{}", layer_id, property, value),
+                });
+            }
+
+            // ── Navigation / View ─────────────────────────────────────────────
+            Action::ScrollTo { layer_id, behavior: _ } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("scroll_to:{}", layer_id),
+                });
+            }
+            Action::SetFocus { layer_id } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("set_focus:{}", layer_id),
+                });
+            }
+
+            // ── Variable ─────────────────────────────────────────────────────
+            Action::UpdateVariable { name, value } => {
+                self.variables.insert(name, value);
+            }
+            Action::IncrementVariable { name, delta } => {
+                let entry = self.variables.entry(name).or_insert(serde_json::Value::from(0.0));
+                if let Some(n) = entry.as_f64() {
+                    *entry = serde_json::Value::from(n + delta);
+                }
+            }
+            Action::ToggleVariable { name } => {
+                let entry = self.variables.entry(name).or_insert(serde_json::Value::Bool(false));
+                if let serde_json::Value::Bool(b) = entry {
+                    *b = !*b;
+                }
+            }
+
+            // ── Media ─────────────────────────────────────────────────────────
+            Action::PlayMedia { layer_id } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("play_media:{}", layer_id),
+                });
+            }
+            Action::PauseMedia { layer_id } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("pause_media:{}", layer_id),
+                });
+            }
+            Action::StopMedia { layer_id } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("stop_media:{}", layer_id),
+                });
+            }
+            Action::SeekMedia { layer_id, time_seconds } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("seek_media:{}:{}", layer_id, time_seconds),
+                });
+            }
+            Action::SetMute { layer_id, muted } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("set_mute:{}:{}", layer_id, muted),
+                });
+            }
+
+            // ── Communication ────────────────────────────────────────────────
+            Action::EmitCustomEvent { name, payload: _ } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("custom_event:{}", name),
+                });
+            }
+            Action::CopyToClipboard { text } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("copy:{}", text),
+                });
+            }
+            Action::Vibrate { pattern_ms } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("vibrate:{:?}", pattern_ms),
+                });
+            }
+            Action::TrackEvent { category, action, label: _, value: _ } => {
+                self.events.push(PreviewEvent::CustomNotification {
+                    message: format!("track:{}:{}", category, action),
+                });
             }
         }
     }
