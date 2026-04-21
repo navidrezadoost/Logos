@@ -553,6 +553,9 @@ pub struct PresenceRoom {
     idle_fade_start: Duration,
     /// Idle fade-out duration.
     idle_fade_duration: Duration,
+    /// When set, this room is "following" another peer — the local viewport
+    /// should track that peer's cursor position.
+    pub follow_peer_id: Option<Uuid>,
 }
 
 impl PresenceRoom {
@@ -571,6 +574,7 @@ impl PresenceRoom {
             idle_timeout: Duration::from_secs(30),
             idle_fade_start: Duration::from_secs(5),
             idle_fade_duration: Duration::from_secs(2),
+            follow_peer_id: None,
         }
     }
 
@@ -771,7 +775,57 @@ impl PresenceRoom {
         self.local_user_id
     }
 
-    /// Get the local cursor position.
+    // ── Follow-mode ───────────────────────────────────────────────────────────
+
+    /// Start following another peer's cursor.
+    ///
+    /// The caller should poll [`Self::followed_cursor_position`] each frame to
+    /// synchronise the local viewport with the followed peer.
+    ///
+    /// Returns `Err(())` if the target peer is not currently in the room.
+    pub fn start_follow(&mut self, peer_id: Uuid) -> Result<(), ()> {
+        if self.peers.contains_key(&peer_id) {
+            self.follow_peer_id = Some(peer_id);
+            Ok(())
+        } else {
+            Err(())
+        }
+    }
+
+    /// Stop following any peer.
+    pub fn stop_follow(&mut self) {
+        self.follow_peer_id = None;
+    }
+
+    /// Returns the interpolated cursor position of the currently followed peer,
+    /// or `None` if not in follow-mode / the peer has left.
+    pub fn followed_cursor_position(&mut self) -> Option<Vec2> {
+        let pid = self.follow_peer_id?;
+        let peer = match self.peers.get_mut(&pid) {
+            Some(p) => p,
+            None => {
+                // Peer was removed (left) — auto-stop following
+                self.follow_peer_id = None;
+                return None;
+            }
+        };
+        if !peer.active {
+            // Peer left — auto-stop following
+            self.follow_peer_id = None;
+            return None;
+        }
+        Some(peer.interpolated_position())
+    }
+
+    /// Returns `true` if we are currently following someone.
+    pub fn is_following(&self) -> bool {
+        self.follow_peer_id.is_some()
+    }
+
+    /// Returns the [`Uuid`] of the peer being followed, if any.
+    pub fn following_peer(&self) -> Option<Uuid> {
+        self.follow_peer_id
+    }
     pub fn local_cursor(&self) -> Vec2 {
         self.local_cursor
     }
@@ -2043,5 +2097,183 @@ mod tests {
         }
 
         assert_eq!(room.local_page_id(), Some(page_id));
+    }
+
+    // ── Follow-mode tests ────────────────────────────────────────
+
+    // P-01: start_follow on unknown peer returns Err.
+    #[test]
+    fn test_follow_unknown_peer_errors() {
+        let mut room = PresenceRoom::new(Uuid::new_v4());
+        assert!(room.start_follow(Uuid::new_v4()).is_err());
+    }
+
+    // P-02: start_follow on known peer succeeds and sets follow_peer_id.
+    #[test]
+    fn test_follow_known_peer_ok() {
+        let local_id = Uuid::new_v4();
+        let mut room = PresenceRoom::new(local_id);
+        let peer_id  = Uuid::new_v4();
+
+        room.handle_message(&AwarenessMessage::Join {
+            user_id: peer_id,
+            user_name: "Alice".into(),
+            user_color: CursorColor::default(),
+            device_info: None,
+        });
+
+        assert!(room.start_follow(peer_id).is_ok());
+        assert_eq!(room.following_peer(), Some(peer_id));
+        assert!(room.is_following());
+    }
+
+    // P-03: stop_follow clears follow state.
+    #[test]
+    fn test_stop_follow_clears_state() {
+        let local_id = Uuid::new_v4();
+        let mut room = PresenceRoom::new(local_id);
+        let peer_id  = Uuid::new_v4();
+
+        room.handle_message(&AwarenessMessage::Join {
+            user_id: peer_id,
+            user_name: "Alice".into(),
+            user_color: CursorColor::default(),
+            device_info: None,
+        });
+
+        room.start_follow(peer_id).unwrap();
+        room.stop_follow();
+        assert!(!room.is_following());
+        assert_eq!(room.following_peer(), None);
+    }
+
+    // P-04: followed_cursor_position returns the peer's position.
+    #[test]
+    fn test_followed_cursor_position_returns_position() {
+        let local_id = Uuid::new_v4();
+        let mut room = PresenceRoom::new(local_id);
+        let peer_id  = Uuid::new_v4();
+
+        room.handle_message(&AwarenessMessage::Join {
+            user_id: peer_id,
+            user_name: "Alice".into(),
+            user_color: CursorColor::default(),
+            device_info: None,
+        });
+        room.handle_message(&AwarenessMessage::Cursor {
+            user_id: peer_id,
+            position: Vec2::new(123.0, 456.0),
+            timestamp: 1,
+        });
+
+        room.start_follow(peer_id).unwrap();
+        let pos = room.followed_cursor_position();
+        // The interpolated position starts near origin and moves toward target;
+        // what matters is that we get Some (not None).
+        assert!(pos.is_some());
+    }
+
+    // P-05: followed_cursor_position returns None when not following.
+    #[test]
+    fn test_followed_cursor_position_none_when_not_following() {
+        let mut room = PresenceRoom::new(Uuid::new_v4());
+        assert!(room.followed_cursor_position().is_none());
+    }
+
+    // P-06: Auto-stops following when peer leaves.
+    #[test]
+    fn test_follow_auto_stops_on_leave() {
+        let local_id = Uuid::new_v4();
+        let mut room = PresenceRoom::new(local_id);
+        let peer_id  = Uuid::new_v4();
+
+        room.handle_message(&AwarenessMessage::Join {
+            user_id: peer_id,
+            user_name: "Alice".into(),
+            user_color: CursorColor::default(),
+            device_info: None,
+        });
+        room.start_follow(peer_id).unwrap();
+
+        // Peer leaves — handle_message should deactivate them
+        room.handle_message(&AwarenessMessage::Leave { user_id: peer_id });
+
+        // Querying followed position should auto-clear follow state
+        let pos = room.followed_cursor_position();
+        assert!(pos.is_none());
+        assert!(!room.is_following());
+    }
+
+    // P-07: Can switch who we are following without stop_follow.
+    #[test]
+    fn test_follow_switch_peer() {
+        let local_id = Uuid::new_v4();
+        let mut room = PresenceRoom::new(local_id);
+        let peer_a   = Uuid::new_v4();
+        let peer_b   = Uuid::new_v4();
+
+        for &pid in &[peer_a, peer_b] {
+            room.handle_message(&AwarenessMessage::Join {
+                user_id: pid,
+                user_name: "Peer".into(),
+                user_color: CursorColor::default(),
+                device_info: None,
+            });
+        }
+
+        room.start_follow(peer_a).unwrap();
+        assert_eq!(room.following_peer(), Some(peer_a));
+
+        room.start_follow(peer_b).unwrap();
+        assert_eq!(room.following_peer(), Some(peer_b));
+    }
+
+    // P-08: is_following is false on fresh room.
+    #[test]
+    fn test_is_following_false_on_new_room() {
+        let room = PresenceRoom::new(Uuid::new_v4());
+        assert!(!room.is_following());
+    }
+
+    // P-09: follow_peer_id field is public and matches following_peer().
+    #[test]
+    fn test_follow_peer_id_field_public() {
+        let local_id = Uuid::new_v4();
+        let mut room = PresenceRoom::new(local_id);
+        let peer_id  = Uuid::new_v4();
+        room.handle_message(&AwarenessMessage::Join {
+            user_id: peer_id,
+            user_name: "A".into(),
+            user_color: CursorColor::default(),
+            device_info: None,
+        });
+        room.start_follow(peer_id).unwrap();
+        assert_eq!(room.follow_peer_id, Some(peer_id));
+    }
+
+    // P-10: Following persists through cursor updates from the same peer.
+    #[test]
+    fn test_follow_persists_through_cursor_updates() {
+        let local_id = Uuid::new_v4();
+        let mut room = PresenceRoom::new(local_id);
+        let peer_id  = Uuid::new_v4();
+
+        room.handle_message(&AwarenessMessage::Join {
+            user_id: peer_id,
+            user_name: "A".into(),
+            user_color: CursorColor::default(),
+            device_info: None,
+        });
+        room.start_follow(peer_id).unwrap();
+
+        for ts in 1u64..5 {
+            room.handle_message(&AwarenessMessage::Cursor {
+                user_id: peer_id,
+                position: Vec2::new(ts as f32 * 10.0, 0.0),
+                timestamp: ts,
+            });
+            assert!(room.is_following(), "Follow should persist after cursor update");
+            assert!(room.followed_cursor_position().is_some());
+        }
     }
 }

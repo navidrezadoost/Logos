@@ -48,6 +48,12 @@ pub mod auth;
 pub mod cluster;
 pub mod encryption;
 pub mod bridge;
+pub mod roles;
+pub mod comments;
+pub mod activity;
+pub mod notifications;
+pub mod handoff;
+pub mod exporter;
 
 // Re-exports for convenience
 pub use protocol::{
@@ -85,3 +91,14 @@ pub use encryption::{
     AuthTag, CryptoError, DocumentCryptoContext, DocumentKey,
     EncryptedPayload, KeyExchangePair, KeyStore, Nonce,
 };
+pub use roles::{Role, Permission, PermissionSet, ProjectMember, MembershipTable, RoleError};
+pub use comments::{Comment, CommentDelta, CommentStore};
+pub use activity::{
+    ActivityEntry, ActivityKind, ActivityLog, ActivityWriter, SearchQuery, RETENTION_MS,
+};
+pub use notifications::{
+    Notification, NotificationKind, NotificationCenter,
+    dispatch_mention_notifications, dispatch_thread_reply_notifications,
+};
+pub use handoff::{Color, Shadow, Typography, AutoLayout, LayoutDirection, LayerInspection};
+pub use exporter::{CodeExporter, ExportFormat};

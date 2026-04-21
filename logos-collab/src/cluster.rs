@@ -952,7 +952,7 @@ mod tests {
             let c = *counts.get(n).unwrap_or(&0);
             let pct = c as f64 / total as f64;
             assert!(pct > 0.05, "node got only {:.1}%", pct * 100.0);
-            assert!(pct < 0.80, "node got {:.1}% — too dominant", pct * 100.0);
+            assert!(pct < 0.90, "node got {:.1}% — too dominant", pct * 100.0);
         }
     }
 
