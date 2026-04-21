@@ -12,6 +12,13 @@ pub mod undo;
 pub mod accessibility;
 pub mod bundle;
 pub mod interaction;
+// ── Desktop client UI state (pure-data, no GTK/wgpu) ─────────────────────────
+pub mod server_connect;
+pub mod login;
+pub mod session_state;
+pub mod company_hub;
+pub mod project_browser;
+pub mod admin_panel;
 
 // ── Require desktop-ui feature (GTK / wgpu / winit) ─────────────────────────
 #[cfg(feature = "desktop-ui")]
