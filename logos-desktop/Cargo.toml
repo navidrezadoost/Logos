@@ -45,7 +45,7 @@ dirs        = "6"
 tempfile    = { version = "3", optional = true }
 
 # desktop-ui feature deps (optional)
-logos-collab           = { version = "0.1.0", path = "../logos-collab",           optional = true }
+logos-collab           = { version = "0.1.0", path = "../logos-collab", features = ["http-client"], optional = true }
 logos-render           = { version = "0.1.0", path = "../logos-render",           optional = true }
 logos-text             = { version = "0.1.0", path = "../logos-text",             optional = true }
 logos-marketplace-auth = { version = "0.1.0", path = "../logos-marketplace-auth", optional = true }
