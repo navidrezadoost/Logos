@@ -3067,6 +3067,7 @@ dependencies = [
  "logos-marketplace-api",
  "logos-marketplace-auth",
  "logos-marketplace-db",
+ "logos-prototyping",
  "logos-render",
  "logos-text",
  "lz4_flex 0.11.5",

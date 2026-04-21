@@ -54,6 +54,8 @@ pub mod activity;
 pub mod notifications;
 pub mod handoff;
 pub mod exporter;
+#[cfg(feature = "stress")]
+pub mod stress;
 
 // Re-exports for convenience
 pub use protocol::{

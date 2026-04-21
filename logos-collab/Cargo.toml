@@ -8,6 +8,9 @@ edition = "2021"
 # Requires libclang/clang (bindgen). Disabled by default so CI
 # without native tooling can still compile and run all tests.
 persistent-storage = ["dep:rocksdb"]
+# Enable the stress-test simulation suite (heavier tokio workloads).
+# Run with: cargo test -p logos-collab --features stress
+stress = []
 
 [dependencies]
 base64 = "0.22.1"
