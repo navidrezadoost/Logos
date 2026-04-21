@@ -54,6 +54,10 @@ pub mod activity;
 pub mod notifications;
 pub mod handoff;
 pub mod exporter;
+pub mod org;
+pub mod project_scope;
+pub mod admin;
+pub mod desktop_sync;
 #[cfg(feature = "stress")]
 pub mod stress;
 

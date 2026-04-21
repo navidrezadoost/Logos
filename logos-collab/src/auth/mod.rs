@@ -37,6 +37,9 @@ pub mod ratelimit;
 pub mod middleware;
 pub mod multilimit;
 pub mod backpressure;
+pub mod user;
+
+pub use user::{User, UserError, UserStore, Session};
 
 pub use token::{TokenEngine, Claims, TokenError};
 pub use ratelimit::{RateLimiter, RateLimitConfig, TokenBucket};
