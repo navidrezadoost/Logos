@@ -59,6 +59,7 @@ pub mod project_scope;
 pub mod admin;
 pub mod desktop_sync;
 pub mod network;
+pub mod http_server;
 #[cfg(feature = "stress")]
 pub mod stress;
 
