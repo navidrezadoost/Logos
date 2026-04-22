@@ -20,6 +20,7 @@ mod axum_router {
         companies::axum_handlers as companies,
         projects::axum_handlers as projects,
         admin::axum_handlers as admin_h,
+        conflicts::axum_handlers as conflicts,
     };
 
     /// Build the full Axum `Router` with all REST endpoints.
@@ -49,6 +50,20 @@ mod axum_router {
             .route("/api/admin/users/:id/grant-admin", post(admin_h::grant_admin))
             .route("/api/admin/users/:id/revoke-admin",post(admin_h::revoke_admin))
             .route("/api/admin/users/:id",     delete(admin_h::delete_user))
+            // ── Conflicts & Sync Status ───────────────────────────────────
+            .route("/api/projects/:project_id/conflicts",
+                   get(conflicts::list_conflicts))
+            .route("/api/conflicts",           post(conflicts::create_conflict))
+            .route("/api/conflicts/:conflict_id",
+                   get(conflicts::get_conflict))
+            .route("/api/conflicts/:conflict_id/review",
+                   post(conflicts::mark_under_review))
+            .route("/api/conflicts/:conflict_id/resolve",
+                   post(conflicts::resolve_conflict))
+            .route("/api/conflicts/:conflict_id/reject",
+                   post(conflicts::reject_conflict))
+            .route("/api/projects/:project_id/sync-status",
+                   get(conflicts::get_sync_status))
             // ── CORS (permissive; tighten in production) ──────────────────
             .layer(CorsLayer::permissive())
             .with_state(state)

@@ -18,6 +18,7 @@ pub mod login;
 pub mod session_state;
 pub mod company_hub;
 pub mod project_browser;
+pub mod conflict_reviewer;
 pub mod admin_panel;
 
 // ── Require desktop-ui feature (GTK / wgpu / winit) ─────────────────────────

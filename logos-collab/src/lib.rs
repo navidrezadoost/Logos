@@ -60,6 +60,9 @@ pub mod admin;
 pub mod desktop_sync;
 pub mod network;
 pub mod http_server;
+pub mod conflict;
+pub mod sync_status;
+pub mod offline_tracker;
 #[cfg(feature = "stress")]
 pub mod stress;
 
@@ -110,3 +113,9 @@ pub use notifications::{
 };
 pub use handoff::{Color, Shadow, Typography, AutoLayout, LayoutDirection, LayerInspection};
 pub use exporter::{CodeExporter, ExportFormat};
+pub use conflict::{
+    ConflictRecord, ConflictStatus, ConflictStore, ConflictError,
+    ElementVersion, ResolutionStrategy,
+};
+pub use sync_status::{SyncState, SyncStatusRecord, SyncStatusStore};
+pub use offline_tracker::{OfflineTracker, LocalEdit, EditType};

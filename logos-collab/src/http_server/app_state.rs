@@ -17,6 +17,8 @@ use crate::admin::AdminEngine;
 use crate::org::CompanyStore;
 use crate::project_scope::ProjectStore;
 use crate::auth::token::TokenEngine;
+use crate::conflict::ConflictStore;
+use crate::sync_status::SyncStatusStore;
 
 // ── AppState ──────────────────────────────────────────────────────────────────
 
@@ -27,6 +29,8 @@ pub struct AppState {
     pub orgs:     Arc<RwLock<CompanyStore>>,
     pub projects: Arc<RwLock<ProjectStore>>,
     pub tokens:   Arc<TokenEngine>,
+    pub conflicts: Arc<RwLock<ConflictStore>>,
+    pub sync_status: Arc<RwLock<SyncStatusStore>>,
     /// Human-readable server name returned by `/api/info`.
     pub server_name: String,
     /// Server version string.
@@ -47,6 +51,8 @@ impl AppState {
             orgs:     Arc::new(RwLock::new(orgs)),
             projects: Arc::new(RwLock::new(projects)),
             tokens:   Arc::new(tokens),
+            conflicts: Arc::new(RwLock::new(ConflictStore::new())),
+            sync_status: Arc::new(RwLock::new(SyncStatusStore::new())),
             server_name: server_name.into(),
             version:     version.into(),
         }

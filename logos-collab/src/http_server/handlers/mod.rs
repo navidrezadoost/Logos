@@ -3,3 +3,4 @@ pub mod auth;
 pub mod companies;
 pub mod projects;
 pub mod admin;
+pub mod conflicts;
