@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logos — Server Running</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f0f13;
+      color: #e8e8f0;
+      font-family: 'Inter', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #18181f;
+      border: 1px solid #2a2a38;
+      border-radius: 16px;
+      padding: 48px 56px;
+      max-width: 560px;
+      text-align: center;
+    }
+    .logo { font-size: 2.8rem; font-weight: 800; letter-spacing: -1px; color: #7c6aff; }
+    .subtitle { margin-top: 8px; color: #888; font-size: 0.95rem; }
+    .badge {
+      display: inline-block;
+      margin-top: 20px;
+      background: #1e2a1e;
+      color: #4ade80;
+      border: 1px solid #2d4d2d;
+      border-radius: 99px;
+      padding: 4px 14px;
+      font-size: 0.82rem;
+      font-family: monospace;
+    }
+    h2 { margin-top: 32px; font-size: 1.1rem; color: #ccc; font-weight: 600; }
+    .info { margin-top: 12px; font-size: 0.88rem; color: #666; line-height: 1.7; }
+    code {
+      background: #222230;
+      color: #a78bfa;
+      border-radius: 6px;
+      padding: 2px 7px;
+      font-family: monospace;
+      font-size: 0.9em;
+    }
+    .links { margin-top: 32px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    .links a {
+      background: #7c6aff;
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      padding: 9px 20px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    .links a:hover { background: #6b5ce7; }
+    .links a.outlined {
+      background: transparent;
+      border: 1px solid #2a2a38;
+      color: #ccc;
+    }
+    .links a.outlined:hover { background: #22222e; }
+    .divider { margin: 32px 0; border: none; border-top: 1px solid #1e1e2e; }
+    .step { text-align: left; margin-top: 16px; font-size: 0.88rem; color: #999; }
+    .step span { color: #7c6aff; font-weight: 600; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Logos</div>
+    <div class="subtitle">Collaborative Design Platform</div>
+    <div class="badge">✓ Server is running</div>
+
+    <h2>Frontend not yet available</h2>
+    <p class="info">
+      The REST API and WebSocket server are active. The browser frontend
+      needs to be compiled from the <code>logos-wasm</code> crate first.
+    </p>
+
+    <hr class="divider">
+
+    <div class="step"><span>1.</span>Install Trunk: <code>cargo install trunk</code></div>
+    <div class="step"><span>2.</span>Build: <code>cd logos-wasm &amp;&amp; trunk build --release</code></div>
+    <div class="step"><span>3.</span>Restart: <code>cargo run -p logos-server</code></div>
+    <div class="step"><span>4.</span>Open: <code>http://localhost:8080</code></div>
+
+    <div class="links">
+      <a href="/api/info">API Info</a>
+      <a href="/health">Health</a>
+      <a href="https://github.com/navidrezadoost/Logos" class="outlined">GitHub</a>
+    </div>
+  </div>
+</body>
+</html>

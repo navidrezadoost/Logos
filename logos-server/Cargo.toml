@@ -1,0 +1,33 @@
+[package]
+name = "logos-server"
+version = "3.0.0"
+edition = "2021"
+description = "Self-contained Logos server binary: REST API + WebSocket + static frontend — no Docker required."
+
+[[bin]]
+name = "logos-server"
+path = "src/main.rs"
+
+[dependencies]
+logos-collab  = { path = "../logos-collab", features = ["http-server"] }
+logos-cache   = { path = "../logos-cache" }
+logos-export  = { path = "../logos-export" }
+
+axum          = { version = "0.8" }
+tower         = { version = "0.5" }
+tower-http    = { version = "0.6", features = ["cors", "trace", "fs", "compression-full"] }
+tokio         = { version = "1.49", features = ["full"] }
+serde         = { version = "1",    features = ["derive"] }
+serde_json    = "1"
+toml          = "0.8"
+thiserror     = "2"
+log           = "0.4"
+env_logger    = "0.11"
+uuid          = { version = "1.20", features = ["v4", "serde"] }
+
+# Serve WASM assets embedded in the binary (no external files required in prod)
+rust-embed    = { version = "8", features = ["debug-embed"] }
+mime_guess    = "2"
+
+[dev-dependencies]
+tempfile = "3"

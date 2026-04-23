@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# logos.toml — Logos Server Configuration
+#
+# All values shown are the defaults. You only need to include settings you
+# want to override. Delete this file entirely and logos-server will still
+# start with sensible defaults.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[server]
+# Bind address for the combined REST + WebSocket + static-file server.
+host       = "0.0.0.0"
+port       = 8080
+# Separate port for the CRDT WebSocket sync server (real-time collaboration).
+ws_port    = 8081
+# TLS — set tls = true and provide paths to your certificate and key.
+tls        = false
+# tls_cert = "/etc/logos/cert.pem"
+# tls_key  = "/etc/logos/key.pem"
+# HMAC/session signing key — CHANGE THIS in production!
+secret_key = "change-this-insecure-default-secret-key"
+# Log level: trace | debug | info | warn | error
+log_level  = "info"
+
+# ─────────────────────────────────────────────────────────────────────────────
+[database]
+# PostgreSQL connection string.
+# Logos only requires PostgreSQL — no Redis, Valkey, or any other external
+# service is needed.
+url             = "postgresql://logos:logos@localhost/logos"
+max_connections = 10
+
+# ─────────────────────────────────────────────────────────────────────────────
+[cache]
+# Native in-memory cache (powered by moka — no Redis/Valkey daemon required).
+max_capacity         = 10000   # max key/value entries
+ttl_seconds          = 3600    # general cache TTL (1 hour)
+session_ttl_seconds  = 28800   # session TTL (8 hours)
+
+# ─────────────────────────────────────────────────────────────────────────────
+[export]
+# PDF / PNG export settings.
+png_dpi     = 144           # dots-per-inch for PNG rasterisation
+pdf_quality = "standard"   # "draft" | "standard" | "high"
+# temp_dir = "/tmp/logos-export"  # leave unset to use OS temp directory
+
+# ─────────────────────────────────────────────────────────────────────────────
+[frontend]
+# Public URL shown to clients (used in CORS headers and email links).
+public_url = "http://localhost:8080"
+# Path to compiled frontend assets on disk (for development hot-reload).
+# Leave unset (or comment out) to use assets embedded in the binary.
+# assets_dir = "./logos-wasm/dist"

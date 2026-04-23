@@ -150,7 +150,7 @@ pub mod axum_handlers {
         let conflicts = state.conflicts.read().await;
         let records = conflicts.list_conflicts_for_project(project_id);
 
-        Ok(Json(records.iter().map(|r| r.into()).collect()))
+        Ok(Json(records.iter().map(|r| ConflictResponseBody::from(r.clone())).collect()))
     }
 
     /// POST /api/conflicts — Create a new conflict.
@@ -211,8 +211,8 @@ pub mod axum_handlers {
                 )
             })?;
 
-        let record = conflicts.get_conflict(conflict_id).unwrap();
-        Ok(Json(ConflictResponseBody::from(record)))
+        let record = conflicts.get_conflict(conflict_id).cloned().unwrap();
+        Ok(Json(ConflictResponseBody::from(&record)))
     }
 
     /// GET /api/conflicts/:conflict_id — Get conflict details.
@@ -273,8 +273,8 @@ pub mod axum_handlers {
                 )
             })?;
 
-        let record = conflicts.get_conflict(conflict_id).unwrap();
-        Ok(Json(ConflictResponseBody::from(record)))
+        let record = conflicts.get_conflict(conflict_id).cloned().unwrap();
+        Ok(Json(ConflictResponseBody::from(&record)))
     }
 
     /// POST /api/conflicts/:conflict_id/resolve — Resolve a conflict.
@@ -311,7 +311,7 @@ pub mod axum_handlers {
                 )
             })?;
 
-        let record = conflicts.get_conflict(conflict_id).unwrap();
+        let record = conflicts.get_conflict(conflict_id).cloned().unwrap();
 
         // Update sync status
         drop(conflicts);
@@ -321,7 +321,7 @@ pub mod axum_handlers {
             sync_status.mark_synced(record.element_id, project_id);
         }
 
-        Ok(Json(ConflictResponseBody::from(record)))
+        Ok(Json(ConflictResponseBody::from(&record)))
     }
 
     /// POST /api/conflicts/:conflict_id/reject — Reject a conflict (discard all versions).
@@ -340,7 +340,7 @@ pub mod axum_handlers {
             )
         })?;
 
-        let record = conflicts.get_conflict(conflict_id).unwrap();
+        let record = conflicts.get_conflict(conflict_id).cloned().unwrap();
 
         // Update sync status
         drop(conflicts);
@@ -350,7 +350,7 @@ pub mod axum_handlers {
             sync_status.mark_rejected(record.element_id, project_id, Some("Reviewer rejected all versions".into()));
         }
 
-        Ok(Json(ConflictResponseBody::from(record)))
+        Ok(Json(ConflictResponseBody::from(&record)))
     }
 
     /// GET /api/projects/:project_id/sync-status — Get sync status for project elements.

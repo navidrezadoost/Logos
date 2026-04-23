@@ -13,7 +13,6 @@ pub use axum_impl::AuthUser;
 #[cfg(feature = "http-server")]
 mod axum_impl {
     use axum::{
-        async_trait,
         extract::{FromRequestParts, State},
         http::{request::Parts, StatusCode, HeaderMap},
         Json,
@@ -26,7 +25,6 @@ mod axum_impl {
 
     pub struct AuthUser(pub Uuid);
 
-    #[async_trait]
     impl FromRequestParts<AppState> for AuthUser {
         type Rejection = (StatusCode, Json<ErrorBody>);
 

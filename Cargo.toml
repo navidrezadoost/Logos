@@ -1,5 +1,7 @@
 [workspace]
 members = [
+    "logos-cache",
+    "logos-server",
     "logos-core",
     "logos-render",
     "logos-text",
