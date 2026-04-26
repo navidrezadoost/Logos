@@ -307,12 +307,12 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             }
             // Show element name + WxH px on hover (small tooltip-style label)
             let rec = state.layers.get(&id).unwrap();
-            let label = format!("{}  {:.0} x {:.0} px", rec.name, rec.width, rec.height);
-            let lpos = rect.left_top() + vec2(0.0, -18.0);
+            let label = format!("{} | {:.0} x {:.0} px", rec.name, rec.width, rec.height);
+            let lpos = rect.left_top() + vec2(0.0, -20.0);
             let bg = Color32::from_rgba_unmultiplied(20, 20, 32, 230);
-            let galley = painter.layout_no_wrap(label.clone(), FontId::monospace(10.0), Color32::from_rgb(30, 180, 255));
+            let galley = painter.layout_no_wrap(label.clone(), FontId::proportional(11.0), Color32::from_rgb(30, 180, 255));
             let lsize  = galley.size() + vec2(6.0, 2.0);
-            painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(2.0), bg, Stroke::NONE);
+            painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(3.0), bg, Stroke::NONE);
             painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(30, 180, 255));
         }
 
@@ -333,22 +333,23 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
 
             // Always show WxH px above the selected rect
             let rec = state.layers.get(&id).unwrap();
-            let dim_label = format!("{:.0} x {:.0} px", rec.width, rec.height);
-            let lpos = rect.left_top() + vec2(0.0, -18.0);
+            let dim_text = format!("{:.0} x {:.0} px", rec.width, rec.height);
+            let lpos = rect.left_top() + vec2(0.0, -22.0);
             let bg   = Color32::from_rgba_unmultiplied(20, 20, 32, 220);
-            let galley = painter.layout_no_wrap(dim_label, FontId::monospace(10.0), Color32::from_rgb(133, 96, 255));
-            let lsize  = galley.size() + vec2(6.0, 2.0);
-            painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(2.0), bg, Stroke::NONE);
-            painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(133, 96, 255));
+            let galley = painter.layout_no_wrap(dim_text, FontId::proportional(12.0), Color32::from_rgb(160, 120, 255));
+            let lsize  = galley.size() + vec2(8.0, 4.0);
+            painter.rect(Rect::from_min_size(lpos - vec2(3.0, 2.0), lsize), Rounding::same(4.0), bg, Stroke::new(1.0, Color32::from_rgb(133, 96, 255)));
+            painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(160, 120, 255));
 
-            // Also show x,y position label beside bottom-left handle
+            // Also show x,y position label below the selected rect
             let rec = state.layers.get(&id).unwrap();
-            let pos_label = format!("x {:.0}  y {:.0}", rec.x, rec.y);
-            let plpos = rect.left_bottom() + vec2(0.0, 4.0);
-            let gp = painter.layout_no_wrap(pos_label, FontId::monospace(10.0), Color32::from_gray(160));
-            painter.rect(Rect::from_min_size(plpos - vec2(2.0, 0.0), gp.size() + vec2(6.0, 2.0)),
-                Rounding::same(2.0), bg, Stroke::NONE);
-            painter.galley(plpos + vec2(1.0, 1.0), gp, Color32::from_gray(160));
+            let pos_label = format!("x:{:.0}  y:{:.0}", rec.x, rec.y);
+            let plpos = rect.left_bottom() + vec2(0.0, 6.0);
+            let gp = painter.layout_no_wrap(pos_label, FontId::proportional(11.0), Color32::from_gray(180));
+            let pbg = Color32::from_rgba_unmultiplied(20, 20, 32, 200);
+            painter.rect(Rect::from_min_size(plpos - vec2(3.0, 0.0), gp.size() + vec2(8.0, 4.0)),
+                Rounding::same(3.0), pbg, Stroke::NONE);
+            painter.galley(plpos + vec2(1.0, 1.0), gp, Color32::from_gray(180));
         }
 
         // Frame name + size label — always visible above frames
@@ -804,16 +805,45 @@ fn handle_tool_input(
         })
     };
 
-    // ── Double-click: "enter" a frame to select its child ─────────────────
+    // ── Double-click: enter the selected frame to select its child ─────────────
     if resp.double_clicked_by(PointerButton::Primary) {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
-            let content = state.hit_test_content(wx, wy);
-            if let Some(cid) = content {
-                // Double-click always selects the content layer directly
-                state.select_only(cid);
-            } else if let Some(id) = state.hit_test(wx, wy) {
-                state.select_only(id);
+
+            // Only enter a frame’s child if the selected layer IS that frame.
+            // Otherwise just select whatever is topmost at the click point.
+            let currently_selected_frame: Option<Uuid> = state.selection.first().copied()
+                .filter(|&sid| state.layers.get(&sid)
+                    .map(|r| matches!(r.layer_type, LayerType::Frame))
+                    .unwrap_or(false));
+
+            if let Some(sel_frame_id) = currently_selected_frame {
+                // Check if the double-click is inside the currently selected frame
+                let inside_sel_frame = state.layers.get(&sel_frame_id).map(|r| {
+                    wx >= r.x && wx <= r.x + r.width && wy >= r.y && wy <= r.y + r.height
+                }).unwrap_or(false);
+
+                if inside_sel_frame {
+                    // Enter the frame: select the child content layer
+                    if let Some(cid) = state.hit_test_content(wx, wy) {
+                        state.select_only(cid);
+                    }
+                    // If no content child, stay on the frame
+                } else {
+                    // Double-clicking outside the selected frame: select whatever is there
+                    if let Some(id) = state.hit_test(wx, wy) {
+                        state.select_only(id);
+                    } else {
+                        state.clear_selection();
+                    }
+                }
+            } else {
+                // No frame selected: double-click selects topmost layer
+                if let Some(id) = state.hit_test(wx, wy) {
+                    state.select_only(id);
+                } else {
+                    state.clear_selection();
+                }
             }
         }
     }
@@ -881,10 +911,12 @@ fn handle_tool_input(
                         let content_id = state.hit_test_content(wx, wy);
                         let frame_id   = state.frame_at(wx, wy);
 
-                        // If the click lands directly on an already-selected layer, drag it
-                        // (prevents accidentally entering child-drag when frame is selected)
+                        // If the click lands on an already-selected NON-FRAME layer, drag it
+                        // directly (avoids accidentally re-entering parent/child logic).
+                        // For frames, always allow re-selection of a different frame.
                         let already_selected_hit = state.selection.iter().find(|&&sid| {
                             if let Some(r) = state.layers.get(&sid) {
+                                if matches!(r.layer_type, LayerType::Frame) { return false; }
                                 wx >= r.x && wx <= r.x + r.width && wy >= r.y && wy <= r.y + r.height
                             } else { false }
                         }).copied();

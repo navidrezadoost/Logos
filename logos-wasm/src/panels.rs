@@ -42,6 +42,21 @@ pub fn top_toolbar(ui: &mut Ui, state: &mut EditorState) {
         let grid_label = if state.show_grid { "Grid ON" } else { "Grid OFF" };
         if ui.small_button(grid_label).clicked() { state.show_grid = !state.show_grid; }
 
+        // ── Selection info in toolbar ──────────────────────────────────────
+        if let Some(&sel_id) = state.selection.first() {
+            if let Some(rec) = state.layers.get(&sel_id) {
+                ui.separator();
+                ui.label(RichText::new(format!("W: {:.0} px", rec.width))
+                    .size(12.0).color(Color32::from_rgb(200, 200, 200)));
+                ui.label(RichText::new(format!("H: {:.0} px", rec.height))
+                    .size(12.0).color(Color32::from_rgb(200, 200, 200)));
+                ui.label(RichText::new(format!("X: {:.0}", rec.x))
+                    .size(12.0).color(Color32::from_gray(150)));
+                ui.label(RichText::new(format!("Y: {:.0}", rec.y))
+                    .size(12.0).color(Color32::from_gray(150)));
+            }
+        }
+
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(8.0);
             if ui.small_button("Fit").clicked() {
