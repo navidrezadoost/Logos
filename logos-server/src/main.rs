@@ -103,7 +103,6 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health_handler))
-        .route("/", get(root_handler))
         .merge(api_router)
         .merge(static_router);
 
@@ -154,22 +153,6 @@ fn derive_secret_key(input: &[u8]) -> [u8; 32] {
 
 async fn health_handler() -> impl IntoResponse {
     (StatusCode::OK, "OK")
-}
-
-async fn root_handler() -> impl IntoResponse {
-    // Serve the embedded index.html when the WASM frontend has been compiled,
-    // otherwise show the welcome/instructions page.
-    use crate::static_files::EmbeddedAssets;
-    use axum::http::{header, HeaderValue};
-    if let Some(f) = EmbeddedAssets::get("index.html") {
-        (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8")),
-             (header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-store, must-revalidate"))],
-            f.data.to_vec(),
-        ).into_response()
-    } else {
-        Html(include_str!("welcome.html")).into_response()
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

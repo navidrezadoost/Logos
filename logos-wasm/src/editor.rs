@@ -17,24 +17,46 @@ const TOOLBAR_H: f32 = 40.0;
 
 pub struct LogosEditor {
     pub state: EditorState,
+    /// Id of layer being right-clicked (for canvas context menu)
+    ctx_menu_layer: Option<uuid::Uuid>,
 }
 
 impl LogosEditor {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self { state: EditorState::new() }
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        // Configure visuals once at startup
+        let mut visuals = Visuals::dark();
+        visuals.panel_fill        = Color32::from_rgb(30, 30, 38);
+        visuals.window_fill       = Color32::from_rgb(24, 24, 30);
+        visuals.override_text_color = Some(Color32::from_gray(220));
+        cc.egui_ctx.set_visuals(visuals);
+
+        // Ensure a legible font size across all widgets
+        let mut style = (*cc.egui_ctx.style()).clone();
+        style.text_styles.insert(
+            TextStyle::Body,
+            FontId::new(13.0, FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            TextStyle::Button,
+            FontId::new(13.0, FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            TextStyle::Small,
+            FontId::new(11.0, FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            TextStyle::Heading,
+            FontId::new(15.0, FontFamily::Proportional),
+        );
+        cc.egui_ctx.set_style(style);
+
+        Self { state: EditorState::new(), ctx_menu_layer: None }
     }
 }
 
 impl eframe::App for LogosEditor {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         let state = &mut self.state;
-
-        // ─── Dark theme ────────────────────────────────────────────────────
-        ctx.set_visuals(Visuals::dark());
-        let mut style = (*ctx.style()).clone();
-        style.visuals.panel_fill = Color32::from_rgb(30, 30, 38);
-        style.visuals.window_fill = Color32::from_rgb(24, 24, 30);
-        ctx.set_style(style);
 
         // ─── Global keyboard shortcuts ─────────────────────────────────────
         ctx.input(|i| {
@@ -81,14 +103,14 @@ impl eframe::App for LogosEditor {
         CentralPanel::default()
             .frame(Frame::none().fill(Color32::from_rgb(18, 18, 24)))
             .show(ctx, |ui| {
-                canvas_panel(ui, state);
+                canvas_panel(ui, state, &mut self.ctx_menu_layer);
             });
     }
 }
 
 // ── Canvas panel ─────────────────────────────────────────────────────────────
 
-fn canvas_panel(ui: &mut Ui, state: &mut EditorState) {
+fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Option<uuid::Uuid>) {
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let origin = resp.rect.min;
 
@@ -208,7 +230,66 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ── Tool interactions ─────────────────────────────────────────────────
-    handle_tool_input(ui, &resp, &painter, origin, state);
+    handle_tool_input(ui, &resp, &painter, origin, state, ctx_menu_layer);
+
+    // ── Right-click context menu on canvas ────────────────────────────────
+    resp.context_menu(|ui| {
+        ui.set_min_width(160.0);
+        if let Some(id) = *ctx_menu_layer {
+            let name = state.layers.get(&id).map(|r| r.name.clone()).unwrap_or_default();
+            ui.label(RichText::new(&name).strong());
+            ui.separator();
+            if ui.button("Select").clicked() {
+                state.select_only(id);
+                ui.close_menu();
+            }
+            if ui.button("Duplicate").clicked() {
+                state.select_only(id);
+                state.duplicate_selected();
+                ui.close_menu();
+            }
+            if ui.button("Delete").clicked() {
+                state.remove_layer(id);
+                *ctx_menu_layer = None;
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui.button("Bring to Front").clicked() {
+                let page = &mut state.pages[state.active_page];
+                if let Some(pos) = page.layers.iter().position(|&x| x == id) {
+                    page.layers.remove(pos);
+                    page.layers.push(id);
+                }
+                ui.close_menu();
+            }
+            if ui.button("Send to Back").clicked() {
+                let page = &mut state.pages[state.active_page];
+                if let Some(pos) = page.layers.iter().position(|&x| x == id) {
+                    page.layers.remove(pos);
+                    page.layers.insert(0, id);
+                }
+                ui.close_menu();
+            }
+        } else {
+            if ui.button("Paste").clicked() { ui.close_menu(); }
+            ui.separator();
+            if ui.button("Add Rectangle").clicked() {
+                let id = state.add_rect_layer("Rectangle", 100.0, 100.0, 120.0, 80.0, [0.4, 0.6, 1.0, 1.0]);
+                state.select_only(id);
+                ui.close_menu();
+            }
+            if ui.button("Add Frame").clicked() {
+                let id = state.add_frame("Frame", 100.0, 100.0, 300.0, 200.0);
+                state.select_only(id);
+                ui.close_menu();
+            }
+            if ui.button("Add Text").clicked() {
+                let id = state.add_text(100.0, 100.0, "Text");
+                state.select_only(id);
+                ui.close_menu();
+            }
+        }
+    });
 
     // ── Status bar overlay ────────────────────────────────────────────────
     if let Some(mp) = ui.input(|i| i.pointer.hover_pos()) {
@@ -289,6 +370,7 @@ fn handle_tool_input(
     _painter: &Painter,
     origin: Pos2,
     state: &mut EditorState,
+    ctx_menu_layer: &mut Option<uuid::Uuid>,
 ) {
     use crate::state::ResizeHandle;
 
@@ -352,18 +434,19 @@ fn handle_tool_input(
                         }
                     }
 
-                    if let Some((id, handle)) = found_handle {
-                        let rec = &state.layers[&id];
+                    if let Some(id) = found_handle {
+                        let rec = &state.layers[&id.0];
                         state.drag.active        = true;
-                        state.drag.layer_id      = Some(id);
+                        state.drag.layer_id      = Some(id.0);
                         state.drag.origin        = pos2(wx, wy);
                         state.drag.layer_start   = pos2(rec.x, rec.y);
                         state.drag.layer_size    = vec2(rec.width, rec.height);
-                        state.drag.resize_handle = Some(handle);
+                        state.drag.resize_handle = Some(id.1);
                     } else {
                         // 2. Check if pressing on a layer
                         if let Some(id) = state.hit_test(wx, wy) {
-                            if ui.input(|i| i.modifiers.shift) {
+                            let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
+                            if multi {
                                 state.toggle_select(id);
                             } else if !state.is_selected(id) {
                                 state.select_only(id);
@@ -497,6 +580,17 @@ fn handle_tool_input(
             }
         }
         state.drag.active = false;
+    }
+
+    // ── Right-click: record which layer is under cursor for context menu ──
+    if resp.secondary_clicked() {
+        if let Some(mp) = pointer.interact_pos() {
+            let (wx, wy) = to_world(mp, state);
+            *ctx_menu_layer = state.hit_test(wx, wy);
+            if let Some(id) = *ctx_menu_layer {
+                if !state.is_selected(id) { state.select_only(id); }
+            }
+        }
     }
 
     // ── Single click with no drag: deselect ───────────────────────────────

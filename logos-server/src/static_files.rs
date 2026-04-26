@@ -34,12 +34,20 @@ pub struct EmbeddedAssets;
 pub fn build_router(assets_dir: Option<&str>) -> Router {
     if let Some(dir) = assets_dir {
         let dir = dir.to_owned();
-        Router::new().route("/{*path}", get(move |path: Path<String>| {
-            let dir = dir.clone();
-            async move { serve_from_disk(&dir, &path.0).await }
-        }))
+        let dir2 = dir.clone();
+        Router::new()
+            .route("/", get(move || {
+                let dir = dir2.clone();
+                async move { serve_from_disk(&dir, "index.html").await }
+            }))
+            .route("/{*path}", get(move |path: Path<String>| {
+                let dir = dir.clone();
+                async move { serve_from_disk(&dir, &path.0).await }
+            }))
     } else {
-        Router::new().route("/{*path}", get(serve_embedded))
+        Router::new()
+            .route("/", get(serve_embedded_index))
+            .route("/{*path}", get(serve_embedded))
     }
 }
 
@@ -62,9 +70,17 @@ async fn serve_from_disk(dir: &str, path: &str) -> Response {
     }
 }
 
+/// Serve index.html from the embedded assets (root path handler).
+pub async fn serve_embedded_index() -> Response {
+    serve_embedded_path("index.html").await
+}
+
 /// Serve a file from the embedded assets.
 async fn serve_embedded(Path(path): Path<String>) -> Response {
-    let path = path.trim_start_matches('/');
+    serve_embedded_path(path.trim_start_matches('/')).await
+}
+
+async fn serve_embedded_path(path: &str) -> Response {
 
     // Try exact match first, then fall back to `index.html` for SPA routing.
     let (file_path, content) = if let Some(f) = EmbeddedAssets::get(path) {
