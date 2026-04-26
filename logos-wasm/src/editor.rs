@@ -305,9 +305,9 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             } else {
                 painter.rect_stroke(rect.expand(1.0), rounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
             }
-            // Show element name + W×H px on hover (small tooltip-style label)
+            // Show element name + WxH px on hover (small tooltip-style label)
             let rec = state.layers.get(&id).unwrap();
-            let label = format!("{}  {:.0} × {:.0} px", rec.name, rec.width, rec.height);
+            let label = format!("{}  {:.0} x {:.0} px", rec.name, rec.width, rec.height);
             let lpos = rect.left_top() + vec2(0.0, -18.0);
             let bg = Color32::from_rgba_unmultiplied(20, 20, 32, 230);
             let galley = painter.layout_no_wrap(label.clone(), FontId::monospace(10.0), Color32::from_rgb(30, 180, 255));
@@ -331,9 +331,9 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             }
             draw_selection_handles(&painter, rect, rotation, state.zoom);
 
-            // Always show W×H px above the selected rect
+            // Always show WxH px above the selected rect
             let rec = state.layers.get(&id).unwrap();
-            let dim_label = format!("{:.0} × {:.0} px", rec.width, rec.height);
+            let dim_label = format!("{:.0} x {:.0} px", rec.width, rec.height);
             let lpos = rect.left_top() + vec2(0.0, -18.0);
             let bg   = Color32::from_rgba_unmultiplied(20, 20, 32, 220);
             let galley = painter.layout_no_wrap(dim_label, FontId::monospace(10.0), Color32::from_rgb(133, 96, 255));
@@ -354,7 +354,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         // Frame name + size label — always visible above frames
         if state.zoom >= 0.3 && matches!(rec.layer_type, LayerType::Frame) {
             let rec = state.layers.get(&id).unwrap();
-            let frame_label = format!("{}  {:.0} × {:.0}", rec.name, rec.width, rec.height);
+            let frame_label = format!("{}  {:.0} x {:.0}", rec.name, rec.width, rec.height);
             painter.text(
                 rect.left_top() + vec2(0.0, -14.0 * state.zoom.clamp(0.3, 1.0)),
                 Align2::LEFT_BOTTOM,
@@ -684,15 +684,15 @@ fn draw_spacing_annotation(painter: &Painter, sel: Rect, other: Rect) {
         draw_label(painter, pos2(sel.center().x + 12.0, (oy0 + oy1) * 0.5), format!("{:.0}", oy1 - oy0));
     }
 
-    // ── Selected layer W×H label ─────────────────────────────────────────
+    // ── Selected layer WxH label ─────────────────────────────────────────
     draw_label(painter,
         pos2(sel.center().x, sel.min.y - 18.0),
-        format!("{:.0} × {:.0}", sel.width(), sel.height()),
+        format!("{:.0} x {:.0}", sel.width(), sel.height()),
     );
-    // Other layer W×H
+    // Other layer WxH
     draw_label(painter,
         pos2(other.center().x, other.min.y - 18.0),
-        format!("{:.0} × {:.0}", other.width(), other.height()),
+        format!("{:.0} x {:.0}", other.width(), other.height()),
     );
 
     // ── Alignment guides: center lines if close ──────────────────────────
@@ -881,17 +881,22 @@ fn handle_tool_input(
                         let content_id = state.hit_test_content(wx, wy);
                         let frame_id   = state.frame_at(wx, wy);
 
-                        let target_id: Option<Uuid> = if let Some(cid) = content_id {
+                        // If the click lands directly on an already-selected layer, drag it
+                        // (prevents accidentally entering child-drag when frame is selected)
+                        let already_selected_hit = state.selection.iter().find(|&&sid| {
+                            if let Some(r) = state.layers.get(&sid) {
+                                wx >= r.x && wx <= r.x + r.width && wy >= r.y && wy <= r.y + r.height
+                            } else { false }
+                        }).copied();
+
+                        let target_id: Option<Uuid> = if let Some(id) = already_selected_hit {
+                            // Drag the already-selected layer directly
+                            Some(id)
+                        } else if let Some(cid) = content_id {
                             let parent = state.parent_frame_of(cid);
                             if let Some(pfid) = parent {
-                                // Child is inside a frame
-                                if state.selection.first() == Some(&pfid) {
-                                    // Parent frame already selected → select/move child
-                                    Some(cid)
-                                } else {
-                                    // Select parent frame first
-                                    Some(pfid)
-                                }
+                                // Child is inside a frame → select parent frame first
+                                Some(pfid)
                             } else {
                                 // Free content layer
                                 Some(cid)
@@ -1031,6 +1036,8 @@ fn handle_tool_input(
         }
         state.drag.active   = false;
         state.drag.rotating = false;
+        state.drag.layer_id = None;
+        state.drag.resize_handle = None;
     }
 
     // ── Right-click: record which layer is under cursor for context menu ──
@@ -1045,36 +1052,37 @@ fn handle_tool_input(
     }
 
     // ── Single click with no drag: frame-aware selection ─────────────────
-    if resp.clicked_by(PointerButton::Primary) && !state.drag.active {
+    if resp.clicked_by(PointerButton::Primary) && !resp.drag_stopped() {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
+
             let content_id = state.hit_test_content(wx, wy);
             let frame_id   = state.frame_at(wx, wy);
 
-            let target: Option<Uuid> = if let Some(cid) = content_id {
-                let parent = state.parent_frame_of(cid);
-                if let Some(pfid) = parent {
-                    if state.selection.first() == Some(&pfid) {
-                        // Parent is already selected → go into child
-                        Some(cid)
+                let target: Option<Uuid> = if let Some(cid) = content_id {
+                    let parent = state.parent_frame_of(cid);
+                    if let Some(pfid) = parent {
+                        if state.selection.first() == Some(&pfid) {
+                            // Parent is already selected → go into child
+                            Some(cid)
+                        } else {
+                            // Select parent first
+                            Some(pfid)
+                        }
                     } else {
-                        // Select parent first
-                        Some(pfid)
+                        // Free element
+                        Some(cid)
                     }
+                } else if let Some(fid) = frame_id {
+                    Some(fid)
                 } else {
-                    // Free element
-                    Some(cid)
-                }
-            } else if let Some(fid) = frame_id {
-                Some(fid)
-            } else {
-                None
-            };
+                    None
+                };
 
-            match target {
-                Some(id) => { state.select_only(id); }
-                None     => { state.clear_selection(); }
-            }
+                match target {
+                    Some(id) => { state.select_only(id); }
+                    None     => { state.clear_selection(); }
+                }
         }
     }
 }
