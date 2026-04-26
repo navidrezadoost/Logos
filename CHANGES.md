@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-04-26
+
+### Changed – Pure Rust Frontend (Zero Java / Zero ClojureScript)
+
+- **logos-wasm**: Completely replaced the ClojureScript/Java frontend with a pure Rust + egui design editor compiled to WebAssembly via `trunk`. No JVM, no Node.js runtime required.
+- **logos-wasm/src/state.rs**: Full `EditorState` — pages, layers (Rect/Frame/Ellipse/Text/Path/Group), selection, viewport pan/zoom, drag-to-create, drag-to-move, snap-to-grid, undo/redo history, hit-test, demo scene.
+- **logos-wasm/src/tools.rs**: `Tool` enum — Select (V), Frame (F), Rect (R), Ellipse (E), Text (T), Pen (P), Pan (H) — each with icon and keyboard shortcut.
+- **logos-wasm/src/panels.rs**: All UI panels — top toolbar with tool buttons and zoom controls, left layers panel with page tabs and inline rename, right properties panel with transform/fill/stroke/opacity/text-content editors.
+- **logos-wasm/src/editor.rs**: `LogosEditor` implementing `eframe::App` — canvas drawing with `egui::Painter`, selection handles, grid overlay, pan/zoom interactions, status bar, keyboard shortcuts.
+- **logos-wasm/src/lib.rs**: New entry point — `run_app()` looks up `#logos-canvas` from DOM and hands off to `eframe::WebRunner`.
+- **logos-wasm/index.html**: Minimal loader — shows splash screen while WASM initialises, calls `run_app()`, hides splash on success.
+- **logos-wasm/src/app.rs**: Deleted — old WebGPU `LogosApp` replaced entirely.
+
+### Fixed
+- `camera.rs`: Removed dead `logos_render::CameraUniform` import and `uniform()` method (wgpu/logos-render no longer a direct dependency of logos-wasm).
+- egui 0.29 API: `Frame::none()`, `epaint::EllipseShape`, `rect_stroke` 3-argument form, `WebRunner::start(HtmlCanvasElement, …)`.
+
+### Infrastructure
+- **logos-server**: Confirmed serving new WASM artifacts at `http://localhost:8080` with correct `application/wasm` MIME type.
+- **trunk build**: `dist/` — WASM 5.4 MB (debug), JS glue 76 KB; `data-wasm-opt="0"` keeps Binaryen out of the build pipeline.
+
 ## [Unreleased] - 2026-04-18
 
 ### Added – Option C: AI Agent Track
