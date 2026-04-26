@@ -8,4 +8,7 @@ packages:
   - "packages/mousetrap"
   - "packages/tokenscript"
   - "text-editor"
+  - "../plugins/libs/plugins-runtime"
+  - "../plugins/libs/plugin-types"
+  - "../plugins/libs/plugins-styles"
   - "packages/ui"

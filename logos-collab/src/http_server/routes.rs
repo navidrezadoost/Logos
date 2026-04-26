@@ -38,31 +38,31 @@ mod axum_router {
             // ── Companies ─────────────────────────────────────────────────
             .route("/api/companies",   get(companies::list_companies)
                                        .post(companies::create_company))
-            .route("/api/companies/:company_id/members",
+            .route("/api/companies/{company_id}/members",
                    post(companies::add_member))
             // ── Projects ──────────────────────────────────────────────────
-            .route("/api/companies/:company_id/projects",
+            .route("/api/companies/{company_id}/projects",
                    get(projects::list_projects).post(projects::create_project))
             // ── Admin ─────────────────────────────────────────────────────
             .route("/api/admin/users",         get(admin_h::list_users)
                                                .post(admin_h::create_user))
-            .route("/api/admin/users/:id/approve",     post(admin_h::approve_user))
-            .route("/api/admin/users/:id/grant-admin", post(admin_h::grant_admin))
-            .route("/api/admin/users/:id/revoke-admin",post(admin_h::revoke_admin))
-            .route("/api/admin/users/:id",     delete(admin_h::delete_user))
+            .route("/api/admin/users/{id}/approve",     post(admin_h::approve_user))
+            .route("/api/admin/users/{id}/grant-admin", post(admin_h::grant_admin))
+            .route("/api/admin/users/{id}/revoke-admin",post(admin_h::revoke_admin))
+            .route("/api/admin/users/{id}",     delete(admin_h::delete_user))
             // ── Conflicts & Sync Status ───────────────────────────────────
-            .route("/api/projects/:project_id/conflicts",
+            .route("/api/projects/{project_id}/conflicts",
                    get(conflicts::list_conflicts))
             .route("/api/conflicts",           post(conflicts::create_conflict))
-            .route("/api/conflicts/:conflict_id",
+            .route("/api/conflicts/{conflict_id}",
                    get(conflicts::get_conflict))
-            .route("/api/conflicts/:conflict_id/review",
+            .route("/api/conflicts/{conflict_id}/review",
                    post(conflicts::mark_under_review))
-            .route("/api/conflicts/:conflict_id/resolve",
+            .route("/api/conflicts/{conflict_id}/resolve",
                    post(conflicts::resolve_conflict))
-            .route("/api/conflicts/:conflict_id/reject",
+            .route("/api/conflicts/{conflict_id}/reject",
                    post(conflicts::reject_conflict))
-            .route("/api/projects/:project_id/sync-status",
+            .route("/api/projects/{project_id}/sync-status",
                    get(conflicts::get_sync_status))
             // ── CORS (permissive; tighten in production) ──────────────────
             .layer(CorsLayer::permissive())

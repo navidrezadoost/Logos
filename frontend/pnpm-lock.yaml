@@ -13,25 +13,25 @@ importers:
 
   .:
     devDependencies:
-      '@penpot/draft-js':
+      '@logos/draft-js':
         specifier: workspace:./packages/draft-js
         version: link:packages/draft-js
-      '@penpot/mousetrap':
+      '@logos/mousetrap':
         specifier: workspace:./packages/mousetrap
         version: link:packages/mousetrap
-      '@penpot/plugins-runtime':
-        specifier: 1.4.2
-        version: 1.4.2
-      '@penpot/svgo':
-        specifier: penpot/svgo#v3.2
+      '@logos/plugins-runtime':
+        specifier: workspace:../plugins/libs/plugins-runtime
+        version: link:../plugins/libs/plugins-runtime
+      '@logos/svgo':
+        specifier: https://codeload.github.com/penpot/svgo/tar.gz/8c9b0e32e9cb5f106085260bd9375f3c91a5010b
         version: svgo@https://codeload.github.com/penpot/svgo/tar.gz/8c9b0e32e9cb5f106085260bd9375f3c91a5010b
-      '@penpot/text-editor':
+      '@logos/text-editor':
         specifier: workspace:./text-editor
         version: link:text-editor
-      '@penpot/tokenscript':
+      '@logos/tokenscript':
         specifier: workspace:./packages/tokenscript
         version: link:packages/tokenscript
-      '@penpot/ui':
+      '@logos/ui':
         specifier: workspace:./packages/ui
         version: link:packages/ui
       '@playwright/test':
@@ -233,10 +233,26 @@ importers:
         specifier: ^5.1.2
         version: 5.1.2
 
+  ../plugins/libs/plugin-types: {}
+
+  ../plugins/libs/plugins-runtime:
+    dependencies:
+      '@logos/plugin-types':
+        specifier: workspace:../plugin-types
+        version: link:../plugin-types
+      ses:
+        specifier: ^1.1.0
+        version: 1.14.0
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
+
+  ../plugins/libs/plugins-styles: {}
+
   packages/draft-js:
     dependencies:
       draft-js:
-        specifier: penpot/draft-js.git#4a99b2a6020b2af97f6dc5fa1b4275ec16b559a0
+        specifier: https://codeload.github.com/penpot/draft-js/tar.gz/4a99b2a6020b2af97f6dc5fa1b4275ec16b559a0
         version: https://codeload.github.com/penpot/draft-js/tar.gz/4a99b2a6020b2af97f6dc5fa1b4275ec16b559a0(encoding@0.1.13)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       immutable:
         specifier: ^5.1.4
@@ -1254,12 +1270,6 @@ packages:
   '@parcel/watcher@2.5.6':
     resolution: {integrity: sha512-tmmZ3lQxAe/k/+rNnXQRawJ4NjxO2hqiOLTHvWchtGZULp4RyFeh6aU4XdOYBFe2KE1oShQTv4AblOs2iOrNnQ==}
     engines: {node: '>= 10.0.0'}
-
-  '@penpot/plugin-types@1.4.2':
-    resolution: {integrity: sha512-O8wU6RSYE8bIVU7g8cSTYi32ppxs3R13dq7X3Nn9tmDaJjBOKOBpVLuoRPIp3fJC65fv8/7om0sdrtFoL5v19g==}
-
-  '@penpot/plugins-runtime@1.4.2':
-    resolution: {integrity: sha512-y9TDZOnb96JBW9E33dHKpmTMeAPXLtHDIZruUVjtM8hBJWZK7RCv+vAGDGxeoZJC/OB2YAHrCZG+mukePBzcuQ==}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -6293,14 +6303,6 @@ snapshots:
       '@parcel/watcher-win32-ia32': 2.5.6
       '@parcel/watcher-win32-x64': 2.5.6
     optional: true
-
-  '@penpot/plugin-types@1.4.2': {}
-
-  '@penpot/plugins-runtime@1.4.2':
-    dependencies:
-      '@penpot/plugin-types': 1.4.2
-      ses: 1.14.0
-      zod: 3.25.76
 
   '@pkgjs/parseargs@0.11.0':
     optional: true

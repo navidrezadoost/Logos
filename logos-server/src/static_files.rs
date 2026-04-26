@@ -34,12 +34,12 @@ struct EmbeddedAssets;
 pub fn build_router(assets_dir: Option<&str>) -> Router {
     if let Some(dir) = assets_dir {
         let dir = dir.to_owned();
-        Router::new().route("/*path", get(move |path: Path<String>| {
+        Router::new().route("/{*path}", get(move |path: Path<String>| {
             let dir = dir.clone();
             async move { serve_from_disk(&dir, &path.0).await }
         }))
     } else {
-        Router::new().route("/*path", get(serve_embedded))
+        Router::new().route("/{*path}", get(serve_embedded))
     }
 }
 

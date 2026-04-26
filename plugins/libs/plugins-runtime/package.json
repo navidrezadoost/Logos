@@ -2,7 +2,7 @@
   "name": "@logos/plugins-runtime",
   "version": "1.4.2",
   "dependencies": {
-    "@logos/plugin-types": "^1.4.2",
+    "@logos/plugin-types": "workspace:../plugin-types",
     "ses": "^1.1.0",
     "zod": "^3.22.4"
   },

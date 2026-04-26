@@ -339,7 +339,18 @@ impl SyncServer {
                         multi_limiter, drop_counter,
                     ).await
                 {
-                    log::error!("Connection error from {addr}: {e}");
+                    let msg = e.to_string();
+                    // Plain HTTP probes / health checks hitting the WS port are
+                    // expected and not actionable — log at debug, not error.
+                    if msg.contains("No \"Connection: upgrade\"")
+                        || msg.contains("Connection: upgrade")
+                        || msg.contains("invalid HTTP method")
+                        || msg.contains("Handshake not finished")
+                    {
+                        log::debug!("Non-WS probe from {addr}: {e}");
+                    } else {
+                        log::error!("Connection error from {addr}: {e}");
+                    }
                 }
             });
         }
