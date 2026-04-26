@@ -59,26 +59,20 @@
     const loading  = document.getElementById('loading');
     const statusEl = document.getElementById('status-text');
 
-    async function boot() {
+    // Trunk initialises the WASM and fires TrunkApplicationStarted when ready.
+    // We just need to call run_app() from the bindings it exposes.
+    addEventListener('TrunkApplicationStarted', () => {
       try {
-        statusEl.textContent = 'Initialising WebAssembly…';
-        const wasm = await import('./logos_wasm.js');
-        await wasm.default();   // runs #[wasm_bindgen(start)] → init()
-
         statusEl.textContent = 'Starting editor…';
-        wasm.run_app();          // starts eframe render loop
-
-        // Hide splash
+        window.wasmBindings.run_app();
         loading.classList.add('hidden');
         setTimeout(() => loading.style.display = 'none', 500);
-
       } catch (e) {
         console.error('Logos boot failed:', e);
         statusEl.textContent = 'Error: ' + e.message;
         statusEl.style.color = '#ff6b6b';
       }
-    }
-    boot();
+    });
   </script>
 </body>
 </html>
