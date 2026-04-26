@@ -215,8 +215,8 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState) {
         let lx = mp.x - origin.x;
         let ly = mp.y - origin.y;
         let (wx, wy) = state.screen_to_world(lx, ly);
-        let status = format!("{}  {:.0},{:.0}  |  zoom {:.0}%  |  {} layers",
-            state.tool.icon(),
+        let status = format!("[{}]  {:.0},{:.0}  |  zoom {:.0}%  |  {} layers",
+            state.tool.label(),
             wx, wy,
             state.zoom * 100.0,
             state.pages[state.active_page].layers.len(),
@@ -290,51 +290,112 @@ fn handle_tool_input(
     origin: Pos2,
     state: &mut EditorState,
 ) {
+    use crate::state::ResizeHandle;
+
     let pointer = ui.input(|i| i.pointer.clone());
 
-    // ── Left-click / drag ─────────────────────────────────────────────────
+    // ── Helper: get world-space rect of a layer ────────────────────────────
+    let layer_world_rect = |id: uuid::Uuid, s: &EditorState| -> Option<Rect> {
+        s.layers.get(&id).map(|r| {
+            Rect::from_min_size(pos2(r.x, r.y), vec2(r.width, r.height))
+        })
+    };
+
+    // ── Helper: hit-test the 8 resize handles (screen coords) ─────────────
+    let handle_positions = |sr: Rect| -> [(ResizeHandle, Pos2); 8] {
+        [
+            (ResizeHandle::TopLeft,     sr.left_top()),
+            (ResizeHandle::Top,         sr.center_top()),
+            (ResizeHandle::TopRight,    sr.right_top()),
+            (ResizeHandle::Left,        sr.left_center()),
+            (ResizeHandle::Right,       sr.right_center()),
+            (ResizeHandle::BottomLeft,  sr.left_bottom()),
+            (ResizeHandle::Bottom,      sr.center_bottom()),
+            (ResizeHandle::BottomRight, sr.right_bottom()),
+        ]
+    };
+
+    let to_screen = |wx: f32, wy: f32, s: &EditorState| -> Pos2 {
+        let (sx, sy) = s.world_to_screen(wx, wy);
+        pos2(origin.x + sx, origin.y + sy)
+    };
+
+    let to_world = |mp: Pos2, s: &EditorState| -> (f32, f32) {
+        let lx = mp.x - origin.x;
+        let ly = mp.y - origin.y;
+        s.screen_to_world(lx, ly)
+    };
+
+    // ── Left button drag start ─────────────────────────────────────────────
     if resp.drag_started_by(PointerButton::Primary) {
         if let Some(mp) = pointer.press_origin() {
-            let lx = mp.x - origin.x;
-            let ly = mp.y - origin.y;
-            let (wx, wy) = state.screen_to_world(lx, ly);
+            let (wx, wy) = to_world(mp, state);
+            let hit_radius = 6.0 / state.zoom;  // world-space handle hit radius
 
             match state.tool {
                 Tool::Select => {
-                    if let Some(id) = state.hit_test(wx, wy) {
-                        if ui.input(|i| i.modifiers.shift) {
-                            state.toggle_select(id);
-                        } else {
-                            if !state.is_selected(id) { state.select_only(id); }
+                    // 1. Check if pressing a resize handle on the selected layer
+                    let mut found_handle: Option<(uuid::Uuid, ResizeHandle)> = None;
+                    if let Some(&sel_id) = state.selection.first() {
+                        if let Some(wr) = layer_world_rect(sel_id, state) {
+                            let sr = Rect::from_min_size(
+                                to_screen(wr.min.x, wr.min.y, state),
+                                vec2(wr.width() * state.zoom, wr.height() * state.zoom),
+                            );
+                            for (h, spt) in handle_positions(sr) {
+                                // Hit-test in screen space with fixed 8px radius
+                                if spt.distance(mp) <= 8.0 {
+                                    found_handle = Some((sel_id, h));
+                                    break;
+                                }
+                            }
                         }
-                        // Start drag-move
-                        let rec  = &state.layers[&id];
-                        state.drag.active       = true;
-                        state.drag.layer_id     = Some(id);
-                        state.drag.origin       = pos2(wx, wy);
-                        state.drag.layer_start  = pos2(rec.x, rec.y);
-                        state.drag.resize_handle = None;
+                    }
+
+                    if let Some((id, handle)) = found_handle {
+                        let rec = &state.layers[&id];
+                        state.drag.active        = true;
+                        state.drag.layer_id      = Some(id);
+                        state.drag.origin        = pos2(wx, wy);
+                        state.drag.layer_start   = pos2(rec.x, rec.y);
+                        state.drag.layer_size    = vec2(rec.width, rec.height);
+                        state.drag.resize_handle = Some(handle);
                     } else {
-                        state.clear_selection();
-                        state.drag.active = false;
+                        // 2. Check if pressing on a layer
+                        if let Some(id) = state.hit_test(wx, wy) {
+                            if ui.input(|i| i.modifiers.shift) {
+                                state.toggle_select(id);
+                            } else if !state.is_selected(id) {
+                                state.select_only(id);
+                            }
+                            let rec = &state.layers[&id];
+                            state.drag.active        = true;
+                            state.drag.layer_id      = Some(id);
+                            state.drag.origin        = pos2(wx, wy);
+                            state.drag.layer_start   = pos2(rec.x, rec.y);
+                            state.drag.layer_size    = vec2(rec.width, rec.height);
+                            state.drag.resize_handle = None;
+                        } else {
+                            state.clear_selection();
+                            state.drag.active = false;
+                        }
                     }
                 }
                 Tool::Frame | Tool::Rect | Tool::Ellipse | Tool::Text => {
-                    state.drag.active  = true;
-                    state.drag.origin  = pos2(wx, wy);
-                    state.drag.layer_id = None;
+                    state.drag.active    = true;
+                    state.drag.origin    = pos2(wx, wy);
+                    state.drag.layer_id  = None;
+                    state.drag.resize_handle = None;
                 }
                 _ => {}
             }
         }
     }
 
-    // Drag in progress
+    // ── Drag in progress ──────────────────────────────────────────────────
     if resp.dragged_by(PointerButton::Primary) && state.drag.active {
         if let Some(mp) = pointer.hover_pos() {
-            let lx = mp.x - origin.x;
-            let ly = mp.y - origin.y;
-            let (wx, wy) = state.screen_to_world(lx, ly);
+            let (wx, wy) = to_world(mp, state);
 
             match state.tool {
                 Tool::Select => {
@@ -342,22 +403,68 @@ fn handle_tool_input(
                         if state.layers.get(&id).map(|r| !r.locked).unwrap_or(false) {
                             let dx = wx - state.drag.origin.x;
                             let dy = wy - state.drag.origin.y;
-                            let nx = state.drag.layer_start.x + dx;
-                            let ny = state.drag.layer_start.y + dy;
-                            let nx = if state.snap_to_grid {
-                                (nx / state.grid_size).round() * state.grid_size
-                            } else { nx };
-                            let ny = if state.snap_to_grid {
-                                (ny / state.grid_size).round() * state.grid_size
-                            } else { ny };
-                            if let Some(r) = state.layers.get_mut(&id) {
-                                r.x = nx; r.y = ny;
+                            let ox = state.drag.layer_start.x;
+                            let oy = state.drag.layer_start.y;
+                            let ow = state.drag.layer_size.x;
+                            let oh = state.drag.layer_size.y;
+
+                            let snap = |v: f32, g: f32| {
+                                if state.snap_to_grid { (v / g).round() * g } else { v }
+                            };
+                            let g = state.grid_size;
+
+                            if let Some(handle) = state.drag.resize_handle {
+                                // Resize
+                                let (nx, ny, nw, nh) = match handle {
+                                    ResizeHandle::TopLeft => (
+                                        snap(ox + dx, g), snap(oy + dy, g),
+                                        (ow - dx).max(4.0), (oh - dy).max(4.0),
+                                    ),
+                                    ResizeHandle::Top => (
+                                        ox, snap(oy + dy, g),
+                                        ow, (oh - dy).max(4.0),
+                                    ),
+                                    ResizeHandle::TopRight => (
+                                        ox, snap(oy + dy, g),
+                                        (ow + dx).max(4.0), (oh - dy).max(4.0),
+                                    ),
+                                    ResizeHandle::Left => (
+                                        snap(ox + dx, g), oy,
+                                        (ow - dx).max(4.0), oh,
+                                    ),
+                                    ResizeHandle::Right => (
+                                        ox, oy,
+                                        (ow + dx).max(4.0), oh,
+                                    ),
+                                    ResizeHandle::BottomLeft => (
+                                        snap(ox + dx, g), oy,
+                                        (ow - dx).max(4.0), (oh + dy).max(4.0),
+                                    ),
+                                    ResizeHandle::Bottom => (
+                                        ox, oy,
+                                        ow, (oh + dy).max(4.0),
+                                    ),
+                                    ResizeHandle::BottomRight => (
+                                        ox, oy,
+                                        (ow + dx).max(4.0), (oh + dy).max(4.0),
+                                    ),
+                                };
+                                if let Some(r) = state.layers.get_mut(&id) {
+                                    r.x = nx; r.y = ny;
+                                    r.width = nw; r.height = nh;
+                                }
+                            } else {
+                                // Move
+                                let nx = snap(ox + dx, g);
+                                let ny = snap(oy + dy, g);
+                                if let Some(r) = state.layers.get_mut(&id) {
+                                    r.x = nx; r.y = ny;
+                                }
                             }
                         }
                     }
                 }
                 Tool::Frame | Tool::Rect | Tool::Ellipse | Tool::Text => {
-                    // Live preview drawn next frame via drag_preview
                     state.drag.layer_start = pos2(wx, wy);
                 }
                 _ => {}
@@ -365,22 +472,19 @@ fn handle_tool_input(
         }
     }
 
-    // Drag released
+    // ── Drag released ──────────────────────────────────────────────────────
     if resp.drag_stopped() && state.drag.active {
-        if let Some(mp) = pointer.hover_pos() {
-            let lx = mp.x - origin.x;
-            let ly = mp.y - origin.y;
-            let (wx, wy) = state.screen_to_world(lx, ly);
-            let ox = state.drag.origin.x;
-            let oy = state.drag.origin.y;
+        if state.drag.layer_id.is_none() {
+            if let Some(mp) = pointer.hover_pos() {
+                let (wx, wy) = to_world(mp, state);
+                let ox = state.drag.origin.x;
+                let oy = state.drag.origin.y;
 
-            let x = ox.min(wx);
-            let y = oy.min(wy);
-            let w = (wx - ox).abs().max(4.0);
-            let h = (wy - oy).abs().max(4.0);
+                let x = ox.min(wx);
+                let y = oy.min(wy);
+                let w = (wx - ox).abs().max(4.0);
+                let h = (wy - oy).abs().max(4.0);
 
-            if state.drag.layer_id.is_none() {
-                // Create new layer
                 let id = match state.tool {
                     Tool::Frame   => state.add_frame("Frame", x, y, w, h),
                     Tool::Rect    => state.add_rect_layer("Rectangle", x, y, w, h, [0.94, 0.35, 0.35, 1.0]),
@@ -395,11 +499,10 @@ fn handle_tool_input(
         state.drag.active = false;
     }
 
-    // Single click (no drag) in select mode to deselect
+    // ── Single click with no drag: deselect ───────────────────────────────
     if resp.clicked_by(PointerButton::Primary) && !state.drag.active {
         if let Some(mp) = pointer.interact_pos() {
-            let wx = (mp.x - origin.x) / state.zoom + state.pan_x;
-            let wy = (mp.y - origin.y) / state.zoom + state.pan_y;
+            let (wx, wy) = to_world(mp, state);
             if state.hit_test(wx, wy).is_none() && state.tool == Tool::Select {
                 state.clear_selection();
             }

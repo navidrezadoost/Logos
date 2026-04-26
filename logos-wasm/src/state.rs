@@ -88,12 +88,12 @@ impl LayerRecord {
 
     pub fn type_icon(&self) -> &'static str {
         match &self.layer_type {
-            LayerType::Rect     => "▭",
-            LayerType::Frame    => "⬜",
-            LayerType::Text(_)  => "T",
-            LayerType::Ellipse  => "◯",
-            LayerType::Path     => "✏",
-            LayerType::Group    => "▼",
+            LayerType::Rect     => "[R]",
+            LayerType::Frame    => "[F]",
+            LayerType::Text(_)  => "[T]",
+            LayerType::Ellipse  => "(E)",
+            LayerType::Path     => "Pth",
+            LayerType::Group    => "Grp",
         }
     }
 }
@@ -155,10 +155,11 @@ pub struct EditorState {
 
 #[derive(Default, Debug)]
 pub struct DragState {
-    pub active:      bool,
-    pub origin:      egui::Pos2,
-    pub layer_id:    Option<Uuid>,
-    pub layer_start: egui::Pos2,
+    pub active:        bool,
+    pub origin:        egui::Pos2,
+    pub layer_id:      Option<Uuid>,
+    pub layer_start:   egui::Pos2,   // original x,y
+    pub layer_size:    egui::Vec2,   // original w,h (for resize)
     pub resize_handle: Option<ResizeHandle>,
 }
 

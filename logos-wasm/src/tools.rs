@@ -15,13 +15,13 @@ pub enum Tool {
 impl Tool {
     pub fn icon(&self) -> &'static str {
         match self {
-            Tool::Select  => "↖",
-            Tool::Frame   => "⬜",
-            Tool::Rect    => "▭",
-            Tool::Ellipse => "◯",
+            Tool::Select  => "V",
+            Tool::Frame   => "F",
+            Tool::Rect    => "R",
+            Tool::Ellipse => "E",
             Tool::Text    => "T",
-            Tool::Pen     => "✏",
-            Tool::Pan     => "✋",
+            Tool::Pen     => "P",
+            Tool::Pan     => "H",
         }
     }
 

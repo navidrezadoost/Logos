@@ -39,12 +39,12 @@ pub fn top_toolbar(ui: &mut Ui, state: &mut EditorState) {
         ui.separator();
 
         // Grid toggle
-        let grid_label = if state.show_grid { "⊞ Grid" } else { "⊟ Grid" };
+        let grid_label = if state.show_grid { "Grid ON" } else { "Grid OFF" };
         if ui.small_button(grid_label).clicked() { state.show_grid = !state.show_grid; }
 
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.add_space(8.0);
-            if ui.small_button("⟳ Fit").clicked() {
+            if ui.small_button("Fit").clicked() {
                 state.zoom = 1.0; state.pan_x = -60.0; state.pan_y = -60.0;
             }
         });
@@ -74,7 +74,6 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
 
     // Search / filter (placeholder)
     ui.horizontal(|ui| {
-        ui.label("🔍");
         ui.label(RichText::new("Layers").size(12.0).strong());
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             if ui.small_button("+").on_hover_text("Add rectangle").clicked() {
@@ -107,7 +106,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
 
             ui.horizontal(|ui| {
                 // Visibility eye
-                let eye = if visible { "👁" } else { "👁‍🗨" };
+                let eye = if visible { "O" } else { "-" };
                 if ui.small_button(eye).on_hover_text("Toggle visibility").clicked() {
                     to_toggle_vis = Some(id);
                 }
@@ -132,16 +131,16 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     to_rename = Some((id, name.clone()));
                 }
                 resp.context_menu(|ui| {
-                    if ui.button("✎ Rename").clicked() {
+                    if ui.button("Rename").clicked() {
                         to_rename = Some((id, name.clone()));
                         ui.close_menu();
                     }
-                    if ui.button("⎘ Duplicate").clicked() {
+                    if ui.button("Duplicate").clicked() {
                         state.select_only(id);
                         state.duplicate_selected();
                         ui.close_menu();
                     }
-                    if ui.button("🗑 Delete").clicked() {
+                    if ui.button("Delete").clicked() {
                         to_delete = Some(id);
                         ui.close_menu();
                     }
@@ -267,20 +266,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
 }
 
 fn color_edit(ui: &mut Ui, color: &mut [f32; 4]) {
-    let mut rgba = Color32::from_rgba_unmultiplied(
-        (color[0] * 255.0) as u8,
-        (color[1] * 255.0) as u8,
-        (color[2] * 255.0) as u8,
-        (color[3] * 255.0) as u8,
-    );
-    if color_picker::color_edit_button_rgba(ui, &mut ecolor::Rgba::from(rgba),
-        color_picker::Alpha::BlendOrAdditive).changed()
-    {
-        let c = ecolor::Rgba::from(rgba);
-        // re-read after edit
-        color[0] = c.r(); color[1] = c.g(); color[2] = c.b(); color[3] = c.a();
+    let mut c = ecolor::Rgba::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]);
+    if color_picker::color_edit_button_rgba(ui, &mut c, color_picker::Alpha::BlendOrAdditive).changed() {
+        color[0] = c.r();
+        color[1] = c.g();
+        color[2] = c.b();
+        color[3] = c.a();
     }
-    let _ = rgba;
 }
 
 fn canvas_properties(ui: &mut Ui, state: &mut EditorState) {
