@@ -81,6 +81,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 let id = state.add_rect_layer("Rectangle", wx, wy, 120.0, 80.0,
                     [0.94, 0.35, 0.35, 1.0]);
                 state.select_only(id);
+                state.push_history("add rectangle");
             }
         });
     });
@@ -152,8 +153,12 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
         if let Some(id) = to_select      { state.select_only(id); }
         if let Some(id) = to_toggle_vis  {
             if let Some(r) = state.layers.get_mut(&id) { r.visible = !r.visible; }
+            state.push_history("toggle visibility");
         }
-        if let Some(id) = to_delete      { state.remove_layer(id); }
+        if let Some(id) = to_delete      {
+            state.remove_layer(id);
+            state.push_history("delete layer");
+        }
         if let Some((id, name)) = to_rename {
             state.rename_target = Some(id);
             state.rename_buf    = name;
@@ -170,6 +175,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 let name = state.rename_buf.trim().to_owned();
                 if !name.is_empty() {
                     if let Some(r) = state.layers.get_mut(&target) { r.name = name; }
+                    state.push_history("rename");
                 }
                 state.rename_target = None;
             }
@@ -192,87 +198,109 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     let id = state.selection[0];
-    let rec = match state.layers.get_mut(&id) {
-        Some(r) => r,
-        None    => return,
-    };
+    if state.layers.get(&id).is_none() { return; }
 
-    // ── Name ──────────────────────────────────────────────────────────────
-    ui.horizontal(|ui| {
-        ui.label("Name");
-        ui.text_edit_singleline(&mut rec.name);
-    });
-    ui.separator();
+    // We need to collect "needs_history" while rec is borrowed,
+    // then push_history after that borrow is released.
+    let mut needs_history = false;
 
-    // ── Position & Size ───────────────────────────────────────────────────
-    ui.label(RichText::new("Transform").strong());
-    Grid::new("transform_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label("X");
-        ui.add(DragValue::new(&mut rec.x).speed(1.0).suffix(" px"));
-        ui.end_row();
-        ui.label("Y");
-        ui.add(DragValue::new(&mut rec.y).speed(1.0).suffix(" px"));
-        ui.end_row();
-        ui.label("W");
-        ui.add(DragValue::new(&mut rec.width).speed(1.0).suffix(" px").range(1.0..=99999.0));
-        ui.end_row();
-        ui.label("H");
-        ui.add(DragValue::new(&mut rec.height).speed(1.0).suffix(" px").range(1.0..=99999.0));
-        ui.end_row();
-        ui.label("Radius");
-        ui.add(DragValue::new(&mut rec.radius).speed(0.5).suffix(" px").range(0.0..=9999.0));
-        ui.end_row();
-    });
-    ui.separator();
+    {
+        let rec = state.layers.get_mut(&id).unwrap();
 
-    // ── Opacity ───────────────────────────────────────────────────────────
-    ui.label(RichText::new("Layer").strong());
-    ui.horizontal(|ui| {
-        ui.label("Opacity");
-        let mut pct = rec.opacity * 100.0;
-        if ui.add(DragValue::new(&mut pct).speed(1.0).suffix("%").range(0.0..=100.0)).changed() {
-            rec.opacity = pct / 100.0;
-        }
-    });
-    ui.checkbox(&mut rec.visible, "Visible");
-    ui.checkbox(&mut rec.locked,  "Locked");
-    ui.separator();
-
-    // ── Fill ──────────────────────────────────────────────────────────────
-    ui.label(RichText::new("Fill").strong());
-    ui.horizontal(|ui| {
-        ui.label("Color");
-        color_edit(ui, &mut rec.fill);
-    });
-    ui.separator();
-
-    // ── Stroke ────────────────────────────────────────────────────────────
-    ui.label(RichText::new("Stroke").strong());
-    Grid::new("stroke_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label("Color");
-        color_edit(ui, &mut rec.stroke_color);
-        ui.end_row();
-        ui.label("Width");
-        ui.add(DragValue::new(&mut rec.stroke_width).speed(0.5).suffix(" px").range(0.0..=100.0));
-        ui.end_row();
-    });
-
-    // ── Text content ──────────────────────────────────────────────────────
-    if let LayerType::Text(ref mut content) = rec.layer_type {
+        // ── Name ──────────────────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            ui.label("Name");
+            let r = ui.text_edit_singleline(&mut rec.name);
+            if r.lost_focus() { needs_history = true; }
+        });
         ui.separator();
-        ui.label(RichText::new("Content").strong());
-        ui.text_edit_multiline(content);
+
+        // ── Position & Size ───────────────────────────────────────────────
+        ui.label(RichText::new("Transform").strong());
+        Grid::new("transform_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            ui.label("X");
+            let r = ui.add(DragValue::new(&mut rec.x).speed(1.0).suffix(" px"));
+            if r.drag_stopped() { needs_history = true; }
+            ui.end_row();
+            ui.label("Y");
+            let r = ui.add(DragValue::new(&mut rec.y).speed(1.0).suffix(" px"));
+            if r.drag_stopped() { needs_history = true; }
+            ui.end_row();
+            ui.label("W");
+            let r = ui.add(DragValue::new(&mut rec.width).speed(1.0).suffix(" px").range(1.0..=99999.0));
+            if r.drag_stopped() { needs_history = true; }
+            ui.end_row();
+            ui.label("H");
+            let r = ui.add(DragValue::new(&mut rec.height).speed(1.0).suffix(" px").range(1.0..=99999.0));
+            if r.drag_stopped() { needs_history = true; }
+            ui.end_row();
+            ui.label("Radius");
+            let r = ui.add(DragValue::new(&mut rec.radius).speed(0.5).suffix(" px").range(0.0..=9999.0));
+            if r.drag_stopped() { needs_history = true; }
+            ui.end_row();
+        });
+        ui.separator();
+
+        // ── Opacity ───────────────────────────────────────────────────────
+        ui.label(RichText::new("Layer").strong());
+        ui.horizontal(|ui| {
+            ui.label("Opacity");
+            let mut pct = rec.opacity * 100.0;
+            let r = ui.add(DragValue::new(&mut pct).speed(1.0).suffix("%").range(0.0..=100.0));
+            if r.changed()      { rec.opacity = pct / 100.0; }
+            if r.drag_stopped() { needs_history = true; }
+        });
+        let r = ui.checkbox(&mut rec.visible, "Visible");
+        if r.changed() { needs_history = true; }
+        let r = ui.checkbox(&mut rec.locked,  "Locked");
+        if r.changed() { needs_history = true; }
+        ui.separator();
+
+        // ── Fill ──────────────────────────────────────────────────────────
+        ui.label(RichText::new("Fill").strong());
+        ui.horizontal(|ui| {
+            ui.label("Color");
+            if color_edit(ui, &mut rec.fill) { needs_history = true; }
+        });
+        ui.separator();
+
+        // ── Stroke ────────────────────────────────────────────────────────
+        ui.label(RichText::new("Stroke").strong());
+        Grid::new("stroke_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            ui.label("Color");
+            if color_edit(ui, &mut rec.stroke_color) { needs_history = true; }
+            ui.end_row();
+            ui.label("Width");
+            let r = ui.add(DragValue::new(&mut rec.stroke_width).speed(0.5).suffix(" px").range(0.0..=100.0));
+            if r.drag_stopped() { needs_history = true; }
+            ui.end_row();
+        });
+
+        // ── Text content ──────────────────────────────────────────────────
+        if let LayerType::Text(ref mut content) = rec.layer_type {
+            ui.separator();
+            ui.label(RichText::new("Content").strong());
+            let r = ui.text_edit_multiline(content);
+            if r.lost_focus() { needs_history = true; }
+        }
+    } // rec borrow released here
+
+    if needs_history {
+        state.push_history("property");
     }
 }
 
-fn color_edit(ui: &mut Ui, color: &mut [f32; 4]) {
+fn color_edit(ui: &mut Ui, color: &mut [f32; 4]) -> bool {
     let mut c = ecolor::Rgba::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]);
-    if color_picker::color_edit_button_rgba(ui, &mut c, color_picker::Alpha::BlendOrAdditive).changed() {
+    let resp = color_picker::color_edit_button_rgba(ui, &mut c, color_picker::Alpha::BlendOrAdditive);
+    if resp.changed() {
         color[0] = c.r();
         color[1] = c.g();
         color[2] = c.b();
         color[3] = c.a();
     }
+    // Return true when the picker popup closes (lost_focus or gained_focus change)
+    resp.gained_focus() || resp.lost_focus()
 }
 
 fn canvas_properties(ui: &mut Ui, state: &mut EditorState) {

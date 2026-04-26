@@ -209,6 +209,8 @@ impl EditorState {
         state.add_rect_layer("Card 1", 340.0, 200.0, 280.0, 160.0, [0.94, 0.35, 0.35, 1.0]);
         state.add_rect_layer("Card 2", 640.0, 200.0, 280.0, 160.0, [0.35, 0.67, 0.94, 1.0]);
         state.add_rect_layer("Card 3", 940.0, 200.0, 280.0, 160.0, [0.47, 0.87, 0.47, 1.0]);
+        // Seed history with the initial scene so undo has a baseline
+        state.push_history("initial");
         state
     }
 
@@ -273,6 +275,7 @@ impl EditorState {
             }
         }
         self.selection = new_ids;
+        self.push_history("duplicate");
     }
 
     pub fn delete_selected(&mut self) {
@@ -280,6 +283,7 @@ impl EditorState {
         for id in ids {
             self.remove_layer(id);
         }
+        self.push_history("delete");
     }
 
     pub fn copy_selected(&mut self) {
@@ -290,7 +294,13 @@ impl EditorState {
 
     pub fn cut_selected(&mut self) {
         self.copy_selected();
-        self.delete_selected();
+        // delete without double-pushing history
+        let ids: Vec<Uuid> = self.selection.drain(..).collect();
+        for id in ids {
+            self.layers.remove(&id);
+            self.pages[self.active_page].layers.retain(|&l| l != id);
+        }
+        self.push_history("cut");
     }
 
     pub fn paste_clipboard(&mut self) {
@@ -309,37 +319,48 @@ impl EditorState {
             new_ids.push(nid);
         }
         self.selection = new_ids;
+        self.push_history("paste");
     }
 
-    /// Save a history snapshot before a destructive operation.
+    /// Snapshot the current state AFTER a mutation so it can be undone.
+    /// `history_idx` always points to the current snapshot in `history`.
     pub fn push_history(&mut self, label: impl Into<String>) {
-        // Truncate redo branch
-        self.history.truncate(self.history_idx);
-        self.history.push(HistoryEntry {
+        // Drop any redone-future snapshots
+        if self.history_idx + 1 < self.history.len() {
+            self.history.truncate(self.history_idx + 1);
+        }
+        // If history is empty the first call bootstraps it
+        let snapshot = HistoryEntry {
             label:  label.into(),
             layers: self.layers.clone(),
             pages:  self.pages.iter()
                 .map(|p| (p.id, p.name.clone(), p.layers.clone()))
                 .collect(),
-        });
-        self.history_idx = self.history.len();
-        // Keep last 50 snapshots
-        if self.history.len() > 50 {
+        };
+        if self.history.is_empty() {
+            self.history.push(snapshot);
+            self.history_idx = 0;
+        } else {
+            self.history.push(snapshot);
+            self.history_idx = self.history.len() - 1;
+        }
+        // Cap at 100 snapshots
+        if self.history.len() > 100 {
             self.history.remove(0);
-            self.history_idx = self.history.len();
+            self.history_idx = self.history.len() - 1;
         }
     }
 
     pub fn undo(&mut self) {
-        if self.history_idx == 0 { return; }
+        if self.history.is_empty() || self.history_idx == 0 { return; }
         self.history_idx -= 1;
         self.restore_history(self.history_idx);
     }
 
     pub fn redo(&mut self) {
-        if self.history_idx >= self.history.len() { return; }
-        self.restore_history(self.history_idx);
+        if self.history_idx + 1 >= self.history.len() { return; }
         self.history_idx += 1;
+        self.restore_history(self.history_idx);
     }
 
     fn restore_history(&mut self, idx: usize) {
@@ -350,7 +371,7 @@ impl EditorState {
             name:   name.clone(),
             layers: layers.clone(),
         }).collect();
-        self.selection.clear();
+        self.selection.retain(|id| self.layers.contains_key(id));
     }
 
     // ── Selection ───────────────────────────────────────────────────────────

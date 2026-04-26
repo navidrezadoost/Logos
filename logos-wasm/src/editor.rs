@@ -294,6 +294,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             }
             if ui.button("Delete").clicked() {
                 state.remove_layer(id);
+                state.push_history("delete");
                 *ctx_menu_layer = None;
                 ui.close_menu();
             }
@@ -304,6 +305,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     page.layers.remove(pos);
                     page.layers.push(id);
                 }
+                state.push_history("bring to front");
                 ui.close_menu();
             }
             if ui.button("Send to Back").clicked() {
@@ -312,6 +314,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     page.layers.remove(pos);
                     page.layers.insert(0, id);
                 }
+                state.push_history("send to back");
                 ui.close_menu();
             }
         } else {
@@ -320,16 +323,19 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             if ui.button("Add Rectangle").clicked() {
                 let id = state.add_rect_layer("Rectangle", 100.0, 100.0, 120.0, 80.0, [0.4, 0.6, 1.0, 1.0]);
                 state.select_only(id);
+                state.push_history("add rectangle");
                 ui.close_menu();
             }
             if ui.button("Add Frame").clicked() {
                 let id = state.add_frame("Frame", 100.0, 100.0, 300.0, 200.0);
                 state.select_only(id);
+                state.push_history("add frame");
                 ui.close_menu();
             }
             if ui.button("Add Text").clicked() {
                 let id = state.add_text(100.0, 100.0, "Text");
                 state.select_only(id);
+                state.push_history("add text");
                 ui.close_menu();
             }
         }
@@ -601,6 +607,11 @@ fn handle_tool_input(
 
     // ── Drag released ──────────────────────────────────────────────────────
     if resp.drag_stopped() && state.drag.active {
+        // If a layer was moved/resized, snapshot the result
+        if state.drag.layer_id.is_some() {
+            let label = if state.drag.resize_handle.is_some() { "resize" } else { "move" };
+            state.push_history(label);
+        }
         if state.drag.layer_id.is_none() {
             if let Some(mp) = pointer.hover_pos() {
                 let (wx, wy) = to_world(mp, state);
@@ -620,6 +631,7 @@ fn handle_tool_input(
                     _ => { state.drag.active = false; return; }
                 };
                 state.select_only(id);
+                state.push_history("draw layer");
                 state.tool = Tool::Select;
             }
         }
