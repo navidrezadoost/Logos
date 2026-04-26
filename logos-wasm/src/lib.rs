@@ -1,81 +1,60 @@
-//! # logos-wasm — WebAssembly target for the Logos design engine
+//! # logos-wasm — pure-Rust design editor compiled to WebAssembly
 //!
-//! Exposes the full Document → Layout → Render pipeline to JavaScript
-//! via `wasm-bindgen` + WebGPU. All engine optimizations (308 ns layout,
-//! 131 ns partial GPU upload, 3 ns steady-state frame) carry over unchanged.
+//! Zero Java. Zero ClojureScript. Zero Node (at runtime).
+//!
+//! Built with eframe/egui (immediate-mode UI), logos-core, logos-layout, logos-render.
 //!
 //! ## Build
-//!
 //! ```bash
-//! wasm-pack build logos-wasm --target web --release
-//! ```
-//!
-//! ## Usage (JavaScript)
-//!
-//! ```javascript
-//! import init, { LogosApp } from './pkg/logos_wasm.js';
-//! await init();
-//! const app = await LogosApp.create(document.getElementById('canvas'));
-//! app.set_clear_color(0.1, 0.1, 0.18, 1.0);
-//! app.load_demo_scene(100);
-//! function frame() { app.render_frame(); requestAnimationFrame(frame); }
-//! requestAnimationFrame(frame);
+//! cd logos-wasm && trunk build --release
 //! ```
 
-/// App module — WASM-only (requires WebGPU canvas surface).
-#[cfg(target_arch = "wasm32")]
-pub mod app;
+use wasm_bindgen::prelude::*;
 
-/// Camera module — pure Rust, compiles on all targets.
-pub mod camera;
+mod camera;
+mod collab;
+mod editor;   // egui design-editor application
+mod error;
+mod panels;   // left / right / toolbar panels
+mod state;    // editor state model
+mod tools;    // tool modes
 
-/// Collaboration sync module — protocol state compiles everywhere,
-/// WebSocket transport is WASM-only.
-pub mod collab;
-
-/// Error types — compile on all targets for testing.
-pub mod error;
-
-#[cfg(target_arch = "wasm32")]
-pub use app::LogosApp;
 pub use camera::Camera;
 pub use collab::{WasmConnectionState, WasmSyncConfig, WasmSyncState};
 pub use error::WasmError;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
-/// Initialize panic hook for browser console error messages.
-/// Called automatically when the WASM module loads.
-#[cfg(target_arch = "wasm32")]
+/// Initialise panic hook — browser console error messages.
 #[wasm_bindgen(start)]
 pub fn init() {
     console_error_panic_hook::set_once();
 }
 
-/// Log to the browser console (debug helper).
-#[cfg(target_arch = "wasm32")]
-macro_rules! console_log {
-    ($($t:tt)*) => {
-        web_sys::console::log_1(&format!($($t)*).into())
-    }
-}
-#[cfg(target_arch = "wasm32")]
-pub(crate) use console_log;
+/// Start the Logos design editor.
+///
+/// Mounts the eframe app into the browser canvas with id `logos-canvas`.
+#[wasm_bindgen]
+pub fn run_app() -> Result<(), JsValue> {
+    use wasm_bindgen::JsCast;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    // Look up the canvas element we placed in index.html
+    let canvas = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("logos-canvas"))
+        .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        .ok_or_else(|| JsValue::from_str("Could not find #logos-canvas"))?;
 
-    #[test]
-    fn test_camera_accessible() {
-        let cam = Camera::new(800.0, 600.0);
-        assert_eq!(cam.viewport_size(), (800.0, 600.0));
-    }
-
-    #[test]
-    fn test_error_accessible() {
-        let err = WasmError::Gpu("test".into());
-        assert!(err.to_string().contains("GPU"));
-    }
+    let web_options = eframe::WebOptions::default();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(|cc| Ok(Box::new(editor::LogosEditor::new(cc)))),
+            )
+            .await;
+        if let Err(e) = result {
+            web_sys::console::error_1(&format!("Logos startup failed: {e:?}").into());
+        }
+    });
+    Ok(())
 }

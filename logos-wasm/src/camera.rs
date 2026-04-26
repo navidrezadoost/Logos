@@ -4,7 +4,6 @@
 //! any platform-specific dependencies. Generates `CameraUniform`
 //! for the GPU orthographic projection.
 
-use logos_render::CameraUniform;
 
 /// Viewport camera state.
 ///
@@ -42,17 +41,6 @@ impl Camera {
         let screen_x = (world_x - self.pan_x) * self.zoom + self.viewport_width / 2.0;
         let screen_y = (world_y - self.pan_y) * self.zoom + self.viewport_height / 2.0;
         (screen_x, screen_y)
-    }
-
-    /// Generate the GPU camera uniform (4×4 orthographic matrix).
-    pub fn uniform(&self) -> CameraUniform {
-        CameraUniform::orthographic(
-            self.viewport_width,
-            self.viewport_height,
-            self.pan_x,
-            self.pan_y,
-            self.zoom,
-        )
     }
 
     /// Pan the camera by screen-space delta.

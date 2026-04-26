@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logos — Design Editor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: #12121a;
+      overflow: hidden;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    canvas#logos-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    #loading {
+      position: fixed;
+      inset: 0;
+      background: #12121a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+      transition: opacity 0.4s ease;
+    }
+    #loading.hidden { opacity: 0; pointer-events: none; }
+    .logo-text { font-size: 2.4rem; font-weight: 800; color: #7c6aff; margin-bottom: 24px; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid #2a2a38;
+      border-top-color: #7c6aff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .status { margin-top: 16px; color: #555; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <!-- eframe mounts into this canvas by id -->
+  <canvas id="logos-canvas"></canvas>
+
+  <!-- Splash screen shown while WASM loads -->
+  <div id="loading">
+    <div class="logo-text">Logos</div>
+    <div class="spinner"></div>
+    <div class="status" id="status-text">Loading…</div>
+  </div>
+
+  <!-- Trunk injects WASM glue here (wasm-opt disabled, no network needed) -->
+  <link data-trunk rel="rust" data-wasm-opt="0" />
+
+  <script type="module">
+    const loading  = document.getElementById('loading');
+    const statusEl = document.getElementById('status-text');
+
+    async function boot() {
+      try {
+        statusEl.textContent = 'Initialising WebAssembly…';
+        const wasm = await import('./logos_wasm.js');
+        await wasm.default();   // runs #[wasm_bindgen(start)] → init()
+
+        statusEl.textContent = 'Starting editor…';
+        wasm.run_app();          // starts eframe render loop
+
+        // Hide splash
+        loading.classList.add('hidden');
+        setTimeout(() => loading.style.display = 'none', 500);
+
+      } catch (e) {
+        console.error('Logos boot failed:', e);
+        statusEl.textContent = 'Error: ' + e.message;
+        statusEl.style.color = '#ff6b6b';
+      }
+    }
+    boot();
+  </script>
+</body>
+</html>

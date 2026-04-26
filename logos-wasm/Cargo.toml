@@ -2,26 +2,44 @@
 name = "logos-wasm"
 version = "0.1.0"
 edition = "2021"
-description = "WebAssembly target for the Logos design engine — full pipeline via WebGPU"
+description = "WebAssembly target for the Logos design editor — pure Rust, no Java/ClojureScript"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-logos-core = { path = "../logos-core" }
-logos-render = { path = "../logos-render" }
+logos-core   = { path = "../logos-core" }
 logos-layout = { path = "../logos-layout" }
 
-wasm-bindgen = "0.2"
+# WASM bindings
+wasm-bindgen         = "0.2"
 wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
+js-sys               = "0.3"
 web-sys = { version = "0.3", features = [
     "HtmlCanvasElement",
+    "Window",
+    "Document",
+    "Element",
+    "EventTarget",
+    "MouseEvent",
+    "WheelEvent",
+    "KeyboardEvent",
+    "PointerEvent",
     "console",
+    "Performance",
+    "Navigator",
 ] }
 console_error_panic_hook = "0.1"
-uuid = { version = "1.20.0", features = ["v4", "js"] }
-wgpu = { version = "24", features = ["webgpu"] }
+uuid  = { version = "1.20.0", features = ["v4", "js"] }
+
+# eframe/egui — immediate-mode design editor UI, compiles to WASM natively
+# No Java, no ClojureScript, no Node required at runtime.
+eframe = { version = "0.29", default-features = false, features = [
+    "wgpu",
+    "web_screen_reader",
+] }
+
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
