@@ -130,6 +130,9 @@ pub struct EditorState {
     // Selection
     pub selection:     Vec<Uuid>,
 
+    // Clipboard (cut/copy/paste)
+    pub clipboard:     Vec<LayerRecord>,
+
     // Active tool
     pub tool:          Tool,
 
@@ -185,6 +188,7 @@ impl EditorState {
             active_page: 0,
             layers:      HashMap::new(),
             selection:   vec![],
+            clipboard:   vec![],
             tool:        Tool::Select,
             pan_x:       0.0,
             pan_y:       0.0,
@@ -276,6 +280,77 @@ impl EditorState {
         for id in ids {
             self.remove_layer(id);
         }
+    }
+
+    pub fn copy_selected(&mut self) {
+        self.clipboard = self.selection.iter()
+            .filter_map(|id| self.layers.get(id).cloned())
+            .collect();
+    }
+
+    pub fn cut_selected(&mut self) {
+        self.copy_selected();
+        self.delete_selected();
+    }
+
+    pub fn paste_clipboard(&mut self) {
+        if self.clipboard.is_empty() { return; }
+        let mut new_ids = vec![];
+        let pastes: Vec<LayerRecord> = self.clipboard.clone();
+        for src in pastes {
+            let mut new = src.clone();
+            new.id   = Uuid::new_v4();
+            new.name = format!("{} copy", src.name);
+            new.x   += 20.0;
+            new.y   += 20.0;
+            let nid = new.id;
+            self.pages[self.active_page].layers.push(nid);
+            self.layers.insert(nid, new);
+            new_ids.push(nid);
+        }
+        self.selection = new_ids;
+    }
+
+    /// Save a history snapshot before a destructive operation.
+    pub fn push_history(&mut self, label: impl Into<String>) {
+        // Truncate redo branch
+        self.history.truncate(self.history_idx);
+        self.history.push(HistoryEntry {
+            label:  label.into(),
+            layers: self.layers.clone(),
+            pages:  self.pages.iter()
+                .map(|p| (p.id, p.name.clone(), p.layers.clone()))
+                .collect(),
+        });
+        self.history_idx = self.history.len();
+        // Keep last 50 snapshots
+        if self.history.len() > 50 {
+            self.history.remove(0);
+            self.history_idx = self.history.len();
+        }
+    }
+
+    pub fn undo(&mut self) {
+        if self.history_idx == 0 { return; }
+        self.history_idx -= 1;
+        self.restore_history(self.history_idx);
+    }
+
+    pub fn redo(&mut self) {
+        if self.history_idx >= self.history.len() { return; }
+        self.restore_history(self.history_idx);
+        self.history_idx += 1;
+    }
+
+    fn restore_history(&mut self, idx: usize) {
+        let entry = &self.history[idx];
+        self.layers = entry.layers.clone();
+        self.pages  = entry.pages.iter().map(|(id, name, layers)| Page {
+            id:     *id,
+            name:   name.clone(),
+            layers: layers.clone(),
+        }).collect();
+        self.selection.clear();
     }
 
     // ── Selection ───────────────────────────────────────────────────────────

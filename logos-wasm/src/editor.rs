@@ -23,31 +23,47 @@ pub struct LogosEditor {
 
 impl LogosEditor {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Configure visuals once at startup
+        // ── Visuals ───────────────────────────────────────────────────────
         let mut visuals = Visuals::dark();
-        visuals.panel_fill        = Color32::from_rgb(30, 30, 38);
-        visuals.window_fill       = Color32::from_rgb(24, 24, 30);
-        visuals.override_text_color = Some(Color32::from_gray(220));
+        // Panel / window backgrounds
+        visuals.panel_fill  = Color32::from_rgb(28, 28, 36);
+        visuals.window_fill = Color32::from_rgb(22, 22, 30);
+        visuals.menu_rounding = Rounding::same(6.0);
+
+        // Widget text — explicit per-state so popups & context menus are readable
+        let text_color = Color32::from_gray(215);
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, text_color);
+        visuals.widgets.inactive.fg_stroke        = Stroke::new(1.0, text_color);
+        visuals.widgets.hovered.fg_stroke         = Stroke::new(1.5, Color32::WHITE);
+        visuals.widgets.active.fg_stroke          = Stroke::new(1.5, Color32::WHITE);
+        visuals.widgets.open.fg_stroke            = Stroke::new(1.0, text_color);
+
+        // Widget backgrounds
+        visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(38, 38, 50);
+        visuals.widgets.inactive.bg_fill        = Color32::from_rgb(44, 44, 58);
+        visuals.widgets.hovered.bg_fill         = Color32::from_rgb(55, 55, 72);
+        visuals.widgets.active.bg_fill          = Color32::from_rgb(70, 60, 110);
+        visuals.widgets.open.bg_fill            = Color32::from_rgb(44, 44, 58);
+
+        // Popup / context-menu background
+        visuals.window_fill = Color32::from_rgb(32, 32, 44);
+
+        // Selection / accent
+        visuals.selection.bg_fill    = Color32::from_rgb(80, 60, 160);
+        visuals.selection.stroke     = Stroke::new(1.0, Color32::from_rgb(133, 96, 255));
+        visuals.hyperlink_color       = Color32::from_rgb(133, 96, 255);
+
         cc.egui_ctx.set_visuals(visuals);
 
-        // Ensure a legible font size across all widgets
+        // ── Font sizes ────────────────────────────────────────────────────
         let mut style = (*cc.egui_ctx.style()).clone();
-        style.text_styles.insert(
-            TextStyle::Body,
-            FontId::new(13.0, FontFamily::Proportional),
-        );
-        style.text_styles.insert(
-            TextStyle::Button,
-            FontId::new(13.0, FontFamily::Proportional),
-        );
-        style.text_styles.insert(
-            TextStyle::Small,
-            FontId::new(11.0, FontFamily::Proportional),
-        );
-        style.text_styles.insert(
-            TextStyle::Heading,
-            FontId::new(15.0, FontFamily::Proportional),
-        );
+        style.text_styles.insert(TextStyle::Body,    FontId::new(13.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Button,  FontId::new(13.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Small,   FontId::new(11.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Heading, FontId::new(15.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Monospace, FontId::new(12.0, FontFamily::Monospace));
+        style.spacing.button_padding = vec2(8.0, 4.0);
+        style.spacing.item_spacing   = vec2(6.0, 4.0);
         cc.egui_ctx.set_style(style);
 
         Self { state: EditorState::new(), ctx_menu_layer: None }
@@ -59,19 +75,47 @@ impl eframe::App for LogosEditor {
         let state = &mut self.state;
 
         // ─── Global keyboard shortcuts ─────────────────────────────────────
+        let _typing_guard = ctx.wants_keyboard_input();
         ctx.input(|i| {
-            if i.key_pressed(Key::V) { state.tool = Tool::Select; }
-            if i.key_pressed(Key::F) { state.tool = Tool::Frame; }
-            if i.key_pressed(Key::R) { state.tool = Tool::Rect; }
-            if i.key_pressed(Key::E) { state.tool = Tool::Ellipse; }
-            if i.key_pressed(Key::T) { state.tool = Tool::Text; }
-            if i.key_pressed(Key::H) { state.tool = Tool::Pan; }
-            if i.key_pressed(Key::Escape) { state.clear_selection(); state.tool = Tool::Select; }
-            if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
-                state.delete_selected();
+            // Only fire shortcuts when NOT typing in a text field
+            let typing = _typing_guard;
+
+            // ── Edit shortcuts (always guarded, never interfere with text) ──
+            if !typing {
+                if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
+                    state.delete_selected();
+                }
+                if i.key_pressed(Key::Escape) {
+                    state.clear_selection();
+                    state.tool = Tool::Select;
+                }
             }
-            // Ctrl+D duplicate
-            if i.modifiers.ctrl && i.key_pressed(Key::D) { state.duplicate_selected(); }
+
+            // ── Ctrl shortcuts ──────────────────────────────────────────────
+            if i.modifiers.ctrl {
+                if i.key_pressed(Key::Z) {
+                    if i.modifiers.shift { state.redo(); } else { state.undo(); }
+                }
+                if i.key_pressed(Key::Y) { state.redo(); }
+                if i.key_pressed(Key::C) && !typing { state.copy_selected(); }
+                if i.key_pressed(Key::X) && !typing { state.cut_selected(); }
+                if i.key_pressed(Key::V) { state.paste_clipboard(); }
+                if i.key_pressed(Key::D) && !typing { state.duplicate_selected(); }
+                if i.key_pressed(Key::A) && !typing {
+                    let all: Vec<uuid::Uuid> = state.pages[state.active_page].layers.clone();
+                    state.selection = all;
+                }
+            }
+
+            // ── Tool shortcuts (only when NOT typing and no modifier) ───────
+            if !typing && !i.modifiers.ctrl && !i.modifiers.alt {
+                if i.key_pressed(Key::V) { state.tool = Tool::Select; }
+                if i.key_pressed(Key::F) { state.tool = Tool::Frame; }
+                if i.key_pressed(Key::R) { state.tool = Tool::Rect; }
+                if i.key_pressed(Key::E) { state.tool = Tool::Ellipse; }
+                if i.key_pressed(Key::T) { state.tool = Tool::Text; }
+                if i.key_pressed(Key::H) { state.tool = Tool::Pan; }
+            }
         });
 
         // ─── Top toolbar ───────────────────────────────────────────────────
