@@ -154,6 +154,9 @@ pub struct EditorState {
     // Drag state
     pub drag: DragState,
 
+    // Hover (for outline rendering)
+    pub hovered_layer: Option<Uuid>,
+
     // History (undo/redo)
     pub history:       Vec<HistoryEntry>,
     pub history_idx:   usize,
@@ -206,6 +209,7 @@ impl EditorState {
             snap_to_grid:  false,
             grid_size:     8.0,
             drag:          DragState::default(),
+            hovered_layer: None,
             history:       vec![],
             history_idx:   0,
         };
@@ -433,6 +437,63 @@ impl EditorState {
         for &id in page.layers.iter().rev() {
             if let Some(rec) = self.layers.get(&id) {
                 if !rec.visible { continue; }
+                if wx >= rec.x && wx <= rec.x + rec.width
+                    && wy >= rec.y && wy <= rec.y + rec.height
+                {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns the topmost **non-frame** layer hit.
+    pub fn hit_test_content(&self, wx: f32, wy: f32) -> Option<Uuid> {
+        let page = &self.pages[self.active_page];
+        for &id in page.layers.iter().rev() {
+            if let Some(rec) = self.layers.get(&id) {
+                if !rec.visible { continue; }
+                if matches!(rec.layer_type, LayerType::Frame) { continue; }
+                if wx >= rec.x && wx <= rec.x + rec.width
+                    && wy >= rec.y && wy <= rec.y + rec.height
+                {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns the frame that contains `id`, if any.
+    /// A layer is considered "inside" a frame when the layer's center is within the frame's bounds.
+    pub fn parent_frame_of(&self, id: Uuid) -> Option<Uuid> {
+        let rec = self.layers.get(&id)?;
+        if matches!(rec.layer_type, LayerType::Frame) { return None; }
+        let cx = rec.x + rec.width  * 0.5;
+        let cy = rec.y + rec.height * 0.5;
+        let page = &self.pages[self.active_page];
+        // Iterate front-to-back to find the topmost (smallest) containing frame
+        for &fid in page.layers.iter().rev() {
+            if fid == id { continue; }
+            if let Some(f) = self.layers.get(&fid) {
+                if !matches!(f.layer_type, LayerType::Frame) { continue; }
+                if cx >= f.x && cx <= f.x + f.width
+                    && cy >= f.y && cy <= f.y + f.height
+                {
+                    return Some(fid);
+                }
+            }
+        }
+        None
+    }
+
+    /// Returns the frame at this world point (topmost by paint order).
+    pub fn frame_at(&self, wx: f32, wy: f32) -> Option<Uuid> {
+        let page = &self.pages[self.active_page];
+        for &id in page.layers.iter().rev() {
+            if let Some(rec) = self.layers.get(&id) {
+                if !rec.visible { continue; }
+                if !matches!(rec.layer_type, LayerType::Frame) { continue; }
                 if wx >= rec.x && wx <= rec.x + rec.width
                     && wy >= rec.y && wy <= rec.y + rec.height
                 {

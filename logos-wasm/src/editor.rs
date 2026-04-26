@@ -194,6 +194,16 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
     }
 
     // ── Draw layers ───────────────────────────────────────────────────────
+    // Update hovered layer state first
+    {
+        let hover_pos = ui.input(|i| i.pointer.hover_pos());
+        let hov = hover_pos.and_then(|mp| {
+            let (wx, wy) = state.screen_to_world(mp.x - origin.x, mp.y - origin.y);
+            state.hit_test(wx, wy)
+        });
+        state.hovered_layer = hov;
+    }
+
     let layer_ids: Vec<Uuid> = state.pages[state.active_page].layers.clone();
     for &id in &layer_ids {
         let rec = match state.layers.get(&id) {
@@ -281,8 +291,33 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             }
         }
 
+        // Hover outline — thin blue border on anything under the cursor (if not selected)
+        let is_hovered  = state.hovered_layer == Some(id);
+        let is_selected = state.is_selected(id);
+        if is_hovered && !is_selected {
+            if rotation.abs() > 0.001 {
+                let pts = rotated_corners(rect, rotation);
+                let mut cl = pts.clone(); cl.push(pts[0]);
+                painter.add(Shape::Path(epaint::PathShape {
+                    points: cl, closed: true, fill: Color32::TRANSPARENT,
+                    stroke: Stroke::new(1.0, Color32::from_rgb(30, 180, 255)).into(),
+                }));
+            } else {
+                painter.rect_stroke(rect.expand(1.0), rounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
+            }
+            // Show element name + W×H px on hover (small tooltip-style label)
+            let rec = state.layers.get(&id).unwrap();
+            let label = format!("{}  {:.0} × {:.0} px", rec.name, rec.width, rec.height);
+            let lpos = rect.left_top() + vec2(0.0, -18.0);
+            let bg = Color32::from_rgba_unmultiplied(20, 20, 32, 230);
+            let galley = painter.layout_no_wrap(label.clone(), FontId::monospace(10.0), Color32::from_rgb(30, 180, 255));
+            let lsize  = galley.size() + vec2(6.0, 2.0);
+            painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(2.0), bg, Stroke::NONE);
+            painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(30, 180, 255));
+        }
+
         // Selection highlight
-        if state.is_selected(id) {
+        if is_selected {
             if rotation.abs() > 0.001 {
                 let pts = rotated_corners(rect, rotation);
                 let mut closed = pts.clone();
@@ -295,16 +330,37 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 painter.rect_stroke(rect.expand(1.5), rounding, Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
             }
             draw_selection_handles(&painter, rect, rotation, state.zoom);
+
+            // Always show W×H px above the selected rect
+            let rec = state.layers.get(&id).unwrap();
+            let dim_label = format!("{:.0} × {:.0} px", rec.width, rec.height);
+            let lpos = rect.left_top() + vec2(0.0, -18.0);
+            let bg   = Color32::from_rgba_unmultiplied(20, 20, 32, 220);
+            let galley = painter.layout_no_wrap(dim_label, FontId::monospace(10.0), Color32::from_rgb(133, 96, 255));
+            let lsize  = galley.size() + vec2(6.0, 2.0);
+            painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(2.0), bg, Stroke::NONE);
+            painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(133, 96, 255));
+
+            // Also show x,y position label beside bottom-left handle
+            let rec = state.layers.get(&id).unwrap();
+            let pos_label = format!("x {:.0}  y {:.0}", rec.x, rec.y);
+            let plpos = rect.left_bottom() + vec2(0.0, 4.0);
+            let gp = painter.layout_no_wrap(pos_label, FontId::monospace(10.0), Color32::from_gray(160));
+            painter.rect(Rect::from_min_size(plpos - vec2(2.0, 0.0), gp.size() + vec2(6.0, 2.0)),
+                Rounding::same(2.0), bg, Stroke::NONE);
+            painter.galley(plpos + vec2(1.0, 1.0), gp, Color32::from_gray(160));
         }
 
-        // Layer name label (when zoomed in enough)
-        if state.zoom >= 0.5 && matches!(rec.layer_type, LayerType::Frame) {
+        // Frame name + size label — always visible above frames
+        if state.zoom >= 0.3 && matches!(rec.layer_type, LayerType::Frame) {
+            let rec = state.layers.get(&id).unwrap();
+            let frame_label = format!("{}  {:.0} × {:.0}", rec.name, rec.width, rec.height);
             painter.text(
-                rect.left_top() + vec2(0.0, -14.0 * state.zoom.clamp(0.5, 1.0)),
+                rect.left_top() + vec2(0.0, -14.0 * state.zoom.clamp(0.3, 1.0)),
                 Align2::LEFT_BOTTOM,
-                &rec.name,
+                &frame_label,
                 FontId::proportional((11.0 * state.zoom).clamp(9.0, 14.0)),
-                Color32::from_gray(160),
+                Color32::from_gray(170),
             );
         }
     }
@@ -748,6 +804,20 @@ fn handle_tool_input(
         })
     };
 
+    // ── Double-click: "enter" a frame to select its child ─────────────────
+    if resp.double_clicked_by(PointerButton::Primary) {
+        if let Some(mp) = pointer.interact_pos() {
+            let (wx, wy) = to_world(mp, state);
+            let content = state.hit_test_content(wx, wy);
+            if let Some(cid) = content {
+                // Double-click always selects the content layer directly
+                state.select_only(cid);
+            } else if let Some(id) = state.hit_test(wx, wy) {
+                state.select_only(id);
+            }
+        }
+    }
+
     // ── Left button drag start ─────────────────────────────────────────────
     if resp.drag_started_by(PointerButton::Primary) {
         if let Some(mp) = pointer.press_origin() {
@@ -757,7 +827,7 @@ fn handle_tool_input(
                 Tool::Select => {
                     let mut did_something = false;
 
-                    // 1. Check rotation zone first (outside corners, 10-24px)
+                    // 1. Rotation zone (outside corners)
                     if let Some(&sel_id) = state.selection.first() {
                         if let Some(sr) = sel_screen_rect(sel_id, state) {
                             let rotation = state.layers.get(&sel_id).map(|r| r.rotation).unwrap_or(0.0);
@@ -782,38 +852,57 @@ fn handle_tool_input(
                         }
                     }
 
+                    // 2. Resize handles
                     if !did_something {
-                        // 2. Check resize handles
-                        let mut found_handle: Option<(uuid::Uuid, ResizeHandle)> = None;
                         if let Some(&sel_id) = state.selection.first() {
                             if let Some(sr) = sel_screen_rect(sel_id, state) {
                                 let rotation = state.layers.get(&sel_id).map(|r| r.rotation).unwrap_or(0.0);
                                 let handles  = rotated_handle_positions(sr, rotation);
                                 for (h, spt) in handles {
                                     if spt.distance(mp) <= 8.0 {
-                                        found_handle = Some((sel_id, h));
+                                        let rec = &state.layers[&sel_id];
+                                        state.drag.active        = true;
+                                        state.drag.rotating      = false;
+                                        state.drag.layer_id      = Some(sel_id);
+                                        state.drag.origin        = pos2(wx, wy);
+                                        state.drag.layer_start   = pos2(rec.x, rec.y);
+                                        state.drag.layer_size    = vec2(rec.width, rec.height);
+                                        state.drag.resize_handle = Some(h);
+                                        did_something = true;
                                         break;
                                     }
                                 }
                             }
                         }
-
-                        if let Some((lid, h)) = found_handle {
-                            let rec = &state.layers[&lid];
-                            state.drag.active        = true;
-                            state.drag.rotating      = false;
-                            state.drag.layer_id      = Some(lid);
-                            state.drag.origin        = pos2(wx, wy);
-                            state.drag.layer_start   = pos2(rec.x, rec.y);
-                            state.drag.layer_size    = vec2(rec.width, rec.height);
-                            state.drag.resize_handle = Some(h);
-                            did_something = true;
-                        }
                     }
 
+                    // 3. Frame-aware selection + move
                     if !did_something {
-                        // 3. Hit test a layer to move / select
-                        if let Some(id) = state.hit_test(wx, wy) {
+                        let content_id = state.hit_test_content(wx, wy);
+                        let frame_id   = state.frame_at(wx, wy);
+
+                        let target_id: Option<Uuid> = if let Some(cid) = content_id {
+                            let parent = state.parent_frame_of(cid);
+                            if let Some(pfid) = parent {
+                                // Child is inside a frame
+                                if state.selection.first() == Some(&pfid) {
+                                    // Parent frame already selected → select/move child
+                                    Some(cid)
+                                } else {
+                                    // Select parent frame first
+                                    Some(pfid)
+                                }
+                            } else {
+                                // Free content layer
+                                Some(cid)
+                            }
+                        } else if let Some(fid) = frame_id {
+                            Some(fid)
+                        } else {
+                            None
+                        };
+
+                        if let Some(id) = target_id {
                             let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
                             if multi {
                                 state.toggle_select(id);
@@ -828,7 +917,10 @@ fn handle_tool_input(
                             state.drag.layer_start   = pos2(rec.x, rec.y);
                             state.drag.layer_size    = vec2(rec.width, rec.height);
                             state.drag.resize_handle = None;
-                        } else {
+                            did_something = true;
+                        }
+
+                        if !did_something {
                             state.clear_selection();
                             state.drag.active = false;
                         }
@@ -855,9 +947,7 @@ fn handle_tool_input(
                 Tool::Select => {
                     if let Some(id) = state.drag.layer_id {
                         if state.layers.get(&id).map(|r| !r.locked).unwrap_or(false) {
-
                             if state.drag.rotating {
-                                // ── Rotate drag ─────────────────────────
                                 let center = state.drag.rotate_screen_center;
                                 let start_angle = (state.drag.origin.y - center.y)
                                     .atan2(state.drag.origin.x - center.x);
@@ -873,14 +963,11 @@ fn handle_tool_input(
                                 let oy = state.drag.layer_start.y;
                                 let ow = state.drag.layer_size.x;
                                 let oh = state.drag.layer_size.y;
-
                                 let snap = |v: f32, g: f32| {
                                     if state.snap_to_grid { (v / g).round() * g } else { v }
                                 };
                                 let g = state.grid_size;
-
                                 if let Some(handle) = state.drag.resize_handle {
-                                    // ── Resize drag ─────────────────────
                                     let (nx, ny, nw, nh) = match handle {
                                         ResizeHandle::TopLeft     => (snap(ox+dx,g), snap(oy+dy,g), (ow-dx).max(4.0), (oh-dy).max(4.0)),
                                         ResizeHandle::Top         => (ox, snap(oy+dy,g), ow, (oh-dy).max(4.0)),
@@ -895,7 +982,6 @@ fn handle_tool_input(
                                         r.x = nx; r.y = ny; r.width = nw; r.height = nh;
                                     }
                                 } else {
-                                    // ── Move drag ───────────────────────
                                     let nx = snap(ox + dx, g);
                                     let ny = snap(oy + dy, g);
                                     if let Some(r) = state.layers.get_mut(&id) {
@@ -917,13 +1003,9 @@ fn handle_tool_input(
     // ── Drag released ──────────────────────────────────────────────────────
     if resp.drag_stopped() && state.drag.active {
         if state.drag.layer_id.is_some() {
-            let label = if state.drag.rotating {
-                "rotate"
-            } else if state.drag.resize_handle.is_some() {
-                "resize"
-            } else {
-                "move"
-            };
+            let label = if state.drag.rotating { "rotate" }
+                else if state.drag.resize_handle.is_some() { "resize" }
+                else { "move" };
             state.push_history(label);
         }
         if state.drag.layer_id.is_none() {
@@ -935,7 +1017,6 @@ fn handle_tool_input(
                 let y = oy.min(wy);
                 let w = (wx - ox).abs().max(4.0);
                 let h = (wy - oy).abs().max(4.0);
-
                 let id = match state.tool {
                     Tool::Frame   => state.add_frame("Frame", x, y, w, h),
                     Tool::Rect    => state.add_rect_layer("Rectangle", x, y, w, h, [0.94, 0.35, 0.35, 1.0]),
@@ -963,16 +1044,38 @@ fn handle_tool_input(
         }
     }
 
-    // ── Single click with no drag: deselect ───────────────────────────────
+    // ── Single click with no drag: frame-aware selection ─────────────────
     if resp.clicked_by(PointerButton::Primary) && !state.drag.active {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
-            if state.hit_test(wx, wy).is_none() && state.tool == Tool::Select {
-                state.clear_selection();
+            let content_id = state.hit_test_content(wx, wy);
+            let frame_id   = state.frame_at(wx, wy);
+
+            let target: Option<Uuid> = if let Some(cid) = content_id {
+                let parent = state.parent_frame_of(cid);
+                if let Some(pfid) = parent {
+                    if state.selection.first() == Some(&pfid) {
+                        // Parent is already selected → go into child
+                        Some(cid)
+                    } else {
+                        // Select parent first
+                        Some(pfid)
+                    }
+                } else {
+                    // Free element
+                    Some(cid)
+                }
+            } else if let Some(fid) = frame_id {
+                Some(fid)
+            } else {
+                None
+            };
+
+            match target {
+                Some(id) => { state.select_only(id); }
+                None     => { state.clear_selection(); }
             }
         }
     }
 }
-
-
 
