@@ -157,9 +157,19 @@ async fn health_handler() -> impl IntoResponse {
 }
 
 async fn root_handler() -> impl IntoResponse {
-    // In production the static file handler intercepts `index.html`.
-    // This fallback serves a plain message when no frontend assets are present.
-    Html(include_str!("welcome.html"))
+    // Serve the embedded index.html when the WASM frontend has been compiled,
+    // otherwise show the welcome/instructions page.
+    use crate::static_files::EmbeddedAssets;
+    use axum::http::{header, HeaderValue};
+    if let Some(f) = EmbeddedAssets::get("index.html") {
+        (
+            [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8")),
+             (header::CACHE_CONTROL, HeaderValue::from_static("no-cache, no-store, must-revalidate"))],
+            f.data.to_vec(),
+        ).into_response()
+    } else {
+        Html(include_str!("welcome.html")).into_response()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

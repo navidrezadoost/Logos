@@ -24,7 +24,7 @@ use rust_embed::RustEmbed;
 #[derive(RustEmbed)]
 #[folder = "../logos-wasm/dist"]
 #[prefix = ""]
-struct EmbeddedAssets;
+pub struct EmbeddedAssets;
 
 /// Build the static file router.
 ///
