@@ -231,34 +231,70 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         };
 
         let rounding = Rounding::same(rec.radius * state.zoom);
+        let rotation = rec.rotation;
 
-        match &rec.layer_type {
-            LayerType::Ellipse => {
-                painter.add(epaint::EllipseShape { center: rect.center(), radius: vec2(sw * 0.5, sh * 0.5), fill, stroke });
+        if rotation.abs() > 0.001 {
+            // Rotated rendering via polygon
+            let pts = rotated_corners(rect, rotation);
+            match &rec.layer_type {
+                LayerType::Ellipse => {
+                    // Approximate rotated ellipse with polygon
+                    let n = 48usize;
+                    let c = rect.center();
+                    let rx = sw * 0.5;
+                    let ry = sh * 0.5;
+                    let epts: Vec<Pos2> = (0..n).map(|i| {
+                        let t = 2.0 * std::f32::consts::PI * (i as f32) / (n as f32);
+                        rotate_point(pos2(c.x + rx * t.cos(), c.y + ry * t.sin()), c, rotation)
+                    }).collect();
+                    painter.add(Shape::Path(epaint::PathShape { points: epts, closed: true, fill, stroke: stroke.into() }));
+                }
+                LayerType::Text(content) => {
+                    painter.add(Shape::Path(epaint::PathShape { points: pts.clone(), closed: true, fill: Color32::TRANSPARENT, stroke: stroke.into() }));
+                    // Text is rendered unrotated (limitation) — show at rect origin
+                    let content = content.clone();
+                    painter.text(rect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &content,
+                        FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
+                }
+                _ => {
+                    painter.add(Shape::Path(epaint::PathShape { points: pts, closed: true, fill, stroke: stroke.into() }));
+                }
             }
-            LayerType::Text(content) => {
-                painter.rect(rect, rounding, Color32::TRANSPARENT, stroke);
-                painter.text(
-                    rect.min + vec2(4.0, 4.0),
-                    Align2::LEFT_TOP,
-                    content,
-                    FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)),
-                    fill,
-                );
-            }
-            LayerType::Frame => {
-                // Frame: white fill + subtle border
-                painter.rect(rect, rounding, fill, Stroke::new(1.0, Color32::from_gray(80)));
-            }
-            _ => {
-                painter.rect(rect, rounding, fill, stroke);
+        } else {
+            // Non-rotated — draw normally for crisp rendering
+            match &rec.layer_type {
+                LayerType::Ellipse => {
+                    painter.add(epaint::EllipseShape { center: rect.center(), radius: vec2(sw * 0.5, sh * 0.5), fill, stroke });
+                }
+                LayerType::Text(content) => {
+                    painter.rect(rect, rounding, Color32::TRANSPARENT, stroke);
+                    let content = content.clone();
+                    painter.text(rect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &content,
+                        FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
+                }
+                LayerType::Frame => {
+                    painter.rect(rect, rounding, fill, Stroke::new(1.0, Color32::from_gray(80)));
+                }
+                _ => {
+                    painter.rect(rect, rounding, fill, stroke);
+                }
             }
         }
 
         // Selection highlight
         if state.is_selected(id) {
-            painter.rect_stroke(rect.expand(1.5), rounding, Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
-            draw_handles(&painter, rect, state.zoom);
+            if rotation.abs() > 0.001 {
+                let pts = rotated_corners(rect, rotation);
+                let mut closed = pts.clone();
+                closed.push(pts[0]);
+                painter.add(Shape::Path(epaint::PathShape {
+                    points: closed, closed: true, fill: Color32::TRANSPARENT,
+                    stroke: Stroke::new(2.0, Color32::from_rgb(133, 96, 255)).into(),
+                }));
+            } else {
+                painter.rect_stroke(rect.expand(1.5), rounding, Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
+            }
+            draw_selection_handles(&painter, rect, rotation, state.zoom);
         }
 
         // Layer name label (when zoomed in enough)
@@ -270,6 +306,90 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 FontId::proportional((11.0 * state.zoom).clamp(9.0, 14.0)),
                 Color32::from_gray(160),
             );
+        }
+    }
+
+    // ── Measurement overlay (alt held or hovering another layer while one selected) ──
+    let alt_held = ui.input(|i| i.modifiers.alt);
+    let mp_screen = ui.input(|i| i.pointer.hover_pos());
+    if state.selection.len() == 1 {
+        let sel_id = state.selection[0];
+        if let Some(sel) = state.layers.get(&sel_id) {
+            let (sx, sy) = state.world_to_screen(sel.x, sel.y);
+            let sel_rect = Rect::from_min_size(pos2(origin.x + sx, origin.y + sy),
+                vec2(sel.width * state.zoom, sel.height * state.zoom));
+
+            // Find the layer being hovered (other than selection)
+            let hov_id = mp_screen.and_then(|mp| {
+                let (wx, wy) = state.screen_to_world(mp.x - origin.x, mp.y - origin.y);
+                state.hit_test(wx, wy).filter(|&id| id != sel_id)
+            });
+
+            // If alt is held, show measurements to *every* other visible layer
+            let targets: Vec<uuid::Uuid> = if alt_held {
+                state.pages[state.active_page].layers.iter()
+                    .filter(|&&id| id != sel_id &&
+                        state.layers.get(&id).map(|r| r.visible).unwrap_or(false))
+                    .cloned().collect()
+            } else if let Some(id) = hov_id {
+                vec![id]
+            } else {
+                vec![]
+            };
+
+            for tid in targets {
+                if let Some(trec) = state.layers.get(&tid) {
+                    let (tx, ty) = state.world_to_screen(trec.x, trec.y);
+                    let t_rect = Rect::from_min_size(pos2(origin.x + tx, origin.y + ty),
+                        vec2(trec.width * state.zoom, trec.height * state.zoom));
+                    // Only draw if close enough to be meaningful (< 600px apart)
+                    let dist = (sel_rect.center() - t_rect.center()).length();
+                    if dist < 600.0 {
+                        draw_spacing_annotation(&painter, sel_rect, t_rect);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Cursor icon based on what the pointer is hovering ─────────────────
+    if state.tool == Tool::Select {
+        if let Some(mp) = mp_screen {
+            if let Some(&sel_id) = state.selection.first() {
+                if let Some(rec) = state.layers.get(&sel_id) {
+                    let (sx, sy) = state.world_to_screen(rec.x, rec.y);
+                    let sr = Rect::from_min_size(pos2(origin.x + sx, origin.y + sy),
+                        vec2(rec.width * state.zoom, rec.height * state.zoom));
+                    let handles = rotated_handle_positions(sr, rec.rotation);
+                    let mut done = false;
+                    // Resize handles (8px hit radius)
+                    for (h, spt) in handles {
+                        if spt.distance(mp) <= 8.0 {
+                            ui.ctx().set_cursor_icon(resize_cursor_for_handle(h, rec.rotation));
+                            done = true;
+                            break;
+                        }
+                    }
+                    if !done {
+                        // Rotation zones: 10–24px from corner handles
+                        for idx in [0usize, 2, 5, 7] {
+                            let cp = handles[idx].1;
+                            let d = cp.distance(mp);
+                            if d >= 10.0 && d <= 24.0 {
+                                ui.ctx().set_cursor_icon(CursorIcon::Grab);
+                                done = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !done && sr.contains(mp) {
+                        // Inside the selected layer → move cursor
+                        if !rec.locked {
+                            ui.ctx().set_cursor_icon(CursorIcon::Move);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -362,6 +482,178 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
     }
 }
 
+// ── Canvas helpers ────────────────────────────────────────────────────────────
+
+/// Rotate `pt` around `center` by `angle` radians.
+#[inline]
+fn rotate_point(pt: Pos2, center: Pos2, angle: f32) -> Pos2 {
+    let (sin, cos) = angle.sin_cos();
+    let dx = pt.x - center.x;
+    let dy = pt.y - center.y;
+    pos2(center.x + dx * cos - dy * sin, center.y + dx * sin + dy * cos)
+}
+
+/// 4 rotated corners of a screen-space rect (cl, tr, br, bl order).
+fn rotated_corners(rect: Rect, rotation: f32) -> Vec<Pos2> {
+    let c = rect.center();
+    vec![
+        rotate_point(rect.left_top(),     c, rotation),
+        rotate_point(rect.right_top(),    c, rotation),
+        rotate_point(rect.right_bottom(), c, rotation),
+        rotate_point(rect.left_bottom(),  c, rotation),
+    ]
+}
+
+/// Return the 8 resize-handle screen positions for a (possibly rotated) selection rect.
+fn rotated_handle_positions(sr: Rect, rotation: f32) -> [(crate::state::ResizeHandle, Pos2); 8] {
+    use crate::state::ResizeHandle;
+    let c = sr.center();
+    [
+        (ResizeHandle::TopLeft,     rotate_point(sr.left_top(),     c, rotation)),
+        (ResizeHandle::Top,         rotate_point(sr.center_top(),   c, rotation)),
+        (ResizeHandle::TopRight,    rotate_point(sr.right_top(),    c, rotation)),
+        (ResizeHandle::Left,        rotate_point(sr.left_center(),  c, rotation)),
+        (ResizeHandle::Right,       rotate_point(sr.right_center(), c, rotation)),
+        (ResizeHandle::BottomLeft,  rotate_point(sr.left_bottom(),  c, rotation)),
+        (ResizeHandle::Bottom,      rotate_point(sr.center_bottom(),c, rotation)),
+        (ResizeHandle::BottomRight, rotate_point(sr.right_bottom(), c, rotation)),
+    ]
+}
+
+/// Choose the right resize cursor for a handle, accounting for element rotation.
+fn resize_cursor_for_handle(h: crate::state::ResizeHandle, rotation: f32) -> CursorIcon {
+    use crate::state::ResizeHandle;
+    use std::f32::consts::FRAC_PI_4;
+    let base_angle: f32 = match h {
+        ResizeHandle::Top | ResizeHandle::Bottom       => 0.0,
+        ResizeHandle::TopRight | ResizeHandle::BottomLeft => FRAC_PI_4,
+        ResizeHandle::Right | ResizeHandle::Left        => FRAC_PI_4 * 2.0,
+        ResizeHandle::BottomRight | ResizeHandle::TopLeft => FRAC_PI_4 * 3.0,
+    };
+    let effective = (base_angle + rotation).rem_euclid(std::f32::consts::PI);
+    let sector = (effective / FRAC_PI_4).round() as u32 % 4;
+    match sector {
+        0 => CursorIcon::ResizeVertical,
+        1 => CursorIcon::ResizeNeSw,
+        2 => CursorIcon::ResizeHorizontal,
+        _ => CursorIcon::ResizeNwSe,
+    }
+}
+
+// ── Measurement overlay ───────────────────────────────────────────────────────
+
+/// Draw Figma-style spacing + dimension annotations between `sel_rect` and `other_rect`.
+fn draw_spacing_annotation(painter: &Painter, sel: Rect, other: Rect) {
+    let pink = Color32::from_rgb(255, 0, 128);
+    let label_bg = Color32::from_rgba_unmultiplied(20, 20, 30, 220);
+    let label_fg = Color32::from_rgb(255, 80, 160);
+    let dashed   = Stroke::new(1.0, pink);
+
+    let draw_label = |painter: &Painter, pt: Pos2, text: String| {
+        let font = FontId::monospace(10.0);
+        let galley = painter.layout_no_wrap(text, font, label_fg);
+        let size   = galley.size() + vec2(4.0, 2.0);
+        let rect   = Rect::from_center_size(pt, size);
+        painter.rect(rect, Rounding::same(2.0), label_bg, Stroke::NONE);
+        painter.galley(rect.min + vec2(2.0, 1.0), galley, label_fg);
+    };
+
+    let draw_dashed_h = |painter: &Painter, y: f32, x0: f32, x1: f32| {
+        let mut x = x0.min(x1);
+        let end = x0.max(x1);
+        let dash = 4.0; let gap = 3.0;
+        while x < end {
+            let xe = (x + dash).min(end);
+            painter.line_segment([pos2(x, y), pos2(xe, y)], dashed);
+            x += dash + gap;
+        }
+    };
+    let draw_dashed_v = |painter: &Painter, x: f32, y0: f32, y1: f32| {
+        let mut y = y0.min(y1);
+        let end = y0.max(y1);
+        let dash = 4.0; let gap = 3.0;
+        while y < end {
+            let ye = (y + dash).min(end);
+            painter.line_segment([pos2(x, y), pos2(x, ye)], dashed);
+            y += dash + gap;
+        }
+    };
+
+    // ── Horizontal gap (left / right) ────────────────────────────────────
+    let gap_left  = sel.min.x - other.max.x;
+    let gap_right = other.min.x - sel.max.x;
+
+    if gap_left > 1.0 {
+        let y = (sel.center().y + other.center().y) * 0.5;
+        draw_dashed_h(painter, y, other.max.x, sel.min.x);
+        // End ticks
+        painter.line_segment([pos2(other.max.x, y - 5.0), pos2(other.max.x, y + 5.0)], dashed);
+        painter.line_segment([pos2(sel.min.x,   y - 5.0), pos2(sel.min.x,   y + 5.0)], dashed);
+        draw_label(painter, pos2((other.max.x + sel.min.x) * 0.5, y - 10.0), format!("{:.0}", gap_left / 1.0));
+    } else if gap_right > 1.0 {
+        let y = (sel.center().y + other.center().y) * 0.5;
+        draw_dashed_h(painter, y, sel.max.x, other.min.x);
+        painter.line_segment([pos2(sel.max.x,   y - 5.0), pos2(sel.max.x,   y + 5.0)], dashed);
+        painter.line_segment([pos2(other.min.x, y - 5.0), pos2(other.min.x, y + 5.0)], dashed);
+        draw_label(painter, pos2((sel.max.x + other.min.x) * 0.5, y - 10.0), format!("{:.0}", gap_right / 1.0));
+    } else {
+        // Overlapping horizontally — show overlap extent on sel edges
+        let ox0 = sel.min.x.max(other.min.x);
+        let ox1 = sel.max.x.min(other.max.x);
+        draw_dashed_h(painter, sel.center().y, ox0, ox1);
+        draw_label(painter, pos2((ox0 + ox1) * 0.5, sel.center().y - 10.0), format!("{:.0}", ox1 - ox0));
+    }
+
+    // ── Vertical gap (top / bottom) ──────────────────────────────────────
+    let gap_top    = sel.min.y - other.max.y;
+    let gap_bottom = other.min.y - sel.max.y;
+
+    if gap_top > 1.0 {
+        let x = (sel.center().x + other.center().x) * 0.5;
+        draw_dashed_v(painter, x, other.max.y, sel.min.y);
+        painter.line_segment([pos2(x - 5.0, other.max.y), pos2(x + 5.0, other.max.y)], dashed);
+        painter.line_segment([pos2(x - 5.0, sel.min.y),   pos2(x + 5.0, sel.min.y)],   dashed);
+        draw_label(painter, pos2(x + 12.0, (other.max.y + sel.min.y) * 0.5), format!("{:.0}", gap_top / 1.0));
+    } else if gap_bottom > 1.0 {
+        let x = (sel.center().x + other.center().x) * 0.5;
+        draw_dashed_v(painter, x, sel.max.y, other.min.y);
+        painter.line_segment([pos2(x - 5.0, sel.max.y),   pos2(x + 5.0, sel.max.y)],   dashed);
+        painter.line_segment([pos2(x - 5.0, other.min.y), pos2(x + 5.0, other.min.y)], dashed);
+        draw_label(painter, pos2(x + 12.0, (sel.max.y + other.min.y) * 0.5), format!("{:.0}", gap_bottom / 1.0));
+    } else {
+        // Overlapping vertically — show overlap
+        let oy0 = sel.min.y.max(other.min.y);
+        let oy1 = sel.max.y.min(other.max.y);
+        draw_dashed_v(painter, sel.center().x, oy0, oy1);
+        draw_label(painter, pos2(sel.center().x + 12.0, (oy0 + oy1) * 0.5), format!("{:.0}", oy1 - oy0));
+    }
+
+    // ── Selected layer W×H label ─────────────────────────────────────────
+    draw_label(painter,
+        pos2(sel.center().x, sel.min.y - 18.0),
+        format!("{:.0} × {:.0}", sel.width(), sel.height()),
+    );
+    // Other layer W×H
+    draw_label(painter,
+        pos2(other.center().x, other.min.y - 18.0),
+        format!("{:.0} × {:.0}", other.width(), other.height()),
+    );
+
+    // ── Alignment guides: center lines if close ──────────────────────────
+    let center_thresh = 3.0;
+    let guide = Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 0, 128, 100));
+    if (sel.center().x - other.center().x).abs() < center_thresh {
+        let x = (sel.center().x + other.center().x) * 0.5;
+        painter.line_segment([pos2(x, sel.min.y.min(other.min.y) - 20.0),
+                               pos2(x, sel.max.y.max(other.max.y) + 20.0)], guide);
+    }
+    if (sel.center().y - other.center().y).abs() < center_thresh {
+        let y = (sel.center().y + other.center().y) * 0.5;
+        painter.line_segment([pos2(sel.min.x.min(other.min.x) - 20.0, y),
+                               pos2(sel.max.x.max(other.max.x) + 20.0, y)], guide);
+    }
+}
+
 fn draw_grid(painter: &Painter, bounds: Rect, state: &EditorState) {
     let grid_world = state.grid_size;
     let grid_screen = grid_world * state.zoom;
@@ -395,23 +687,34 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &EditorState) {
     }
 }
 
-fn draw_handles(painter: &Painter, rect: Rect, zoom: f32) {
-    let size = (6.0 * zoom.sqrt()).clamp(4.0, 10.0);
-    let hs   = size * 0.5;
-    let col  = Color32::WHITE;
-    let border = Stroke::new(1.5, Color32::from_rgb(133, 96, 255));
+fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f32, zoom: f32) {
+    let size    = (6.0_f32 * zoom.sqrt()).clamp(4.0, 10.0);
+    let col     = Color32::WHITE;
+    let border  = Stroke::new(1.5, Color32::from_rgb(133, 96, 255));
+    let rot_col = Stroke::new(1.5, Color32::from_rgba_unmultiplied(133, 96, 255, 160));
 
-    for pt in [
-        rect.left_top(),  rect.center_top(),    rect.right_top(),
-        rect.left_center(),                      rect.right_center(),
-        rect.left_bottom(), rect.center_bottom(), rect.right_bottom(),
-    ] {
+    let handles = rotated_handle_positions(rect, rotation);
+
+    // Draw resize squares
+    for (_, pt) in &handles {
         painter.rect(
-            Rect::from_center_size(pt, vec2(size, size)),
+            Rect::from_center_size(*pt, vec2(size, size)),
             Rounding::ZERO, col, border,
         );
     }
-    let _ = hs;
+
+    // Draw rotation arc indicators outside the four corners
+    // Indices 0=TL, 2=TR, 5=BL, 7=BR
+    let rot_radius = size * 1.8;
+    for idx in [0usize, 2, 5, 7] {
+        let (_, cpt) = handles[idx];
+        let outward = (cpt - rect.center()).normalized() * rot_radius;
+        let arc_center = cpt + outward;
+        painter.circle_stroke(arc_center, size * 0.6, rot_col);
+        // Small curved arrow stub — just two tick lines to imply rotation
+        let perp = vec2(-outward.y, outward.x).normalized() * size * 0.5;
+        painter.line_segment([arc_center - perp, arc_center + perp], rot_col);
+    }
 }
 
 fn handle_tool_input(
@@ -426,27 +729,6 @@ fn handle_tool_input(
 
     let pointer = ui.input(|i| i.pointer.clone());
 
-    // ── Helper: get world-space rect of a layer ────────────────────────────
-    let layer_world_rect = |id: uuid::Uuid, s: &EditorState| -> Option<Rect> {
-        s.layers.get(&id).map(|r| {
-            Rect::from_min_size(pos2(r.x, r.y), vec2(r.width, r.height))
-        })
-    };
-
-    // ── Helper: hit-test the 8 resize handles (screen coords) ─────────────
-    let handle_positions = |sr: Rect| -> [(ResizeHandle, Pos2); 8] {
-        [
-            (ResizeHandle::TopLeft,     sr.left_top()),
-            (ResizeHandle::Top,         sr.center_top()),
-            (ResizeHandle::TopRight,    sr.right_top()),
-            (ResizeHandle::Left,        sr.left_center()),
-            (ResizeHandle::Right,       sr.right_center()),
-            (ResizeHandle::BottomLeft,  sr.left_bottom()),
-            (ResizeHandle::Bottom,      sr.center_bottom()),
-            (ResizeHandle::BottomRight, sr.right_bottom()),
-        ]
-    };
-
     let to_screen = |wx: f32, wy: f32, s: &EditorState| -> Pos2 {
         let (sx, sy) = s.world_to_screen(wx, wy);
         pos2(origin.x + sx, origin.y + sy)
@@ -458,42 +740,79 @@ fn handle_tool_input(
         s.screen_to_world(lx, ly)
     };
 
+    let sel_screen_rect = |sel_id: uuid::Uuid, s: &EditorState| -> Option<Rect> {
+        s.layers.get(&sel_id).map(|r| {
+            let (sx, sy) = s.world_to_screen(r.x, r.y);
+            Rect::from_min_size(pos2(origin.x + sx, origin.y + sy),
+                vec2(r.width * s.zoom, r.height * s.zoom))
+        })
+    };
+
     // ── Left button drag start ─────────────────────────────────────────────
     if resp.drag_started_by(PointerButton::Primary) {
         if let Some(mp) = pointer.press_origin() {
             let (wx, wy) = to_world(mp, state);
-            let hit_radius = 6.0 / state.zoom;  // world-space handle hit radius
 
             match state.tool {
                 Tool::Select => {
-                    // 1. Check if pressing a resize handle on the selected layer
-                    let mut found_handle: Option<(uuid::Uuid, ResizeHandle)> = None;
+                    let mut did_something = false;
+
+                    // 1. Check rotation zone first (outside corners, 10-24px)
                     if let Some(&sel_id) = state.selection.first() {
-                        if let Some(wr) = layer_world_rect(sel_id, state) {
-                            let sr = Rect::from_min_size(
-                                to_screen(wr.min.x, wr.min.y, state),
-                                vec2(wr.width() * state.zoom, wr.height() * state.zoom),
-                            );
-                            for (h, spt) in handle_positions(sr) {
-                                // Hit-test in screen space with fixed 8px radius
-                                if spt.distance(mp) <= 8.0 {
-                                    found_handle = Some((sel_id, h));
+                        if let Some(sr) = sel_screen_rect(sel_id, state) {
+                            let rotation = state.layers.get(&sel_id).map(|r| r.rotation).unwrap_or(0.0);
+                            let handles  = rotated_handle_positions(sr, rotation);
+                            for idx in [0usize, 2, 5, 7] {
+                                let cp = handles[idx].1;
+                                let d  = cp.distance(mp);
+                                if d >= 10.0 && d <= 24.0 {
+                                    let rec = &state.layers[&sel_id];
+                                    let screen_cx = to_screen(rec.x + rec.width * 0.5, rec.y + rec.height * 0.5, state);
+                                    state.drag.active               = true;
+                                    state.drag.rotating             = true;
+                                    state.drag.layer_id             = Some(sel_id);
+                                    state.drag.origin               = mp;
+                                    state.drag.rotate_screen_center = screen_cx;
+                                    state.drag.layer_start          = pos2(rec.x, rec.y);
+                                    state.drag.layer_start_rotation = rec.rotation;
+                                    did_something = true;
                                     break;
                                 }
                             }
                         }
                     }
 
-                    if let Some(id) = found_handle {
-                        let rec = &state.layers[&id.0];
-                        state.drag.active        = true;
-                        state.drag.layer_id      = Some(id.0);
-                        state.drag.origin        = pos2(wx, wy);
-                        state.drag.layer_start   = pos2(rec.x, rec.y);
-                        state.drag.layer_size    = vec2(rec.width, rec.height);
-                        state.drag.resize_handle = Some(id.1);
-                    } else {
-                        // 2. Check if pressing on a layer
+                    if !did_something {
+                        // 2. Check resize handles
+                        let mut found_handle: Option<(uuid::Uuid, ResizeHandle)> = None;
+                        if let Some(&sel_id) = state.selection.first() {
+                            if let Some(sr) = sel_screen_rect(sel_id, state) {
+                                let rotation = state.layers.get(&sel_id).map(|r| r.rotation).unwrap_or(0.0);
+                                let handles  = rotated_handle_positions(sr, rotation);
+                                for (h, spt) in handles {
+                                    if spt.distance(mp) <= 8.0 {
+                                        found_handle = Some((sel_id, h));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some((lid, h)) = found_handle {
+                            let rec = &state.layers[&lid];
+                            state.drag.active        = true;
+                            state.drag.rotating      = false;
+                            state.drag.layer_id      = Some(lid);
+                            state.drag.origin        = pos2(wx, wy);
+                            state.drag.layer_start   = pos2(rec.x, rec.y);
+                            state.drag.layer_size    = vec2(rec.width, rec.height);
+                            state.drag.resize_handle = Some(h);
+                            did_something = true;
+                        }
+                    }
+
+                    if !did_something {
+                        // 3. Hit test a layer to move / select
                         if let Some(id) = state.hit_test(wx, wy) {
                             let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
                             if multi {
@@ -503,6 +822,7 @@ fn handle_tool_input(
                             }
                             let rec = &state.layers[&id];
                             state.drag.active        = true;
+                            state.drag.rotating      = false;
                             state.drag.layer_id      = Some(id);
                             state.drag.origin        = pos2(wx, wy);
                             state.drag.layer_start   = pos2(rec.x, rec.y);
@@ -516,6 +836,7 @@ fn handle_tool_input(
                 }
                 Tool::Frame | Tool::Rect | Tool::Ellipse | Tool::Text => {
                     state.drag.active    = true;
+                    state.drag.rotating  = false;
                     state.drag.origin    = pos2(wx, wy);
                     state.drag.layer_id  = None;
                     state.drag.resize_handle = None;
@@ -534,64 +855,52 @@ fn handle_tool_input(
                 Tool::Select => {
                     if let Some(id) = state.drag.layer_id {
                         if state.layers.get(&id).map(|r| !r.locked).unwrap_or(false) {
-                            let dx = wx - state.drag.origin.x;
-                            let dy = wy - state.drag.origin.y;
-                            let ox = state.drag.layer_start.x;
-                            let oy = state.drag.layer_start.y;
-                            let ow = state.drag.layer_size.x;
-                            let oh = state.drag.layer_size.y;
 
-                            let snap = |v: f32, g: f32| {
-                                if state.snap_to_grid { (v / g).round() * g } else { v }
-                            };
-                            let g = state.grid_size;
-
-                            if let Some(handle) = state.drag.resize_handle {
-                                // Resize
-                                let (nx, ny, nw, nh) = match handle {
-                                    ResizeHandle::TopLeft => (
-                                        snap(ox + dx, g), snap(oy + dy, g),
-                                        (ow - dx).max(4.0), (oh - dy).max(4.0),
-                                    ),
-                                    ResizeHandle::Top => (
-                                        ox, snap(oy + dy, g),
-                                        ow, (oh - dy).max(4.0),
-                                    ),
-                                    ResizeHandle::TopRight => (
-                                        ox, snap(oy + dy, g),
-                                        (ow + dx).max(4.0), (oh - dy).max(4.0),
-                                    ),
-                                    ResizeHandle::Left => (
-                                        snap(ox + dx, g), oy,
-                                        (ow - dx).max(4.0), oh,
-                                    ),
-                                    ResizeHandle::Right => (
-                                        ox, oy,
-                                        (ow + dx).max(4.0), oh,
-                                    ),
-                                    ResizeHandle::BottomLeft => (
-                                        snap(ox + dx, g), oy,
-                                        (ow - dx).max(4.0), (oh + dy).max(4.0),
-                                    ),
-                                    ResizeHandle::Bottom => (
-                                        ox, oy,
-                                        ow, (oh + dy).max(4.0),
-                                    ),
-                                    ResizeHandle::BottomRight => (
-                                        ox, oy,
-                                        (ow + dx).max(4.0), (oh + dy).max(4.0),
-                                    ),
-                                };
+                            if state.drag.rotating {
+                                // ── Rotate drag ─────────────────────────
+                                let center = state.drag.rotate_screen_center;
+                                let start_angle = (state.drag.origin.y - center.y)
+                                    .atan2(state.drag.origin.x - center.x);
+                                let cur_angle = (mp.y - center.y).atan2(mp.x - center.x);
+                                let delta = cur_angle - start_angle;
                                 if let Some(r) = state.layers.get_mut(&id) {
-                                    r.x = nx; r.y = ny;
-                                    r.width = nw; r.height = nh;
+                                    r.rotation = state.drag.layer_start_rotation + delta;
                                 }
                             } else {
-                                // Move
-                                let nx = snap(ox + dx, g);
-                                let ny = snap(oy + dy, g);
-                                if let Some(r) = state.layers.get_mut(&id) {
-                                    r.x = nx; r.y = ny;
+                                let dx = wx - state.drag.origin.x;
+                                let dy = wy - state.drag.origin.y;
+                                let ox = state.drag.layer_start.x;
+                                let oy = state.drag.layer_start.y;
+                                let ow = state.drag.layer_size.x;
+                                let oh = state.drag.layer_size.y;
+
+                                let snap = |v: f32, g: f32| {
+                                    if state.snap_to_grid { (v / g).round() * g } else { v }
+                                };
+                                let g = state.grid_size;
+
+                                if let Some(handle) = state.drag.resize_handle {
+                                    // ── Resize drag ─────────────────────
+                                    let (nx, ny, nw, nh) = match handle {
+                                        ResizeHandle::TopLeft     => (snap(ox+dx,g), snap(oy+dy,g), (ow-dx).max(4.0), (oh-dy).max(4.0)),
+                                        ResizeHandle::Top         => (ox, snap(oy+dy,g), ow, (oh-dy).max(4.0)),
+                                        ResizeHandle::TopRight    => (ox, snap(oy+dy,g), (ow+dx).max(4.0), (oh-dy).max(4.0)),
+                                        ResizeHandle::Left        => (snap(ox+dx,g), oy, (ow-dx).max(4.0), oh),
+                                        ResizeHandle::Right       => (ox, oy, (ow+dx).max(4.0), oh),
+                                        ResizeHandle::BottomLeft  => (snap(ox+dx,g), oy, (ow-dx).max(4.0), (oh+dy).max(4.0)),
+                                        ResizeHandle::Bottom      => (ox, oy, ow, (oh+dy).max(4.0)),
+                                        ResizeHandle::BottomRight => (ox, oy, (ow+dx).max(4.0), (oh+dy).max(4.0)),
+                                    };
+                                    if let Some(r) = state.layers.get_mut(&id) {
+                                        r.x = nx; r.y = ny; r.width = nw; r.height = nh;
+                                    }
+                                } else {
+                                    // ── Move drag ───────────────────────
+                                    let nx = snap(ox + dx, g);
+                                    let ny = snap(oy + dy, g);
+                                    if let Some(r) = state.layers.get_mut(&id) {
+                                        r.x = nx; r.y = ny;
+                                    }
                                 }
                             }
                         }
@@ -607,9 +916,14 @@ fn handle_tool_input(
 
     // ── Drag released ──────────────────────────────────────────────────────
     if resp.drag_stopped() && state.drag.active {
-        // If a layer was moved/resized, snapshot the result
         if state.drag.layer_id.is_some() {
-            let label = if state.drag.resize_handle.is_some() { "resize" } else { "move" };
+            let label = if state.drag.rotating {
+                "rotate"
+            } else if state.drag.resize_handle.is_some() {
+                "resize"
+            } else {
+                "move"
+            };
             state.push_history(label);
         }
         if state.drag.layer_id.is_none() {
@@ -617,7 +931,6 @@ fn handle_tool_input(
                 let (wx, wy) = to_world(mp, state);
                 let ox = state.drag.origin.x;
                 let oy = state.drag.origin.y;
-
                 let x = ox.min(wx);
                 let y = oy.min(wy);
                 let w = (wx - ox).abs().max(4.0);
@@ -635,7 +948,8 @@ fn handle_tool_input(
                 state.tool = Tool::Select;
             }
         }
-        state.drag.active = false;
+        state.drag.active   = false;
+        state.drag.rotating = false;
     }
 
     // ── Right-click: record which layer is under cursor for context menu ──
@@ -659,3 +973,6 @@ fn handle_tool_input(
         }
     }
 }
+
+
+

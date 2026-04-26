@@ -28,6 +28,8 @@ pub struct LayerRecord {
     pub stroke_color: [f32; 4],
     pub stroke_width: f32,
     pub layer_type: LayerType,
+    /// Rotation in radians (counter-clockwise positive)
+    pub rotation: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,6 +57,7 @@ impl LayerRecord {
             stroke_color: [0.2, 0.2, 0.2, 1.0],
             stroke_width: 0.0,
             layer_type: LayerType::Rect,
+            rotation: 0.0,
         }
     }
 
@@ -163,7 +166,11 @@ pub struct DragState {
     pub layer_id:      Option<Uuid>,
     pub layer_start:   egui::Pos2,   // original x,y
     pub layer_size:    egui::Vec2,   // original w,h (for resize)
+    pub layer_start_rotation: f32,   // original rotation (for rotate)
     pub resize_handle: Option<ResizeHandle>,
+    /// True when dragging rotates instead of moving/resizing
+    pub rotating:      bool,
+    pub rotate_screen_center: egui::Pos2, // layer center in screen coords at drag start
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

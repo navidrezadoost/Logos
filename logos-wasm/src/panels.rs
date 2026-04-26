@@ -238,6 +238,12 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             let r = ui.add(DragValue::new(&mut rec.radius).speed(0.5).suffix(" px").range(0.0..=9999.0));
             if r.drag_stopped() { needs_history = true; }
             ui.end_row();
+            ui.label("Rotation");
+            let mut deg = rec.rotation.to_degrees();
+            let r = ui.add(DragValue::new(&mut deg).speed(0.5).suffix("°").range(-360.0..=360.0));
+            if r.changed()      { rec.rotation = deg.to_radians(); }
+            if r.drag_stopped() { needs_history = true; }
+            ui.end_row();
         });
         ui.separator();
 
