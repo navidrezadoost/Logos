@@ -8,6 +8,13 @@ use uuid::Uuid;
 
 use crate::panels;
 use crate::state::{EditorState, LayerType};
+
+/// Helper: log a message to the browser console (DevTools → Console tab).
+macro_rules! clog {
+    ($($arg:tt)*) => {
+        web_sys::console::log_1(&format!($($arg)*).into());
+    };
+}
 use crate::tools::Tool;
 
 // Panel sizes
@@ -910,27 +917,30 @@ fn handle_tool_input(
                     if !did_something {
                         let content_id = state.hit_test_content(wx, wy);
                         let frame_id   = state.frame_at(wx, wy);
+                        clog!("[DRAG-START] world=({:.1},{:.1}) content={:?} frame={:?}",
+                            wx, wy,
+                            content_id.and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()),
+                            frame_id.and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()),
+                        );
 
-                        // If the click lands on an already-selected NON-FRAME layer, drag it
-                        // directly (avoids accidentally re-entering parent/child logic).
-                        // For frames, always allow re-selection of a different frame.
                         let already_selected_hit = state.selection.iter().find(|&&sid| {
                             if let Some(r) = state.layers.get(&sid) {
                                 if matches!(r.layer_type, LayerType::Frame) { return false; }
                                 wx >= r.x && wx <= r.x + r.width && wy >= r.y && wy <= r.y + r.height
                             } else { false }
                         }).copied();
+                        clog!("[DRAG-START] already_selected_hit={:?}", already_selected_hit
+                            .and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()));
 
                         let target_id: Option<Uuid> = if let Some(id) = already_selected_hit {
-                            // Drag the already-selected layer directly
                             Some(id)
                         } else if let Some(cid) = content_id {
                             let parent = state.parent_frame_of(cid);
+                            clog!("[DRAG-START] content parent_frame={:?}", parent
+                                .and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()));
                             if let Some(pfid) = parent {
-                                // Child is inside a frame → select parent frame first
                                 Some(pfid)
                             } else {
-                                // Free content layer
                                 Some(cid)
                             }
                         } else if let Some(fid) = frame_id {
@@ -938,6 +948,8 @@ fn handle_tool_input(
                         } else {
                             None
                         };
+                        clog!("[DRAG-START] → target={:?}", target_id
+                            .and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()));
 
                         if let Some(id) = target_id {
                             let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
@@ -1087,9 +1099,14 @@ fn handle_tool_input(
     if resp.clicked_by(PointerButton::Primary) && !resp.drag_stopped() {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
-
             let content_id = state.hit_test_content(wx, wy);
             let frame_id   = state.frame_at(wx, wy);
+            clog!("[CLICK] world=({:.1},{:.1}) content={:?} frame={:?} selection={:?}",
+                wx, wy,
+                content_id.and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()),
+                frame_id.and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()),
+                state.selection.first().and_then(|id| state.layers.get(id)).map(|r| r.name.clone()),
+            );
 
                 let target: Option<Uuid> = if let Some(cid) = content_id {
                     let parent = state.parent_frame_of(cid);
@@ -1112,8 +1129,18 @@ fn handle_tool_input(
                 };
 
                 match target {
-                    Some(id) => { state.select_only(id); }
-                    None     => { state.clear_selection(); }
+                    Some(id) => {
+                        clog!("[CLICK] → selecting '{}'  W:{:.0} H:{:.0}",
+                            state.layers.get(&id).map(|r| r.name.as_str()).unwrap_or("?"),
+                            state.layers.get(&id).map(|r| r.width).unwrap_or(0.0),
+                            state.layers.get(&id).map(|r| r.height).unwrap_or(0.0),
+                        );
+                        state.select_only(id);
+                    }
+                    None => {
+                        clog!("[CLICK] → clear selection");
+                        state.clear_selection();
+                    }
                 }
         }
     }
