@@ -6,6 +6,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — 2026-05-06
+
+### Added — `logos-wasm` editor (Figma-style toolbar & interaction improvements)
+
+#### Toolbar
+- **Floating bottom-centre toolbar** — `TopBottomPanel::top` removed; toolbar now renders as a dark rounded pill anchored to `Align2::CENTER_BOTTOM` (20 px from bottom edge), matching Figma's layout exactly.
+- **Move-mode dropdown** — Replaces the flat Select + Pan buttons with a single Figma-style dropdown button showing the active tool icon + chevron. Opens upward with a dark popup listing all three move tools:
+  - **Move** (`V`) — select and drag layers
+  - **Scale** (`K`) — select with proportional-scale intent (new `Tool::Scale` variant)
+  - **Hand** (`H`) — persistent pan mode; no Space key required
+- **Shape-tool dropdown** — popup now opens upward (was downward); `pivot(Align2::LEFT_BOTTOM)` applied.
+- **Logo label** removed from toolbar; toolbar now contains only interaction tools, zoom controls, grid toggle, and fit button.
+
+#### Hand tool (H)
+- **Persistent pan mode** — `Tool::Pan` now works exactly like Space+drag but without holding any key. Open hand (`Grab`) cursor shown when hovering; closed fist (`Grabbing`) cursor shown while dragging.
+- **No accidental selection** — single-click and drag-start selection logic explicitly skipped when Hand tool is active.
+
+#### Scale tool (K)
+- New `Tool::Scale` variant added to `tools.rs` with icon `K`, label `Scale`, shortcut `K`.
+- Keyboard shortcut `K` registered in tool-input handler.
+- Canvas drag-start and hover-pos match arms extended to `Tool::Select | Tool::Scale` so scale mode participates in the full selection/resize interaction.
+
+#### Alignment fixes (multi-selection)
+- **Root cause fixed** — alignment actions previously only moved `selection[0]`, leaving all other selected layers untouched.
+- **Single selection** — aligns against page/canvas bounds (unchanged behaviour).
+- **Multi-selection** — computes the union bounding box of all selected layers; each layer is moved so its edge/center aligns to the group's collective edge/center. All 6 alignment operations (left, center-H, right, top, center-V, bottom) now work correctly on any number of simultaneously selected layers.
+
+### Changed — `logos-wasm`
+- `Tool::Select.label()` renamed `"Select"` → `"Move"` to match Figma terminology.
+- `Tool::Pan.label()` renamed `"Pan"` → `"Hand"` to match Figma terminology.
+
+### Removed
+- `CHANGES.md` — duplicate changelog, deleted.
+- `PHASE5_ISSUE_STATUS.md` — stale issue tracker snapshot, deleted.
+- `PROJECT_REPORT.md` — outdated v2.0.0 report, deleted.
+
+---
+
 ## [v3.0.0] — 2026-04-22
 
 ### Summary

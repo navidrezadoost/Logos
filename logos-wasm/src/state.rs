@@ -9,6 +9,25 @@ use eframe::egui;
 
 // ── Layer record ──────────────────────────────────────────────────────────────
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum StrokePosition { Center, Inside, Outside }
+
+#[derive(Clone, Debug)]
+pub struct DropShadow {
+    pub enabled: bool,
+    pub x:       f32,
+    pub y:       f32,
+    pub blur:    f32,
+    pub spread:  f32,
+    pub color:   [f32; 4],
+}
+impl Default for DropShadow {
+    fn default() -> Self {
+        Self { enabled: false, x: 4.0, y: 4.0, blur: 8.0, spread: 0.0,
+               color: [0.0, 0.0, 0.0, 0.35] }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LayerRecord {
     pub id:       Uuid,
@@ -21,12 +40,16 @@ pub struct LayerRecord {
     pub visible:  bool,
     pub locked:   bool,
     pub opacity:  f32,
-    /// Border radius (corners)
-    pub radius:   f32,
+    /// Per-corner radius [TL, TR, BR, BL]
+    pub corner_radii: [f32; 4],
+    /// When true all four corners share the same radius value.
+    pub corner_radii_linked: bool,
     /// Fill color separate from stroke
     pub fill:     [f32; 4],
-    pub stroke_color: [f32; 4],
-    pub stroke_width: f32,
+    pub stroke_color:    [f32; 4],
+    pub stroke_width:    f32,
+    pub stroke_position: StrokePosition,
+    pub drop_shadow:     DropShadow,
     pub layer_type: LayerType,
     /// Rotation in radians (counter-clockwise positive)
     pub rotation: f32,
@@ -37,9 +60,14 @@ pub enum LayerType {
     Rect,
     Frame,
     Text(String),
-    Ellipse,
+    /// arc_start / arc_end in radians (0 = right, clockwise).
+    /// inner_ratio 0 = full disc / pie sector,  0 < r < 1 = ring/donut.
+    Ellipse { arc_start: f32, arc_end: f32, inner_ratio: f32 },
     Path,
     Group,
+    /// Regular N-sided polygon inscribed in the bounding rect.
+    /// corner_radius is a fraction of the shortest edge (0 .. 0.45).
+    Polygon { sides: u32, corner_radius: f32 },
 }
 
 impl LayerRecord {
@@ -52,10 +80,13 @@ impl LayerRecord {
             visible: true,
             locked: false,
             opacity: 1.0,
-            radius: 0.0,
+            corner_radii: [0.0; 4],
+            corner_radii_linked: true,
             fill: [0.94, 0.35, 0.35, 1.0],
             stroke_color: [0.2, 0.2, 0.2, 1.0],
             stroke_width: 0.0,
+            stroke_position: StrokePosition::Center,
+            drop_shadow: DropShadow::default(),
             layer_type: LayerType::Rect,
             rotation: 0.0,
         }
@@ -73,7 +104,15 @@ impl LayerRecord {
         let mut r = Self::new_rect(x, y, w, h);
         r.name = "Ellipse".into();
         r.fill = [0.35, 0.67, 0.94, 1.0];
-        r.layer_type = LayerType::Ellipse;
+        r.layer_type = LayerType::Ellipse { arc_start: 0.0, arc_end: std::f32::consts::TAU, inner_ratio: 0.0 };
+        r
+    }
+
+    pub fn new_polygon(x: f32, y: f32, w: f32, h: f32) -> Self {
+        let mut r = Self::new_rect(x, y, w, h);
+        r.name = "Polygon".into();
+        r.fill = [0.47, 0.87, 0.47, 1.0];
+        r.layer_type = LayerType::Polygon { sides: 3, corner_radius: 0.0 };
         r
     }
 
@@ -94,9 +133,10 @@ impl LayerRecord {
             LayerType::Rect     => "[R]",
             LayerType::Frame    => "[F]",
             LayerType::Text(_)  => "[T]",
-            LayerType::Ellipse  => "(E)",
+            LayerType::Ellipse { .. } => "(E)",
             LayerType::Path     => "Pth",
             LayerType::Group    => "Grp",
+            LayerType::Polygon { .. } => "Ply",
         }
     }
 }
@@ -160,6 +200,23 @@ pub struct EditorState {
     // History (undo/redo)
     pub history:       Vec<HistoryEntry>,
     pub history_idx:   usize,
+
+    // ── Reinforcement-learning measurement affinity ────────────────────
+    // Q-value table: (selected_id, other_id) → affinity score.
+    // Scores decay each frame and are rewarded when the user inspects a pair.
+    // During drag the top-scored neighbours are shown automatically.
+    pub measure_affinity: std::collections::HashMap<(Uuid, Uuid), f32>,
+}
+
+/// Which shape-specific handle is being dragged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ShapeHandle {
+    CornerRadius(usize), // 0=TL 1=TR 2=BR 3=BL
+    ArcStart,
+    ArcEnd,
+    ArcInner,
+    PolygonCornerRadius,
+    PolygonSides,
 }
 
 #[derive(Default, Debug)]
@@ -174,6 +231,14 @@ pub struct DragState {
     /// True when dragging rotates instead of moving/resizing
     pub rotating:      bool,
     pub rotate_screen_center: egui::Pos2, // layer center in screen coords at drag start
+    /// Snap/alignment guide lines to draw: (x1,y1,x2,y2, is_center_align)
+    /// Coords are in *world* space.
+    pub snap_guides:   Vec<(f32, f32, f32, f32, bool)>,
+    /// Shape-specific handle being dragged (None = normal move / resize / rotate).
+    pub shape_handle:  Option<ShapeHandle>,
+    /// World-space start positions of *every* selected layer at drag-start.
+    /// Used so every layer in the selection moves together with the primary.
+    pub multi_drag_offsets: Vec<(Uuid, f32, f32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -212,6 +277,7 @@ impl EditorState {
             hovered_layer: None,
             history:       vec![],
             history_idx:   0,
+            measure_affinity: std::collections::HashMap::new(),
         };
         // Demo scene
         state.add_frame("Desktop - 1", 100.0, 80.0, 1280.0, 720.0);
@@ -223,6 +289,46 @@ impl EditorState {
         // Seed history with the initial scene so undo has a baseline
         state.push_history("initial");
         state
+    }
+
+    // ── RL Measurement Affinity ──────────────────────────────────────────────
+
+    /// Apply `reward` to the pair (sel, other) and then apply TD decay (γ=0.998)
+    /// to every entry so older interactions fade over time.
+    pub fn rl_reward(&mut self, sel: Uuid, other: Uuid, reward: f32) {
+        let key = if sel < other { (sel, other) } else { (other, sel) };
+        let v = self.measure_affinity.entry(key).or_insert(0.0);
+        *v = (*v + reward).min(10.0); // cap to prevent unbounded growth
+        for val in self.measure_affinity.values_mut() {
+            *val *= 0.998; // temporal-difference decay
+        }
+    }
+
+    /// Return up to `max_n` visible layer IDs ranked by (affinity + proximity bonus),
+    /// excluding `sel_id` itself. Used to auto-select measurement targets during drag.
+    pub fn rl_top_targets(&self, sel_id: Uuid, max_n: usize) -> Vec<Uuid> {
+        let sel = match self.layers.get(&sel_id) { Some(r) => r, None => return vec![] };
+        let scx = sel.x + sel.width * 0.5;
+        let scy = sel.y + sel.height * 0.5;
+        let ref_dist = 400.0f32; // falloff distance in world units
+
+        let mut scored: Vec<(Uuid, f32)> = self.pages[self.active_page].layers.iter()
+            .filter(|&&id| id != sel_id)
+            .filter_map(|&id| {
+                let r = self.layers.get(&id)?;
+                if !r.visible { return None; }
+                let dx = (r.x + r.width * 0.5) - scx;
+                let dy = (r.y + r.height * 0.5) - scy;
+                let dist = (dx * dx + dy * dy).sqrt();
+                let proximity = (-dist / ref_dist).exp(); // 1.0 at overlap, decays with distance
+                let key = if sel_id < id { (sel_id, id) } else { (id, sel_id) };
+                let affinity = self.measure_affinity.get(&key).copied().unwrap_or(0.0);
+                Some((id, affinity + proximity))
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.into_iter().take(max_n).map(|(id, _)| id).collect()
     }
 
     // ── Layers ──────────────────────────────────────────────────────────────
@@ -249,6 +355,14 @@ impl EditorState {
 
     pub fn add_ellipse(&mut self, x: f32, y: f32, w: f32, h: f32) -> Uuid {
         let rec = LayerRecord::new_ellipse(x, y, w, h);
+        let id = rec.id;
+        self.pages[self.active_page].layers.push(id);
+        self.layers.insert(id, rec);
+        id
+    }
+
+    pub fn add_polygon(&mut self, x: f32, y: f32, w: f32, h: f32) -> Uuid {
+        let rec = LayerRecord::new_polygon(x, y, w, h);
         let id = rec.id;
         self.pages[self.active_page].layers.push(id);
         self.layers.insert(id, rec);
@@ -424,9 +538,30 @@ impl EditorState {
 
     pub fn zoom_at(&mut self, sx: f32, sy: f32, factor: f32) {
         let (wx, wy) = self.screen_to_world(sx, sy);
-        self.zoom = (self.zoom * factor).clamp(0.05, 32.0);
+        // 2 % minimum, 25 600 % maximum
+        self.zoom = (self.zoom * factor).clamp(0.02, 256.0);
         self.pan_x = wx - sx / self.zoom;
         self.pan_y = wy - sy / self.zoom;
+    }
+
+    // ── Alignment helpers ────────────────────────────────────────────────────
+
+    /// AABB of all layers on the active page (reference for alignment ops).
+    pub fn page_content_bounds(&self) -> Option<(f32, f32, f32, f32)> {
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for &id in &self.pages[self.active_page].layers {
+            if let Some(r) = self.layers.get(&id) {
+                if !r.visible { continue; }
+                min_x = min_x.min(r.x);
+                min_y = min_y.min(r.y);
+                max_x = max_x.max(r.x + r.width);
+                max_y = max_y.max(r.y + r.height);
+            }
+        }
+        if min_x.is_finite() { Some((min_x, min_y, max_x, max_y)) } else { None }
     }
 
     // ── Hit test ────────────────────────────────────────────────────────────

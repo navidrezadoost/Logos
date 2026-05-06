@@ -39,7 +39,7 @@ Logos (Cargo Workspace)
 ├── logos-text            # Text shaping via cosmic-text; glyph atlas; shaped-run cache
 ├── logos-collab          # Real-time collaboration — CRDT sessions, RBAC, REST API, conflict resolution
 ├── logos-desktop         # Desktop application — UI state machines, tool FSM, HTTP client
-├── logos-wasm            # WebAssembly target — wasm-bindgen exports, JS API
+├── logos-wasm            # WebAssembly editor — egui/eframe UI, Figma-style canvas, trunk build
 ├── logos-plugin-system   # Plugin SDK, marketplace client, permission model
 └── logos-plugins         # Built-in and example plugins
 ```
@@ -340,15 +340,70 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ---
 
-## Building the WebAssembly Target
+## Building the WebAssembly Editor
+
+The `logos-wasm` crate is the browser-based design editor, built with **egui 0.29 / eframe 0.29** and compiled to WebAssembly via **Trunk**.
 
 ```bash
-wasm-pack build logos-wasm --target web --out-dir pkg
-cd logos-wasm/web
-npx serve .
+# Install Trunk (once)
+cargo install trunk
+
+# Development build & dev server (hot-reload)
+cd logos-wasm
+trunk serve
+
+# Production build
+trunk build --release
+# Output in logos-wasm/dist/
 ```
 
-Open `http://localhost:3000` in a WebGPU-capable browser (Chrome 113+, Edge 113+).
+Serve the `dist/` directory with any static file server or use `logos-server` which serves it at `http://localhost:8080`.
+
+### Editor Keyboard Shortcuts
+
+| Key | Tool / Action |
+|-----|---------------|
+| `V` | Move tool — select and drag layers |
+| `K` | Scale tool — select with proportional scale intent |
+| `H` | Hand tool — pan canvas (no Space key needed) |
+| `F` | Frame tool |
+| `R` | Rectangle tool |
+| `E` | Ellipse tool |
+| `N` | Polygon tool |
+| `T` | Text tool |
+| `P` | Pen tool |
+| `G` | Toggle grid |
+| `Space + drag` | Temporary pan (any tool) |
+| `Ctrl+Z / Ctrl+Shift+Z` | Undo / Redo |
+| `Ctrl+C / Ctrl+X / Ctrl+V` | Copy / Cut / Paste |
+| `Ctrl+D` | Duplicate selection |
+| `Ctrl+A` | Select all |
+| `Delete / Backspace` | Delete selected layers |
+| `Shift+click` | Toggle multi-select |
+| `Escape` | Clear selection / cancel tool |
+
+### Toolbar Layout
+
+The toolbar floats as a **dark pill at the bottom-centre** of the canvas (Figma-style):
+
+- **Move-mode dropdown** — shows the active move tool (Move / Scale / Hand); click to open a popup and switch modes.
+- **Shape-tool dropdown** — shows the last-used shape tool; click to open a popup listing Frame, Rect, Ellipse, Polygon, Text, Pen.
+- **Zoom controls** — `−` / zoom% / `+`; click the percentage to reset to 100%.
+- **Grid toggle** — `#` / `.`
+- **Fit button** — `[ ]` — fits the canvas to the viewport.
+
+### Alignment (Right Panel → Transform)
+
+Select one or more layers and use the Align buttons:
+
+| Action | Single selection | Multi-selection |
+|--------|-----------------|-----------------|
+| Align Left | Align to page left edge | Align all to the leftmost edge in the group |
+| Center H | Center on page horizontal axis | Center all on group's horizontal midpoint |
+| Align Right | Align to page right edge | Align all to the rightmost edge in the group |
+| Align Top | Align to page top edge | Align all to the topmost edge in the group |
+| Center V | Center on page vertical axis | Center all on group's vertical midpoint |
+| Align Bottom | Align to page bottom edge | Align all to the bottommost edge in the group |
 
 ---
 
