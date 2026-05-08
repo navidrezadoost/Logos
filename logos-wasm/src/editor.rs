@@ -107,7 +107,20 @@ impl eframe::App for LogosEditor {
                 }
                 if i.key_pressed(Key::Escape) {
                     state.clear_selection();
+                    state.pen_in_progress = None;  // cancel any in-progress pen path
                     state.tool = Tool::Select;
+                }
+                if i.key_pressed(Key::Enter) {
+                    // Commit an in-progress Pen path
+                    if state.tool == Tool::Pen {
+                        if let Some(pts) = state.pen_in_progress.take() {
+                            if let Some(id) = state.add_pen_path(pts) {
+                                state.select_only(id);
+                                state.push_history("draw path");
+                            }
+                        }
+                        state.tool = Tool::Select;
+                    }
                 }
             }
 
@@ -138,22 +151,27 @@ impl eframe::App for LogosEditor {
                 if i.key_pressed(Key::T) { state.tool = Tool::Text; }
                 if i.key_pressed(Key::P) { state.tool = Tool::Pen; }
                 if i.key_pressed(Key::H) { state.tool = Tool::Pan; }
+                if i.key_pressed(Key::L) { state.tool = Tool::Line; }
                 if i.key_pressed(Key::G) { state.show_grid = !state.show_grid; }
             }
         });
 
         // ─── Left panel ────────────────────────────────────────────────────
         SidePanel::left("layers")
-            .exact_width(LEFT_W)
-            .resizable(false)
+            .default_width(LEFT_W)
+            .min_width(180.0)
+            .max_width(400.0)
+            .resizable(true)
             .show(ctx, |ui| {
                 panels::left_panel(ui, state);
             });
 
         // ─── Right panel ───────────────────────────────────────────────────
         SidePanel::right("properties")
-            .exact_width(RIGHT_W)
-            .resizable(false)
+            .default_width(RIGHT_W)
+            .min_width(200.0)
+            .max_width(480.0)
+            .resizable(true)
             .show(ctx, |ui| {
                 ScrollArea::vertical().id_salt("right_panel_scroll").show(ui, |ui| {
                     panels::right_panel(ui, state);
@@ -244,6 +262,10 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         } else {
             ui.ctx().set_cursor_icon(CursorIcon::Grab);
         }
+    } else {
+        // Explicitly reset – ensures the hand/fist cursor is not carried over
+        // when the user switches away from the Pan tool.
+        ui.ctx().set_cursor_icon(CursorIcon::Default);
     }
 
     // ── Grid ──────────────────────────────────────────────────────────────
@@ -361,11 +383,55 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     pts2 = pts2.into_iter().map(|p| rotate_point(p, c, rotation)).collect();
                     painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
                 }
+                LayerType::Line => {
+                    let c = rect.center();
+                    let lc = rotate_point(rect.left_center(), c, rotation);
+                    let rc2 = rotate_point(rect.right_center(), c, rotation);
+                    let lw  = (rec.stroke_width * state.zoom).max(2.0);
+                    let col = if stroke.width > 0.0 { stroke.color } else { fill };
+                    painter.line_segment([lc, rc2], Stroke::new(lw, col));
+                }
+                LayerType::Arrow { head_size } => {
+                    let c = rect.center();
+                    let lc = rotate_point(rect.left_center(), c, rotation);
+                    let rc2 = rotate_point(rect.right_center(), c, rotation);
+                    let head_s = head_size * state.zoom;
+                    let dir  = (rc2 - lc).normalized();
+                    let perp = vec2(-dir.y, dir.x);
+                    let tip  = rc2;
+                    let back = tip - dir * head_s;
+                    let p1   = back + perp * (head_s * 0.45);
+                    let p2   = back - perp * (head_s * 0.45);
+                    let lw   = (rec.stroke_width * state.zoom).max(2.0);
+                    let col  = if stroke.width > 0.0 { stroke.color } else { fill };
+                    painter.line_segment([lc, back + dir * (head_s * 0.15)], Stroke::new(lw, col));
+                    painter.add(Shape::Path(epaint::PathShape {
+                        points: vec![tip, p1, p2], closed: true, fill: col,
+                        stroke: epaint::PathStroke::NONE,
+                    }));
+                }
+                LayerType::Star { points, inner_ratio } => {
+                    let pts2 = star_screen_points(rect, *points, *inner_ratio, rotation);
+                    painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
+                }
                 LayerType::Text(content) => {
                     painter.add(Shape::Path(epaint::PathShape { points: pts.clone(), closed: true, fill: Color32::TRANSPARENT, stroke: stroke.into() }));
                     let content = content.clone();
                     painter.text(rect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &content,
                         FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
+                }
+                LayerType::Path { points } => {
+                    let lw  = (rec.stroke_width * state.zoom).max(1.5);
+                    let col = if stroke.width > 0.0 { stroke.color }
+                              else if fill.a() > 0 { fill }
+                              else { Color32::from_rgb(51, 153, 255) };
+                    let spts: Vec<Pos2> = points.iter().map(|[px, py]| {
+                        let (sx, sy) = state.world_to_screen(*px, *py);
+                        pos2(origin.x + sx, origin.y + sy)
+                    }).collect();
+                    for i in 0..spts.len().saturating_sub(1) {
+                        painter.line_segment([spts[i], spts[i + 1]], Stroke::new(lw, col));
+                    }
                 }
                 LayerType::Rect | LayerType::Frame => {
                     // Draw rounded rectangle correctly even when rotated.
@@ -413,6 +479,30 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     let pts2 = polygon_screen_points(rect, *sides, *corner_radius);
                     painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
                 }
+                LayerType::Line => {
+                    let lw  = (rec.stroke_width * state.zoom).max(2.0);
+                    let col = if stroke.width > 0.0 { stroke.color } else { fill };
+                    painter.line_segment([rect.left_center(), rect.right_center()], Stroke::new(lw, col));
+                }
+                LayerType::Arrow { head_size } => {
+                    let head_s = head_size * state.zoom;
+                    let lw    = (rec.stroke_width * state.zoom).max(2.0);
+                    let col   = if stroke.width > 0.0 { stroke.color } else { fill };
+                    let lc    = rect.left_center();
+                    let rc2   = rect.right_center();
+                    let tip   = rc2;
+                    let p1    = pos2(tip.x - head_s, tip.y - head_s * 0.45);
+                    let p2    = pos2(tip.x - head_s, tip.y + head_s * 0.45);
+                    painter.line_segment([lc, pos2(tip.x - head_s * 0.85, tip.y)], Stroke::new(lw, col));
+                    painter.add(Shape::Path(epaint::PathShape {
+                        points: vec![tip, p1, p2], closed: true, fill: col,
+                        stroke: epaint::PathStroke::NONE,
+                    }));
+                }
+                LayerType::Star { points, inner_ratio } => {
+                    let pts2 = star_screen_points(rect, *points, *inner_ratio, 0.0);
+                    painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
+                }
                 LayerType::Text(content) => {
                     painter.rect(rect, rounding, Color32::TRANSPARENT, stroke);
                     let content = content.clone();
@@ -422,6 +512,19 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 LayerType::Frame => {
                     painter.rect_filled(rect, rounding, fill);
                     painter.rect_stroke(rect, rounding, Stroke::new(1.0, Color32::from_gray(80)));
+                }
+                LayerType::Path { points } => {
+                    let lw  = (rec.stroke_width * state.zoom).max(1.5);
+                    let col = if stroke.width > 0.0 { stroke.color }
+                              else if fill.a() > 0 { fill }
+                              else { Color32::from_rgb(51, 153, 255) };
+                    let spts: Vec<Pos2> = points.iter().map(|[px, py]| {
+                        let (sx, sy) = state.world_to_screen(*px, *py);
+                        pos2(origin.x + sx, origin.y + sy)
+                    }).collect();
+                    for i in 0..spts.len().saturating_sub(1) {
+                        painter.line_segment([spts[i], spts[i + 1]], Stroke::new(lw, col));
+                    }
                 }
                 _ => {
                     // Separate fill + stroke so stroke position (inside/outside/center) works.
@@ -482,7 +585,9 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             } else {
                 painter.rect_stroke(rect, rounding, Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
             }
-            draw_selection_handles(&painter, rect, rotation, state.zoom);
+            let is_line_shape = matches!(state.layers.get(&id).map(|r| &r.layer_type),
+                Some(LayerType::Line) | Some(LayerType::Arrow { .. }));
+            draw_selection_handles(&painter, rect, rotation, state.zoom, is_line_shape);
 
             // ── Shape-specific handles ──────────────────────────────────────────
             {
@@ -765,16 +870,22 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     let sr = Rect::from_min_size(pos2(origin.x + sx, origin.y + sy),
                         vec2(rec.width * state.zoom, rec.height * state.zoom));
                     let handles = rotated_handle_positions(sr, rec.rotation);
+                    let is_line_sel = matches!(&rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
                     let mut done = false;
                     // Resize handles (8px hit radius)
                     for (h, spt) in handles {
+                        // Line/Arrow only allow Left/Right width handles
+                        use crate::state::ResizeHandle;
+                        if is_line_sel && !matches!(h, ResizeHandle::Left | ResizeHandle::Right) {
+                            continue;
+                        }
                         if spt.distance(mp) <= 8.0 {
                             ui.ctx().set_cursor_icon(resize_cursor_for_handle(h, rec.rotation));
                             done = true;
                             break;
                         }
                     }
-                    if !done {
+                    if !done && !is_line_sel {
                         // Rotation zones: 10–24px from corner handles
                         for idx in [0usize, 2, 5, 7] {
                             let cp = handles[idx].1;
@@ -799,6 +910,31 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
 
     // ── Tool interactions ─────────────────────────────────────────────────
     handle_tool_input(ui, &resp, &painter, origin, state, ctx_menu_layer);
+
+    // ── In-progress pen / pencil path preview ─────────────────────────────
+    if let Some(pts) = &state.pen_in_progress {
+        if pts.len() >= 2 {
+            let stroke = Stroke::new(2.0, Color32::from_rgb(51, 153, 255));
+            let spts: Vec<Pos2> = pts.iter().map(|[px, py]| {
+                let (sx, sy) = state.world_to_screen(*px, *py);
+                pos2(origin.x + sx, origin.y + sy)
+            }).collect();
+            for i in 0..spts.len() - 1 {
+                painter.line_segment([spts[i], spts[i + 1]], stroke);
+            }
+            // Ghost segment from last point to cursor
+            if let Some(mp) = ui.input(|i| i.pointer.hover_pos()) {
+                painter.line_segment([spts[spts.len()-1], mp],
+                    Stroke::new(1.5, Color32::from_rgba_unmultiplied(51,153,255,100)));
+            }
+        }
+        // Show dot at each anchor point
+        for [px, py] in pts {
+            let (sx, sy) = state.world_to_screen(*px, *py);
+            let sp = pos2(origin.x + sx, origin.y + sy);
+            painter.circle(sp, 4.0, Color32::WHITE, Stroke::new(1.5, Color32::from_rgb(51, 153, 255)));
+        }
+    }
 
     // ── Right-click context menu on canvas ────────────────────────────────
     resp.context_menu(|ui| {
@@ -1020,6 +1156,32 @@ fn polygon_screen_points(rect: Rect, sides: u32, _corner_radius: f32) -> Vec<Pos
         let t = -std::f32::consts::FRAC_PI_2 + 2.0 * std::f32::consts::PI * (i as f32) / (n as f32);
         pos2(c.x + rx * t.cos(), c.y + ry * t.sin())
     }).collect()
+}
+
+/// Generate screen-space points for an N-pointed star.
+/// `inner_ratio` = inner radius / outer radius (0..1).
+/// Points are generated from the top (12 o'clock) clockwise.
+/// `rotation` is in radians and applied around the rect center.
+fn star_screen_points(rect: Rect, points: u32, inner_ratio: f32, rotation: f32) -> Vec<Pos2> {
+    let c   = rect.center();
+    let rx  = rect.width()  * 0.5;
+    let ry  = rect.height() * 0.5;
+    let n   = (points.max(3)) as usize;
+    let ir  = inner_ratio.clamp(0.05, 0.95);
+    let tau = std::f32::consts::TAU;
+    let start = -std::f32::consts::FRAC_PI_2;
+    let mut pts = Vec::with_capacity(n * 2);
+    for i in 0..n {
+        // Outer vertex — unit coordinate (cos, sin) scaled to bounding ellipse.
+        let a_out = start + (i as f32) * tau / (n as f32) + rotation;
+        pts.push(pos2(c.x + rx * a_out.cos(), c.y + ry * a_out.sin()));
+        // Inner vertex — same normalized-then-scale pipeline: unit coord is `ir*(cos, sin)`,
+        // then scaled by the SAME (rx, ry).  Both spaces are consistent so the star
+        // always looks like a star regardless of bounding-box aspect ratio.
+        let a_in = a_out + tau / (2.0 * n as f32);
+        pts.push(pos2(c.x + ir * rx * a_in.cos(), c.y + ir * ry * a_in.sin()));
+    }
+    pts
 }
 
 /// 4 rotated corners of a screen-space rect (cl, tr, br, bl order).
@@ -1289,7 +1451,8 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &EditorState) {
     }
 }
 
-fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f32, zoom: f32) {
+fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f32, zoom: f32, line_mode: bool) {
+    use crate::state::ResizeHandle;
     let size    = (6.0_f32 * zoom.sqrt()).clamp(4.0, 10.0);
     let col     = Color32::WHITE;
     let border  = Stroke::new(1.5, Color32::from_rgb(133, 96, 255));
@@ -1297,25 +1460,30 @@ fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f32, zoom: f3
 
     let handles = rotated_handle_positions(rect, rotation);
 
-    // Draw resize squares
-    for (_, pt) in &handles {
+    // Draw resize squares — for Line/Arrow only show Left & Right handles.
+    for (handle, pt) in &handles {
+        if line_mode && !matches!(handle, ResizeHandle::Left | ResizeHandle::Right) {
+            continue;
+        }
         painter.rect(
             Rect::from_center_size(*pt, vec2(size, size)),
             Rounding::ZERO, col, border,
         );
     }
 
-    // Draw rotation arc indicators outside the four corners
-    // Indices 0=TL, 2=TR, 5=BL, 7=BR
-    let rot_radius = size * 1.8;
-    for idx in [0usize, 2, 5, 7] {
-        let (_, cpt) = handles[idx];
-        let outward = (cpt - rect.center()).normalized() * rot_radius;
-        let arc_center = cpt + outward;
-        painter.circle_stroke(arc_center, size * 0.6, rot_col);
-        // Small curved arrow stub — just two tick lines to imply rotation
-        let perp = vec2(-outward.y, outward.x).normalized() * size * 0.5;
-        painter.line_segment([arc_center - perp, arc_center + perp], rot_col);
+    // Draw rotation arc indicators outside the four corners — skip for lines.
+    if !line_mode {
+        // Indices 0=TL, 2=TR, 5=BL, 7=BR
+        let rot_radius = size * 1.8;
+        for idx in [0usize, 2, 5, 7] {
+            let (_, cpt) = handles[idx];
+            let outward = (cpt - rect.center()).normalized() * rot_radius;
+            let arc_center = cpt + outward;
+            painter.circle_stroke(arc_center, size * 0.6, rot_col);
+            // Small curved arrow stub — just two tick lines to imply rotation
+            let perp = vec2(-outward.y, outward.x).normalized() * size * 0.5;
+            painter.line_segment([arc_center - perp, arc_center + perp], rot_col);
+        }
     }
 }
 
@@ -1355,6 +1523,30 @@ fn handle_tool_input(
     if resp.double_clicked_by(PointerButton::Primary) {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
+            // Pen tool: double-click commits the in-progress path
+            if state.tool == Tool::Pen {
+                if let Some(pts) = state.pen_in_progress.take() {
+                    if let Some(id) = state.add_pen_path(pts) {
+                        state.select_only(id);
+                        state.push_history("draw path");
+                    }
+                }
+                state.tool = Tool::Select;
+                return;
+            }
+            // When a draw tool is active, double-click = select layer under cursor + revert to Select.
+            let is_draw_tool = matches!(state.tool,
+                Tool::Ellipse | Tool::Rect | Tool::Polygon |
+                Tool::Line | Tool::Arrow | Tool::Star | Tool::Frame |
+                Tool::Text | Tool::Pen);
+            if is_draw_tool {
+                if let Some(id) = state.hit_test(wx, wy) {
+                    state.select_only(id);
+                }
+                state.tool = Tool::Select;
+                return;
+            }
+
 
             // Only enter a frame’s child if the selected layer IS that frame.
             // Otherwise just select whatever is topmost at the click point.
@@ -1607,12 +1799,46 @@ fn handle_tool_input(
                     state.drag.layer_id  = None;
                     state.drag.resize_handle = None;
                 }
+                Tool::Polygon | Tool::Line | Tool::Arrow | Tool::Star => {
+                    state.drag.active    = true;
+                    state.drag.rotating  = false;
+                    state.drag.origin    = pos2(wx, wy);
+                    state.drag.layer_id  = None;
+                    state.drag.resize_handle = None;
+                }
+                // Pencil freehand: start collecting points
+                Tool::Pen if state.pen_mode == crate::state::PenMode::Pencil => {
+                    state.pen_in_progress = Some(vec![[wx, wy]]);
+                    state.drag.active = true;
+                    state.drag.origin = pos2(wx, wy);
+                    state.drag.layer_id = None;
+                }
                 _ => {}
             }
         }
     }
 
     // ── Drag in progress ──────────────────────────────────────────────────
+    // Pencil: collect points while mouse is dragged (independent of drag.active layer move)
+    if resp.dragged_by(PointerButton::Primary)
+        && state.tool == Tool::Pen
+        && state.pen_mode == crate::state::PenMode::Pencil
+    {
+        if let Some(mp) = pointer.hover_pos() {
+            let (wx, wy) = to_world(mp, state);
+            let should_push = state.pen_in_progress.as_ref().map(|pts| {
+                if let Some(&[lx, ly]) = pts.last() {
+                    let dx = wx - lx; let dy = wy - ly;
+                    (dx*dx + dy*dy) > (4.0 / state.zoom).powi(2)
+                } else { true }
+            }).unwrap_or(false);
+            if should_push {
+                if let Some(pts) = state.pen_in_progress.as_mut() {
+                    pts.push([wx, wy]);
+                }
+            }
+        }
+    }
     if resp.dragged_by(PointerButton::Primary) && state.drag.active {
         if let Some(mp) = pointer.hover_pos() {
             let (wx, wy) = to_world(mp, state);
@@ -1841,7 +2067,8 @@ fn handle_tool_input(
                         }
                     }
                 }
-                Tool::Frame | Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Text => {
+                Tool::Frame | Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Text
+                | Tool::Line | Tool::Arrow | Tool::Star => {
                     state.drag.layer_start = pos2(wx, wy);
                 }
                 _ => {}
@@ -1850,6 +2077,19 @@ fn handle_tool_input(
     }
 
     // ── Drag released ──────────────────────────────────────────────────────
+    if resp.drag_stopped() {
+        // Pencil commit
+        if state.tool == Tool::Pen && state.pen_mode == crate::state::PenMode::Pencil {
+            if let Some(pts) = state.pen_in_progress.take() {
+                if let Some(id) = state.add_pen_path(pts) {
+                    state.select_only(id);
+                    state.push_history("draw path");
+                }
+            }
+            state.drag.active = false;
+            return;
+        }
+    }
     if resp.drag_stopped() && state.drag.active {
         if state.drag.layer_id.is_some() {
             let label = if state.drag.rotating { "rotate" }
@@ -1872,6 +2112,9 @@ fn handle_tool_input(
                     Tool::Ellipse => state.add_ellipse(x, y, w, h),
                     Tool::Polygon => state.add_polygon(x, y, w, h),
                     Tool::Text    => state.add_text(x, y, "Text"),
+                    Tool::Line    => state.add_line(x, y, w, h.max(2.0)),
+                    Tool::Arrow   => state.add_arrow(x, y, w, h.max(2.0)),
+                    Tool::Star    => state.add_star(x, y, w, h),
                     _ => { state.drag.active = false; return; }
                 };
                 state.select_only(id);
@@ -1903,6 +2146,42 @@ fn handle_tool_input(
     if resp.clicked_by(PointerButton::Primary) && !resp.drag_stopped() && !space_held && state.tool != Tool::Pan {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
+
+            // When a draw tool is active, ANY click (even over an existing shape) creates
+            // a new default-sized shape. Double-click selects existing.
+            let is_draw_tool = matches!(state.tool,
+                Tool::Ellipse | Tool::Rect | Tool::Polygon |
+                Tool::Line | Tool::Arrow | Tool::Star | Tool::Frame |
+                Tool::Text | Tool::Pen);
+            if is_draw_tool {
+                // Pen (click-to-add-anchor mode): add a point to the in-progress path
+                if state.tool == Tool::Pen && state.pen_mode == crate::state::PenMode::Pen {
+                    let pts = state.pen_in_progress.get_or_insert_with(Vec::new);
+                    pts.push([wx, wy]);
+                    return;
+                }
+                let shift = ui.input(|i| i.modifiers.shift);
+                if !shift {
+                    let ds = 100.0_f32;
+                    let cx = wx - ds * 0.5;
+                    let cy = wy - ds * 0.5;
+                    let new_id = match state.tool {
+                        Tool::Ellipse => state.add_ellipse(cx, cy, ds, ds),
+                        Tool::Rect    => state.add_rect_layer("Rectangle", cx, cy, ds, ds, [0.94, 0.35, 0.35, 1.0]),
+                        Tool::Polygon => state.add_polygon(cx, cy, ds, ds),
+                        Tool::Line    => state.add_line(cx, cy, ds, 2.0),
+                        Tool::Arrow   => state.add_arrow(cx, cy, ds, 2.0),
+                        Tool::Star    => state.add_star(cx, cy, ds, ds),
+                        Tool::Frame   => state.add_frame("Frame", cx, cy, 300.0, 200.0),
+                        Tool::Text    => state.add_text(cx, cy, "Text"),
+                        _             => { return; }
+                    };
+                    state.select_only(new_id);
+                    state.push_history("draw layer");
+                    state.tool = Tool::Select;
+                }
+                return;
+            }
             let content_id = state.hit_test_content(wx, wy);
             let frame_id   = state.frame_at(wx, wy);
             clog!("[CLICK] world=({:.1},{:.1}) content={:?} frame={:?} selection={:?}",
@@ -1952,8 +2231,31 @@ fn handle_tool_input(
                         }
                     }
                     None => {
-                        clog!("[CLICK] → clear selection");
-                        if !shift { state.clear_selection(); }
+                        // If a draw tool is active, single-click places a default-sized shape
+                        let is_draw_tool = matches!(state.tool,
+                            Tool::Ellipse | Tool::Rect | Tool::Polygon |
+                            Tool::Line | Tool::Arrow | Tool::Star | Tool::Frame);
+                        if is_draw_tool && !shift {
+                            let ds = 100.0_f32;
+                            let cx = wx - ds * 0.5;
+                            let cy = wy - ds * 0.5;
+                            let new_id = match state.tool {
+                                Tool::Ellipse => state.add_ellipse(cx, cy, ds, ds),
+                                Tool::Rect    => state.add_rect_layer("Rectangle", cx, cy, ds, ds, [0.94, 0.35, 0.35, 1.0]),
+                                Tool::Polygon => state.add_polygon(cx, cy, ds, ds),
+                                Tool::Line    => state.add_line(cx, cy, ds, 2.0),
+                                Tool::Arrow   => state.add_arrow(cx, cy, ds, 2.0),
+                                Tool::Star    => state.add_star(cx, cy, ds, ds),
+                                Tool::Frame   => state.add_frame("Frame", cx, cy, 300.0, 200.0),
+                                _             => { state.clear_selection(); return; }
+                            };
+                            state.select_only(new_id);
+                            state.push_history("draw layer");
+                            state.tool = Tool::Select;
+                        } else {
+                            clog!("[CLICK] → clear selection");
+                            if !shift { state.clear_selection(); }
+                        }
                     }
                 }
         }

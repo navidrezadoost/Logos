@@ -55,6 +55,34 @@ pub struct LayerRecord {
     pub rotation: f32,
 }
 
+// ── Tool sub-modes ────────────────────────────────────────────────────────────
+
+/// Three modes of the Frame tool (like Figma's frame group).
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum FrameMode {
+    #[default] Frame,
+    /// Selection — rectangular marquee selection (no new frame created)
+    Section,
+    /// Slice — marks an export slice region
+    Slice,
+}
+
+/// Two modes of the Text tool.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum TextMode {
+    #[default] Normal,
+    /// Writes text that flows along the edge of a shape or path.
+    OnPath,
+}
+
+/// Two modes of the Pen tool.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum PenMode {
+    #[default] Pen,
+    /// Freehand pencil — rough bezier approximation of mouse path.
+    Pencil,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LayerType {
     Rect,
@@ -63,11 +91,18 @@ pub enum LayerType {
     /// arc_start / arc_end in radians (0 = right, clockwise).
     /// inner_ratio 0 = full disc / pie sector,  0 < r < 1 = ring/donut.
     Ellipse { arc_start: f32, arc_end: f32, inner_ratio: f32 },
-    Path,
+    /// Freehand / pen polyline; points are in absolute *world* coordinates.
+    Path { points: Vec<[f32; 2]> },
     Group,
     /// Regular N-sided polygon inscribed in the bounding rect.
     /// corner_radius is a fraction of the shortest edge (0 .. 0.45).
     Polygon { sides: u32, corner_radius: f32 },
+    /// Straight line from left-center to right-center of the bounding rect.
+    Line,
+    /// Arrow line with a filled triangular head at the right end.
+    Arrow { head_size: f32 },
+    /// N-pointed star; inner_ratio = inner-radius / outer-radius (0 < r < 1).
+    Star { points: u32, inner_ratio: f32 },
 }
 
 impl LayerRecord {
@@ -116,6 +151,35 @@ impl LayerRecord {
         r
     }
 
+    pub fn new_line(x: f32, y: f32, w: f32, h: f32) -> Self {
+        let mut r = Self::new_rect(x, y, w, h);
+        r.name = "Line".into();
+        r.fill = [0.0, 0.0, 0.0, 0.0];
+        r.stroke_color = [0.2, 0.6, 1.0, 1.0];
+        r.stroke_width = 2.0;
+        r.layer_type = LayerType::Line;
+        r
+    }
+
+    pub fn new_arrow(x: f32, y: f32, w: f32, h: f32) -> Self {
+        let mut r = Self::new_rect(x, y, w, h);
+        r.name = "Arrow".into();
+        r.fill = [0.0, 0.0, 0.0, 0.0];
+        r.stroke_color = [0.2, 0.6, 1.0, 1.0];
+        r.stroke_width = 2.0;
+        r.layer_type = LayerType::Arrow { head_size: 14.0 };
+        r
+    }
+
+    pub fn new_star(x: f32, y: f32, w: f32, h: f32) -> Self {
+        let mut r = Self::new_rect(x, y, w, h);
+        r.name = "Star".into();
+        r.fill  = [0.98, 0.78, 0.18, 1.0];
+        r.color = [0.98, 0.78, 0.18, 1.0];
+        r.layer_type = LayerType::Star { points: 5, inner_ratio: 0.382 };
+        r
+    }
+
     pub fn new_text(x: f32, y: f32, text: &str) -> Self {
         let mut r = Self::new_rect(x, y, 200.0, 40.0);
         r.name = "Text".into();
@@ -134,9 +198,12 @@ impl LayerRecord {
             LayerType::Frame    => "[F]",
             LayerType::Text(_)  => "[T]",
             LayerType::Ellipse { .. } => "(E)",
-            LayerType::Path     => "Pth",
+            LayerType::Path { .. } => "Pth",
             LayerType::Group    => "Grp",
             LayerType::Polygon { .. } => "Ply",
+            LayerType::Line     => "---",
+            LayerType::Arrow { .. } => "-->",
+            LayerType::Star { .. }  => "*",
         }
     }
 }
@@ -200,6 +267,13 @@ pub struct EditorState {
     // History (undo/redo)
     pub history:       Vec<HistoryEntry>,
     pub history_idx:   usize,
+
+    // Tool sub-modes
+    pub frame_mode: FrameMode,
+    pub text_mode:  TextMode,
+    pub pen_mode:   PenMode,
+    /// In-progress pen/pencil path points (world coords). None = not drawing.
+    pub pen_in_progress: Option<Vec<[f32; 2]>>,
 
     // ── Reinforcement-learning measurement affinity ────────────────────
     // Q-value table: (selected_id, other_id) → affinity score.
@@ -277,6 +351,10 @@ impl EditorState {
             hovered_layer: None,
             history:       vec![],
             history_idx:   0,
+            frame_mode: FrameMode::Frame,
+            text_mode:  TextMode::Normal,
+            pen_mode:   PenMode::Pen,
+            pen_in_progress: None,
             measure_affinity: std::collections::HashMap::new(),
         };
         // Demo scene
@@ -375,6 +453,55 @@ impl EditorState {
         self.pages[self.active_page].layers.push(id);
         self.layers.insert(id, rec);
         id
+    }
+
+    pub fn add_line(&mut self, x: f32, y: f32, w: f32, h: f32) -> Uuid {
+        let rec = LayerRecord::new_line(x, y, w, h);
+        let id = rec.id;
+        self.pages[self.active_page].layers.push(id);
+        self.layers.insert(id, rec);
+        id
+    }
+
+    pub fn add_arrow(&mut self, x: f32, y: f32, w: f32, h: f32) -> Uuid {
+        let rec = LayerRecord::new_arrow(x, y, w, h);
+        let id = rec.id;
+        self.pages[self.active_page].layers.push(id);
+        self.layers.insert(id, rec);
+        id
+    }
+
+    pub fn add_star(&mut self, x: f32, y: f32, w: f32, h: f32) -> Uuid {
+        let rec = LayerRecord::new_star(x, y, w, h);
+        let id = rec.id;
+        self.pages[self.active_page].layers.push(id);
+        self.layers.insert(id, rec);
+        id
+    }
+
+    /// Commit a completed pen/pencil stroke as a new Path layer.
+    /// `points` must be in world coordinates.  Returns `None` if fewer than 2 points.
+    pub fn add_pen_path(&mut self, points: Vec<[f32; 2]>) -> Option<Uuid> {
+        if points.len() < 2 { return None; }
+        // Compute bounding box for the layer rect.
+        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for [px, py] in &points {
+            min_x = min_x.min(*px); min_y = min_y.min(*py);
+            max_x = max_x.max(*px); max_y = max_y.max(*py);
+        }
+        let w = (max_x - min_x).max(2.0);
+        let h = (max_y - min_y).max(2.0);
+        let mut rec = LayerRecord::new_rect(min_x, min_y, w, h);
+        rec.name         = "Path".into();
+        rec.fill         = [0.0, 0.0, 0.0, 0.0];
+        rec.stroke_color = [0.2, 0.6, 1.0, 1.0];
+        rec.stroke_width = 2.0;
+        rec.layer_type   = LayerType::Path { points };
+        let id = rec.id;
+        self.pages[self.active_page].layers.push(id);
+        self.layers.insert(id, rec);
+        Some(id)
     }
 
     pub fn remove_layer(&mut self, id: Uuid) {

@@ -1,7 +1,7 @@
 //! Left panel (layers + pages), right panel (properties), top toolbar.
 
 use eframe::egui::*;
-use crate::state::{EditorState, LayerType};
+use crate::state::{EditorState, LayerType, FrameMode, TextMode, PenMode};
 use crate::tools::Tool;
 
 // ── Top toolbar ──────────────────────────────────────────────────────────────
@@ -26,13 +26,23 @@ fn tb_btn(ui: &mut Ui, icon: &str, tip: &str, active: bool) -> bool {
     ).on_hover_text(tip).clicked()
 }
 
+/// Close every dropdown except the given one (pass "" to close all).
+fn close_other_dropdowns(ui: &mut Ui, except: &str) {
+    for name in ["move_dd", "shape_dd", "frame_dd", "text_dd", "pen_dd"] {
+        if name != except {
+            let id = ui.make_persistent_id(name);
+            ui.memory_mut(|m| *m.data.get_temp_mut_or(id, false) = false);
+        }
+    }
+}
+
 /// Figma-style shape-tool dropdown.
 /// Shows the last-used shape-tool icon + ▾ chevron; opens a popup listing all
 /// shape tools with their keyboard shortcuts. Returns the chosen tool.
 fn shape_tool_dropdown(ui: &mut Ui, state: &EditorState) -> Option<Tool> {
     const SHAPE_TOOLS: [Tool; 6] = [
-        Tool::Frame, Tool::Rect, Tool::Ellipse,
-        Tool::Polygon, Tool::Text, Tool::Pen,
+        Tool::Rect, Tool::Ellipse, Tool::Polygon,
+        Tool::Line, Tool::Arrow,   Tool::Star,
     ];
 
     let current  = if state.tool.is_shape_tool() { state.tool } else { Tool::Rect };
@@ -52,6 +62,7 @@ fn shape_tool_dropdown(ui: &mut Ui, state: &EditorState) -> Option<Tool> {
     ).on_hover_text(format!("{}  [{}]", current.label(), current.shortcut()));
 
     if trigger_resp.clicked() {
+        close_other_dropdowns(ui, "shape_dd");
         ui.memory_mut(|m| {
             let open: &mut bool = m.data.get_temp_mut_or(trigger_id, false);
             *open = !*open;
@@ -150,6 +161,7 @@ fn move_tool_dropdown(ui: &mut Ui, state: &mut EditorState) {
     ).on_hover_text(format!("{}  [{}]", current.label(), current.shortcut()));
 
     if trigger_resp.clicked() {
+        close_other_dropdowns(ui, "move_dd");
         ui.memory_mut(|m| {
             let open: &mut bool = m.data.get_temp_mut_or(trigger_id, false);
             *open = !*open;
@@ -222,6 +234,138 @@ fn move_tool_dropdown(ui: &mut Ui, state: &mut EditorState) {
     }
 }
 
+// ── Shared helper to render a generic tool dropdown ──────────────────────────
+/// Generic popup list dropdown. `items` is &[(&str, &str, &str)] = (icon, label, shortcut).
+/// Returns the index picked, if any.
+fn generic_dropdown(
+    ui: &mut Ui,
+    dd_name: &str,
+    trigger_icon: &str,
+    trigger_tip: &str,
+    is_active: bool,
+    section_header: &str,
+    items: &[(&str, &str, &str)],
+    current_idx: usize,
+) -> Option<usize> {
+    let fill = if is_active { TB_ACCENT } else { TB_SECONDARY };
+    let fg   = if is_active { TB_FG     } else { TB_MUTED     };
+    let trigger_id = ui.make_persistent_id(dd_name);
+
+    let trigger_resp = ui.add(
+        Button::new(RichText::new(trigger_icon).size(14.0).color(fg))
+            .fill(fill)
+            .stroke(Stroke::new(1.0, TB_BORDER))
+            .min_size(vec2(50.0, 28.0))
+            .rounding(5.0),
+    ).on_hover_text(trigger_tip);
+
+    if trigger_resp.clicked() {
+        close_other_dropdowns(ui, dd_name);
+        ui.memory_mut(|m| {
+            let open: &mut bool = m.data.get_temp_mut_or(trigger_id, false);
+            *open = !*open;
+        });
+    }
+
+    let is_open = ui.memory(|m| m.data.get_temp::<bool>(trigger_id).unwrap_or(false));
+    let mut picked: Option<usize> = None;
+
+    if is_open {
+        let popup_anchor = trigger_resp.rect.left_top() - vec2(0.0, 6.0);
+        Area::new(trigger_id.with("area"))
+            .fixed_pos(popup_anchor)
+            .pivot(Align2::LEFT_BOTTOM)
+            .order(Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                Frame::none()
+                    .fill(Color32::from_rgb(20, 20, 20))
+                    .stroke(Stroke::new(1.0, TB_BORDER))
+                    .rounding(8.0)
+                    .inner_margin(Margin::same(6.0))
+                    .show(ui, |ui| {
+                        ui.set_min_width(168.0);
+                        ui.label(RichText::new(section_header).size(10.0).color(TB_MUTED));
+                        ui.add_space(6.0);
+                        for (idx, (icon, label, shortcut)) in items.iter().enumerate() {
+                            let row_sel  = idx == current_idx;
+                            let row_bg   = if row_sel {
+                                Color32::from_rgba_unmultiplied(59, 130, 246, 28)
+                            } else { Color32::TRANSPARENT };
+                            let text_col = if row_sel { TB_ACCENT } else { TB_FG };
+                            let inner = Frame::none()
+                                .fill(row_bg).rounding(5.0)
+                                .inner_margin(Margin::symmetric(8.0, 5.0))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.set_min_width(156.0);
+                                        ui.label(RichText::new(*icon).size(14.0).color(text_col));
+                                        ui.add_space(8.0);
+                                        ui.label(RichText::new(*label).size(12.0).color(text_col));
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            ui.label(RichText::new(*shortcut).size(11.0)
+                                                .color(if row_sel { TB_ACCENT } else { TB_MUTED }));
+                                        });
+                                    });
+                                });
+                            let row_resp = inner.response.interact(Sense::click());
+                            if row_resp.hovered() {
+                                ui.painter().rect_filled(row_resp.rect, 5.0, Color32::from_white_alpha(8));
+                            }
+                            if row_resp.clicked() { picked = Some(idx); }
+                        }
+                    });
+            });
+
+        if ui.input(|i| i.key_pressed(Key::Escape)) || picked.is_some() {
+            ui.memory_mut(|m| *m.data.get_temp_mut_or(trigger_id, false) = false);
+        }
+    }
+    picked
+}
+
+fn frame_tool_dropdown(ui: &mut Ui, state: &mut EditorState) {
+    let items = [
+        ("[F]",  "Frame",    "F"),
+        ("[ ]",  "Section",  ""),
+        ("/[]",  "Slice",    ""),
+    ];
+    let current_idx = match state.frame_mode { FrameMode::Frame => 0, FrameMode::Section => 1, FrameMode::Slice => 2 };
+    let icon = format!("{} v", items[current_idx].0);
+    if let Some(idx) = generic_dropdown(ui, "frame_dd", &icon, "Frame  [F]",
+        state.tool.is_frame_tool(), "FRAME TOOLS", &items, current_idx) {
+        state.tool = Tool::Frame;
+        state.frame_mode = match idx { 1 => FrameMode::Section, 2 => FrameMode::Slice, _ => FrameMode::Frame };
+    }
+}
+
+fn text_tool_dropdown(ui: &mut Ui, state: &mut EditorState) {
+    let items = [
+        ("Aa",  "Text",         "T"),
+        ("A~",  "Text on Path", ""),
+    ];
+    let current_idx = match state.text_mode { TextMode::Normal => 0, TextMode::OnPath => 1 };
+    let icon = format!("{} v", items[current_idx].0);
+    if let Some(idx) = generic_dropdown(ui, "text_dd", &icon, "Text  [T]",
+        state.tool.is_text_tool(), "TEXT TOOLS", &items, current_idx) {
+        state.tool = Tool::Text;
+        state.text_mode = match idx { 1 => TextMode::OnPath, _ => TextMode::Normal };
+    }
+}
+
+fn pen_tool_dropdown(ui: &mut Ui, state: &mut EditorState) {
+    let items = [
+        ("/\\",  "Pen",    "P"),
+        ("~",    "Pencil", ""),
+    ];
+    let current_idx = match state.pen_mode { PenMode::Pen => 0, PenMode::Pencil => 1 };
+    let icon = format!("{} v", items[current_idx].0);
+    if let Some(idx) = generic_dropdown(ui, "pen_dd", &icon, "Pen  [P]",
+        state.tool.is_pen_tool(), "PEN TOOLS", &items, current_idx) {
+        state.tool = Tool::Pen;
+        state.pen_mode = match idx { 1 => PenMode::Pencil, _ => PenMode::Pen };
+    }
+}
+
 pub fn top_toolbar(ui: &mut Ui, state: &mut EditorState) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
@@ -230,10 +374,22 @@ pub fn top_toolbar(ui: &mut Ui, state: &mut EditorState) {
         move_tool_dropdown(ui, state);
         ui.add_space(2.0);
 
-        // ── Shape-tool dropdown ───────────────────────────────────────────
+        // ── Frame tool dropdown (Frame / Section / Slice) ─────────────────
+        frame_tool_dropdown(ui, state);
+        ui.add_space(2.0);
+
+        // ── Shape-tool dropdown (Rect / Ellipse / Polygon / Line / Arrow / Star) ──
         if let Some(t) = shape_tool_dropdown(ui, state) {
             state.tool = t;
         }
+        ui.add_space(2.0);
+
+        // ── Text tool dropdown (Normal / On Path) ─────────────────────────
+        text_tool_dropdown(ui, state);
+        ui.add_space(2.0);
+
+        // ── Pen tool dropdown (Pen / Pencil) ──────────────────────────────
+        pen_tool_dropdown(ui, state);
 
         ui.add_space(6.0);
 
@@ -530,12 +686,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
 
             // Layer type icon badge
             let type_icon = match rec.layer_type {
-                LayerType::Rect    => "▬",
+                LayerType::Rect    => "Rc",
                 LayerType::Frame   => "Fr",
                 LayerType::Ellipse { .. } => "El",
-                LayerType::Text(_) => "T",
+                LayerType::Text(_) => "Tx",
                 LayerType::Polygon { .. } => "Pg",
-                _                  => "◻",
+                LayerType::Line    => "--",
+                LayerType::Arrow { .. } => "->",
+                LayerType::Star { .. }  => "St",
+                _                  => "Sh",
             };
             let badge_size = vec2(22.0, 22.0);
             let (badge_rect, _) = ui.allocate_exact_size(badge_size, Sense::hover());
@@ -682,7 +841,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                     let old_x = rec.x;
                     let r = ui.add(prop_drag("x", DragValue::new(&mut rec.x).speed(1.0).max_decimals(1)));
                     if r.drag_stopped() && rec.x != old_x { needs_history = true; }
-                    ui.add_space(8.0);
+                    ui.label("");
                     ui.label(RichText::new("Y").size(10.0).color(C_MUTED));
                     let old_y = rec.y;
                     let r = ui.add(prop_drag("y", DragValue::new(&mut rec.y).speed(1.0).max_decimals(1)));
@@ -740,7 +899,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                     DragValue::new(&mut rec.width).speed(1.0).range(1.0..=99999.0).max_decimals(1)
                 ));
                 if r.drag_stopped() { needs_history = true; }
-                ui.add_space(8.0);
+                ui.label("");
                 ui.label(RichText::new("H").size(10.0).color(C_MUTED));
                 let r = ui.add(prop_drag("h",
                     DragValue::new(&mut rec.height).speed(1.0).range(1.0..=99999.0).max_decimals(1)
@@ -772,7 +931,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                 if r.drag_stopped() { needs_history = true; }
 
                 if matches!(rec.layer_type, LayerType::Rect | LayerType::Frame) {
-                    ui.add_space(8.0);
+                    ui.label("");
                     ui.label(RichText::new("RADIUS").size(10.0).color(C_MUTED));
                     let mut v = rec.corner_radii[0];
                     let r = ui.add(prop_drag("cr",
@@ -965,7 +1124,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                         DragValue::new(&mut rec.stroke_width).speed(0.5).suffix("px").range(0.0..=100.0)
                     ));
                     if r.drag_stopped() { needs_history = true; }
-                    ui.add_space(8.0);
+                    ui.label("");
                     ui.label(RichText::new("POSITION").size(10.0).color(C_MUTED));
                     ComboBox::from_id_salt("stroke_pos")
                         .selected_text(match rec.stroke_position {

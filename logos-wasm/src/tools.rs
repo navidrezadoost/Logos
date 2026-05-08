@@ -12,6 +12,9 @@ pub enum Tool {
     Text,
     Pen,
     Pan,
+    Line,
+    Arrow,
+    Star,
 }
 
 impl Tool {
@@ -26,6 +29,9 @@ impl Tool {
             Tool::Text    => "T",
             Tool::Pen     => "P",
             Tool::Pan     => "H",
+            Tool::Line    => "-",
+            Tool::Arrow   => "->",
+            Tool::Star    => "*",
         }
     }
 
@@ -40,6 +46,9 @@ impl Tool {
             Tool::Text    => "Text",
             Tool::Pen     => "Pen",
             Tool::Pan     => "Hand",
+            Tool::Line    => "Line",
+            Tool::Arrow   => "Arrow",
+            Tool::Star    => "Star",
         }
     }
 
@@ -55,18 +64,25 @@ impl Tool {
             Tool::Text    => "T",
             Tool::Pen     => "P",
             Tool::Pan     => "H",
+            Tool::Line    => "L",
+            Tool::Arrow   => "",
+            Tool::Star    => "",
         }
     }
 
     /// Whether this tool belongs in the "shape tools" group
-    /// (shown inside the dropdown) vs. as a standalone button.
+    /// (shown inside the shapes dropdown) vs. as a standalone button.
     pub fn is_shape_tool(&self) -> bool {
-        matches!(self, Tool::Frame | Tool::Rect | Tool::Ellipse
-            | Tool::Polygon | Tool::Text | Tool::Pen)
+        matches!(self, Tool::Rect | Tool::Ellipse
+            | Tool::Polygon | Tool::Line | Tool::Arrow | Tool::Star)
     }
 
     /// Whether this tool is one of the three move-mode tools.
     pub fn is_move_tool(&self) -> bool {
         matches!(self, Tool::Select | Tool::Scale | Tool::Pan)
     }
+
+    pub fn is_frame_tool(&self) -> bool { matches!(self, Tool::Frame) }
+    pub fn is_text_tool(&self)  -> bool { matches!(self, Tool::Text)  }
+    pub fn is_pen_tool(&self)   -> bool { matches!(self, Tool::Pen)   }
 }
