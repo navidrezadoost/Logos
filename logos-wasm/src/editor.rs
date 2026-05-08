@@ -412,7 +412,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 }
                 LayerType::Star { points, inner_ratio } => {
                     let pts2 = star_screen_points(rect, *points, *inner_ratio, rotation);
-                    paint_star(&painter, pts2, fill, stroke);
+                    painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
                 }
                 LayerType::Text(content) => {
                     painter.add(Shape::Path(epaint::PathShape { points: pts.clone(), closed: true, fill: Color32::TRANSPARENT, stroke: stroke.into() }));
@@ -501,7 +501,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 }
                 LayerType::Star { points, inner_ratio } => {
                     let pts2 = star_screen_points(rect, *points, *inner_ratio, 0.0);
-                    paint_star(&painter, pts2, fill, stroke);
+                    painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
                 }
                 LayerType::Text(content) => {
                     painter.rect(rect, rounding, Color32::TRANSPARENT, stroke);
@@ -1160,7 +1160,7 @@ fn polygon_screen_points(rect: Rect, sides: u32, _corner_radius: f32) -> Vec<Pos
 
 /// Generate screen-space points for an N-pointed star.
 /// `inner_ratio` = inner radius / outer radius (0..1).
-/// Points are generated from the top (12 o'clock) clockwise, alternating outer/inner.
+/// Points are generated from the top (12 o'clock) clockwise.
 /// `rotation` is in radians and applied around the rect center.
 fn star_screen_points(rect: Rect, points: u32, inner_ratio: f32, rotation: f32) -> Vec<Pos2> {
     let c   = rect.center();
@@ -1172,65 +1172,14 @@ fn star_screen_points(rect: Rect, points: u32, inner_ratio: f32, rotation: f32) 
     let start = -std::f32::consts::FRAC_PI_2;
     let mut pts = Vec::with_capacity(n * 2);
     for i in 0..n {
-        // Outer vertex — unit space then scaled to bounding ellipse
+        // Outer vertex: unit (cos,sin) scaled by (rx,ry)
         let a_out = start + (i as f32) * tau / (n as f32) + rotation;
         pts.push(pos2(c.x + rx * a_out.cos(), c.y + ry * a_out.sin()));
-        // Inner vertex — same scale pipeline, just shorter radius
+        // Inner vertex: same (rx,ry) scaling, inner unit radius = ir
         let a_in = a_out + tau / (2.0 * n as f32);
         pts.push(pos2(c.x + ir * rx * a_in.cos(), c.y + ir * ry * a_in.sin()));
     }
     pts
-}
-
-/// Draw a filled+stroked star correctly.
-/// egui's PathShape tessellates non-convex shapes with a centroid fan, which
-/// incorrectly fills the concave valleys of a star.  We instead decompose
-/// into fully-convex pieces: one triangle per spike + one center polygon.
-fn paint_star(
-    painter: &Painter,
-    pts: Vec<Pos2>,
-    fill: Color32,
-    stroke: Stroke,
-) {
-    let total = pts.len();
-    let n = total / 2; // number of spikes
-    if n == 0 { return; }
-
-    // ── Fill ──────────────────────────────────────────────────────────────
-    if fill.a() > 0 {
-        // Each spike is a triangle (3 vertices = always convex).
-        // Spike i: outer[i], inner[i-1 (mod n)], inner[i]
-        //   where outer[i] = pts[2*i]  and  inner[i] = pts[2*i+1]
-        for i in 0..n {
-            let outer      = pts[2 * i];
-            let inner_prev = pts[if i == 0 { 2*n - 1 } else { 2*i - 1 }];
-            let inner_curr = pts[2 * i + 1];
-            painter.add(Shape::Path(epaint::PathShape {
-                points: vec![outer, inner_prev, inner_curr],
-                closed: true,
-                fill,
-                stroke: epaint::PathStroke::NONE,
-            }));
-        }
-        // Center polygon connecting all inner vertices (convex for regular stars).
-        let inner_pts: Vec<Pos2> = (0..n).map(|i| pts[2*i + 1]).collect();
-        painter.add(Shape::Path(epaint::PathShape {
-            points: inner_pts,
-            closed: true,
-            fill,
-            stroke: epaint::PathStroke::NONE,
-        }));
-    }
-
-    // ── Stroke ────────────────────────────────────────────────────────────
-    if stroke.width > 0.0 {
-        painter.add(Shape::Path(epaint::PathShape {
-            points: pts,
-            closed: true,
-            fill: Color32::TRANSPARENT,
-            stroke: stroke.into(),
-        }));
-    }
 }
 
 /// 4 rotated corners of a screen-space rect (cl, tr, br, bl order).
