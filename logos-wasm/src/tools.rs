@@ -20,18 +20,18 @@ pub enum Tool {
 impl Tool {
     pub fn icon(&self) -> &'static str {
         match self {
-            Tool::Select  => "V",
-            Tool::Scale   => "K",
+            Tool::Select  => "↖",
+            Tool::Scale   => "⤡",
             Tool::Frame   => "#",
-            Tool::Rect    => "R",
-            Tool::Ellipse => "O",
-            Tool::Polygon => "N",
+            Tool::Rect    => "▭",
+            Tool::Ellipse => "◯",
+            Tool::Polygon => "⬡",
             Tool::Text    => "T",
-            Tool::Pen     => "P",
-            Tool::Pan     => "H",
-            Tool::Line    => "-",
-            Tool::Arrow   => "->",
-            Tool::Star    => "*",
+            Tool::Pen     => "✎",
+            Tool::Pan     => "✋",
+            Tool::Line    => "╱",
+            Tool::Arrow   => "→",
+            Tool::Star    => "★",
         }
     }
 

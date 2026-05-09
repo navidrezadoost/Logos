@@ -468,7 +468,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
 
     ui.add_space(4.0);
 
-    // Layer list (top = front)
+    // Layer tree (top = front). Root layers only; children indented under their frame.
     let layer_ids: Vec<uuid::Uuid> = state.pages[state.active_page].layers
         .iter().rev().cloned().collect();
 
@@ -477,17 +477,48 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
         let mut to_delete: Option<uuid::Uuid> = None;
         let mut to_select: Option<uuid::Uuid> = None;
         let mut to_toggle_vis: Option<uuid::Uuid> = None;
+        let mut to_toggle_exp: Option<uuid::Uuid> = None;
 
-        for id in &layer_ids {
-            let id = *id;
-            let (icon, name, visible, selected) = {
-                let rec = state.layers.get(&id).unwrap();
-                (rec.type_icon(), rec.name.clone(), rec.visible, state.is_selected(id))
+        // Helper: draw one layer row at a given indent depth
+        // We collect root ids then recurse inline with a stack.
+        let root_ids: Vec<uuid::Uuid> = layer_ids.iter()
+            .filter(|&&id| state.layers.get(&id).map(|r| r.parent_id.is_none()).unwrap_or(false))
+            .cloned()
+            .collect();
+
+        // Iterative DFS render using a stack of (id, depth)
+        let mut stack: Vec<(uuid::Uuid, usize)> = root_ids.iter().rev()
+            .map(|&id| (id, 0_usize)).collect();
+
+        while let Some((id, depth)) = stack.pop() {
+            let (icon, name, visible, selected, is_frame, expanded) = {
+                let rec = match state.layers.get(&id) {
+                    Some(r) => r,
+                    None => continue,
+                };
+                let is_frame = matches!(rec.layer_type, LayerType::Frame)
+                    || matches!(rec.layer_type, LayerType::Group);
+                (rec.type_icon(), rec.name.clone(), rec.visible, state.is_selected(id),
+                 is_frame, rec.frame_expanded)
             };
 
             ui.horizontal(|ui| {
+                // Indent
+                ui.add_space(8.0 + depth as f32 * 16.0);
+
+                // Expand/collapse triangle for frames with children
+                let children_exist = is_frame && state.frame_children(id).len() > 0;
+                if children_exist {
+                    let tri = if expanded { "▾" } else { "▸" };
+                    if ui.small_button(tri).clicked() {
+                        to_toggle_exp = Some(id);
+                    }
+                } else {
+                    ui.add_space(16.0);
+                }
+
                 // Visibility eye
-                let eye = if visible { "O" } else { "-" };
+                let eye = if visible { "◎" } else { "○" };
                 if ui.small_button(eye).on_hover_text("Toggle visibility").clicked() {
                     to_toggle_vis = Some(id);
                 }
@@ -498,6 +529,8 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     RichText::new(label).strong().color(Color32::from_rgb(133, 96, 255))
                 } else if !visible {
                     RichText::new(label).color(Color32::GRAY)
+                } else if depth > 0 {
+                    RichText::new(label).size(12.0)
                 } else {
                     RichText::new(label)
                 };
@@ -505,12 +538,8 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 let resp = ui.add(Label::new(text).sense(Sense::click()))
                     .on_hover_text("Click to select • Double-click to rename");
 
-                if resp.clicked() {
-                    to_select = Some(id);
-                }
-                if resp.double_clicked() {
-                    to_rename = Some((id, name.clone()));
-                }
+                if resp.clicked() { to_select = Some(id); }
+                if resp.double_clicked() { to_rename = Some((id, name.clone())); }
                 resp.context_menu(|ui| {
                     if ui.button("Rename").clicked() {
                         to_rename = Some((id, name.clone()));
@@ -525,8 +554,30 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                         to_delete = Some(id);
                         ui.close_menu();
                     }
+                    if is_frame {
+                        ui.separator();
+                        if ui.button("Ungroup / Unwrap Frame").clicked() {
+                            // Detach children, then delete frame
+                            let children = state.frame_children(id);
+                            for &cid in &children {
+                                if let Some(r) = state.layers.get_mut(&cid) {
+                                    r.parent_id = None;
+                                }
+                            }
+                            to_delete = Some(id);
+                            ui.close_menu();
+                        }
+                    }
                 });
             });
+
+            // Push children onto stack if frame is expanded (in reverse order to maintain visual order)
+            if is_frame && expanded {
+                let children = state.frame_children(id);
+                for cid in children.into_iter().rev() {
+                    stack.push((cid, depth + 1));
+                }
+            }
         }
 
         // Apply deferred mutations
@@ -534,6 +585,9 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
         if let Some(id) = to_toggle_vis  {
             if let Some(r) = state.layers.get_mut(&id) { r.visible = !r.visible; }
             state.push_history("toggle visibility");
+        }
+        if let Some(id) = to_toggle_exp  {
+            if let Some(r) = state.layers.get_mut(&id) { r.frame_expanded = !r.frame_expanded; }
         }
         if let Some(id) = to_delete      {
             state.remove_layer(id);
@@ -688,17 +742,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             ui.add_space(10.0);
 
             // Layer type icon badge
-            let type_icon = match rec.layer_type {
-                LayerType::Rect    => "Rc",
-                LayerType::Frame   => "Fr",
-                LayerType::Ellipse { .. } => "El",
-                LayerType::Text(_) => "Tx",
-                LayerType::Polygon { .. } => "Pg",
-                LayerType::Line    => "--",
-                LayerType::Arrow { .. } => "->",
-                LayerType::Star { .. }  => "St",
-                _                  => "Sh",
-            };
+            let type_icon = rec.type_icon();
             let badge_size = vec2(22.0, 22.0);
             let (badge_rect, _) = ui.allocate_exact_size(badge_size, Sense::hover());
             ui.painter().rect_filled(
@@ -745,6 +789,39 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
         Stroke::new(1.0, C_BORDER),
     );
     ui.add_space(6.0);
+
+    // ════════════════════════════════════════════════════════════════════
+    // FRAME  (frame-specific properties — only shown when a Frame is selected)
+    // ════════════════════════════════════════════════════════════════════
+    {
+        let is_frame = state.layers.get(&id)
+            .map(|r| matches!(r.layer_type, LayerType::Frame))
+            .unwrap_or(false);
+        if is_frame && section_header(ui, "sec_frame", "Frame", true) {
+            ui.add_space(4.0);
+            let rec = state.layers.get_mut(&id).unwrap();
+
+            // Clip Content toggle
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                let prev = rec.clip_content;
+                ui.checkbox(&mut rec.clip_content, "Clip Content")
+                    .on_hover_text("Hide children that extend outside this frame's bounds");
+                if rec.clip_content != prev { needs_history = true; }
+            });
+
+            ui.add_space(4.0);
+
+            // Wrap-in-frame hint
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(RichText::new("Ctrl+Alt+G  →  Wrap selection in Frame")
+                    .size(10.5).color(C_MUTED));
+            });
+
+            ui.add_space(6.0);
+        }
+    }
 
     // ════════════════════════════════════════════════════════════════════
     // TRANSFORM  (alignment + X/Y + rotation)

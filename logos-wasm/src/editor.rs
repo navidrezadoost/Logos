@@ -139,6 +139,10 @@ impl eframe::App for LogosEditor {
                 let all: Vec<uuid::Uuid> = state.pages[state.active_page].layers.clone();
                 state.selection = all;
             }
+            // Ctrl+Alt+G — Wrap selection in Frame (like Figma Alt+Cmd+G)
+            if !typing && i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(Key::G) {
+                state.wrap_in_frame();
+            }
 
             // ── Tool shortcuts (only when NOT typing and no modifier) ───────
             if !typing && !i.modifiers.ctrl && !i.modifiers.alt {
@@ -290,6 +294,8 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             Some(r) if r.visible => r,
             _ => continue,
         };
+        // Skip children — they are rendered inside their parent frame's arm below.
+        if rec.parent_id.is_some() { continue; }
 
         let (sx, sy) = state.world_to_screen(rec.x, rec.y);
         let sw = rec.width  * state.zoom;
@@ -611,6 +617,105 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 LayerType::Frame => {
                     painter.rect_filled(rect, rounding, fill);
                     painter.rect_stroke(rect, rounding, Stroke::new(1.0, Color32::from_gray(80)));
+
+                    // Frame name label above the frame (like Figma top-level frames)
+                    if rec.parent_id.is_none() {
+                        let label_painter = painter.with_clip_rect(painter.clip_rect().expand(40.0));
+                        label_painter.text(
+                            pos2(rect.left(), rect.top() - 18.0),
+                            Align2::LEFT_BOTTOM,
+                            &rec.name.clone(),
+                            FontId::proportional((11.0 * state.zoom).clamp(9.0, 18.0)),
+                            Color32::from_gray(130),
+                        );
+                    }
+
+                    // Render children inside this frame
+                    let child_ids: Vec<Uuid> = state.frame_children(id);
+                    let clip_content = rec.clip_content;
+                    let child_painter = if clip_content {
+                        painter.with_clip_rect(rect)
+                    } else {
+                        painter.with_clip_rect(painter.clip_rect())
+                    };
+                    for &cid in &child_ids {
+                        let crec = match state.layers.get(&cid) {
+                            Some(r) if r.visible => r,
+                            _ => continue,
+                        };
+                        let (csx, csy) = state.world_to_screen(crec.x, crec.y);
+                        let csw = crec.width  * state.zoom;
+                        let csh = crec.height * state.zoom;
+                        let crect = Rect::from_min_size(
+                            pos2(origin.x + csx, origin.y + csy),
+                            vec2(csw, csh),
+                        );
+                        let cfill = Color32::from_rgba_unmultiplied(
+                            (crec.fill[0] * 255.0) as u8, (crec.fill[1] * 255.0) as u8,
+                            (crec.fill[2] * 255.0) as u8, (crec.fill[3] * crec.opacity * 255.0) as u8,
+                        );
+                        let cstroke = if crec.stroke_width > 0.0 {
+                            Stroke::new(crec.stroke_width * state.zoom,
+                                Color32::from_rgba_unmultiplied(
+                                    (crec.stroke_color[0] * 255.0) as u8,
+                                    (crec.stroke_color[1] * 255.0) as u8,
+                                    (crec.stroke_color[2] * 255.0) as u8,
+                                    (crec.stroke_color[3] * 255.0) as u8,
+                                ))
+                        } else { Stroke::NONE };
+                        let cr = crec.corner_radii;
+                        let z  = state.zoom;
+                        let crounding = Rounding { nw: cr[0]*z, ne: cr[1]*z, se: cr[2]*z, sw: cr[3]*z };
+                        match &crec.layer_type {
+                            LayerType::Rect | LayerType::Frame => {
+                                child_painter.rect_filled(crect, crounding, cfill);
+                                if crec.stroke_width > 0.0 { child_painter.rect_stroke(crect, crounding, cstroke); }
+                            }
+                            LayerType::Ellipse { arc_start, arc_end, inner_ratio } => {
+                                child_painter.add(ellipse_arc_path(crect, *arc_start, *arc_end, *inner_ratio, cfill, cstroke));
+                            }
+                            LayerType::Text(content) => {
+                                let content = content.clone();
+                                child_painter.rect(crect, crounding, Color32::TRANSPARENT, cstroke);
+                                child_painter.text(crect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &content,
+                                    FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), cfill);
+                            }
+                            LayerType::Line => {
+                                let lw = (crec.stroke_width * state.zoom).max(2.0);
+                                let col = if cstroke.width > 0.0 { cstroke.color } else { cfill };
+                                child_painter.line_segment([crect.left_center(), crect.right_center()], Stroke::new(lw, col));
+                            }
+                            LayerType::Arrow { head_size } => {
+                                let hs = head_size * state.zoom;
+                                let lw = (crec.stroke_width * state.zoom).max(2.0);
+                                let col = if cstroke.width > 0.0 { cstroke.color } else { cfill };
+                                let tip = crect.right_center();
+                                let p1 = pos2(tip.x - hs, tip.y - hs * 0.45);
+                                let p2 = pos2(tip.x - hs, tip.y + hs * 0.45);
+                                child_painter.line_segment([crect.left_center(), pos2(tip.x - hs * 0.85, tip.y)], Stroke::new(lw, col));
+                                child_painter.add(Shape::Path(epaint::PathShape {
+                                    points: vec![tip, p1, p2], closed: true, fill: col,
+                                    stroke: epaint::PathStroke::NONE,
+                                }));
+                            }
+                            LayerType::Star { points, inner_ratio } => {
+                                paint_star(&child_painter, crect, *points, *inner_ratio, 0.0, cfill, cstroke);
+                            }
+                            LayerType::Polygon { sides, corner_radius } => {
+                                let pts = polygon_screen_points(crect, *sides, *corner_radius);
+                                child_painter.add(Shape::Path(epaint::PathShape { points: pts, closed: true, fill: cfill, stroke: cstroke.into() }));
+                            }
+                            _ => {
+                                child_painter.rect_filled(crect, crounding, cfill);
+                            }
+                        }
+                        // Selection/hover highlight for children
+                        if state.is_selected(cid) {
+                            child_painter.rect_stroke(crect, crounding, Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
+                        } else if state.hovered_layer == Some(cid) {
+                            child_painter.rect_stroke(crect, crounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
+                        }
+                    }
                 }
                 LayerType::Path { points } => {
                     let lw  = (rec.stroke_width * state.zoom).max(1.5);

@@ -171,6 +171,12 @@ pub struct LayerRecord {
     pub layer_type: LayerType,
     /// Rotation in radians (counter-clockwise positive)
     pub rotation: f32,
+    /// Parent frame/group UUID (None = top-level on canvas).
+    pub parent_id: Option<Uuid>,
+    /// For Frame layers: whether children are clipped to this frame's bounds.
+    pub clip_content: bool,
+    /// Whether this frame/group is expanded in the layers panel tree.
+    pub frame_expanded: bool,
 }
 
 // ── Tool sub-modes ────────────────────────────────────────────────────────────
@@ -243,6 +249,9 @@ impl LayerRecord {
             blend_mode: BlendMode::Normal,
             layer_type: LayerType::Rect,
             rotation: 0.0,
+            parent_id: None,
+            clip_content: false,
+            frame_expanded: true,
         }
     }
 
@@ -251,6 +260,7 @@ impl LayerRecord {
         r.name = "Frame".into();
         r.fill = [1.0, 1.0, 1.0, 1.0];
         r.layer_type = LayerType::Frame;
+        r.clip_content = true;  // Figma default: clip children
         r
     }
 
@@ -313,16 +323,16 @@ impl LayerRecord {
 
     pub fn type_icon(&self) -> &'static str {
         match &self.layer_type {
-            LayerType::Rect     => "[R]",
-            LayerType::Frame    => "[F]",
-            LayerType::Text(_)  => "[T]",
-            LayerType::Ellipse { .. } => "(E)",
-            LayerType::Path { .. } => "Pth",
-            LayerType::Group    => "Grp",
-            LayerType::Polygon { .. } => "Ply",
-            LayerType::Line     => "---",
-            LayerType::Arrow { .. } => "-->",
-            LayerType::Star { .. }  => "*",
+            LayerType::Rect     => "▭",
+            LayerType::Frame    => "#",
+            LayerType::Text(_)  => "T",
+            LayerType::Ellipse { .. } => "◯",
+            LayerType::Path { .. } => "✎",
+            LayerType::Group    => "⊞",
+            LayerType::Polygon { .. } => "⬡",
+            LayerType::Line     => "╱",
+            LayerType::Arrow { .. } => "→",
+            LayerType::Star { .. }  => "★",
         }
     }
 }
@@ -638,9 +648,78 @@ impl EditorState {
     }
 
     pub fn remove_layer(&mut self, id: Uuid) {
+        // Also recursively remove children
+        let children: Vec<Uuid> = self.frame_children(id);
+        for child in children {
+            self.remove_layer(child);
+        }
         self.layers.remove(&id);
         self.pages[self.active_page].layers.retain(|&l| l != id);
         self.selection.retain(|&s| s != id);
+    }
+
+    // ── Frame hierarchy helpers ──────────────────────────────────────────────
+
+    /// Returns all direct children of `frame_id` in their page order.
+    pub fn frame_children(&self, frame_id: Uuid) -> Vec<Uuid> {
+        self.pages[self.active_page].layers.iter()
+            .filter(|&&id| {
+                self.layers.get(&id)
+                    .and_then(|r| r.parent_id)
+                    .map(|pid| pid == frame_id)
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Reparent `layer_id` into `frame_id` (or detach if `None`).
+    pub fn reparent_layer(&mut self, layer_id: Uuid, new_parent: Option<Uuid>) {
+        if let Some(r) = self.layers.get_mut(&layer_id) {
+            r.parent_id = new_parent;
+        }
+    }
+
+    /// Wrap the current selection in a new Frame. The new frame is sized to the
+    /// selection's bounding box. Selected layers become children of the frame.
+    pub fn wrap_in_frame(&mut self) {
+        if self.selection.is_empty() { return; }
+        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get(&id) {
+                min_x = min_x.min(r.x);   min_y = min_y.min(r.y);
+                max_x = max_x.max(r.x + r.width);
+                max_y = max_y.max(r.y + r.height);
+            }
+        }
+        if min_x == f32::MAX { return; }
+        let padding = 16.0_f32;
+        let frame_id = self.add_frame(
+            "Frame",
+            min_x - padding, min_y - padding,
+            (max_x - min_x) + padding * 2.0,
+            (max_y - min_y) + padding * 2.0,
+        );
+        // Move the new frame to just before the first selected layer in page order
+        let page = &mut self.pages[self.active_page];
+        if let Some(first_pos) = page.layers.iter()
+            .position(|id| self.selection.contains(id))
+        {
+            let fi = page.layers.iter().position(|&id| id == frame_id).unwrap();
+            page.layers.remove(fi);
+            let insert_at = first_pos.min(page.layers.len());
+            page.layers.insert(insert_at, frame_id);
+        }
+        // Reparent selected layers
+        let sel = self.selection.clone();
+        for &id in &sel {
+            if let Some(r) = self.layers.get_mut(&id) {
+                r.parent_id = Some(frame_id);
+            }
+        }
+        self.selection = vec![frame_id];
+        self.push_history("wrap in frame");
     }
 
     pub fn duplicate_selected(&mut self) {
