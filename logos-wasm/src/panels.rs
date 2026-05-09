@@ -652,6 +652,9 @@ fn prop_drag<'a>(_label: &str, dv: DragValue<'a>) -> DragValue<'a> { dv }
 pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     use crate::state::StrokePosition;
 
+    // Clear blend-mode hover preview every frame; the combo re-sets it while open.
+    state.blend_preview = None;
+
     // Paint the panel background slightly lighter than the canvas
     let panel_rect = ui.max_rect();
     ui.painter().rect_filled(panel_rect, 0.0, Color32::from_rgb(20, 20, 20));
@@ -1151,40 +1154,59 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
         ui.add_space(8.0);
     }
 
-    // ════════════════════════════════════════════════════════════════════
-    // BLEND MODE
-    // ════════════════════════════════════════════════════════════════════
-    if section_header(ui, "sec_blend", "Blend Mode", false) {
-        ui.add_space(6.0);
-        let rec = state.layers.get_mut(&id).unwrap();
-        ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            let cur_label = rec.blend_mode.label();
-            ComboBox::from_id_salt("layer_blend_mode")
-                .selected_text(RichText::new(cur_label).size(11.0).color(C_FG))
-                .width(160.0)
-                .show_ui(ui, |ui| {
-                    for opt in BlendMode::groups() {
-                        match opt {
-                            None => { ui.separator(); }
-                            Some(mode) => {
-                                let is_sel = rec.blend_mode == mode;
-                                if ui.selectable_label(is_sel, mode.label()).clicked() {
-                                    rec.blend_mode = mode;
-                                    needs_history = true;
-                                }
-                            }
-                        }
-                    }
-                });
-        });
-        ui.add_space(8.0);
-    }
-
-    // EFFECTS
+    // EFFECTS  (layer blend mode + individual effects)
     // ════════════════════════════════════════════════════════════════════
     if section_header(ui, "sec_effects", "Effects", false) {
         ui.add_space(4.0);
+
+        // ── Layer-level Blend Mode (top row, inside Effects) ─────────────
+        {
+            const LAYER_KEY: usize = usize::MAX;
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(RichText::new("Blend").size(10.0).color(C_MUTED));
+                ui.add_space(4.0);
+                let cur_label = {
+                    let rec = state.layers.get(&id).unwrap();
+                    // Show preview label while hovering
+                    state.blend_preview.as_ref()
+                        .filter(|(lid, k, _)| *lid == id && *k == LAYER_KEY)
+                        .map(|(_, _, m)| m.label())
+                        .unwrap_or_else(|| rec.blend_mode.label())
+                };
+                let mut hovered_mode: Option<BlendMode> = None;
+                let mut clicked_mode: Option<BlendMode> = None;
+                let inner = ComboBox::from_id_salt("layer_blend_mode")
+                    .selected_text(RichText::new(cur_label).size(11.0).color(C_FG))
+                    .width(140.0)
+                    .show_ui(ui, |ui| {
+                        for opt in BlendMode::groups() {
+                            match opt {
+                                None => { ui.separator(); }
+                                Some(mode) => {
+                                    let committed = &state.layers.get(&id).unwrap().blend_mode;
+                                    let is_sel = *committed == mode;
+                                    let r = ui.selectable_label(is_sel, mode.label());
+                                    if r.hovered() { hovered_mode = Some(mode.clone()); }
+                                    if r.clicked() { clicked_mode = Some(mode.clone()); }
+                                }
+                            }
+                        }
+                    });
+                // Drive preview: set while combo is open + hovering, else clear for this key
+                let combo_open = inner.inner.is_some();
+                if combo_open {
+                    if let Some(hm) = hovered_mode {
+                        state.blend_preview = Some((id, LAYER_KEY, hm));
+                    }
+                }
+                if let Some(cm) = clicked_mode {
+                    state.layers.get_mut(&id).unwrap().blend_mode = cm;
+                    needs_history = true;
+                }
+            });
+            ui.add_space(6.0);
+        }
 
         // ── Per-effect rows ──────────────────────────────────────────────
         let effect_count = state.layers.get(&id).map(|r| r.effects.len()).unwrap_or(0);
@@ -1298,13 +1320,23 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                     });
                 }
 
-                // Per-effect blend mode
+                // Per-effect blend mode (with hover-preview)
                 ui.horizontal(|ui| {
                     ui.add_space(24.0);
                     ui.label(RichText::new("Blend").size(10.0).color(C_MUTED));
                     ui.add_space(4.0);
-                    let cur_bm = eff.blend_mode.label();
-                    ComboBox::from_id_salt(format!("eff_blend_{}", eff_idx))
+                    let cur_bm = state.blend_preview.as_ref()
+                        .filter(|(lid, k, _)| *lid == id && *k == eff_idx)
+                        .map(|(_, _, m)| m.label())
+                        .unwrap_or_else(|| {
+                            state.layers.get(&id)
+                                .and_then(|r| r.effects.get(eff_idx))
+                                .map(|e| e.blend_mode.label())
+                                .unwrap_or("Normal")
+                        });
+                    let mut hovered_mode: Option<BlendMode> = None;
+                    let mut clicked_mode: Option<BlendMode> = None;
+                    let inner = ComboBox::from_id_salt(format!("eff_blend_{}", eff_idx))
                         .selected_text(RichText::new(cur_bm).size(10.0).color(C_FG))
                         .width(110.0)
                         .show_ui(ui, |ui| {
@@ -1312,15 +1344,31 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                                 match opt {
                                     None => { ui.separator(); }
                                     Some(mode) => {
-                                        let is_sel = eff.blend_mode == mode;
-                                        if ui.selectable_label(is_sel, mode.label()).clicked() {
-                                            eff.blend_mode = mode;
-                                            needs_history = true;
-                                        }
+                                        let committed = state.layers.get(&id)
+                                            .and_then(|r| r.effects.get(eff_idx))
+                                            .map(|e| &e.blend_mode == &mode)
+                                            .unwrap_or(false);
+                                        let r = ui.selectable_label(committed, mode.label());
+                                        if r.hovered() { hovered_mode = Some(mode.clone()); }
+                                        if r.clicked() { clicked_mode = Some(mode.clone()); }
                                     }
                                 }
                             }
                         });
+                    let combo_open = inner.inner.is_some();
+                    if combo_open {
+                        if let Some(hm) = hovered_mode {
+                            state.blend_preview = Some((id, eff_idx, hm));
+                        }
+                    }
+                    if let Some(cm) = clicked_mode {
+                        if let Some(rec) = state.layers.get_mut(&id) {
+                            if let Some(eff) = rec.effects.get_mut(eff_idx) {
+                                eff.blend_mode = cm;
+                                needs_history = true;
+                            }
+                        }
+                    }
                 });
                 ui.add_space(6.0);
             }

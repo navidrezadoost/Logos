@@ -299,7 +299,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             vec2(sw, sh),
         );
 
-        // Fill — apply layer-level blend mode against white canvas
+        // Fill — apply layer-level blend mode (with hover-preview support)
         let fill = {
             let raw = Color32::from_rgba_unmultiplied(
                 (rec.fill[0] * 255.0) as u8,
@@ -307,7 +307,11 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 (rec.fill[2] * 255.0) as u8,
                 (rec.fill[3] * rec.opacity * 255.0) as u8,
             );
-            apply_layer_blend(raw, &rec.blend_mode)
+            let effective_layer_blend = state.blend_preview.as_ref()
+                .filter(|(lid, k, _)| *lid == id && *k == usize::MAX)
+                .map(|(_, _, m)| m)
+                .unwrap_or(&rec.blend_mode);
+            apply_layer_blend(raw, effective_layer_blend)
         };
         // Snapshot fill/blend for use inside the effects loop
         let layer_fill_f32 = rec.fill;
@@ -337,10 +341,21 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             .filter(|e| e.enabled)
             .cloned()
             .collect();
-        for eff in &effects_snap {
-            // Blend the effect colour against the layer fill using the effect's blend mode.
+        // Capture original indices (before filtering) for blend-preview lookup
+        let effect_orig_indices: Vec<usize> = rec.effects.iter()
+            .enumerate()
+            .filter(|(_, e)| e.enabled)
+            .map(|(i, _)| i)
+            .collect();
+        for (snap_idx, eff) in effects_snap.iter().enumerate() {
+            let eff_idx = effect_orig_indices[snap_idx];
+            // Effective blend mode: hover-preview takes priority over stored value.
+            let effective_blend = state.blend_preview.as_ref()
+                .filter(|(lid, k, _)| *lid == id && *k == eff_idx)
+                .map(|(_, _, m)| m)
+                .unwrap_or(&eff.blend_mode);
             let [sr, sg, sb, sa] = blend_effect_color(
-                eff.color, layer_fill_f32, &eff.blend_mode, eff.opacity
+                eff.color, layer_fill_f32, effective_blend, eff.opacity
             );
             match &eff.kind {
                 EffectKind::DropShadow => {

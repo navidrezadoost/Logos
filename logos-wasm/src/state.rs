@@ -399,6 +399,15 @@ pub struct EditorState {
     // Scores decay each frame and are rewarded when the user inspects a pair.
     // During drag the top-scored neighbours are shown automatically.
     pub measure_affinity: std::collections::HashMap<(Uuid, Uuid), f32>,
+
+    // ── Blend mode hover-preview ──────────────────────────────────────
+    // Set each frame by the Effects panel when the user hovers a blend mode
+    // option.  Cleared at the start of every right-panel frame so it
+    // vanishes as soon as the pointer leaves or the combo closes.
+    // Tuple: (layer_id, key, mode)
+    //   key == usize::MAX  → layer-level blend
+    //   key == 0,1,…      → effect index
+    pub blend_preview: Option<(Uuid, usize, BlendMode)>,
 }
 
 /// Which shape-specific handle is being dragged.
@@ -479,6 +488,7 @@ impl EditorState {
             pen_mode:   PenMode::Pen,
             pen_in_progress: None,
             measure_affinity: std::collections::HashMap::new(),
+            blend_preview: None,
         };
         // Demo scene
         state.add_frame("Desktop - 1", 100.0, 80.0, 1280.0, 720.0);
