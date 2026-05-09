@@ -411,8 +411,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     }));
                 }
                 LayerType::Star { points, inner_ratio } => {
-                    let pts2 = star_screen_points(rect, *points, *inner_ratio, rotation);
-                    painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
+                    paint_star(&painter, rect, *points, *inner_ratio, rotation, fill, stroke);
                 }
                 LayerType::Text(content) => {
                     painter.add(Shape::Path(epaint::PathShape { points: pts.clone(), closed: true, fill: Color32::TRANSPARENT, stroke: stroke.into() }));
@@ -500,8 +499,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     }));
                 }
                 LayerType::Star { points, inner_ratio } => {
-                    let pts2 = star_screen_points(rect, *points, *inner_ratio, 0.0);
-                    painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
+                    paint_star(&painter, rect, *points, *inner_ratio, 0.0, fill, stroke);
                 }
                 LayerType::Text(content) => {
                     painter.rect(rect, rounding, Color32::TRANSPARENT, stroke);
@@ -1180,6 +1178,56 @@ fn star_screen_points(rect: Rect, points: u32, inner_ratio: f32, rotation: f32) 
         pts.push(pos2(c.x + ir * rx * a_in.cos(), c.y + ir * ry * a_in.sin()));
     }
     pts
+}
+
+/// Paint a star correctly by decomposing it into convex triangles.
+/// egui's PathShape fill uses a centroid fan which breaks for concave polygons
+/// (like stars).  We instead build an explicit Mesh:
+///   • n spike triangles : outer[i], inner[i], inner[i-1]
+///   • 1 center fan      : inner[0] … inner[n-1]
+/// Stroke is drawn separately as a closed PathShape with transparent fill.
+fn paint_star(
+    painter: &Painter,
+    rect: Rect,
+    points: u32,
+    inner_ratio: f32,
+    rotation: f32,
+    fill: Color32,
+    stroke: Stroke,
+) {
+    let pts = star_screen_points(rect, points, inner_ratio, rotation);
+    let n   = pts.len() / 2; // number of spikes
+    if n < 3 { return; }
+
+    // ── Fill via explicit triangle mesh ──────────────────────────────────
+    if fill.a() > 0 {
+        let mut mesh = epaint::Mesh::default();
+        for &p in &pts {
+            mesh.colored_vertex(p, fill);
+        }
+        // Spike triangles: outer[i], inner[i], inner[(i+n-1)%n]
+        for i in 0..n {
+            let o      = (2 * i) as u32;
+            let i_curr = (2 * i + 1) as u32;
+            let i_prev = if i == 0 { (2 * n - 1) as u32 } else { (2 * i - 1) as u32 };
+            mesh.add_triangle(o, i_curr, i_prev);
+        }
+        // Center fan from inner[0] through inner[n-1]
+        for i in 1..(n as u32 - 1) {
+            mesh.add_triangle(1, 2 * i + 1, 2 * i + 3);
+        }
+        painter.add(Shape::mesh(mesh));
+    }
+
+    // ── Stroke: full outline as a closed path (no fill) ──────────────────
+    if stroke.width > 0.0 {
+        painter.add(Shape::Path(epaint::PathShape {
+            points: pts,
+            closed: true,
+            fill: Color32::TRANSPARENT,
+            stroke: stroke.into(),
+        }));
+    }
 }
 
 /// 4 rotated corners of a screen-space rect (cl, tr, br, bl order).
