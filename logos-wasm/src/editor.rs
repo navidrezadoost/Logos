@@ -896,9 +896,18 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                         }
                     }
                     if !done && sr.contains(mp) {
-                        // Inside the selected layer → move cursor
+                        // Inside the selected layer → move cursor (Alt = copy cursor)
                         if !rec.locked {
-                            ui.ctx().set_cursor_icon(CursorIcon::Move);
+                            let icon = if alt_held { CursorIcon::Copy } else { CursorIcon::Move };
+                            ui.ctx().set_cursor_icon(icon);
+                        }
+                    }
+                    // Alt held over any hovered non-selected layer → copy cursor
+                    if alt_held {
+                        if let Some(hl) = state.hovered_layer {
+                            if !state.layers.get(&hl).map(|r| r.locked).unwrap_or(true) {
+                                ui.ctx().set_cursor_icon(CursorIcon::Copy);
+                            }
                         }
                     }
                 }
@@ -1810,12 +1819,37 @@ fn handle_tool_input(
                         clog!("[DRAG-START] → target={:?}", target_id
                             .and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()));
 
-                        if let Some(id) = target_id {
+                        if let Some(mut id) = target_id {
                             let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
+                            let alt_drag = ui.input(|i| i.modifiers.alt);
                             if multi {
                                 state.toggle_select(id);
                             } else if !state.is_selected(id) {
                                 state.select_only(id);
+                            }
+                            // Alt+drag: clone all selected layers in-place, then drag the clones
+                            if alt_drag {
+                                let ids_to_clone: Vec<Uuid> = state.selection.clone();
+                                let mut id_map: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
+                                for &src_id in &ids_to_clone {
+                                    if let Some(src) = state.layers.get(&src_id).cloned() {
+                                        let src_name = src.name.clone();
+                                        let mut cloned = src;
+                                        cloned.id   = Uuid::new_v4();
+                                        cloned.name = format!("{} copy", src_name);
+                                        let cid = cloned.id;
+                                        state.pages[state.active_page].layers.push(cid);
+                                        state.layers.insert(cid, cloned);
+                                        id_map.insert(src_id, cid);
+                                    }
+                                }
+                                state.selection = ids_to_clone.iter()
+                                    .filter_map(|sid| id_map.get(sid).copied())
+                                    .collect();
+                                if let Some(&new_id) = id_map.get(&id) { id = new_id; }
+                                state.drag.is_alt_clone = true;
+                            } else {
+                                state.drag.is_alt_clone = false;
                             }
                             let rec = &state.layers[&id];
                             state.drag.active        = true;
@@ -1825,6 +1859,7 @@ fn handle_tool_input(
                             state.drag.layer_start   = pos2(rec.x, rec.y);
                             state.drag.layer_size    = vec2(rec.width, rec.height);
                             state.drag.resize_handle = None;
+                            state.drag.shift_axis_lock = None;
                             // Snapshot start position of every selected layer so they all move together
                             state.drag.multi_drag_offsets = state.selection.iter()
                                 .filter_map(|&sid| state.layers.get(&sid).map(|r| (sid, r.x, r.y)))
@@ -1990,6 +2025,22 @@ fn handle_tool_input(
                                     if state.snap_to_grid { (v / g).round() * g } else { v }
                                 };
                                 let g = state.grid_size;
+                                // ── Shift-axis lock (move only) ──────────────────────────────
+                                let shift_held_move = ui.input(|i| i.modifiers.shift);
+                                let (dx, dy) = if !shift_held_move {
+                                    state.drag.shift_axis_lock = None;
+                                    (dx, dy)
+                                } else {
+                                    if state.drag.shift_axis_lock.is_none() && (dx.abs() > 2.0 || dy.abs() > 2.0) {
+                                        state.drag.shift_axis_lock = Some(dx.abs() >= dy.abs());
+                                    }
+                                    match state.drag.shift_axis_lock {
+                                        Some(true)  => (dx, 0.0),   // horizontal axis locked
+                                        Some(false) => (0.0, dy),   // vertical axis locked
+                                        None        => (0.0, 0.0),  // waiting for direction
+                                    }
+                                };
+
                                 if let Some(handle) = state.drag.resize_handle {
                                     let (nx, ny, nw, nh) = match handle {
                                         ResizeHandle::TopLeft     => (snap(ox+dx,g), snap(oy+dy,g), (ow-dx).max(4.0), (oh-dy).max(4.0)),
@@ -2090,6 +2141,63 @@ fn handle_tool_input(
                                         }
                                     }
 
+                                    // ── Rotation-parallel edge snap ──────────────────────────────
+                                    // When a dragged element's angle is within 15° of another layer's
+                                    // angle, snap the dragged rotation to match (make them parallel)
+                                    // and glue the nearest edges together.
+                                    let dragged_rot = state.layers.get(&id).map(|r| r.rotation).unwrap_or(0.0);
+                                    let rot_thresh  = 15.0f32.to_radians();
+                                    let pi = std::f32::consts::PI;
+                                    let others_with_rot: Vec<(f32,f32,f32,f32,f32)> = {
+                                        let page_ids2 = state.pages[state.active_page].layers.clone();
+                                        page_ids2.iter().filter_map(|&oid| {
+                                            if oid == id { return None; }
+                                            state.layers.get(&oid).map(|r| (r.x, r.y, r.width, r.height, r.rotation))
+                                        }).collect()
+                                    };
+                                    let sw = state.drag.layer_size.x;
+                                    let sh = state.drag.layer_size.y;
+                                    for (ox2, oy2, ow2, oh2, orot) in &others_with_rot {
+                                        // Smallest angle between two undirected lines (mod π)
+                                        let mut da = (dragged_rot - orot).rem_euclid(pi);
+                                        if da > pi * 0.5 { da = pi - da; }
+                                        if da >= rot_thresh { continue; }
+                                        // Snap rotation
+                                        if let Some(r) = state.layers.get_mut(&id) {
+                                            r.rotation = *orot;
+                                        }
+                                        // Snap edge along the perpendicular-to-rotation axis
+                                        let dcx = nx + sw * 0.5;
+                                        let dcy = ny + sh * 0.5;
+                                        let ocx = ox2 + ow2 * 0.5;
+                                        let ocy = oy2 + oh2 * 0.5;
+                                        let cos_r = orot.cos();
+                                        let sin_r = orot.sin();
+                                        let ddx = dcx - ocx;
+                                        let ddy = dcy - ocy;
+                                        // Signed distance perpendicular to rotation axis
+                                        let perp_proj = ddx * (-sin_r) + ddy * cos_r;
+                                        let d_perp_half = (sw * sin_r.abs() + sh * cos_r.abs()) * 0.5;
+                                        let o_perp_half = (ow2 * sin_r.abs() + oh2 * cos_r.abs()) * 0.5;
+                                        let edge_gap = perp_proj.abs() - d_perp_half - o_perp_half;
+                                        let edge_thresh = 14.0 / state.zoom;
+                                        if !snapped_x && !snapped_y && edge_gap.abs() < edge_thresh {
+                                            let snapped_perp = perp_proj.signum() * (d_perp_half + o_perp_half);
+                                            let nudge = snapped_perp - perp_proj;
+                                            nx += nudge * (-sin_r);
+                                            ny += nudge * cos_r;
+                                            // Guide line along the shared edge
+                                            let ex = ocx + snapped_perp * (-sin_r);
+                                            let ey = ocy + snapped_perp * cos_r;
+                                            state.drag.snap_guides.push((
+                                                ex - big * cos_r, ey - big * sin_r,
+                                                ex + big * cos_r, ey + big * sin_r,
+                                                false,
+                                            ));
+                                        }
+                                        break; // apply to first matching layer only
+                                    }
+
                                     // Move the primary layer
                                     if let Some(r) = state.layers.get_mut(&id) {
                                         r.x = nx; r.y = ny;
@@ -2175,6 +2283,8 @@ fn handle_tool_input(
         state.drag.snap_guides.clear();
         state.drag.shape_handle  = None;
         state.drag.multi_drag_offsets.clear();
+        state.drag.shift_axis_lock = None;
+        state.drag.is_alt_clone    = false;
     }
 
     // ── Right-click: record which layer is under cursor for context menu ──

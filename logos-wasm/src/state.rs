@@ -313,6 +313,10 @@ pub struct DragState {
     /// World-space start positions of *every* selected layer at drag-start.
     /// Used so every layer in the selection moves together with the primary.
     pub multi_drag_offsets: Vec<(Uuid, f32, f32)>,
+    /// Shift-key axis lock while moving: Some(true)=horizontal only, Some(false)=vertical only, None=free
+    pub shift_axis_lock: Option<bool>,
+    /// True when this drag was initiated with Alt held — dragging clones of the originals.
+    pub is_alt_clone: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
