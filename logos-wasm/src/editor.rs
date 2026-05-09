@@ -120,6 +120,21 @@ impl eframe::App for LogosEditor {
                             }
                         }
                         state.tool = Tool::Select;
+                    } else if let Some(&sel_id) = state.selection.first() {
+                        // Enter on a Frame → drill in (select first child)
+                        let children = state.frame_children(sel_id);
+                        if !children.is_empty() {
+                            state.select_only(children[0]);
+                        }
+                    }
+                }
+                // Shift+Enter → select parent frame
+                if i.key_pressed(Key::Enter) && i.modifiers.shift {
+                    let parent = state.selection.first()
+                        .and_then(|&id| state.layers.get(&id))
+                        .and_then(|r| r.parent_id);
+                    if let Some(pid) = parent {
+                        state.select_only(pid);
                     }
                 }
             }
@@ -142,6 +157,18 @@ impl eframe::App for LogosEditor {
             // Ctrl+Alt+G — Wrap selection in Frame (like Figma Alt+Cmd+G)
             if !typing && i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(Key::G) {
                 state.wrap_in_frame();
+            }
+            // Shift+Ctrl+G — Unwrap / Ungroup selected Frame
+            if !typing && i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::G) {
+                let ids: Vec<uuid::Uuid> = state.selection.clone();
+                for id in ids {
+                    if let Some(r) = state.layers.get(&id) {
+                        if matches!(r.layer_type, crate::state::LayerType::Frame) {
+                            state.ungroup_frame(id);
+                            break; // ungroup_frame updates selection
+                        }
+                    }
+                }
             }
 
             // ── Tool shortcuts (only when NOT typing and no modifier) ───────
@@ -289,6 +316,18 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
     }
 
     let layer_ids: Vec<Uuid> = state.pages[state.active_page].layers.clone();
+
+    // ── Auto Layout pre-pass: reposition children of AL frames ────────────
+    let al_frames: Vec<Uuid> = layer_ids.iter()
+        .filter(|&&fid| state.layers.get(&fid)
+            .map(|r| r.auto_layout.is_some())
+            .unwrap_or(false))
+        .cloned()
+        .collect();
+    for fid in al_frames {
+        state.apply_auto_layout(fid);
+    }
+
     for &id in &layer_ids {
         let rec = match state.layers.get(&id) {
             Some(r) if r.visible => r,
@@ -615,22 +654,80 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                         FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
                 }
                 LayerType::Frame => {
-                    painter.rect_filled(rect, rounding, fill);
-                    painter.rect_stroke(rect, rounding, Stroke::new(1.0, Color32::from_gray(80)));
+                    let this_selected = state.is_selected(id);
+                    let this_hovered  = state.hovered_layer == Some(id);
+                    let has_selected_child = state.frame_children(id)
+                        .iter().any(|&cid| state.is_selected(cid));
 
-                    // Frame name label above the frame (like Figma top-level frames)
-                    if rec.parent_id.is_none() {
+                    // ── Background fill ──────────────────────────────────────
+                    painter.rect_filled(rect, rounding, fill);
+
+                    // ── Frame border ─────────────────────────────────────────
+                    // Thin gray border normally; accent when a child is selected (parent chain)
+                    let frame_border_col = if has_selected_child {
+                        Color32::from_rgba_unmultiplied(100, 91, 255, 80)
+                    } else {
+                        Color32::from_gray(80)
+                    };
+                    painter.rect_stroke(rect, rounding, Stroke::new(1.0, frame_border_col));
+
+                    // ── Dashed border when overflow is visible (clip_content=false) ──
+                    if !rec.clip_content && !state.frame_children(id).is_empty() {
+                        let dash_painter = painter.with_clip_rect(painter.clip_rect().expand(20.0));
+                        let step = 8.0_f32;
+                        let expanded = rect.expand(2.0);
+                        // Top
+                        let mut x = expanded.left();
+                        while x < expanded.right() {
+                            let x2 = (x + step * 0.6).min(expanded.right());
+                            dash_painter.line_segment([pos2(x, expanded.top()), pos2(x2, expanded.top())],
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 140, 120)));
+                            x += step;
+                        }
+                        // Bottom
+                        x = expanded.left();
+                        while x < expanded.right() {
+                            let x2 = (x + step * 0.6).min(expanded.right());
+                            dash_painter.line_segment([pos2(x, expanded.bottom()), pos2(x2, expanded.bottom())],
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 140, 120)));
+                            x += step;
+                        }
+                        // Left
+                        let mut y = expanded.top();
+                        while y < expanded.bottom() {
+                            let y2 = (y + step * 0.6).min(expanded.bottom());
+                            dash_painter.line_segment([pos2(expanded.left(), y), pos2(expanded.left(), y2)],
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 140, 120)));
+                            y += step;
+                        }
+                        // Right
+                        y = expanded.top();
+                        while y < expanded.bottom() {
+                            let y2 = (y + step * 0.6).min(expanded.bottom());
+                            dash_painter.line_segment([pos2(expanded.right(), y), pos2(expanded.right(), y2)],
+                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 140, 120)));
+                            y += step;
+                        }
+                    }
+
+                    // ── Frame name label (only when selected or hovered) ──────
+                    if (this_selected || this_hovered) && rec.parent_id.is_none() {
+                        let label_col = if this_selected {
+                            Color32::from_rgb(100, 91, 255)
+                        } else {
+                            Color32::from_gray(150)
+                        };
                         let label_painter = painter.with_clip_rect(painter.clip_rect().expand(40.0));
                         label_painter.text(
                             pos2(rect.left(), rect.top() - 18.0),
                             Align2::LEFT_BOTTOM,
                             &rec.name.clone(),
                             FontId::proportional((11.0 * state.zoom).clamp(9.0, 18.0)),
-                            Color32::from_gray(130),
+                            label_col,
                         );
                     }
 
-                    // Render children inside this frame
+                    // ── Render children inside this frame ─────────────────────
                     let child_ids: Vec<Uuid> = state.frame_children(id);
                     let clip_content = rec.clip_content;
                     let child_painter = if clip_content {
@@ -2582,6 +2679,54 @@ fn handle_tool_input(
             let label = if state.drag.rotating { "rotate" }
                 else if state.drag.resize_handle.is_some() { "resize" }
                 else { "move" };
+
+            // ── Auto-reparent on canvas drop (unless Spacebar was held) ─────
+            if label == "move" && !ui.input(|i| i.key_down(Key::Space)) {
+                // For each moved layer: find the deepest frame that fully contains it
+                // (and that is not the layer itself or one of its descendants).
+                let moved_ids: Vec<Uuid> = state.selection.clone();
+                let all_frames: Vec<Uuid> = state.pages[state.active_page].layers.iter()
+                    .filter(|&&fid| {
+                        state.layers.get(&fid)
+                            .map(|r| matches!(r.layer_type, LayerType::Frame) && r.parent_id.is_none())
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect();
+
+                for &mid in &moved_ids {
+                    if let Some(mrec) = state.layers.get(&mid) {
+                        let (mx, my, mw, mh) = (mrec.x, mrec.y, mrec.width, mrec.height);
+                        // Find deepest containing frame
+                        let mut best: Option<Uuid> = None;
+                        let mut best_area = f32::MAX;
+                        for &fid in &all_frames {
+                            if fid == mid { continue; }
+                            if moved_ids.contains(&fid) { continue; }
+                            if let Some(fr) = state.layers.get(&fid) {
+                                let area = fr.width * fr.height;
+                                // Layer must be fully inside frame to auto-nest
+                                if mx >= fr.x && my >= fr.y
+                                    && mx + mw <= fr.x + fr.width
+                                    && my + mh <= fr.y + fr.height
+                                    && area < best_area
+                                {
+                                    best = Some(fid);
+                                    best_area = area;
+                                }
+                            }
+                        }
+                        // Update parent: detach if not inside any frame; nest if inside one
+                        let current_parent = state.layers.get(&mid).and_then(|r| r.parent_id);
+                        if best != current_parent {
+                            if let Some(r) = state.layers.get_mut(&mid) {
+                                r.parent_id = best;
+                            }
+                        }
+                    }
+                }
+            }
+
             state.push_history(label);
         }
         if state.drag.layer_id.is_none() {

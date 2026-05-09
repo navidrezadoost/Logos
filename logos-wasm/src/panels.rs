@@ -1,7 +1,8 @@
 //! Left panel (layers + pages), right panel (properties), top toolbar.
 
 use eframe::egui::*;
-use crate::state::{EditorState, LayerType, FrameMode, TextMode, PenMode, BlendMode, Effect, EffectKind};
+use crate::state::{EditorState, LayerType, FrameMode, TextMode, PenMode, BlendMode, Effect, EffectKind,
+                   AutoLayout, AutoLayoutDirection, SizingMode, Padding};
 use crate::tools::Tool;
 
 // ── Top toolbar ──────────────────────────────────────────────────────────────
@@ -556,15 +557,17 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     }
                     if is_frame {
                         ui.separator();
-                        if ui.button("Ungroup / Unwrap Frame").clicked() {
-                            // Detach children, then delete frame
-                            let children = state.frame_children(id);
-                            for &cid in &children {
-                                if let Some(r) = state.layers.get_mut(&cid) {
-                                    r.parent_id = None;
-                                }
-                            }
-                            to_delete = Some(id);
+                        if ui.button("Unwrap Frame  (Shift+Ctrl+G)").clicked() {
+                            state.ungroup_frame(id);
+                            ui.close_menu();
+                        }
+                        if ui.button("Resize to Fit Contents").clicked() {
+                            state.resize_frame_to_fit(id, 16.0);
+                            ui.close_menu();
+                        }
+                        if ui.button("Wrap in Frame  (Ctrl+Alt+G)").clicked() {
+                            state.select_only(id);
+                            state.wrap_in_frame();
                             ui.close_menu();
                         }
                     }
@@ -799,24 +802,159 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             .unwrap_or(false);
         if is_frame && section_header(ui, "sec_frame", "Frame", true) {
             ui.add_space(4.0);
-            let rec = state.layers.get_mut(&id).unwrap();
 
-            // Clip Content toggle
+            // ── Clip Content ───────────────────────────────────────────
+            {
+                let rec = state.layers.get_mut(&id).unwrap();
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    let prev = rec.clip_content;
+                    ui.checkbox(&mut rec.clip_content, "Clip Content")
+                        .on_hover_text("Hide children that extend outside this frame's bounds");
+                    if rec.clip_content != prev { needs_history = true; }
+                });
+            }
+
+            ui.add_space(6.0);
+
+            // ── Auto Layout toggle row ─────────────────────────────────
+            let has_al = state.layers.get(&id).map(|r| r.auto_layout.is_some()).unwrap_or(false);
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                let prev = rec.clip_content;
-                ui.checkbox(&mut rec.clip_content, "Clip Content")
-                    .on_hover_text("Hide children that extend outside this frame's bounds");
-                if rec.clip_content != prev { needs_history = true; }
+                ui.label(RichText::new("AUTO LAYOUT").size(10.0).color(C_MUTED));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    let btn_label = if has_al { "− Remove" } else { "+ Add" };
+                    if ui.small_button(btn_label).clicked() {
+                        let rec = state.layers.get_mut(&id).unwrap();
+                        if rec.auto_layout.is_some() {
+                            rec.auto_layout = None;
+                        } else {
+                            rec.auto_layout = Some(AutoLayout::default());
+                        }
+                        needs_history = true;
+                    }
+                });
             });
 
-            ui.add_space(4.0);
+            if has_al {
+                ui.add_space(4.0);
+                let al = state.layers.get(&id).unwrap().auto_layout.clone().unwrap();
 
-            // Wrap-in-frame hint
+                // Direction picker
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Direction").size(11.5).color(C_MUTED));
+                    ui.add_space(4.0);
+                    let is_horiz = al.direction == AutoLayoutDirection::Horizontal;
+                    if icon_btn(ui, "→", "Horizontal", is_horiz) {
+                        state.layers.get_mut(&id).unwrap()
+                            .auto_layout.as_mut().unwrap().direction = AutoLayoutDirection::Horizontal;
+                        needs_history = true;
+                    }
+                    if icon_btn(ui, "↓", "Vertical", !is_horiz) {
+                        state.layers.get_mut(&id).unwrap()
+                            .auto_layout.as_mut().unwrap().direction = AutoLayoutDirection::Vertical;
+                        needs_history = true;
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Gap slider
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Gap").size(11.5).color(C_MUTED));
+                    ui.add_space(4.0);
+                    let mut gap = al.gap;
+                    if ui.add(Slider::new(&mut gap, 0.0..=80.0).suffix("px")).changed() {
+                        state.layers.get_mut(&id).unwrap().auto_layout.as_mut().unwrap().gap = gap;
+                        needs_history = true;
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Padding (uniform toggle)
+                let is_uniform = al.padding.is_uniform();
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Padding").size(11.5).color(C_MUTED));
+                    ui.add_space(4.0);
+                    if is_uniform {
+                        let mut v = al.padding.top;
+                        if ui.add(Slider::new(&mut v, 0.0..=80.0).suffix("px")).changed() {
+                            let al_mut = state.layers.get_mut(&id).unwrap().auto_layout.as_mut().unwrap();
+                            al_mut.padding = Padding::uniform(v);
+                            needs_history = true;
+                        }
+                    } else {
+                        ui.label(RichText::new(format!("T{} R{} B{} L{}",
+                            al.padding.top as i32, al.padding.right as i32,
+                            al.padding.bottom as i32, al.padding.left as i32)).size(11.0));
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Sizing H / V
+                let sizing_opts = [
+                    (SizingMode::Fixed,        "Fixed"),
+                    (SizingMode::HugContents,  "Hug"),
+                    (SizingMode::FillContainer,"Fill"),
+                ];
+                for (is_h, label) in [(true, "Width"), (false, "Height")] {
+                    ui.horizontal(|ui| {
+                        ui.add_space(12.0);
+                        ui.label(RichText::new(label).size(11.5).color(C_MUTED));
+                        ui.add_space(4.0);
+                        for (mode, name) in &sizing_opts {
+                            let cur = if is_h { &al.sizing_h } else { &al.sizing_v };
+                            let active = cur == mode;
+                            if icon_btn(ui, name, name, active) {
+                                let al_mut = state.layers.get_mut(&id).unwrap()
+                                    .auto_layout.as_mut().unwrap();
+                                if is_h { al_mut.sizing_h = mode.clone(); } else { al_mut.sizing_v = mode.clone(); }
+                                needs_history = true;
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
+                ui.add_space(4.0);
+
+                // Alignment
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Align").size(11.5).color(C_MUTED));
+                    for (val, name, tip) in [(0u8, "⇤", "Start"), (1, "⟺", "Center"), (2, "⇥", "End")] {
+                        if icon_btn(ui, name, tip, al.align == val) {
+                            state.layers.get_mut(&id).unwrap().auto_layout.as_mut().unwrap().align = val;
+                            needs_history = true;
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+
+                // Apply Auto Layout button
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    if ui.button("⟳  Apply Layout").on_hover_text("Reposition children according to Auto Layout rules").clicked() {
+                        state.apply_auto_layout(id);
+                        state.push_history("apply auto layout");
+                    }
+                });
+
+                ui.add_space(4.0);
+            }
+
+            // ── Frame actions ──────────────────────────────────────────
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                ui.label(RichText::new("Ctrl+Alt+G  →  Wrap selection in Frame")
-                    .size(10.5).color(C_MUTED));
+                if ui.small_button("Resize to Fit").on_hover_text("Shrink frame to tightly wrap children").clicked() {
+                    state.resize_frame_to_fit(id, 16.0);
+                }
+                ui.add_space(6.0);
+                if ui.small_button("Unwrap").on_hover_text("Remove frame, keep children (Shift+Ctrl+G)").clicked() {
+                    state.ungroup_frame(id);
+                }
             });
 
             ui.add_space(6.0);

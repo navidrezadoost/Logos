@@ -177,9 +177,96 @@ pub struct LayerRecord {
     pub clip_content: bool,
     /// Whether this frame/group is expanded in the layers panel tree.
     pub frame_expanded: bool,
+    /// Auto Layout config (None = regular free-form frame).
+    pub auto_layout: Option<AutoLayout>,
+    /// Constraint for how this layer resizes inside its parent frame (no AL on parent).
+    pub constraints: Constraints,
 }
 
-// ── Tool sub-modes ────────────────────────────────────────────────────────────
+// ── Constraints ───────────────────────────────────────────────────────────────
+
+/// How a child layer responds to its parent frame being resized.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum ConstraintType {
+    #[default] Left,
+    Right,
+    LeftRight,   // stretch horizontally
+    Center,
+    Scale,
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Constraints {
+    pub horizontal: ConstraintType,
+    pub vertical:   ConstraintType,
+}
+
+// ── Auto Layout ───────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum AutoLayoutDirection {
+    #[default] Horizontal,
+    Vertical,
+}
+
+/// How a frame (or child within an Auto Layout frame) sizes itself.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum SizingMode {
+    #[default] Fixed,
+    /// Frame shrinks/grows to tightly wrap its children + padding.
+    HugContents,
+    /// Child expands to fill available space in the flow direction.
+    FillContainer,
+}
+
+/// Padding applied inside a Frame (all four sides independently).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Padding {
+    pub top: f32, pub right: f32, pub bottom: f32, pub left: f32,
+}
+
+impl Default for Padding {
+    fn default() -> Self { Self { top: 16.0, right: 16.0, bottom: 16.0, left: 16.0 } }
+}
+
+impl Padding {
+    pub fn uniform(v: f32) -> Self { Self { top: v, right: v, bottom: v, left: v } }
+    pub fn is_uniform(&self) -> bool {
+        self.top == self.right && self.right == self.bottom && self.bottom == self.left
+    }
+}
+
+/// Auto Layout configuration attached to a Frame layer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AutoLayout {
+    pub direction: AutoLayoutDirection,
+    /// Gap between children in the flow direction (px).
+    pub gap:       f32,
+    pub padding:   Padding,
+    /// Auto: evenly distribute (like space-between). false = fixed gap.
+    pub gap_auto:  bool,
+    /// How the frame itself sizes along the main axis.
+    pub sizing_h:  SizingMode,
+    pub sizing_v:  SizingMode,
+    /// Counter-axis alignment of children (start / center / end).
+    pub align:     u8,  // 0=start 1=center 2=end
+}
+
+impl Default for AutoLayout {
+    fn default() -> Self {
+        Self {
+            direction: AutoLayoutDirection::Horizontal,
+            gap:       12.0,
+            padding:   Padding::default(),
+            gap_auto:  false,
+            sizing_h:  SizingMode::HugContents,
+            sizing_v:  SizingMode::HugContents,
+            align:     0,
+        }
+    }
+}
+
+
 
 /// Three modes of the Frame tool (like Figma's frame group).
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -252,6 +339,8 @@ impl LayerRecord {
             parent_id: None,
             clip_content: false,
             frame_expanded: true,
+            auto_layout: None,
+            constraints: Constraints::default(),
         }
     }
 
@@ -720,6 +809,136 @@ impl EditorState {
         }
         self.selection = vec![frame_id];
         self.push_history("wrap in frame");
+    }
+
+    /// Remove a frame layer but keep its children in place (they become top-level siblings).
+    /// Preserves each child's absolute world-space position.
+    pub fn ungroup_frame(&mut self, frame_id: Uuid) {
+        // Detach all children; keep their absolute positions unchanged.
+        let children: Vec<Uuid> = self.frame_children(frame_id);
+        // Find frame position in page order so children can be inserted at the same spot
+        let page_idx = self.active_page;
+        let frame_pos = self.pages[page_idx].layers.iter().position(|&id| id == frame_id);
+        for &cid in children.iter().rev() {
+            // absolute position already stored in world space, no adjustment needed
+            if let Some(r) = self.layers.get_mut(&cid) {
+                r.parent_id = None;
+            }
+            // Move child to the same slot the frame occupied (in reverse so order is preserved)
+            self.pages[page_idx].layers.retain(|&id| id != cid);
+            let insert_at = frame_pos.unwrap_or(self.pages[page_idx].layers.len());
+            self.pages[page_idx].layers.insert(insert_at, cid);
+        }
+        // Remove the frame itself (without recursing into children again)
+        self.layers.remove(&frame_id);
+        self.pages[page_idx].layers.retain(|&id| id != frame_id);
+        self.selection.retain(|&id| id != frame_id);
+        self.selection.extend_from_slice(&children);
+        self.push_history("ungroup frame");
+    }
+
+    /// Resize a Frame to the tight bounding box of all its visible children (+ optional padding).
+    pub fn resize_frame_to_fit(&mut self, frame_id: Uuid, padding: f32) {
+        let children = self.frame_children(frame_id);
+        if children.is_empty() { return; }
+        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for &cid in &children {
+            if let Some(r) = self.layers.get(&cid) {
+                min_x = min_x.min(r.x);   min_y = min_y.min(r.y);
+                max_x = max_x.max(r.x + r.width);
+                max_y = max_y.max(r.y + r.height);
+            }
+        }
+        if let Some(frame) = self.layers.get_mut(&frame_id) {
+            frame.x      = min_x - padding;
+            frame.y      = min_y - padding;
+            frame.width  = (max_x - min_x) + padding * 2.0;
+            frame.height = (max_y - min_y) + padding * 2.0;
+        }
+        self.push_history("resize to fit");
+    }
+
+    /// Apply Auto Layout rules to a frame: repositions all children according to
+    /// direction, gap, padding, and sizing mode.  Does NOT push to history —
+    /// call `push_history` at the call site if needed.
+    pub fn apply_auto_layout(&mut self, frame_id: Uuid) {
+        let al = match self.layers.get(&frame_id).and_then(|r| r.auto_layout.clone()) {
+            Some(al) => al,
+            None => return,
+        };
+        let children: Vec<Uuid> = self.frame_children(frame_id);
+        if children.is_empty() { return; }
+
+        let is_horiz = al.direction == AutoLayoutDirection::Horizontal;
+
+        // Gather child sizes (we don't resize children in HugContents — only position them).
+        let child_sizes: Vec<(f32, f32)> = children.iter().filter_map(|&cid| {
+            self.layers.get(&cid).map(|r| (r.width, r.height))
+        }).collect();
+
+        let total_main: f32 = child_sizes.iter()
+            .map(|&(w, h)| if is_horiz { w } else { h })
+            .sum::<f32>();
+        let max_cross: f32 = child_sizes.iter()
+            .map(|&(w, h)| if is_horiz { h } else { w })
+            .fold(0.0_f32, f32::max);
+
+        let n = children.len() as f32;
+        let gap = if al.gap_auto {
+            let frame = self.layers.get(&frame_id).unwrap();
+            let avail = if is_horiz {
+                frame.width - al.padding.left - al.padding.right - total_main
+            } else {
+                frame.height - al.padding.top - al.padding.bottom - total_main
+            };
+            if n > 1.0 { avail / (n - 1.0) } else { 0.0 }
+        } else { al.gap };
+
+        // Position children
+        let mut cursor = if is_horiz { al.padding.left } else { al.padding.top };
+        for (i, &cid) in children.iter().enumerate() {
+            let (cw, ch) = child_sizes[i];
+            let cross_start = if is_horiz { al.padding.top } else { al.padding.left };
+            let cross_extent = if is_horiz { ch } else { cw };
+            let cross_pos = match al.align {
+                1 => cross_start + (max_cross - cross_extent) * 0.5,
+                2 => cross_start + (max_cross - cross_extent),
+                _ => cross_start,
+            };
+            if let Some(child) = self.layers.get_mut(&cid) {
+                // positions are absolute world coords; adjust relative to frame origin
+                // We compute them relative then add frame origin below.
+                if is_horiz {
+                    child.x = cursor;      // will be offset by frame.x in render
+                    child.y = cross_pos;
+                    cursor += cw + gap;
+                } else {
+                    child.x = cross_pos;
+                    child.y = cursor;
+                    cursor += ch + gap;
+                }
+            }
+        }
+
+        // Update frame size for HugContents
+        let total_main_with_gaps = total_main + gap * (n - 1.0).max(0.0);
+        if let Some(frame) = self.layers.get_mut(&frame_id) {
+            if al.sizing_h == SizingMode::HugContents {
+                if is_horiz {
+                    frame.width  = al.padding.left + total_main_with_gaps + al.padding.right;
+                } else {
+                    frame.height = al.padding.top  + total_main_with_gaps + al.padding.bottom;
+                }
+            }
+            if al.sizing_v == SizingMode::HugContents {
+                if is_horiz {
+                    frame.height = al.padding.top  + max_cross + al.padding.bottom;
+                } else {
+                    frame.width  = al.padding.left + max_cross + al.padding.right;
+                }
+            }
+        }
     }
 
     pub fn duplicate_selected(&mut self) {
