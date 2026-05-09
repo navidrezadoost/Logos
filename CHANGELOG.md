@@ -6,7 +6,108 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
-## [Unreleased] — 2026-05-06
+## [Unreleased] — 2026-05-09
+
+### Added — `logos-wasm` editor (Figma-style Frames, Auto Layout, interaction polish)
+
+#### Unicode Icon System
+- **All toolbar tool icons** replaced with meaningful Unicode symbols: `↖` (Move), `⤡` (Scale), `#` (Frame), `▭` (Rect), `◯` (Ellipse), `⬡` (Polygon), `T` (Text), `✎` (Pen), `✋` (Pan), `╱` (Line), `→` (Arrow), `★` (Star).
+- **Layer type icons** in both the Layers panel tree and the right-panel header badge updated to match: `▭`, `#`, `T`, `◯`, `✎`, `⊞`, `⬡`, `╱`, `→`, `★`.
+- All icons derived from egui's built-in NotoEmoji range; no external font required.
+
+#### Figma-Style Frame Layer System
+- **`parent_id: Option<Uuid>`** — each layer now tracks its parent frame, enabling true hierarchical containment.
+- **`clip_content: bool`** — frames clip child layers to their bounds by default (matching Figma). Togglable in the right panel.
+- **`frame_expanded: bool`** — controls expand/collapse state in the Layers panel tree.
+- **`LayerRecord::new_frame()`** — sets `clip_content = true` and white fill by default.
+- **Frame name label** — rendered above the frame on canvas, but only when the frame is selected or hovered (not always-on). Accent-purple when selected, gray when hovered.
+- **Parent chain tint** — when a child inside a frame is selected, the parent frame's border softens to accent purple at 30 % opacity, visualising containment hierarchy.
+- **Dashed overflow outline** — when `clip_content = false` and the frame has children, a hand-crafted dashed border is drawn around the frame to signal that children may overflow.
+- **Hierarchical rendering** — root-level render loop skips layers that have a `parent_id`; frame render arm draws its own background, then iterates and renders all children inside a clipped (or unclipped) `Painter` scope.
+
+#### Auto Layout (Horizontal / Vertical)
+- **`AutoLayout` struct** — `direction`, `gap`, `padding` (per-side), `gap_auto`, `sizing_h`, `sizing_v`, `align`.
+- **`SizingMode`** — `Fixed`, `HugContents`, `FillContainer`.
+- **`Padding`** — four-sided; `uniform()` constructor; `is_uniform()` helper.
+- **`AutoLayoutDirection`** — `Horizontal` / `Vertical`.
+- **`apply_auto_layout(frame_id)`** — pure layout pass: repositions children according to direction + gap + padding; resizes the frame when `HugContents`; does not push to undo history (called every render frame as a pre-pass).
+- **Auto Layout pre-pass** in `canvas_panel` — all frames with `auto_layout.is_some()` are reflowed before the draw loop so children are always positioned correctly without explicit "Apply" calls.
+- **Right panel Auto Layout section** (visible only when a Frame is selected):
+  - Toggle (`+ Add` / `− Remove`) to enable or disable Auto Layout.
+  - Direction picker (→ horizontal / ↓ vertical) with icon buttons.
+  - Gap slider (0–80 px).
+  - Padding slider (uniform mode with single control).
+  - Width / Height sizing (Fixed / Hug / Fill) segmented control.
+  - Alignment picker (⇤ start / ⟺ center / ⇥ end).
+  - **⟳ Apply Layout** button for one-shot repositioning with history push.
+
+#### Constraints
+- **`Constraints { horizontal: ConstraintType, vertical: ConstraintType }`** — five horizontal variants (Left, Right, LeftRight, Center, Scale) and vertical equivalents. Added to `LayerRecord`; defaults to `Left` / `Left`.
+
+#### Canvas Auto-Reparenting on Drop
+- When a move-drag ends **without Spacebar held**: finds the smallest (deepest) frame that fully contains the bounding box of each dropped layer and sets its `parent_id` accordingly — automatic nesting, matching Figma's default drag-onto-frame behaviour.
+- **Spacebar suppresses auto-reparenting** (hold before or during drag) — exact parity with Figma's power-user modifier.
+- Works per-layer across multi-selection drags.
+
+#### Frame Helpers (state.rs)
+- **`frame_children(frame_id)`** — returns ordered children of a frame from the page list.
+- **`reparent_layer(layer_id, Option<Uuid>)`** — sets `parent_id`; pass `None` to detach.
+- **`wrap_in_frame()`** — wraps the current selection in a new Frame sized to the selection's bounding box + 16 px padding; inserts the frame at the first selected layer's position; reparents all selected layers; selects the new frame. Undo-able.
+- **`ungroup_frame(frame_id)`** — removes a frame but keeps all children in place (they become top-level siblings at the frame's former page position, preserving absolute world-space positions). Undo-able.
+- **`resize_frame_to_fit(frame_id, padding)`** — shrinks/grows a frame to tightly wrap its visible children + specified padding. Undo-able.
+- **`remove_layer()`** — now recursively removes all children when a frame is deleted.
+
+#### Keyboard Shortcuts
+| Shortcut | Action |
+|---|---|
+| `Ctrl + Alt + G` | Wrap selection in Frame |
+| `Shift + Ctrl + G` | Unwrap / Ungroup selected Frame |
+| `Enter` | Drill into selected Frame (select first child) |
+| `Shift + Enter` | Select parent of selected layer |
+
+#### Layers Panel Tree View
+- **Hierarchical DFS tree** — root layers at top level; children indented 16 px per nesting depth. Iterative DFS using a stack ensures stable ordering without recursion depth limits.
+- **Expand / collapse triangles** (`▸` / `▾`) on non-empty frames; toggle stored in `frame_expanded`.
+- **Visibility toggle** updated to `◎` / `○` Unicode icons.
+- **Children rendered at smaller font size** (12 pt vs 13 pt default) to visually distinguish nesting depth.
+- **Context menu** extended:
+  - "Unwrap Frame (Shift+Ctrl+G)" → `ungroup_frame()`, children preserved in place.
+  - "Resize to Fit Contents" → `resize_frame_to_fit(16.0)`.
+  - "Wrap in Frame (Ctrl+Alt+G)" → `wrap_in_frame()`.
+
+#### Right Panel Frame Section
+- Visible **only** when a single Frame layer is selected.
+- **Clip Content** checkbox (live-togglable, writes to history on change).
+- Full **Auto Layout** sub-section (see above).
+- **Resize to Fit** and **Unwrap** quick-action buttons.
+
+#### Interaction Improvements
+- **Shift + axis lock** during move drag — locks movement to the dominant axis (horizontal or vertical) once the pointer moves more than 2 px.
+- **Alt + drag clone** — duplicates all selected layers in-place when Alt is held at drag start; the drag then moves the clones, leaving originals intact.
+- **Rotation-parallel edge snap** — during move drag, detects other layers' rotation angles; snaps the dragged layer's rotation and flushes perpendicular edges when within 15 ° (mod π). Draws a guide line along the snapped edge.
+- **Alt cursor** — `CursorIcon::Copy` shown when hovering an unlocked layer with Alt held.
+
+#### Effects & Blend Mode System
+- **`BlendMode` enum** — 18 modes in 5 groups (Normal, Darken, Multiply, PlusDarker, ColorBurn, Lighten, Screen, PlusLighter, ColorDodge, Overlay, SoftLight, HardLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity).
+- **`EffectKind` enum** — 7 types: Drop Shadow, Inner Shadow, Layer Blur, Background Blur, Noise, Texture, Glass. Each has capability flags (`has_offset`, `has_blur`, `has_spread`, `has_color`, `has_amount`).
+- **`Effect` struct** — `kind, enabled, x, y, blur, spread, opacity, color:[f32;4], blend_mode, amount`.
+- **`LayerRecord.effects: Vec<Effect>`** replaces old single `DropShadow`.
+- **`LayerRecord.blend_mode: BlendMode`** — layer-level blend mode.
+- **CSS Compositing Level 1 math** implemented entirely in Rust: `blend_channel`, `blend_rgb`, `rgb_to_hsl`, `hsl_to_rgb`, `blend_effect_color`, `apply_layer_blend` — all 18 modes for both layer fill and every effect.
+- **Hover-preview for blend modes** — `EditorState.blend_preview: Option<(Uuid, usize, BlendMode)>` cleared every frame; set on ComboBox hover; read by renderer before committed value — live canvas preview while the user browses, commit on click.
+- **Blend mode inside Effects section** — layer-level blend appears as the first row inside the Effects collapsible section (not as a standalone panel), matching Figma's panel structure.
+- **Right panel Effects section** — multi-row effect list; per-effect enable/disable checkbox, all parameter controls conditional on `EffectKind` flags; "Add Effect" combo.
+
+### Changed — `logos-wasm`
+- `type_icon()` returns Unicode glyphs instead of ASCII bracket codes (`[R]` → `▭`, `[F]` → `#`, etc.).
+- `Tool::icon()` updated to Unicode set.
+- Right-panel header badge now calls `rec.type_icon()` directly instead of a local match arm.
+- Frame auto-reparenting replaces the old "always top-level on canvas" behaviour.
+- `remove_layer()` now recursively removes all descendants of a frame.
+
+---
+
+
 
 ### Added — `logos-wasm` editor (Figma-style toolbar & interaction improvements)
 
