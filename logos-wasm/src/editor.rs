@@ -299,13 +299,18 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             vec2(sw, sh),
         );
 
-        // Fill
-        let fill = Color32::from_rgba_unmultiplied(
-            (rec.fill[0] * 255.0) as u8,
-            (rec.fill[1] * 255.0) as u8,
-            (rec.fill[2] * 255.0) as u8,
-            (rec.fill[3] * rec.opacity * 255.0) as u8,
-        );
+        // Fill — apply layer-level blend mode against white canvas
+        let fill = {
+            let raw = Color32::from_rgba_unmultiplied(
+                (rec.fill[0] * 255.0) as u8,
+                (rec.fill[1] * 255.0) as u8,
+                (rec.fill[2] * 255.0) as u8,
+                (rec.fill[3] * rec.opacity * 255.0) as u8,
+            );
+            apply_layer_blend(raw, &rec.blend_mode)
+        };
+        // Snapshot fill/blend for use inside the effects loop
+        let layer_fill_f32 = rec.fill;
 
         // Stroke
         let stroke = if rec.stroke_width > 0.0 {
@@ -333,6 +338,10 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             .cloned()
             .collect();
         for eff in &effects_snap {
+            // Blend the effect colour against the layer fill using the effect's blend mode.
+            let [sr, sg, sb, sa] = blend_effect_color(
+                eff.color, layer_fill_f32, &eff.blend_mode, eff.opacity
+            );
             match &eff.kind {
                 EffectKind::DropShadow => {
                     let offset  = vec2(eff.x * state.zoom, eff.y * state.zoom);
@@ -342,12 +351,11 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                         rect.center() + offset,
                         rect.size() + vec2(spread * 2.0, spread * 2.0),
                     );
-                    let [sr, sg, sb, sa] = eff.color;
                     let steps = 7usize;
                     for i in 0..steps {
-                        let t     = i as f32 / (steps - 1) as f32;
+                        let t      = i as f32 / (steps - 1) as f32;
                         let expand = blur_r * t;
-                        let alpha  = ((1.0 - t) * sa * eff.opacity * 255.0) as u8;
+                        let alpha  = ((1.0 - t) * sa * 255.0) as u8;
                         let col = Color32::from_rgba_unmultiplied(
                             (sr * 255.0) as u8, (sg * 255.0) as u8,
                             (sb * 255.0) as u8, alpha,
@@ -367,20 +375,15 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                             painter.rect_filled(shadow_base.expand(expand), rounding, col);
                         }
                     }
-                    let _ = (sr, sg, sb);
                 }
                 EffectKind::InnerShadow => {
-                    // Inner shadow: thin vignette painted on top of the layer (after fill).
-                    // We approximate it as a semi-transparent overlay rect that is
-                    // shrunk from the shape edges and faded toward the center.
-                    let [sr, sg, sb, sa] = eff.color;
                     let blur_r = (eff.blur * state.zoom).max(1.0);
                     let offset = vec2(eff.x * state.zoom, eff.y * state.zoom);
                     let steps  = 6usize;
                     for i in 0..steps {
-                        let t     = i as f32 / (steps - 1) as f32;
+                        let t      = i as f32 / (steps - 1) as f32;
                         let shrink = blur_r * t + eff.spread * state.zoom;
-                        let alpha  = ((1.0 - t) * sa * eff.opacity * 0.7 * 255.0) as u8;
+                        let alpha  = ((1.0 - t) * sa * 0.7 * 255.0) as u8;
                         let col   = Color32::from_rgba_unmultiplied(
                             (sr * 255.0) as u8, (sg * 255.0) as u8,
                             (sb * 255.0) as u8, alpha,
@@ -390,46 +393,47 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                             painter.rect_stroke(inner, rounding, Stroke::new(shrink.max(1.0), col));
                         }
                     }
-                    let _ = (sr, sg, sb);
                 }
                 EffectKind::LayerBlur | EffectKind::BackgroundBlur => {
-                    // GPU blur is not available in egui; draw a frosted semi-transparent
-                    // overlay to hint that blur is applied.
-                    let alpha = (eff.opacity * 0.15 * 255.0) as u8;
-                    let col = Color32::from_rgba_unmultiplied(200, 210, 220, alpha);
+                    // Frosted hint — true GPU blur requires a framebuffer pass.
+                    let col = Color32::from_rgba_unmultiplied(
+                        (sr * 255.0) as u8, (sg * 255.0) as u8,
+                        (sb * 255.0) as u8,
+                        (sa * 0.15 * 255.0) as u8,
+                    );
                     painter.rect_filled(rect, rounding, col);
                 }
                 EffectKind::Glass => {
-                    let [sr, sg, sb, sa] = eff.color;
-                    let a = (sa * eff.amount * eff.opacity * 255.0) as u8;
+                    let a = (sa * eff.amount * 255.0) as u8;
                     let col = Color32::from_rgba_unmultiplied(
-                        (sr * 255.0) as u8, (sg * 255.0) as u8,
-                        (sb * 255.0) as u8, a,
+                        (sr * 255.0) as u8, (sg * 255.0) as u8, (sb * 255.0) as u8, a,
                     );
                     painter.rect_filled(rect, rounding, col);
                 }
                 EffectKind::Noise => {
-                    // Stipple dots to visualise noise.
                     let rows = ((rect.height() / 6.0) as usize).clamp(2, 30);
                     let cols = ((rect.width()  / 6.0) as usize).clamp(2, 30);
-                    let alpha = (eff.amount * eff.opacity * 180.0) as u8;
-                    for r in 0..rows {
-                        for c in 0..cols {
-                            // Deterministic pseudo-random from grid position
-                            let h = (r as u32).wrapping_mul(2654435761).wrapping_add(c as u32) & 0xFF;
+                    let base_alpha = (sa * eff.amount * 180.0) as u8;
+                    for row in 0..rows {
+                        for col in 0..cols {
+                            let h = (row as u32).wrapping_mul(2654435761).wrapping_add(col as u32) & 0xFF;
                             let v = h as f32 / 255.0;
-                            let px = rect.left() + (c as f32 + 0.5) * rect.width()  / cols as f32;
-                            let py = rect.top()  + (r as f32 + 0.5) * rect.height() / rows as f32;
-                            let g = (v * 255.0) as u8;
+                            let px = rect.left() + (col as f32 + 0.5) * rect.width()  / cols as f32;
+                            let py = rect.top()  + (row as f32 + 0.5) * rect.height() / rows as f32;
+                            // Blend noise grey against the effect base colour
+                            let noise_src = [v, v, v];
+                            let base_dst  = [sr, sg, sb];
+                            let [nr, ng, nb] = blend_rgb(noise_src, base_dst, &eff.blend_mode);
                             painter.circle_filled(pos2(px, py), 1.0,
-                                Color32::from_rgba_unmultiplied(g, g, g, alpha));
+                                Color32::from_rgba_unmultiplied(
+                                    (nr * 255.0) as u8, (ng * 255.0) as u8,
+                                    (nb * 255.0) as u8, base_alpha,
+                                ));
                         }
                     }
                 }
                 EffectKind::Texture => {
-                    // Draw a hatched texture pattern as an overlay.
-                    let [sr, sg, sb, sa] = eff.color;
-                    let a = (sa * eff.amount * eff.opacity * 255.0) as u8;
+                    let a = (sa * eff.amount * 255.0) as u8;
                     let col = Color32::from_rgba_unmultiplied(
                         (sr * 255.0) as u8, (sg * 255.0) as u8, (sb * 255.0) as u8, a,
                     );
@@ -444,6 +448,7 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     }
                 }
             }
+            let _ = (sr, sg, sb, sa); // all arms use these
         }
 
         if rotation.abs() > 0.001 {
@@ -1138,6 +1143,133 @@ fn layer_screen_aabb(rec: &crate::state::LayerRecord, state: &EditorState, origi
     let max_x = corners.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
     let max_y = corners.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
     Rect::from_min_max(pos2(min_x, min_y), pos2(max_x, max_y))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Blend mode math — CSS Compositing Level 1 formulas
+// src = the incoming layer / effect colour (A)
+// dst = the destination / background colour (B)
+// All channels are linear 0..1.
+// ─────────────────────────────────────────────────────────────────────────────
+fn blend_channel(src: f32, dst: f32, mode: &crate::state::BlendMode) -> f32 {
+    use crate::state::BlendMode::*;
+    match mode {
+        Normal      => src,
+        Darken      => src.min(dst),
+        Multiply    => src * dst,
+        PlusDarker  => (src + dst - 1.0).max(0.0),
+        ColorBurn   => if src <= 0.0 { 0.0 } else { 1.0 - ((1.0 - dst) / src).min(1.0) },
+        Lighten     => src.max(dst),
+        Screen      => 1.0 - (1.0 - src) * (1.0 - dst),
+        PlusLighter => (src + dst).min(1.0),
+        ColorDodge  => if src >= 1.0 { 1.0 } else { (dst / (1.0 - src)).min(1.0) },
+        Overlay     => if dst <= 0.5 { 2.0 * src * dst } else { 1.0 - 2.0 * (1.0 - src) * (1.0 - dst) },
+        SoftLight   => {
+            if src <= 0.5 {
+                dst - (1.0 - 2.0 * src) * dst * (1.0 - dst)
+            } else {
+                let d = if dst <= 0.25 { ((16.0 * dst - 12.0) * dst + 4.0) * dst } else { dst.sqrt() };
+                dst + (2.0 * src - 1.0) * (d - dst)
+            }
+        }
+        HardLight   => if src <= 0.5 { 2.0 * src * dst } else { 1.0 - 2.0 * (1.0 - src) * (1.0 - dst) },
+        Difference  => (src - dst).abs(),
+        Exclusion   => src + dst - 2.0 * src * dst,
+        // Component modes handled in blend_rgb; fall back to Normal per channel
+        Hue | Saturation | Color | Luminosity => src,
+    }
+}
+
+/// Convert linear RGB → HSL (h in 0..1, s in 0..1, l in 0..1).
+fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l   = (max + min) * 0.5;
+    if (max - min).abs() < 1e-6 { return (0.0, 0.0, l); }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if max == r {
+        (g - b) / d + if g < b { 6.0 } else { 0.0 }
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h / 6.0, s, l)
+}
+
+fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
+    if t < 0.0 { t += 1.0; } if t > 1.0 { t -= 1.0; }
+    if t < 1.0/6.0 { return p + (q - p) * 6.0 * t; }
+    if t < 0.5     { return q; }
+    if t < 2.0/3.0 { return p + (q - p) * (2.0/3.0 - t) * 6.0; }
+    p
+}
+
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    if s < 1e-6 { return (l, l, l); }
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    (hue_to_rgb(p, q, h + 1.0/3.0), hue_to_rgb(p, q, h), hue_to_rgb(p, q, h - 1.0/3.0))
+}
+
+/// Apply a blend mode to an RGB triplet. Returns blended [r,g,b] in 0..1.
+fn blend_rgb(src: [f32;3], dst: [f32;3], mode: &crate::state::BlendMode) -> [f32;3] {
+    use crate::state::BlendMode::*;
+    match mode {
+        Hue => {
+            let (sh, _, _sl) = rgb_to_hsl(src[0], src[1], src[2]);
+            let (_, ds, dl)  = rgb_to_hsl(dst[0], dst[1], dst[2]);
+            let (r, g, b) = hsl_to_rgb(sh, ds, dl);
+            [r, g, b]
+        }
+        Saturation => {
+            let (_, ss, _sl) = rgb_to_hsl(src[0], src[1], src[2]);
+            let (dh, _, dl)  = rgb_to_hsl(dst[0], dst[1], dst[2]);
+            let (r, g, b) = hsl_to_rgb(dh, ss, dl);
+            [r, g, b]
+        }
+        Color => {
+            let (sh, ss, _)  = rgb_to_hsl(src[0], src[1], src[2]);
+            let (_, _, dl)   = rgb_to_hsl(dst[0], dst[1], dst[2]);
+            let (r, g, b) = hsl_to_rgb(sh, ss, dl);
+            [r, g, b]
+        }
+        Luminosity => {
+            let (_, _, sl)   = rgb_to_hsl(src[0], src[1], src[2]);
+            let (dh, ds, _)  = rgb_to_hsl(dst[0], dst[1], dst[2]);
+            let (r, g, b) = hsl_to_rgb(dh, ds, sl);
+            [r, g, b]
+        }
+        m => [
+            blend_channel(src[0], dst[0], m).clamp(0.0, 1.0),
+            blend_channel(src[1], dst[1], m).clamp(0.0, 1.0),
+            blend_channel(src[2], dst[2], m).clamp(0.0, 1.0),
+        ],
+    }
+}
+
+/// Blend an effect colour against a destination colour using the effect's
+/// blend mode, then re-apply the effect's alpha. Returns [r,g,b,a] in 0..1.
+fn blend_effect_color(eff_color: [f32;4], dst_fill: [f32;4], mode: &crate::state::BlendMode, opacity: f32)
+    -> [f32;4]
+{
+    let src = [eff_color[0], eff_color[1], eff_color[2]];
+    let dst = [dst_fill[0],  dst_fill[1],  dst_fill[2]];
+    let [r, g, b] = blend_rgb(src, dst, mode);
+    [r, g, b, (eff_color[3] * opacity).clamp(0.0, 1.0)]
+}
+
+/// Apply layer-level blend mode: blend the layer fill against a white canvas.
+/// Returns a new fill Color32 that reflects the blend.
+fn apply_layer_blend(fill: Color32, mode: &crate::state::BlendMode) -> Color32 {
+    let src = [fill.r() as f32 / 255.0, fill.g() as f32 / 255.0, fill.b() as f32 / 255.0];
+    // White canvas as destination (design canvas background)
+    let dst = [1.0f32, 1.0, 1.0];
+    let [r, g, b] = blend_rgb(src, dst, mode);
+    Color32::from_rgba_unmultiplied(
+        (r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8, fill.a(),
+    )
 }
 
 fn rounded_rect_path_points(rect: Rect, r_nw: f32, r_ne: f32, r_se: f32, r_sw: f32, steps_per_corner: usize) -> Vec<Pos2> {
