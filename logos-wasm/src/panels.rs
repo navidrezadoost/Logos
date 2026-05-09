@@ -1,7 +1,7 @@
 //! Left panel (layers + pages), right panel (properties), top toolbar.
 
 use eframe::egui::*;
-use crate::state::{EditorState, LayerType, FrameMode, TextMode, PenMode};
+use crate::state::{EditorState, LayerType, FrameMode, TextMode, PenMode, BlendMode, Effect, EffectKind};
 use crate::tools::Tool;
 
 // ── Top toolbar ──────────────────────────────────────────────────────────────
@@ -1152,55 +1152,210 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // EFFECTS  (drop shadow)
+    // BLEND MODE
     // ════════════════════════════════════════════════════════════════════
-    if section_header(ui, "sec_effects", "Effects", false) {
-        ui.add_space(8.0);
+    if section_header(ui, "sec_blend", "Blend Mode", false) {
+        ui.add_space(6.0);
         let rec = state.layers.get_mut(&id).unwrap();
         ui.horizontal(|ui| {
             ui.add_space(12.0);
-            let ds_on = rec.drop_shadow.enabled;
-            if icon_btn(ui, if ds_on { "✓" } else { "+" }, "Toggle drop shadow", ds_on) {
-                rec.drop_shadow.enabled = !rec.drop_shadow.enabled;
-                needs_history = true;
-            }
-            ui.add_space(6.0);
-            ui.label(RichText::new("Drop Shadow").size(11.0).color(if ds_on { C_FG } else { C_MUTED }));
+            let cur_label = rec.blend_mode.label();
+            ComboBox::from_id_salt("layer_blend_mode")
+                .selected_text(RichText::new(cur_label).size(11.0).color(C_FG))
+                .width(160.0)
+                .show_ui(ui, |ui| {
+                    for opt in BlendMode::groups() {
+                        match opt {
+                            None => { ui.separator(); }
+                            Some(mode) => {
+                                let is_sel = rec.blend_mode == mode;
+                                if ui.selectable_label(is_sel, mode.label()).clicked() {
+                                    rec.blend_mode = mode;
+                                    needs_history = true;
+                                }
+                            }
+                        }
+                    }
+                });
         });
-        if rec.drop_shadow.enabled {
-            ui.add_space(6.0);
+        ui.add_space(8.0);
+    }
+
+    // EFFECTS
+    // ════════════════════════════════════════════════════════════════════
+    if section_header(ui, "sec_effects", "Effects", false) {
+        ui.add_space(4.0);
+
+        // ── Per-effect rows ──────────────────────────────────────────────
+        let effect_count = state.layers.get(&id).map(|r| r.effects.len()).unwrap_or(0);
+        let mut to_delete: Option<usize> = None;
+        for eff_idx in 0..effect_count {
+            let eff_kind_label = state.layers.get(&id)
+                .and_then(|r| r.effects.get(eff_idx))
+                .map(|e| e.kind.label())
+                .unwrap_or("");
+            let eff_enabled = state.layers.get(&id)
+                .and_then(|r| r.effects.get(eff_idx))
+                .map(|e| e.enabled)
+                .unwrap_or(false);
+
+            // ── Header row ───────────────────────────────────────────────
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
-                Grid::new("shadow_grid").num_columns(8).spacing([4.0, 4.0]).show(ui, |ui| {
-                    ui.label(RichText::new("X").size(10.0).color(C_MUTED));
-                    let r = ui.add(prop_drag("sdx", DragValue::new(&mut rec.drop_shadow.x).speed(0.5)));
-                    if r.drag_stopped() { needs_history = true; }
-                    ui.label(RichText::new("Y").size(10.0).color(C_MUTED));
-                    let r = ui.add(prop_drag("sdy", DragValue::new(&mut rec.drop_shadow.y).speed(0.5)));
-                    if r.drag_stopped() { needs_history = true; }
-                    ui.label(RichText::new("Blur").size(10.0).color(C_MUTED));
-                    let r = ui.add(prop_drag("blur", DragValue::new(&mut rec.drop_shadow.blur).speed(0.5).range(0.0..=200.0)));
-                    if r.drag_stopped() { needs_history = true; }
-                    ui.label(RichText::new("Spread").size(10.0).color(C_MUTED));
-                    let r = ui.add(prop_drag("spread", DragValue::new(&mut rec.drop_shadow.spread).speed(0.5).range(-50.0..=200.0)));
-                    if r.drag_stopped() { needs_history = true; }
-                    ui.end_row();
+                // Enable toggle
+                let toggle_lbl = if eff_enabled { "●" } else { "○" };
+                let toggle_col = if eff_enabled { C_ACCENT } else { C_MUTED };
+                if ui.add(
+                    Button::new(RichText::new(toggle_lbl).size(12.0).color(toggle_col))
+                        .fill(Color32::TRANSPARENT)
+                        .frame(false)
+                ).clicked() {
+                    if let Some(e) = state.layers.get_mut(&id).and_then(|r| r.effects.get_mut(eff_idx)) {
+                        e.enabled = !e.enabled;
+                        needs_history = true;
+                    }
+                }
+                ui.add_space(4.0);
+                ui.label(RichText::new(eff_kind_label).size(11.0).color(if eff_enabled { C_FG } else { C_MUTED }));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // Delete button
+                    if ui.add(
+                        Button::new(RichText::new("✕").size(10.0).color(C_DESTRUCTIVE))
+                            .fill(Color32::TRANSPARENT)
+                            .frame(false)
+                    ).on_hover_text("Remove effect").clicked() {
+                        to_delete = Some(eff_idx);
+                    }
+                    ui.add_space(4.0);
+                    // Blend mode badge
+                    let bm_label = state.layers.get(&id)
+                        .and_then(|r| r.effects.get(eff_idx))
+                        .map(|e| e.blend_mode.label())
+                        .unwrap_or("Normal");
+                    ui.label(RichText::new(bm_label).size(9.0).color(C_MUTED));
                 });
             });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.add_space(12.0);
-                ui.label(RichText::new("Color").size(10.0).color(C_MUTED));
+
+            if !eff_enabled { continue; }
+
+            // ── Controls for this effect ─────────────────────────────────
+            let rec = state.layers.get_mut(&id).unwrap();
+            if let Some(eff) = rec.effects.get_mut(eff_idx) {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    Grid::new(format!("eff_grid_{}", eff_idx)).num_columns(8).spacing([4.0, 4.0]).show(ui, |ui| {
+                        if eff.kind.has_offset() {
+                            ui.label(RichText::new("X").size(10.0).color(C_MUTED));
+                            let r = ui.add(DragValue::new(&mut eff.x).speed(0.5).suffix("px"));
+                            if r.drag_stopped() { needs_history = true; }
+                            ui.label(RichText::new("Y").size(10.0).color(C_MUTED));
+                            let r = ui.add(DragValue::new(&mut eff.y).speed(0.5).suffix("px"));
+                            if r.drag_stopped() { needs_history = true; }
+                        }
+                        if eff.kind.has_blur() {
+                            ui.label(RichText::new("Blur").size(10.0).color(C_MUTED));
+                            let r = ui.add(DragValue::new(&mut eff.blur).speed(0.5).suffix("px").range(0.0..=200.0));
+                            if r.drag_stopped() { needs_history = true; }
+                        }
+                        if eff.kind.has_spread() {
+                            ui.label(RichText::new("Spread").size(10.0).color(C_MUTED));
+                            let r = ui.add(DragValue::new(&mut eff.spread).speed(0.5).suffix("px").range(-50.0..=200.0));
+                            if r.drag_stopped() { needs_history = true; }
+                        }
+                        ui.end_row();
+                    });
+                });
+
+                // Opacity + Amount
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label(RichText::new("Opacity").size(10.0).color(C_MUTED));
+                    ui.add_space(4.0);
+                    let r = ui.add(
+                        Slider::new(&mut eff.opacity, 0.0..=1.0)
+                            .show_value(true).trailing_fill(true)
+                    );
+                    if r.drag_stopped() || r.changed() { needs_history = true; }
+                    if eff.kind.has_amount() {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("Amount").size(10.0).color(C_MUTED));
+                        let r = ui.add(
+                            Slider::new(&mut eff.amount, 0.0..=1.0)
+                                .show_value(true).trailing_fill(true)
+                        );
+                        if r.drag_stopped() || r.changed() { needs_history = true; }
+                    }
+                });
+
+                // Color
+                if eff.kind.has_color() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.0);
+                        ui.label(RichText::new("Color").size(10.0).color(C_MUTED));
+                        ui.add_space(4.0);
+                        if color_edit(ui, &mut eff.color) { needs_history = true; }
+                    });
+                }
+
+                // Per-effect blend mode
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.label(RichText::new("Blend").size(10.0).color(C_MUTED));
+                    ui.add_space(4.0);
+                    let cur_bm = eff.blend_mode.label();
+                    ComboBox::from_id_salt(format!("eff_blend_{}", eff_idx))
+                        .selected_text(RichText::new(cur_bm).size(10.0).color(C_FG))
+                        .width(110.0)
+                        .show_ui(ui, |ui| {
+                            for opt in BlendMode::groups() {
+                                match opt {
+                                    None => { ui.separator(); }
+                                    Some(mode) => {
+                                        let is_sel = eff.blend_mode == mode;
+                                        if ui.selectable_label(is_sel, mode.label()).clicked() {
+                                            eff.blend_mode = mode;
+                                            needs_history = true;
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                });
                 ui.add_space(6.0);
-                if color_edit(ui, &mut rec.drop_shadow.color) { needs_history = true; }
-            });
-        } else {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.add_space(12.0);
-                ui.label(RichText::new("No effects applied").size(11.0).color(C_MUTED));
-            });
+            }
         }
+
+        // Apply delete
+        if let Some(idx) = to_delete {
+            if let Some(rec) = state.layers.get_mut(&id) {
+                rec.effects.remove(idx);
+                needs_history = true;
+            }
+        }
+
+        // ── "+  Add Effect" row ──────────────────────────────────────────
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            let mut add_kind: Option<EffectKind> = None;
+            ComboBox::from_id_salt("add_effect_combo")
+                .selected_text(RichText::new("+ Add Effect").size(11.0).color(C_ACCENT))
+                .width(150.0)
+                .show_ui(ui, |ui| {
+                    for kind in EffectKind::all() {
+                        if ui.selectable_label(false, kind.label()).clicked() {
+                            add_kind = Some(kind.clone());
+                        }
+                    }
+                });
+            if let Some(kind) = add_kind {
+                if let Some(rec) = state.layers.get_mut(&id) {
+                    rec.effects.push(Effect::new(kind));
+                    needs_history = true;
+                }
+            }
+        });
         ui.add_space(8.0);
     }
 

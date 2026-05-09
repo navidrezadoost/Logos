@@ -7,7 +7,7 @@ use eframe::egui::*;
 use uuid::Uuid;
 
 use crate::panels;
-use crate::state::{EditorState, LayerType, StrokePosition};
+use crate::state::{EditorState, LayerType, StrokePosition, EffectKind};
 
 /// Helper: log a message to the browser console (DevTools → Console tab).
 macro_rules! clog {
@@ -327,42 +327,123 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         };
         let rotation = rec.rotation;
 
-        // ── Drop Shadow (drawn beneath the layer) ─────────────────────────
-        if rec.drop_shadow.enabled {
-            let ds = &rec.drop_shadow;
-            let offset  = vec2(ds.x * state.zoom, ds.y * state.zoom);
-            let spread  = ds.spread * state.zoom;
-            let blur_r  = ds.blur   * state.zoom;
-            let shadow_base = Rect::from_center_size(
-                rect.center() + offset,
-                rect.size() + vec2(spread * 2.0, spread * 2.0),
-            );
-            let [sr, sg, sb, sa] = ds.color;
-            let steps = 7usize;
-            for i in 0..steps {
-                let t       = i as f32 / (steps - 1) as f32;
-                let expand  = blur_r * t;
-                let alpha   = ((1.0 - t) * sa * 0.85 * 255.0) as u8;
-                let col = Color32::from_rgba_unmultiplied(
-                    (sr * 255.0) as u8, (sg * 255.0) as u8,
-                    (sb * 255.0) as u8, alpha,
-                );
-                if rotation.abs() > 0.001 {
-                    let mut spts = rounded_rect_path_points(
-                        shadow_base.expand(expand),
-                        rounding.nw, rounding.ne, rounding.se, rounding.sw, 6,
+        // ── Effects (drawn beneath the layer) ─────────────────────────────
+        let effects_snap: Vec<crate::state::Effect> = rec.effects.iter()
+            .filter(|e| e.enabled)
+            .cloned()
+            .collect();
+        for eff in &effects_snap {
+            match &eff.kind {
+                EffectKind::DropShadow => {
+                    let offset  = vec2(eff.x * state.zoom, eff.y * state.zoom);
+                    let spread  = eff.spread * state.zoom;
+                    let blur_r  = eff.blur   * state.zoom;
+                    let shadow_base = Rect::from_center_size(
+                        rect.center() + offset,
+                        rect.size() + vec2(spread * 2.0, spread * 2.0),
                     );
-                    let c = rect.center();
-                    spts = spts.into_iter().map(|p| rotate_point(p, c + offset, rotation)).collect();
-                    painter.add(Shape::Path(epaint::PathShape {
-                        points: spts, closed: true, fill: col,
-                        stroke: epaint::PathStroke::NONE,
-                    }));
-                } else {
-                    painter.rect_filled(shadow_base.expand(expand), rounding, col);
+                    let [sr, sg, sb, sa] = eff.color;
+                    let steps = 7usize;
+                    for i in 0..steps {
+                        let t     = i as f32 / (steps - 1) as f32;
+                        let expand = blur_r * t;
+                        let alpha  = ((1.0 - t) * sa * eff.opacity * 255.0) as u8;
+                        let col = Color32::from_rgba_unmultiplied(
+                            (sr * 255.0) as u8, (sg * 255.0) as u8,
+                            (sb * 255.0) as u8, alpha,
+                        );
+                        if rotation.abs() > 0.001 {
+                            let mut spts = rounded_rect_path_points(
+                                shadow_base.expand(expand),
+                                rounding.nw, rounding.ne, rounding.se, rounding.sw, 6,
+                            );
+                            let c = rect.center();
+                            spts = spts.into_iter().map(|p| rotate_point(p, c + offset, rotation)).collect();
+                            painter.add(Shape::Path(epaint::PathShape {
+                                points: spts, closed: true, fill: col,
+                                stroke: epaint::PathStroke::NONE,
+                            }));
+                        } else {
+                            painter.rect_filled(shadow_base.expand(expand), rounding, col);
+                        }
+                    }
+                    let _ = (sr, sg, sb);
+                }
+                EffectKind::InnerShadow => {
+                    // Inner shadow: thin vignette painted on top of the layer (after fill).
+                    // We approximate it as a semi-transparent overlay rect that is
+                    // shrunk from the shape edges and faded toward the center.
+                    let [sr, sg, sb, sa] = eff.color;
+                    let blur_r = (eff.blur * state.zoom).max(1.0);
+                    let offset = vec2(eff.x * state.zoom, eff.y * state.zoom);
+                    let steps  = 6usize;
+                    for i in 0..steps {
+                        let t     = i as f32 / (steps - 1) as f32;
+                        let shrink = blur_r * t + eff.spread * state.zoom;
+                        let alpha  = ((1.0 - t) * sa * eff.opacity * 0.7 * 255.0) as u8;
+                        let col   = Color32::from_rgba_unmultiplied(
+                            (sr * 255.0) as u8, (sg * 255.0) as u8,
+                            (sb * 255.0) as u8, alpha,
+                        );
+                        let inner = rect.shrink(shrink).translate(offset);
+                        if inner.width() > 0.0 && inner.height() > 0.0 {
+                            painter.rect_stroke(inner, rounding, Stroke::new(shrink.max(1.0), col));
+                        }
+                    }
+                    let _ = (sr, sg, sb);
+                }
+                EffectKind::LayerBlur | EffectKind::BackgroundBlur => {
+                    // GPU blur is not available in egui; draw a frosted semi-transparent
+                    // overlay to hint that blur is applied.
+                    let alpha = (eff.opacity * 0.15 * 255.0) as u8;
+                    let col = Color32::from_rgba_unmultiplied(200, 210, 220, alpha);
+                    painter.rect_filled(rect, rounding, col);
+                }
+                EffectKind::Glass => {
+                    let [sr, sg, sb, sa] = eff.color;
+                    let a = (sa * eff.amount * eff.opacity * 255.0) as u8;
+                    let col = Color32::from_rgba_unmultiplied(
+                        (sr * 255.0) as u8, (sg * 255.0) as u8,
+                        (sb * 255.0) as u8, a,
+                    );
+                    painter.rect_filled(rect, rounding, col);
+                }
+                EffectKind::Noise => {
+                    // Stipple dots to visualise noise.
+                    let rows = ((rect.height() / 6.0) as usize).clamp(2, 30);
+                    let cols = ((rect.width()  / 6.0) as usize).clamp(2, 30);
+                    let alpha = (eff.amount * eff.opacity * 180.0) as u8;
+                    for r in 0..rows {
+                        for c in 0..cols {
+                            // Deterministic pseudo-random from grid position
+                            let h = (r as u32).wrapping_mul(2654435761).wrapping_add(c as u32) & 0xFF;
+                            let v = h as f32 / 255.0;
+                            let px = rect.left() + (c as f32 + 0.5) * rect.width()  / cols as f32;
+                            let py = rect.top()  + (r as f32 + 0.5) * rect.height() / rows as f32;
+                            let g = (v * 255.0) as u8;
+                            painter.circle_filled(pos2(px, py), 1.0,
+                                Color32::from_rgba_unmultiplied(g, g, g, alpha));
+                        }
+                    }
+                }
+                EffectKind::Texture => {
+                    // Draw a hatched texture pattern as an overlay.
+                    let [sr, sg, sb, sa] = eff.color;
+                    let a = (sa * eff.amount * eff.opacity * 255.0) as u8;
+                    let col = Color32::from_rgba_unmultiplied(
+                        (sr * 255.0) as u8, (sg * 255.0) as u8, (sb * 255.0) as u8, a,
+                    );
+                    let step = 6.0;
+                    let mut x = rect.left();
+                    while x < rect.right() {
+                        painter.line_segment(
+                            [pos2(x, rect.top()), pos2(x, rect.bottom())],
+                            Stroke::new(0.5, col),
+                        );
+                        x += step;
+                    }
                 }
             }
-            let _ = (sr, sg, sb); // used above
         }
 
         if rotation.abs() > 0.001 {

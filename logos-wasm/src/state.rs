@@ -12,19 +12,134 @@ use eframe::egui;
 #[derive(Clone, Debug, PartialEq)]
 pub enum StrokePosition { Center, Inside, Outside }
 
-#[derive(Clone, Debug)]
-pub struct DropShadow {
-    pub enabled: bool,
-    pub x:       f32,
-    pub y:       f32,
-    pub blur:    f32,
-    pub spread:  f32,
-    pub color:   [f32; 4],
+// ── Blend mode ────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum BlendMode {
+    #[default] Normal,
+    // Darken group
+    Darken, Multiply, PlusDarker, ColorBurn,
+    // Lighten group
+    Lighten, Screen, PlusLighter, ColorDodge,
+    // Contrast group
+    Overlay, SoftLight, HardLight,
+    // Inversion group
+    Difference, Exclusion,
+    // Component group
+    Hue, Saturation, Color, Luminosity,
 }
-impl Default for DropShadow {
-    fn default() -> Self {
-        Self { enabled: false, x: 4.0, y: 4.0, blur: 8.0, spread: 0.0,
-               color: [0.0, 0.0, 0.0, 0.35] }
+
+impl BlendMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Normal      => "Normal",
+            Self::Darken      => "Darken",
+            Self::Multiply    => "Multiply",
+            Self::PlusDarker  => "Plus Darker",
+            Self::ColorBurn   => "Color Burn",
+            Self::Lighten     => "Lighten",
+            Self::Screen      => "Screen",
+            Self::PlusLighter => "Plus Lighter",
+            Self::ColorDodge  => "Color Dodge",
+            Self::Overlay     => "Overlay",
+            Self::SoftLight   => "Soft Light",
+            Self::HardLight   => "Hard Light",
+            Self::Difference  => "Difference",
+            Self::Exclusion   => "Exclusion",
+            Self::Hue         => "Hue",
+            Self::Saturation  => "Saturation",
+            Self::Color       => "Color",
+            Self::Luminosity  => "Luminosity",
+        }
+    }
+
+    /// All blend modes ordered in groups with separators (None = divider).
+    pub fn groups() -> Vec<Option<BlendMode>> {
+        vec![
+            Some(Self::Normal),
+            None,
+            Some(Self::Darken), Some(Self::Multiply), Some(Self::PlusDarker), Some(Self::ColorBurn),
+            None,
+            Some(Self::Lighten), Some(Self::Screen), Some(Self::PlusLighter), Some(Self::ColorDodge),
+            None,
+            Some(Self::Overlay), Some(Self::SoftLight), Some(Self::HardLight),
+            None,
+            Some(Self::Difference), Some(Self::Exclusion),
+            None,
+            Some(Self::Hue), Some(Self::Saturation), Some(Self::Color), Some(Self::Luminosity),
+        ]
+    }
+}
+
+// ── Effect ────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EffectKind {
+    DropShadow,
+    InnerShadow,
+    LayerBlur,
+    BackgroundBlur,
+    Noise,
+    Texture,
+    Glass,
+}
+
+impl EffectKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::DropShadow     => "Drop Shadow",
+            Self::InnerShadow    => "Inner Shadow",
+            Self::LayerBlur      => "Layer Blur",
+            Self::BackgroundBlur => "Background Blur",
+            Self::Noise          => "Noise",
+            Self::Texture        => "Texture",
+            Self::Glass          => "Glass",
+        }
+    }
+    pub fn all() -> &'static [EffectKind] {
+        use EffectKind::*;
+        &[DropShadow, InnerShadow, LayerBlur, BackgroundBlur, Noise, Texture, Glass]
+    }
+    /// Whether X/Y offset controls are relevant for this kind.
+    pub fn has_offset(&self) -> bool { matches!(self, Self::DropShadow | Self::InnerShadow) }
+    /// Whether spread is relevant.
+    pub fn has_spread(&self) -> bool { matches!(self, Self::DropShadow | Self::InnerShadow) }
+    /// Whether blur radius is relevant.
+    pub fn has_blur(&self) -> bool {
+        matches!(self, Self::DropShadow | Self::InnerShadow | Self::LayerBlur | Self::BackgroundBlur | Self::Glass)
+    }
+    /// Whether a color picker is relevant.
+    pub fn has_color(&self) -> bool { matches!(self, Self::DropShadow | Self::InnerShadow) }
+    /// Whether an "amount" (0..1) slider is relevant (noise amount / glass opacity).
+    pub fn has_amount(&self) -> bool { matches!(self, Self::Noise | Self::Glass | Self::Texture) }
+}
+
+#[derive(Clone, Debug)]
+pub struct Effect {
+    pub kind:       EffectKind,
+    pub enabled:    bool,
+    pub x:          f32,
+    pub y:          f32,
+    pub blur:       f32,
+    pub spread:     f32,
+    pub opacity:    f32,  // shadow/effect opacity 0..1
+    pub color:      [f32; 4],
+    pub blend_mode: BlendMode,
+    pub amount:     f32,  // noise/glass/texture amount 0..1
+}
+
+impl Effect {
+    pub fn new(kind: EffectKind) -> Self {
+        let (x, y, blur, spread, color, amount) = match &kind {
+            EffectKind::DropShadow     => (4.0, 4.0, 8.0,  0.0, [0.0,0.0,0.0,0.35], 1.0),
+            EffectKind::InnerShadow    => (2.0, 2.0, 4.0,  0.0, [0.0,0.0,0.0,0.35], 1.0),
+            EffectKind::LayerBlur      => (0.0, 0.0, 8.0,  0.0, [0.0,0.0,0.0,1.0],  1.0),
+            EffectKind::BackgroundBlur => (0.0, 0.0, 16.0, 0.0, [0.0,0.0,0.0,1.0],  1.0),
+            EffectKind::Noise          => (0.0, 0.0, 0.0,  0.0, [0.5,0.5,0.5,1.0],  0.1),
+            EffectKind::Texture        => (0.0, 0.0, 0.0,  0.0, [1.0,1.0,1.0,1.0],  1.0),
+            EffectKind::Glass          => (0.0, 0.0, 16.0, 0.0, [1.0,1.0,1.0,0.2],  0.2),
+        };
+        Self { kind, enabled: true, x, y, blur, spread, opacity: 1.0, color, blend_mode: BlendMode::Normal, amount }
     }
 }
 
@@ -49,7 +164,10 @@ pub struct LayerRecord {
     pub stroke_color:    [f32; 4],
     pub stroke_width:    f32,
     pub stroke_position: StrokePosition,
-    pub drop_shadow:     DropShadow,
+    /// List of applied effects (drop shadow, inner shadow, blur, etc.)
+    pub effects:      Vec<Effect>,
+    /// Layer blend mode (how this layer composites with layers beneath it)
+    pub blend_mode:   BlendMode,
     pub layer_type: LayerType,
     /// Rotation in radians (counter-clockwise positive)
     pub rotation: f32,
@@ -121,7 +239,8 @@ impl LayerRecord {
             stroke_color: [0.2, 0.2, 0.2, 1.0],
             stroke_width: 0.0,
             stroke_position: StrokePosition::Center,
-            drop_shadow: DropShadow::default(),
+            effects:    vec![],
+            blend_mode: BlendMode::Normal,
             layer_type: LayerType::Rect,
             rotation: 0.0,
         }
