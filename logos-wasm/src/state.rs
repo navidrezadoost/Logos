@@ -210,6 +210,11 @@ pub struct LayerRecord {
     /// When `true` this layer acts as a luminance/alpha mask for all siblings
     /// above it within the same parent container.
     pub is_mask: bool,
+    /// For `ComponentInstance` root layers: UUID of the master `Component` layer.
+    /// Mirrors the value inside `LayerType::ComponentInstance { master_id }` for
+    /// quick access without pattern-matching the enum.
+    /// `None` for all other layer types and for master Component layers themselves.
+    pub master_id: Option<Uuid>,
 }
 
 // ── Constraints ───────────────────────────────────────────────────────────────
@@ -357,6 +362,12 @@ pub enum LayerType {
     Star { points: u32, inner_ratio: f32 },
     /// Organisational Section (top-level only). optional header colour.
     Section { color: Option<[f32; 4]> },
+    /// Master Component definition (purple, source-of-truth for instances).
+    Component,
+    /// Instance of a master Component.  `master_id` links to the Component layer.
+    /// The instance owns its own subtree (independent UUIDs) and can carry
+    /// field-level overrides.  Reset → re-sync from master.
+    ComponentInstance { master_id: Uuid },
 }
 
 impl LayerRecord {
@@ -387,6 +398,7 @@ impl LayerRecord {
             layout_sizing_h: SizingMode::Fixed,
             layout_sizing_v: SizingMode::Fixed,
             is_mask: false,
+            master_id: None,
         }
     }
 
@@ -469,6 +481,8 @@ impl LayerRecord {
             LayerType::Arrow { .. } => "→",
             LayerType::Star { .. }  => "★",
             LayerType::Section { .. } => "▦",
+            LayerType::Component            => "◆",  // filled diamond
+            LayerType::ComponentInstance { .. } => "◇",  // hollow diamond
         }
     }
 }
@@ -549,6 +563,10 @@ pub struct EditorState {
     // Scores decay each frame and are rewarded when the user inspects a pair.
     // During drag the top-scored neighbours are shown automatically.
     pub measure_affinity: std::collections::HashMap<(Uuid, Uuid), f32>,
+
+    /// All master Component UUIDs defined in this document (across all pages).
+    /// Used to populate the “Local Components” panel strip.
+    pub component_ids: Vec<Uuid>,
 
     // ── Blend mode hover-preview ──────────────────────────────────────
     // Set each frame by the Effects panel when the user hovers a blend mode
@@ -631,9 +649,10 @@ impl EditorState {
             pan_x:       0.0,
             pan_y:       0.0,
             zoom:        1.0,
-            rename_target: None,
-            rename_buf:    String::new(),
-            layer_search:  String::new(),
+            rename_target:  None,
+            rename_buf:     String::new(),
+            layer_search:   String::new(),
+            component_ids:  Vec::new(),
             show_grid:     true,
             snap_to_grid:  false,
             grid_size:     8.0,
@@ -744,7 +763,184 @@ impl EditorState {
         self.push_history("convert to section");
     }
 
-    /// Select all **visible**, **unlocked** layers whose world bounding box
+    // ── Component System ─────────────────────────────────────────────────────
+
+    /// Convert the first selected layer into a **Master Component**.
+    ///
+    /// - Sets its `layer_type` to `LayerType::Component`.
+    /// - Registers the ID in `self.component_ids`.
+    /// - Returns the component ID, or `None` if the selection is empty.
+    pub fn create_component(&mut self) -> Option<Uuid> {
+        let id = *self.selection.first()?;
+        if let Some(rec) = self.layers.get_mut(&id) {
+            rec.layer_type = LayerType::Component;
+            rec.master_id  = None;
+        }
+        if !self.component_ids.contains(&id) {
+            self.component_ids.push(id);
+        }
+        self.push_history("create component");
+        Some(id)
+    }
+
+    /// Create a **ComponentInstance** linked to `master_id`.
+    ///
+    /// Deep-copies the master's full subtree (new UUIDs), places the instance
+    /// root at `(master.x + 20, master.y + 20)`, and selects it.
+    /// Returns the new instance root UUID, or `None` if the master is not found.
+    pub fn instantiate_component(&mut self, master_id: Uuid) -> Option<Uuid> {
+        // Collect master subtree
+        let subtree = self.collect_subtree(master_id);
+        if subtree.is_empty() { return None; }
+
+        // UUID remap table
+        let mut remap: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
+        for rec in &subtree { remap.insert(rec.id, Uuid::new_v4()); }
+
+        // Clone + remap
+        let mut cloned: Vec<LayerRecord> = subtree.into_iter().map(|mut rec| {
+            rec.id        = remap[&rec.id];
+            rec.parent_id = rec.parent_id.and_then(|p| remap.get(&p).copied());
+            rec.master_id = Some(master_id);
+            rec
+        }).collect();
+
+        // Root layer: change type to ComponentInstance, offset position
+        if let Some(root) = cloned.iter_mut().next() {
+            root.layer_type = LayerType::ComponentInstance { master_id };
+            root.x += 20.0;
+            root.y += 20.0;
+        }
+
+        let root_id = cloned[0].id;
+        // Insert all layers into state
+        for rec in cloned {
+            let id = rec.id;
+            self.layers.insert(id, rec);
+            if self.layers[&id].parent_id.is_none() {
+                self.pages[self.active_page].layers.push(id);
+            }
+        }
+
+        self.select_only(root_id);
+        self.push_history("instantiate component");
+        Some(root_id)
+    }
+
+    /// **Detach** an instance: break the master link, converting it to a plain Frame.
+    /// Children keep their current values; the master is unchanged.
+    pub fn detach_instance(&mut self, instance_id: Uuid) {
+        // Walk the entire subtree and clear master_id
+        let subtree_ids: Vec<Uuid> = self.collect_subtree(instance_id)
+            .into_iter().map(|r| r.id).collect();
+        for id in subtree_ids {
+            if let Some(rec) = self.layers.get_mut(&id) {
+                rec.master_id = None;
+            }
+        }
+        if let Some(rec) = self.layers.get_mut(&instance_id) {
+            rec.layer_type = LayerType::Frame;
+        }
+        self.push_history("detach instance");
+    }
+
+    /// **Reset overrides** on an instance: re-copies the master's subtree into
+    /// the instance, preserving only position (x, y) and name of the root.
+    pub fn reset_overrides(&mut self, instance_id: Uuid) {
+        let master_id = match self.layers.get(&instance_id) {
+            Some(LayerRecord { layer_type: LayerType::ComponentInstance { master_id }, .. }) => *master_id,
+            _ => return,
+        };
+
+        // Save instance root position and name
+        let (inst_x, inst_y, inst_name, inst_parent) = match self.layers.get(&instance_id) {
+            Some(r) => (r.x, r.y, r.name.clone(), r.parent_id),
+            None    => return,
+        };
+
+        // Remove old instance subtree (children only; keep root record slot)
+        let old_children: Vec<Uuid> = self.collect_subtree(instance_id)
+            .into_iter().map(|r| r.id).filter(|&id| id != instance_id).collect();
+        for cid in old_children {
+            self.layers.remove(&cid);
+            for page in &mut self.pages {
+                page.layers.retain(|&id| id != cid);
+            }
+        }
+
+        // Collect master subtree (excluding master root — we keep instance root)
+        let master_children: Vec<LayerRecord> = self.collect_subtree(master_id)
+            .into_iter().filter(|r| r.id != master_id).collect();
+
+        // UUID remap for master's children
+        let mut remap: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
+        remap.insert(master_id, instance_id); // master root → instance root
+        for rec in &master_children { remap.insert(rec.id, Uuid::new_v4()); }
+
+        for mut rec in master_children {
+            rec.id        = remap[&rec.id];
+            rec.parent_id = rec.parent_id.and_then(|p| remap.get(&p).copied());
+            rec.master_id = Some(master_id);
+            self.layers.insert(rec.id, rec);
+        }
+
+        // Clone master record before any mutable borrow
+        let master_snap = match self.layers.get(&master_id).cloned() {
+            Some(r) => r,
+            None    => return,
+        };
+
+        // Restore root: apply master snapshot, then restore instance-specific fields
+        if let Some(rec) = self.layers.get_mut(&instance_id) {
+            *rec             = master_snap;
+            rec.id           = instance_id;
+            rec.parent_id    = inst_parent;
+            rec.layer_type   = LayerType::ComponentInstance { master_id };
+            rec.master_id    = Some(master_id);
+            rec.x            = inst_x;
+            rec.y            = inst_y;
+            rec.name         = inst_name;
+        }
+
+        self.push_history("reset overrides");
+    }
+
+    /// **Push to master**: copy the instance root's visual properties back to the
+    /// master Component.  Does NOT sync children (only top-level fill, stroke,
+    /// corner radii, opacity, effects, blend mode).
+    pub fn push_to_master(&mut self, instance_id: Uuid) {
+        let master_id = match self.layers.get(&instance_id) {
+            Some(LayerRecord { layer_type: LayerType::ComponentInstance { master_id }, .. }) => *master_id,
+            _ => return,
+        };
+        // Clone the values out before taking a mutable borrow on the master
+        let (fill, stroke_color, stroke_width, corner_radii, opacity, effects, blend_mode) =
+            match self.layers.get(&instance_id) {
+                Some(r) => (r.fill, r.stroke_color, r.stroke_width, r.corner_radii,
+                            r.opacity, r.effects.clone(), r.blend_mode.clone()),
+                None    => return,
+            };
+        if let Some(mr) = self.layers.get_mut(&master_id) {
+            mr.fill         = fill;
+            mr.stroke_color  = stroke_color;
+            mr.stroke_width  = stroke_width;
+            mr.corner_radii  = corner_radii;
+            mr.opacity       = opacity;
+            mr.effects       = effects;
+            mr.blend_mode    = blend_mode;
+        }
+        self.push_history("push overrides to master");
+    }
+
+    /// Check if a layer is a Component or ComponentInstance root.
+    pub fn is_component(&self, id: Uuid) -> bool {
+        matches!(self.layers.get(&id), Some(r) if matches!(r.layer_type, LayerType::Component))
+    }
+
+    pub fn is_component_instance(&self, id: Uuid) -> bool {
+        matches!(self.layers.get(&id), Some(r) if matches!(r.layer_type, LayerType::ComponentInstance { .. }))
+    }
+
     /// overlaps the given world-space rectangle. Replaces the current selection.
     pub fn select_in_rect(&mut self, rx0: f32, ry0: f32, rx1: f32, ry1: f32) {
         let (rx0, rx1) = if rx0 < rx1 { (rx0, rx1) } else { (rx1, rx0) };
@@ -2022,7 +2218,9 @@ impl EditorState {
         for &id in page.layers.iter().rev() {
             if let Some(rec) = self.layers.get(&id) {
                 if !rec.visible { continue; }
-                if matches!(rec.layer_type, LayerType::Frame) { continue; }
+                if matches!(rec.layer_type, LayerType::Frame
+                    | LayerType::Component
+                    | LayerType::ComponentInstance { .. }) { continue; }
                 if wx >= rec.x && wx <= rec.x + rec.width
                     && wy >= rec.y && wy <= rec.y + rec.height
                 {
@@ -2037,15 +2235,16 @@ impl EditorState {
     /// A layer is considered "inside" a frame when the layer's center is within the frame's bounds.
     pub fn parent_frame_of(&self, id: Uuid) -> Option<Uuid> {
         let rec = self.layers.get(&id)?;
-        if matches!(rec.layer_type, LayerType::Frame) { return None; }
+        if matches!(rec.layer_type, LayerType::Frame
+            | LayerType::Component | LayerType::ComponentInstance { .. }) { return None; }
         let cx = rec.x + rec.width  * 0.5;
         let cy = rec.y + rec.height * 0.5;
         let page = &self.pages[self.active_page];
-        // Iterate front-to-back to find the topmost (smallest) containing frame
         for &fid in page.layers.iter().rev() {
             if fid == id { continue; }
             if let Some(f) = self.layers.get(&fid) {
-                if !matches!(f.layer_type, LayerType::Frame) { continue; }
+                if !matches!(f.layer_type, LayerType::Frame
+                    | LayerType::Component | LayerType::ComponentInstance { .. }) { continue; }
                 if cx >= f.x && cx <= f.x + f.width
                     && cy >= f.y && cy <= f.y + f.height
                 {
@@ -2062,7 +2261,8 @@ impl EditorState {
         for &id in page.layers.iter().rev() {
             if let Some(rec) = self.layers.get(&id) {
                 if !rec.visible { continue; }
-                if !matches!(rec.layer_type, LayerType::Frame) { continue; }
+                if !matches!(rec.layer_type, LayerType::Frame
+                    | LayerType::Component | LayerType::ComponentInstance { .. }) { continue; }
                 if wx >= rec.x && wx <= rec.x + rec.width
                     && wy >= rec.y && wy <= rec.y + rec.height
                 {

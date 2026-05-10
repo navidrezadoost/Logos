@@ -515,17 +515,21 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             .map(|&id| (id, 0_usize, None)).collect();
 
         while let Some((id, depth, parent_id)) = stack.pop() {
-            let (icon, name, visible, selected, is_frame, expanded, is_mask, is_section) = {
+            let (icon, name, visible, selected, is_frame, expanded, is_mask, is_section, is_component, is_instance) = {
                 let rec = match state.layers.get(&id) {
                     Some(r) => r,
                     None => continue,
                 };
                 let is_frame = matches!(rec.layer_type, LayerType::Frame)
                     || matches!(rec.layer_type, LayerType::Group)
-                    || matches!(rec.layer_type, LayerType::Section { .. });
-                let is_section = matches!(rec.layer_type, LayerType::Section { .. });
+                    || matches!(rec.layer_type, LayerType::Section { .. })
+                    || matches!(rec.layer_type, LayerType::Component)
+                    || matches!(rec.layer_type, LayerType::ComponentInstance { .. });
+                let is_section   = matches!(rec.layer_type, LayerType::Section { .. });
+                let is_component = matches!(rec.layer_type, LayerType::Component);
+                let is_instance  = matches!(rec.layer_type, LayerType::ComponentInstance { .. });
                 (rec.type_icon(), rec.name.clone(), rec.visible, state.is_selected(id),
-                 is_frame, rec.frame_expanded, rec.is_mask, is_section)
+                 is_frame, rec.frame_expanded, rec.is_mask, is_section, is_component, is_instance)
             };
 
             // ── Push children first so they still appear when filtering ──────
@@ -599,8 +603,12 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 } else {
                     Color32::WHITE
                 };
-                // Section rows get a blue tint
-                let label_color = if is_section && !selected {
+                // Section rows get a blue tint; component/instance rows get purple
+                let label_color = if is_component && !selected {
+                    Color32::from_rgb(167, 118, 255)
+                } else if is_instance && !selected {
+                    Color32::from_rgb(120, 80, 220)
+                } else if is_section && !selected {
                     Color32::from_rgb(120, 160, 255)
                 } else {
                     label_color
@@ -608,7 +616,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 let base = RichText::new(label)
                     .color(label_color)
                     .size(if depth > 0 { 12.0 } else { 13.0 });
-                let text = if selected || is_mask || is_section { base.strong() } else { base };
+                let text = if selected || is_mask || is_section || is_component || is_instance { base.strong() } else { base };
 
                 let resp = ui.add(Label::new(text).sense(Sense::click_and_drag()))
                     .on_hover_text("Click to select • Double-click to rename • Drag to reorder");
@@ -651,24 +659,58 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     }
                     if is_frame {
                         ui.separator();
-                        if !is_section {
+                        if !is_section && !is_component && !is_instance {
                             if ui.button("Convert to Section").clicked() {
                                 state.convert_to_section(id);
                                 ui.close_menu();
                             }
+                            if ui.button("Create Component  Ctrl+Alt+K").clicked() {
+                                state.select_only(id);
+                                state.create_component();
+                                ui.close_menu();
+                            }
                         }
-                        if ui.button("Unwrap Frame  (Shift+Ctrl+G)").clicked() {
-                            state.ungroup_frame(id);
-                            ui.close_menu();
+                        if is_component {
+                            if ui.button("Instantiate Component").clicked() {
+                                state.instantiate_component(id);
+                                ui.close_menu();
+                            }
                         }
-                        if ui.button("Resize to Fit Contents").clicked() {
-                            state.resize_frame_to_fit(id, 16.0);
-                            ui.close_menu();
+                        if is_instance {
+                            ui.separator();
+                            if ui.button("Go to Master").clicked() {
+                                if let Some(mid) = state.layers.get(&id).and_then(|r| r.master_id) {
+                                    state.select_only(mid);
+                                }
+                                ui.close_menu();
+                            }
+                            if ui.button("Reset Overrides").clicked() {
+                                state.reset_overrides(id);
+                                ui.close_menu();
+                            }
+                            if ui.button("Push to Master").clicked() {
+                                state.push_to_master(id);
+                                ui.close_menu();
+                            }
+                            if ui.button("Detach Instance").clicked() {
+                                state.detach_instance(id);
+                                ui.close_menu();
+                            }
                         }
-                        if ui.button("Wrap in Frame  (Ctrl+Alt+G)").clicked() {
-                            state.select_only(id);
-                            state.wrap_in_frame();
-                            ui.close_menu();
+                        if !is_component && !is_instance {
+                            if ui.button("Unwrap Frame  (Shift+Ctrl+G)").clicked() {
+                                state.ungroup_frame(id);
+                                ui.close_menu();
+                            }
+                            if ui.button("Resize to Fit Contents").clicked() {
+                                state.resize_frame_to_fit(id, 16.0);
+                                ui.close_menu();
+                            }
+                            if ui.button("Wrap in Frame  (Ctrl+Alt+G)").clicked() {
+                                state.select_only(id);
+                                state.wrap_in_frame();
+                                ui.close_menu();
+                            }
                         }
                     }
                 });
@@ -702,6 +744,49 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             state.rename_buf    = name;
         }
     });
+
+    // ── Local Components strip ────────────────────────────────────────────────
+    if !state.component_ids.is_empty() {
+        ui.separator();
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("◆  Components")
+                .size(11.0)
+                .strong()
+                .color(Color32::from_rgb(167, 118, 255)),
+        );
+        ui.add_space(4.0);
+        let comp_ids: Vec<uuid::Uuid> = state.component_ids.clone();
+        for cid in comp_ids {
+            if let Some(rec) = state.layers.get(&cid) {
+                let cname = rec.name.clone();
+                ui.horizontal(|ui| {
+                    ui.add_space(8.0);
+                    let resp = ui.add(
+                        Label::new(
+                            RichText::new(format!("◆ {cname}"))
+                                .size(11.5)
+                                .color(Color32::from_rgb(167, 118, 255)),
+                        )
+                        .sense(Sense::click()),
+                    );
+                    if resp.clicked() {
+                        state.select_only(cid);
+                    }
+                    resp.on_hover_text("Click to select master");
+                    ui.with_layout(
+                        Layout::right_to_left(Align::Center),
+                        |ui| {
+                            if ui.small_button("⊕").on_hover_text("Instantiate").clicked() {
+                                state.instantiate_component(cid);
+                            }
+                        },
+                    );
+                });
+            }
+        }
+        ui.add_space(4.0);
+    }
 
     // Inline rename field
     if let Some(target) = state.rename_target {

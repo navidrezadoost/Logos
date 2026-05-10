@@ -158,6 +158,10 @@ impl eframe::App for LogosEditor {
             if !typing && i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(Key::G) {
                 state.wrap_in_frame();
             }
+            // Ctrl+Alt+K — Create Component from selection
+            if !typing && i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(Key::K) {
+                state.create_component();
+            }
             // Ctrl+G — Group selection
             if !typing && i.modifiers.ctrl && !i.modifiers.alt && !i.modifiers.shift && i.key_pressed(Key::G) {
                 state.wrap_in_group();
@@ -753,23 +757,36 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                         let _ = (crec, crect, &child_painter); // rendered in main pass
                     }
                 }
-                LayerType::Frame => {
+                LayerType::Frame | LayerType::Component | LayerType::ComponentInstance { .. } => {
+                    let is_comp    = matches!(rec.layer_type, LayerType::Component);
+                    let is_inst    = matches!(rec.layer_type, LayerType::ComponentInstance { .. });
                     let this_selected = state.is_selected(id);
                     let this_hovered  = state.hovered_layer == Some(id);
                     let has_selected_child = state.frame_children(id)
                         .iter().any(|&cid| state.is_selected(cid));
 
                     // ── Background fill ──────────────────────────────────────
+                    // Component: add purple overlay on top of normal fill
                     painter.rect_filled(rect, rounding, fill);
+                    if is_comp {
+                        painter.rect_filled(rect, rounding,
+                            Color32::from_rgba_unmultiplied(139, 92, 246, 18)); // purple tint
+                    } else if is_inst {
+                        painter.rect_filled(rect, rounding,
+                            Color32::from_rgba_unmultiplied(139, 92, 246, 10)); // lighter tint
+                    }
 
-                    // ── Frame border ─────────────────────────────────────────
-                    // Thin gray border normally; accent when a child is selected (parent chain)
-                    let frame_border_col = if has_selected_child {
+                    // ── Frame/Component border ────────────────────────────────
+                    let frame_border_col = if is_comp {
+                        Color32::from_rgba_unmultiplied(139, 92, 246, 180) // vivid purple
+                    } else if is_inst {
+                        Color32::from_rgba_unmultiplied(139, 92, 246, 90)  // muted purple
+                    } else if has_selected_child {
                         Color32::from_rgba_unmultiplied(100, 91, 255, 80)
                     } else {
                         Color32::from_gray(80)
                     };
-                    painter.rect_stroke(rect, rounding, Stroke::new(1.0, frame_border_col));
+                    painter.rect_stroke(rect, rounding, Stroke::new(if is_comp { 1.5 } else { 1.0 }, frame_border_col));
 
                     // ── Dashed border when overflow is visible (clip_content=false) ──
                     if !rec.clip_content && !state.frame_children(id).is_empty() {
@@ -810,18 +827,23 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                         }
                     }
 
-                    // ── Frame name label (only when selected or hovered) ──────
-                    if (this_selected || this_hovered) && rec.parent_id.is_none() {
-                        let label_col = if this_selected {
+                    // ── Name label (selected/hovered) ────────────────────────
+                    if this_selected || this_hovered || is_comp || is_inst {
+                        let label_col = if is_comp {
+                            Color32::from_rgb(167, 118, 255)   // bright purple
+                        } else if is_inst {
+                            Color32::from_rgb(139, 92, 246)    // muted purple
+                        } else if this_selected {
                             Color32::from_rgb(100, 91, 255)
                         } else {
                             Color32::from_gray(150)
                         };
+                        let prefix = if is_comp { "◆ " } else if is_inst { "◇ " } else { "" };
                         let label_painter = painter.with_clip_rect(painter.clip_rect().expand(40.0));
                         label_painter.text(
                             pos2(rect.left(), rect.top() - 18.0),
                             Align2::LEFT_BOTTOM,
-                            &rec.name.clone(),
+                            format!("{}{}", prefix, &rec.name.clone()),
                             FontId::proportional((11.0 * state.zoom).clamp(9.0, 18.0)),
                             label_col,
                         );
@@ -864,8 +886,13 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                         let z  = state.zoom;
                         let crounding = Rounding { nw: cr[0]*z, ne: cr[1]*z, se: cr[2]*z, sw: cr[3]*z };
                         match &crec.layer_type {
-                            LayerType::Rect | LayerType::Frame => {
+                            LayerType::Rect | LayerType::Frame
+                            | LayerType::Component | LayerType::ComponentInstance { .. } => {
                                 child_painter.rect_filled(crect, crounding, cfill);
+                                if is_comp || matches!(crec.layer_type, LayerType::Component) {
+                                    child_painter.rect_filled(crect, crounding,
+                                        Color32::from_rgba_unmultiplied(139, 92, 246, 14));
+                                }
                                 if crec.stroke_width > 0.0 { child_painter.rect_stroke(crect, crounding, cstroke); }
                             }
                             LayerType::Ellipse { arc_start, arc_end, inner_ratio } => {
