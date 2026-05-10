@@ -1331,6 +1331,74 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         }
     }
 
+    // ── Live draw-tool preview (ghost shape while dragging to size) ────────
+    if state.drag.active && state.drag.layer_id.is_none() {
+        let is_draw_tool = matches!(state.tool,
+            Tool::Frame | Tool::Rect | Tool::Ellipse | Tool::Polygon |
+            Tool::Line | Tool::Arrow | Tool::Star | Tool::Text);
+        if is_draw_tool {
+            if let Some(mp) = ui.input(|i| i.pointer.hover_pos()) {
+                let (wx, wy) = state.screen_to_world(mp.x - origin.x, mp.y - origin.y);
+                let ox = state.drag.origin.x;
+                let oy = state.drag.origin.y;
+                let x = ox.min(wx);
+                let y = oy.min(wy);
+                let w = (wx - ox).abs().max(4.0);
+                let h = (wy - oy).abs().max(4.0);
+                let (sx, sy) = state.world_to_screen(x, y);
+                let sw = w * state.zoom;
+                let sh = h * state.zoom;
+                let prect = Rect::from_min_size(
+                    pos2(origin.x + sx, origin.y + sy),
+                    vec2(sw, sh),
+                );
+                let (fill_col, stroke_col) = match state.tool {
+                    Tool::Frame => (
+                        Color32::from_rgba_unmultiplied(30, 120, 255, 18),
+                        Color32::from_rgba_unmultiplied(30, 120, 255, 220),
+                    ),
+                    Tool::Rect => (
+                        Color32::from_rgba_unmultiplied(240, 90, 90, 28),
+                        Color32::from_rgba_unmultiplied(240, 90, 90, 220),
+                    ),
+                    Tool::Ellipse => (
+                        Color32::from_rgba_unmultiplied(90, 200, 120, 28),
+                        Color32::from_rgba_unmultiplied(90, 200, 120, 220),
+                    ),
+                    _ => (
+                        Color32::from_rgba_unmultiplied(180, 180, 180, 22),
+                        Color32::from_rgba_unmultiplied(200, 200, 200, 220),
+                    ),
+                };
+                let preview_painter = painter.with_clip_rect(painter.clip_rect().expand(20.0));
+                if matches!(state.tool, Tool::Ellipse) {
+                    preview_painter.add(Shape::Circle(epaint::CircleShape {
+                        center: prect.center(),
+                        radius: prect.width().min(prect.height()) * 0.5,
+                        fill: fill_col,
+                        stroke: Stroke::new(1.5, stroke_col),
+                    }));
+                } else if matches!(state.tool, Tool::Line | Tool::Arrow) {
+                    preview_painter.line_segment(
+                        [prect.left_center(), prect.right_center()],
+                        Stroke::new(2.0, stroke_col),
+                    );
+                } else {
+                    preview_painter.rect_filled(prect, 0.0, fill_col);
+                    preview_painter.rect_stroke(prect, 0.0, Stroke::new(1.5, stroke_col));
+                }
+                // Dimension label
+                preview_painter.text(
+                    pos2(prect.right() + 6.0, prect.bottom() + 2.0),
+                    Align2::LEFT_TOP,
+                    format!("{:.0} × {:.0}", w, h),
+                    FontId::proportional(11.0),
+                    Color32::from_rgba_unmultiplied(200, 200, 200, 220),
+                );
+            }
+        }
+    }
+
     // ── Rubber-band marquee rectangle ──────────────────────────────────────
     if let Some((rx0, ry0, rx1, ry1)) = state.drag.rubber_band {
         let (sx0, sy0) = state.world_to_screen(rx0, ry0);
@@ -2625,7 +2693,9 @@ fn handle_tool_input(
                         let already_selected_hit = state.selection.iter().find(|&&sid| {
                             if let Some(r) = state.layers.get(&sid) {
                                 if matches!(r.layer_type, LayerType::Frame) { return false; }
-                                wx >= r.x && wx <= r.x + r.width && wy >= r.y && wy <= r.y + r.height
+                                // Use world position so children (frame-local coords) match correctly
+                                let (lx, ly) = state.layer_world_pos(sid);
+                                wx >= lx && wx <= lx + r.width && wy >= ly && wy <= ly + r.height
                             } else { false }
                         }).copied();
                         clog!("[DRAG-START] already_selected_hit={:?}", already_selected_hit
@@ -3158,30 +3228,42 @@ fn handle_tool_input(
                 // For each moved layer: find the deepest frame that fully contains it
                 // (and that is not the layer itself or one of its descendants).
                 let moved_ids: Vec<Uuid> = state.selection.clone();
+                // Include ALL frames (not just top-level) so parent frames remain
+                // candidates when a child is dropped inside its own parent.
                 let all_frames: Vec<Uuid> = state.pages[state.active_page].layers.iter()
                     .filter(|&&fid| {
                         state.layers.get(&fid)
-                            .map(|r| matches!(r.layer_type, LayerType::Frame) && r.parent_id.is_none())
+                            .map(|r| matches!(r.layer_type, LayerType::Frame
+                                | LayerType::Component | LayerType::ComponentInstance { .. }))
                             .unwrap_or(false)
                     })
                     .cloned()
                     .collect();
 
                 for &mid in &moved_ids {
-                    if let Some(mrec) = state.layers.get(&mid) {
-                        let (mx, my, mw, mh) = (mrec.x, mrec.y, mrec.width, mrec.height);
+                    // Use the layer's WORLD position for containment testing so that
+                    // children (stored in frame-local coords) are compared correctly
+                    // against world-space frame bounds.
+                    let (mx, my) = state.layer_world_pos(mid);
+                    let (mw, mh) = state.layers.get(&mid)
+                        .map(|r| (r.width, r.height)).unwrap_or((0.0, 0.0));
+                    if mw == 0.0 { continue; }
+                    {
                         // Find deepest containing frame
                         let mut best: Option<Uuid> = None;
                         let mut best_area = f32::MAX;
                         for &fid in &all_frames {
                             if fid == mid { continue; }
                             if moved_ids.contains(&fid) { continue; }
+                            // Don't nest a frame into its own descendant
+                            if state.is_ancestor_of(mid, fid) { continue; }
+                            let (fx, fy) = state.layer_world_pos(fid);
                             if let Some(fr) = state.layers.get(&fid) {
                                 let area = fr.width * fr.height;
                                 // Layer must be fully inside frame to auto-nest
-                                if mx >= fr.x && my >= fr.y
-                                    && mx + mw <= fr.x + fr.width
-                                    && my + mh <= fr.y + fr.height
+                                if mx >= fx && my >= fy
+                                    && mx + mw <= fx + fr.width
+                                    && my + mh <= fy + fr.height
                                     && area < best_area
                                 {
                                     best = Some(fid);
@@ -3235,7 +3317,7 @@ fn handle_tool_input(
                                 }
                             }
                         }
-                    }
+                    } // end containment block
                 }
             }
 
