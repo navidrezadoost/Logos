@@ -933,6 +933,74 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                 });
                 ui.add_space(4.0);
 
+                // Wrap toggle
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Wrap").size(11.5).color(C_MUTED));
+                    ui.add_space(4.0);
+                    let mut wrap = al.wrap;
+                    if ui.checkbox(&mut wrap, "").changed() {
+                        state.layers.get_mut(&id).unwrap().auto_layout.as_mut().unwrap().wrap = wrap;
+                        needs_history = true;
+                    }
+                    ui.label(RichText::new(if al.wrap { "On" } else { "Off" }).size(11.0).color(C_MUTED));
+                });
+                ui.add_space(4.0);
+
+                // Min / Max size constraints (collapsed behind disclosure)
+                let minmax_id = Id::new(("al_minmax", id));
+                let minmax_open = ui.memory(|m| m.data.get_temp::<bool>(minmax_id).unwrap_or(false));
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    let tri = if minmax_open { "▾" } else { "▸" };
+                    if ui.small_button(format!("{tri} Min / Max")).clicked() {
+                        ui.memory_mut(|m| m.data.insert_temp(minmax_id, !minmax_open));
+                    }
+                });
+                if minmax_open {
+                    for (label, is_w, is_min) in [
+                        ("Min W", true,  true),  ("Max W", true,  false),
+                        ("Min H", false, true),  ("Max H", false, false),
+                    ] {
+                        ui.horizontal(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(RichText::new(label).size(11.0).color(C_MUTED));
+                            let al_ref = state.layers.get(&id).unwrap().auto_layout.as_ref().unwrap();
+                            let current: Option<f32> = match (is_w, is_min) {
+                                (true,  true)  => al_ref.min_width,
+                                (true,  false) => al_ref.max_width,
+                                (false, true)  => al_ref.min_height,
+                                _              => al_ref.max_height,
+                            };
+                            let mut enabled = current.is_some();
+                            if ui.checkbox(&mut enabled, "").changed() {
+                                let al_mut = state.layers.get_mut(&id).unwrap().auto_layout.as_mut().unwrap();
+                                let val = if enabled { Some(100.0) } else { None };
+                                match (is_w, is_min) {
+                                    (true,  true)  => al_mut.min_width  = val,
+                                    (true,  false) => al_mut.max_width  = val,
+                                    (false, true)  => al_mut.min_height = val,
+                                    _              => al_mut.max_height = val,
+                                }
+                                needs_history = true;
+                            }
+                            if let Some(mut v) = current {
+                                if ui.add(DragValue::new(&mut v).suffix("px").speed(1.0)).changed() {
+                                    let al_mut = state.layers.get_mut(&id).unwrap().auto_layout.as_mut().unwrap();
+                                    match (is_w, is_min) {
+                                        (true,  true)  => al_mut.min_width  = Some(v),
+                                        (true,  false) => al_mut.max_width  = Some(v),
+                                        (false, true)  => al_mut.min_height = Some(v),
+                                        _              => al_mut.max_height = Some(v),
+                                    }
+                                    needs_history = true;
+                                }
+                            }
+                        });
+                    }
+                    ui.add_space(2.0);
+                }
+
                 // Apply Auto Layout button
                 ui.horizontal(|ui| {
                     ui.add_space(12.0);
@@ -958,6 +1026,52 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             });
 
             ui.add_space(6.0);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // LAYOUT SIZING  — shown when the selected layer is inside an AL frame
+    // ════════════════════════════════════════════════════════════════════
+    {
+        let parent_has_al = state.selection.first()
+            .and_then(|&sel_id| state.layers.get(&sel_id))
+            .and_then(|r| r.parent_id)
+            .and_then(|pid| state.layers.get(&pid))
+            .map(|p| p.auto_layout.is_some())
+            .unwrap_or(false);
+
+        if parent_has_al {
+            if section_header(ui, "sec_layout_sizing", "Layout Sizing", true) {
+                ui.add_space(6.0);
+                if let Some(&sel_id) = state.selection.first() {
+                    let sizing_opts = [
+                        (SizingMode::Fixed,         "Fixed"),
+                        (SizingMode::HugContents,   "Hug"),
+                        (SizingMode::FillContainer, "Fill"),
+                    ];
+                    let cur_h = state.layers.get(&sel_id).map(|r| r.layout_sizing_h.clone()).unwrap_or(SizingMode::Fixed);
+                    let cur_v = state.layers.get(&sel_id).map(|r| r.layout_sizing_v.clone()).unwrap_or(SizingMode::Fixed);
+                    for (is_h, label, cur) in [(true, "Width", &cur_h), (false, "Height", &cur_v)] {
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            ui.label(RichText::new(label).size(11.5).color(C_MUTED));
+                            ui.add_space(4.0);
+                            for (mode, name) in &sizing_opts {
+                                let active = cur == mode;
+                                if icon_btn(ui, name, name, active) {
+                                    if let Some(rec) = state.layers.get_mut(&sel_id) {
+                                        if is_h { rec.layout_sizing_h = mode.clone(); }
+                                        else    { rec.layout_sizing_v = mode.clone(); }
+                                    }
+                                    state.push_history("layout sizing");
+                                }
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
+                    ui.add_space(4.0);
+                }
+            }
         }
     }
 

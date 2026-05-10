@@ -202,6 +202,11 @@ pub struct LayerRecord {
     pub auto_layout: Option<AutoLayout>,
     /// Constraint for how this layer resizes inside its parent frame (no AL on parent).
     pub constraints: Constraints,
+    /// How this layer sizes itself on the horizontal axis when its parent has Auto Layout.
+    /// Fixed = respect explicit width; HugContents = shrink-wrap (frames only); FillContainer = grow to fill.
+    pub layout_sizing_h: SizingMode,
+    /// How this layer sizes itself on the vertical axis when its parent has Auto Layout.
+    pub layout_sizing_v: SizingMode,
 }
 
 // ── Constraints ───────────────────────────────────────────────────────────────
@@ -271,6 +276,13 @@ pub struct AutoLayout {
     pub sizing_v:  SizingMode,
     /// Counter-axis alignment of children (start / center / end).
     pub align:     u8,  // 0=start 1=center 2=end
+    /// Wrap children to new rows/columns when the main axis is full.
+    pub wrap:      bool,
+    /// Optional constraints on the frame's own final size after layout.
+    pub min_width:  Option<f32>,
+    pub max_width:  Option<f32>,
+    pub min_height: Option<f32>,
+    pub max_height: Option<f32>,
 }
 
 impl Default for AutoLayout {
@@ -283,6 +295,11 @@ impl Default for AutoLayout {
             sizing_h:  SizingMode::HugContents,
             sizing_v:  SizingMode::HugContents,
             align:     0,
+            wrap:      false,
+            min_width:  None,
+            max_width:  None,
+            min_height: None,
+            max_height: None,
         }
     }
 }
@@ -362,6 +379,8 @@ impl LayerRecord {
             frame_expanded: true,
             auto_layout: None,
             constraints: Constraints::default(),
+            layout_sizing_h: SizingMode::Fixed,
+            layout_sizing_v: SizingMode::Fixed,
         }
     }
 
@@ -880,9 +899,22 @@ impl EditorState {
         self.push_history("resize to fit");
     }
 
-    /// Apply Auto Layout rules to a frame: repositions all children according to
-    /// direction, gap, padding, and sizing mode.  Does NOT push to history —
-    /// call `push_history` at the call site if needed.
+    /// Apply Auto Layout rules to a frame — full two-pass (measure then position).
+    ///
+    /// **Pass 1 — Measure**: resolve each child's final size.
+    ///   - `Fixed` children keep their current `width`/`height`.
+    ///   - `HugContents` children that are frames are recursively laid out first.
+    ///   - `FillContainer` children are noted; they receive the leftover main-axis space
+    ///     split equally after all fixed/hug children have been measured.
+    ///
+    /// **Pass 2 — Position**: assign each child its final `(x, y)` relative to the
+    ///   frame's top-left corner, respecting gap, padding, gap_auto (space-between),
+    ///   cross-axis alignment, and row/column wrapping.
+    ///
+    /// After positioning the frame's own `width`/`height` is updated when
+    /// `sizing_h`/`sizing_v` is `HugContents`, then clamped by `min_*`/`max_*`.
+    ///
+    /// Does **not** push to history — the call-site decides.
     pub fn apply_auto_layout(&mut self, frame_id: Uuid) {
         let al = match self.layers.get(&frame_id).and_then(|r| r.auto_layout.clone()) {
             Some(al) => al,
@@ -893,72 +925,201 @@ impl EditorState {
 
         let is_horiz = al.direction == AutoLayoutDirection::Horizontal;
 
-        // Gather child sizes (we don't resize children in HugContents — only position them).
-        let child_sizes: Vec<(f32, f32)> = children.iter().filter_map(|&cid| {
-            self.layers.get(&cid).map(|r| (r.width, r.height))
-        }).collect();
+        // ── Pass 1: Measure ───────────────────────────────────────────────────
 
-        let total_main: f32 = child_sizes.iter()
-            .map(|&(w, h)| if is_horiz { w } else { h })
-            .sum::<f32>();
-        let max_cross: f32 = child_sizes.iter()
-            .map(|&(w, h)| if is_horiz { h } else { w })
-            .fold(0.0_f32, f32::max);
-
-        let n = children.len() as f32;
-        let gap = if al.gap_auto {
-            let frame = self.layers.get(&frame_id).unwrap();
-            let avail = if is_horiz {
-                frame.width - al.padding.left - al.padding.right - total_main
-            } else {
-                frame.height - al.padding.top - al.padding.bottom - total_main
-            };
-            if n > 1.0 { avail / (n - 1.0) } else { 0.0 }
-        } else { al.gap };
-
-        // Position children
-        let mut cursor = if is_horiz { al.padding.left } else { al.padding.top };
-        for (i, &cid) in children.iter().enumerate() {
-            let (cw, ch) = child_sizes[i];
-            let cross_start = if is_horiz { al.padding.top } else { al.padding.left };
-            let cross_extent = if is_horiz { ch } else { cw };
-            let cross_pos = match al.align {
-                1 => cross_start + (max_cross - cross_extent) * 0.5,
-                2 => cross_start + (max_cross - cross_extent),
-                _ => cross_start,
-            };
-            if let Some(child) = self.layers.get_mut(&cid) {
-                // positions are absolute world coords; adjust relative to frame origin
-                // We compute them relative then add frame origin below.
-                if is_horiz {
-                    child.x = cursor;      // will be offset by frame.x in render
-                    child.y = cross_pos;
-                    cursor += cw + gap;
-                } else {
-                    child.x = cross_pos;
-                    child.y = cursor;
-                    cursor += ch + gap;
-                }
-            }
+        // Recursively apply AL to any child frames first so their sizes are correct.
+        let child_frames: Vec<Uuid> = children.iter().cloned()
+            .filter(|&cid| self.layers.get(&cid)
+                .map(|r| r.auto_layout.is_some()).unwrap_or(false))
+            .collect();
+        for cid in child_frames {
+            self.apply_auto_layout(cid);
         }
 
-        // Update frame size for HugContents
-        let total_main_with_gaps = total_main + gap * (n - 1.0).max(0.0);
+        // Refresh al in case recursive calls mutated our record.
+        let al = match self.layers.get(&frame_id).and_then(|r| r.auto_layout.clone()) {
+            Some(al) => al,
+            None => return,
+        };
+
+        // Snapshot child sizing modes and current sizes.
+        let child_info: Vec<(Uuid, SizingMode, SizingMode, f32, f32)> = children.iter()
+            .filter_map(|&cid| self.layers.get(&cid).map(|r| (
+                cid,
+                r.layout_sizing_h.clone(),
+                r.layout_sizing_v.clone(),
+                r.width, r.height,
+            ))).collect();
+
+        let frame_w = self.layers.get(&frame_id).map(|r| r.width).unwrap_or(0.0);
+        let frame_h = self.layers.get(&frame_id).map(|r| r.height).unwrap_or(0.0);
+
+        // Available inner dimensions.
+        let inner_w = (frame_w - al.padding.left - al.padding.right).max(0.0);
+        let inner_h = (frame_h - al.padding.top  - al.padding.bottom).max(0.0);
+
+        // Identify fill-container children on the main axis.
+        let fill_count = child_info.iter().filter(|(_, sh, sv, _, _)| {
+            if is_horiz { *sh == SizingMode::FillContainer }
+            else        { *sv == SizingMode::FillContainer }
+        }).count();
+
+        let n = child_info.len() as f32;
+        let total_gap_space = if n > 1.0 { al.gap * (n - 1.0) } else { 0.0 };
+
+        // Sum of fixed/hug children on the main axis.
+        let fixed_main: f32 = child_info.iter().filter(|(_, sh, sv, _, _)| {
+            if is_horiz { *sh != SizingMode::FillContainer }
+            else        { *sv != SizingMode::FillContainer }
+        }).map(|(_, _, _, w, h)| if is_horiz { *w } else { *h }).sum();
+
+        let fill_share = if fill_count > 0 {
+            let avail = if is_horiz { inner_w } else { inner_h };
+            ((avail - fixed_main - total_gap_space) / fill_count as f32).max(0.0)
+        } else { 0.0 };
+
+        // Cross-axis fill share (perpendicular to flow).
+        let cross_avail = if is_horiz { inner_h } else { inner_w };
+
+        // Apply sizes to children.
+        let mut resolved: Vec<(Uuid, f32, f32)> = Vec::with_capacity(child_info.len());
+        for (cid, sh, sv, cw, ch) in &child_info {
+            let new_w = match sh {
+                SizingMode::FillContainer if  is_horiz => fill_share,
+                SizingMode::FillContainer if !is_horiz => cross_avail,
+                _ => *cw,
+            };
+            let new_h = match sv {
+                SizingMode::FillContainer if !is_horiz => fill_share,
+                SizingMode::FillContainer if  is_horiz => cross_avail,
+                _ => *ch,
+            };
+            if let Some(child) = self.layers.get_mut(cid) {
+                child.width  = new_w;
+                child.height = new_h;
+            }
+            resolved.push((*cid, new_w, new_h));
+        }
+
+        // ── Pass 2: Position ──────────────────────────────────────────────────
+
+        // With wrap enabled we break into rows/columns.
+        // Each "line" is a Vec of child indices.
+        let mut lines: Vec<Vec<usize>> = vec![];
+        if al.wrap && al.sizing_h == SizingMode::Fixed || al.wrap && al.sizing_v == SizingMode::Fixed {
+            // Determine wrap axis budget.
+            let line_budget = if is_horiz { inner_w } else { inner_h };
+            let mut current_line: Vec<usize> = vec![];
+            let mut current_main = 0.0_f32;
+            for (i, &(_, w, h)) in resolved.iter().enumerate() {
+                let item_main = if is_horiz { w } else { h };
+                let extra = if current_line.is_empty() { 0.0 } else { al.gap };
+                if !current_line.is_empty() && current_main + extra + item_main > line_budget {
+                    lines.push(std::mem::take(&mut current_line));
+                    current_main = 0.0;
+                }
+                current_main += if current_line.is_empty() { item_main } else { extra + item_main };
+                current_line.push(i);
+            }
+            if !current_line.is_empty() { lines.push(current_line); }
+        } else {
+            // Single line — all children.
+            lines.push((0..resolved.len()).collect());
+        }
+
+        // Position each line.
+        let mut line_cross_cursor = if is_horiz { al.padding.top } else { al.padding.left };
+        for line in &lines {
+            let line_main: f32 = line.iter()
+                .map(|&i| if is_horiz { resolved[i].1 } else { resolved[i].2 })
+                .sum::<f32>();
+            let line_cross: f32 = line.iter()
+                .map(|&i| if is_horiz { resolved[i].2 } else { resolved[i].1 })
+                .fold(0.0_f32, f32::max);
+
+            let ln = line.len() as f32;
+            let gap_space = if ln > 1.0 { al.gap * (ln - 1.0) } else { 0.0 };
+
+            let main_start = if is_horiz { al.padding.left } else { al.padding.top };
+            let effective_gap = if al.gap_auto && ln > 1.0 {
+                // space-between: evenly distribute remaining space.
+                let avail = if is_horiz { inner_w } else { inner_h };
+                (avail - line_main) / (ln - 1.0)
+            } else {
+                al.gap
+            };
+            let _ = gap_space; // suppress unused warning when gap_auto
+
+            let mut main_cursor = main_start;
+            for &i in line {
+                let (cid, cw, ch) = resolved[i];
+                let item_cross = if is_horiz { ch } else { cw };
+                let cross_pos = match al.align {
+                    1 => line_cross_cursor + (line_cross - item_cross) * 0.5,
+                    2 => line_cross_cursor + (line_cross - item_cross),
+                    _ => line_cross_cursor,
+                };
+                if let Some(child) = self.layers.get_mut(&cid) {
+                    if is_horiz {
+                        child.x = main_cursor;
+                        child.y = cross_pos;
+                        main_cursor += cw + effective_gap;
+                    } else {
+                        child.x = cross_pos;
+                        child.y = main_cursor;
+                        main_cursor += ch + effective_gap;
+                    }
+                }
+            }
+            line_cross_cursor += line_cross + al.gap;
+        }
+
+        // ── Update frame's own size (HugContents) ────────────────────────────
+
+        // Compute total main & cross extents across all lines.
+        let all_main: f32 = {
+            // Max line main-extent (they all share the same origin for HugContents).
+            // Actually for HugContents we want the longest line.
+            lines.iter().map(|line| {
+                let ln = line.len() as f32;
+                let main: f32 = line.iter()
+                    .map(|&i| if is_horiz { resolved[i].1 } else { resolved[i].2 }).sum();
+                let gaps = if ln > 1.0 { al.gap * (ln - 1.0) } else { 0.0 };
+                main + gaps
+            }).fold(0.0_f32, f32::max)
+        };
+        let all_cross: f32 = {
+            lines.iter().enumerate().map(|(li, line)| {
+                let cross: f32 = line.iter()
+                    .map(|&i| if is_horiz { resolved[i].2 } else { resolved[i].1 })
+                    .fold(0.0_f32, f32::max);
+                // Add inter-line gap (except after last line).
+                if li + 1 < lines.len() { cross + al.gap } else { cross }
+            }).sum()
+        };
+
         if let Some(frame) = self.layers.get_mut(&frame_id) {
             if al.sizing_h == SizingMode::HugContents {
-                if is_horiz {
-                    frame.width  = al.padding.left + total_main_with_gaps + al.padding.right;
+                let computed = if is_horiz {
+                    al.padding.left + all_main + al.padding.right
                 } else {
-                    frame.height = al.padding.top  + total_main_with_gaps + al.padding.bottom;
-                }
+                    al.padding.left + all_cross + al.padding.right
+                };
+                frame.width = computed;
             }
             if al.sizing_v == SizingMode::HugContents {
-                if is_horiz {
-                    frame.height = al.padding.top  + max_cross + al.padding.bottom;
+                let computed = if is_horiz {
+                    al.padding.top + all_cross + al.padding.bottom
                 } else {
-                    frame.width  = al.padding.left + max_cross + al.padding.right;
-                }
+                    al.padding.top + all_main + al.padding.bottom
+                };
+                frame.height = computed;
             }
+            // Apply min / max constraints.
+            if let Some(min_w) = al.min_width  { frame.width  = frame.width.max(min_w); }
+            if let Some(max_w) = al.max_width  { frame.width  = frame.width.min(max_w); }
+            if let Some(min_h) = al.min_height { frame.height = frame.height.max(min_h); }
+            if let Some(max_h) = al.max_height { frame.height = frame.height.min(max_h); }
         }
     }
 
