@@ -2721,8 +2721,9 @@ impl EditorState {
         for &id in page.layers.iter().rev() {
             if let Some(rec) = self.layers.get(&id) {
                 if !rec.visible { continue; }
-                if wx >= rec.x && wx <= rec.x + rec.width
-                    && wy >= rec.y && wy <= rec.y + rec.height
+                let (lx, ly) = self.layer_world_pos(id);
+                if wx >= lx && wx <= lx + rec.width
+                    && wy >= ly && wy <= ly + rec.height
                 {
                     return Some(id);
                 }
@@ -2740,8 +2741,9 @@ impl EditorState {
                 if matches!(rec.layer_type, LayerType::Frame
                     | LayerType::Component
                     | LayerType::ComponentInstance { .. }) { continue; }
-                if wx >= rec.x && wx <= rec.x + rec.width
-                    && wy >= rec.y && wy <= rec.y + rec.height
+                let (lx, ly) = self.layer_world_pos(id);
+                if wx >= lx && wx <= lx + rec.width
+                    && wy >= ly && wy <= ly + rec.height
                 {
                     return Some(id);
                 }
@@ -2756,16 +2758,18 @@ impl EditorState {
         let rec = self.layers.get(&id)?;
         if matches!(rec.layer_type, LayerType::Frame
             | LayerType::Component | LayerType::ComponentInstance { .. }) { return None; }
-        let cx = rec.x + rec.width  * 0.5;
-        let cy = rec.y + rec.height * 0.5;
+        let (wx, wy) = self.layer_world_pos(id);
+        let cx = wx + rec.width  * 0.5;
+        let cy = wy + rec.height * 0.5;
         let page = &self.pages[self.active_page];
         for &fid in page.layers.iter().rev() {
             if fid == id { continue; }
             if let Some(f) = self.layers.get(&fid) {
                 if !matches!(f.layer_type, LayerType::Frame
                     | LayerType::Component | LayerType::ComponentInstance { .. }) { continue; }
-                if cx >= f.x && cx <= f.x + f.width
-                    && cy >= f.y && cy <= f.y + f.height
+                let (fx, fy) = self.layer_world_pos(fid);
+                if cx >= fx && cx <= fx + f.width
+                    && cy >= fy && cy <= fy + f.height
                 {
                     return Some(fid);
                 }
@@ -2782,8 +2786,9 @@ impl EditorState {
                 if !rec.visible { continue; }
                 if !matches!(rec.layer_type, LayerType::Frame
                     | LayerType::Component | LayerType::ComponentInstance { .. }) { continue; }
-                if wx >= rec.x && wx <= rec.x + rec.width
-                    && wy >= rec.y && wy <= rec.y + rec.height
+                let (lx, ly) = self.layer_world_pos(id);
+                if wx >= lx && wx <= lx + rec.width
+                    && wy >= ly && wy <= ly + rec.height
                 {
                     return Some(id);
                 }

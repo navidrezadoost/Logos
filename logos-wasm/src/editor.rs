@@ -860,6 +860,10 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     // ── Render children inside this frame ─────────────────────
                     let child_ids: Vec<Uuid> = state.frame_children(id);
                     let clip_content = rec.clip_content;
+                    // Capture parent world-space origin so children (stored in
+                    // local/frame-relative coords) can be correctly transformed.
+                    let parent_wx = rec.x;
+                    let parent_wy = rec.y;
                     let child_painter = if clip_content {
                         painter.with_clip_rect(rect)
                     } else {
@@ -870,7 +874,9 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                             Some(r) if r.visible => r,
                             _ => continue,
                         };
-                        let (csx, csy) = state.world_to_screen(crec.x, crec.y);
+                        // Children store positions relative to their parent frame.
+                        // Add the parent's world position to get the true world pos.
+                        let (csx, csy) = state.world_to_screen(parent_wx + crec.x, parent_wy + crec.y);
                         let csw = crec.width  * state.zoom;
                         let csh = crec.height * state.zoom;
                         let crect = Rect::from_min_size(
