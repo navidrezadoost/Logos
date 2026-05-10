@@ -2704,25 +2704,9 @@ fn handle_tool_input(
                         let target_id: Option<Uuid> = if let Some(id) = already_selected_hit {
                             Some(id)
                         } else if let Some(cid) = content_id {
-                            let parent = state.parent_frame_of(cid);
-                            clog!("[DRAG-START] content parent_frame={:?}", parent
-                                .and_then(|id| state.layers.get(&id)).map(|r| r.name.clone()));
-                            if let Some(pfid) = parent {
-                                // Drag the child directly if: the frame, this child, or any sibling is selected
-                                let selection_is_inside_frame = state.selection.first().map(|sid| {
-                                    *sid == pfid
-                                        || *sid == cid
-                                        || state.parent_frame_of(*sid) == Some(pfid)
-                                }).unwrap_or(false);
-                                if selection_is_inside_frame {
-                                    Some(cid)
-                                } else {
-                                    // Nothing inside frame selected → drag the frame
-                                    Some(pfid)
-                                }
-                            } else {
-                                Some(cid)
-                            }
+                            // Always start drag on the deepest content layer.
+                            // Clicking on a frame's empty background (no content_id) still picks the frame below.
+                            Some(cid)
                         } else if let Some(fid) = frame_id {
                             Some(fid)
                         } else {
@@ -3344,6 +3328,8 @@ fn handle_tool_input(
                     Tool::Star    => state.add_star(x, y, w, h),
                     _ => { state.drag.active = false; return; }
                 };
+                // If the new shape is fully inside a frame, make it a true child.
+                state.auto_reparent_new_layer(id);
                 state.select_only(id);
                 state.push_history("draw layer");
                 state.tool = Tool::Select;
@@ -3406,6 +3392,7 @@ fn handle_tool_input(
                         Tool::Text    => state.add_text(cx, cy, "Text"),
                         _             => { return; }
                     };
+                    state.auto_reparent_new_layer(new_id);
                     state.select_only(new_id);
                     state.push_history("draw layer");
                     state.tool = Tool::Select;
@@ -3422,24 +3409,10 @@ fn handle_tool_input(
             );
 
                 let target: Option<Uuid> = if let Some(cid) = content_id {
-                    let parent = state.parent_frame_of(cid);
-                    if let Some(pfid) = parent {
-                        // Drill into child if: the frame, this child, or any sibling child is selected
-                        let selection_is_inside_frame = state.selection.first().map(|sid| {
-                            *sid == pfid
-                                || *sid == cid
-                                || state.parent_frame_of(*sid) == Some(pfid)
-                        }).unwrap_or(false);
-                        if selection_is_inside_frame {
-                            Some(cid)
-                        } else {
-                            // Nothing inside this frame is selected → select frame first
-                            Some(pfid)
-                        }
-                    } else {
-                        // Free element
-                        Some(cid)
-                    }
+                    // Always select the content layer directly on first click.
+                    // Holding Cmd/Ctrl while inside a frame still lets you pick
+                    // the frame by clicking on its empty background (frame_id path below).
+                    Some(cid)
                 } else if let Some(fid) = frame_id {
                     Some(fid)
                 } else {
@@ -3480,6 +3453,7 @@ fn handle_tool_input(
                                 Tool::Frame   => state.add_frame("Frame", cx, cy, 300.0, 200.0),
                                 _             => { state.clear_selection(); return; }
                             };
+                            state.auto_reparent_new_layer(new_id);
                             state.select_only(new_id);
                             state.push_history("draw layer");
                             state.tool = Tool::Select;

@@ -1591,6 +1591,56 @@ impl EditorState {
         }
     }
 
+    /// If `layer_id` is fully inside any frame (using world coords), automatically
+    /// reparent it into the smallest such frame and convert its position to
+    /// frame-local coords.  Call this immediately after creating a new shape so
+    /// that shapes drawn inside a frame become true children of that frame.
+    pub fn auto_reparent_new_layer(&mut self, layer_id: Uuid) {
+        let (lx, ly) = self.layer_world_pos(layer_id);
+        let (lw, lh) = self.layers.get(&layer_id)
+            .map(|r| (r.width, r.height)).unwrap_or((0.0, 0.0));
+        if lw <= 0.0 || lh <= 0.0 { return; }
+
+        let frame_ids: Vec<Uuid> = self.pages[self.active_page].layers.iter()
+            .filter(|&&fid| {
+                fid != layer_id &&
+                self.layers.get(&fid).map(|r| matches!(r.layer_type,
+                    LayerType::Frame | LayerType::Component
+                    | LayerType::ComponentInstance { .. }
+                )).unwrap_or(false)
+            })
+            .cloned()
+            .collect();
+
+        let mut best: Option<Uuid> = None;
+        let mut best_area = f32::MAX;
+        for fid in frame_ids {
+            let (fx, fy) = self.layer_world_pos(fid);
+            if let Some(fr) = self.layers.get(&fid) {
+                let area = fr.width * fr.height;
+                if lx >= fx && ly >= fy
+                    && lx + lw <= fx + fr.width
+                    && ly + lh <= fy + fr.height
+                    && area < best_area
+                {
+                    best = Some(fid);
+                    best_area = area;
+                }
+            }
+        }
+        if let Some(parent_fid) = best {
+            let (fx, fy) = self.layer_world_pos(parent_fid);
+            if let Some(r) = self.layers.get_mut(&layer_id) {
+                r.x = lx - fx;
+                r.y = ly - fy;
+                r.parent_id = Some(parent_fid);
+            }
+            if let Some(r) = self.layers.get_mut(&parent_fid) {
+                r.frame_expanded = true;
+            }
+        }
+    }
+
     /// Wrap the current selection in a new Frame. The new frame is sized to the
     /// selection's bounding box. Selected layers become children of the frame.
     pub fn wrap_in_frame(&mut self) {
