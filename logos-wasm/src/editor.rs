@@ -1328,14 +1328,21 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
     resp.context_menu(|ui| {
         ui.set_min_width(200.0);
         if let Some(id) = *ctx_menu_layer {
-            let name = state.layers.get(&id).map(|r| r.name.clone()).unwrap_or_default();
-            let is_frame = state.layers.get(&id).map(|r| matches!(r.layer_type, crate::state::LayerType::Frame)).unwrap_or(false);
+            let name      = state.layers.get(&id).map(|r| r.name.clone()).unwrap_or_default();
+            let is_frame  = state.layers.get(&id).map(|r| matches!(r.layer_type, crate::state::LayerType::Frame)).unwrap_or(false);
+            let is_group  = state.layers.get(&id).map(|r| matches!(r.layer_type, crate::state::LayerType::Group)).unwrap_or(false);
             let is_visible = state.layers.get(&id).map(|r| r.visible).unwrap_or(true);
             let is_locked  = state.layers.get(&id).map(|r| r.locked).unwrap_or(false);
             let has_al     = state.layers.get(&id).map(|r| r.auto_layout.is_some()).unwrap_or(false);
+            let is_mask    = state.layers.get(&id).map(|r| r.is_mask).unwrap_or(false);
+            let can_ungroup = is_frame || is_group;
 
-            // ── Clipboard at top ──
-            if ui.button("Copy                Ctrl+C").clicked() {
+            // ── Layer identity header ──
+            ui.label(RichText::new(&name).strong());
+            ui.separator();
+
+            // ── Clipboard ──
+            if ui.button("Copy                 Ctrl+C").clicked() {
                 state.select_only(id);
                 state.copy_selected();
                 ui.close_menu();
@@ -1354,87 +1361,67 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             }
             ui.separator();
 
-            ui.label(RichText::new(&name).strong());
-            ui.separator();
-
-            // ── Selection & duplication ──
-            if ui.button("Select").clicked() {
-                state.select_only(id);
-                ui.close_menu();
-            }
-            if ui.button("Duplicate    Ctrl+D").clicked() {
-                state.select_only(id);
-                state.duplicate_selected();
-                ui.close_menu();
-            }
-            if ui.button("Delete           Del").clicked() {
-                state.remove_layer(id);
-                state.push_history("delete");
-                *ctx_menu_layer = None;
-                ui.close_menu();
-            }
-            ui.separator();
-
-            // ── Visibility & Lock ──
-            let vis_label = if is_visible { "Hide         Ctrl+Shift+H" } else { "Show         Ctrl+Shift+H" };
-            if ui.button(vis_label).clicked() {
-                state.select_only(id);
-                state.toggle_visibility_selected();
-                ui.close_menu();
-            }
-            let lock_label = if is_locked { "Unlock       Ctrl+Shift+L" } else { "Lock         Ctrl+Shift+L" };
-            if ui.button(lock_label).clicked() {
-                state.select_only(id);
-                state.toggle_lock_selected();
-                ui.close_menu();
-            }
-            ui.separator();
-
-            // ── Flip ──
-            if ui.button("Flip Horizontal      Shift+H").clicked() {
-                state.select_only(id);
-                state.flip_horizontal();
-                ui.close_menu();
-            }
-            if ui.button("Flip Vertical        Shift+V").clicked() {
-                state.select_only(id);
-                state.flip_vertical();
-                ui.close_menu();
-            }
-            ui.separator();
-
             // ── Z-order ──
-            if ui.button("Bring to Front    Ctrl+]").clicked() {
+            if ui.button("Bring to Front       Ctrl+]").clicked() {
                 state.bring_to_front(id);
                 ui.close_menu();
             }
-            if ui.button("Bring Forward         ]").clicked() {
+            if ui.button("Bring Forward             ]").clicked() {
                 state.bring_forward(id);
                 ui.close_menu();
             }
-            if ui.button("Send Backward         [").clicked() {
+            if ui.button("Send Backward             [").clicked() {
                 state.send_backward(id);
                 ui.close_menu();
             }
-            if ui.button("Send to Back      Ctrl+[").clicked() {
+            if ui.button("Send to Back         Ctrl+[").clicked() {
                 state.send_to_back(id);
                 ui.close_menu();
             }
             ui.separator();
 
-            // ── Frame / Group hierarchy ──
-            if ui.button("Frame Selection  Ctrl+Alt+G").clicked() {
+            // ── Structural hierarchy (matches Figma order) ──
+            if ui.button("Convert to Section").clicked() {
+                // Treat as Frame with clip_content=false, section semantics
+                if let Some(r) = state.layers.get_mut(&id) {
+                    r.layer_type = crate::state::LayerType::Frame;
+                    r.clip_content = false;
+                }
+                state.push_history("convert to section");
+                ui.close_menu();
+            }
+            if ui.button("Group Selection      Ctrl+G").clicked() {
+                state.select_only(id);
+                state.wrap_in_group();
+                ui.close_menu();
+            }
+            if ui.button("Frame Selection   Ctrl+Alt+G").clicked() {
                 state.select_only(id);
                 state.wrap_in_frame();
                 ui.close_menu();
             }
-            if is_frame {
-                if ui.button("Ungroup          Ctrl+Shift+G").clicked() {
+            if can_ungroup {
+                if ui.button("Ungroup         Ctrl+Shift+G").clicked() {
                     state.ungroup_frame(id);
+                    *ctx_menu_layer = None;
                     ui.close_menu();
                 }
+            }
+            ui.separator();
+
+            // ── Mask ──
+            let mask_label = if is_mask { "Remove Mask   Ctrl+Alt+M" } else { "Use as Mask   Ctrl+Alt+M" };
+            if ui.button(mask_label).clicked() {
+                state.select_only(id);
+                state.toggle_mask_selected();
+                ui.close_menu();
+            }
+            ui.separator();
+
+            // ── Auto Layout (Frame only) ──
+            if is_frame {
                 if !has_al {
-                    if ui.button("Add Auto Layout       Shift+A").clicked() {
+                    if ui.button("Add Auto Layout        Shift+A").clicked() {
                         state.select_only(id);
                         state.add_auto_layout_to_selection();
                         ui.close_menu();
@@ -1452,20 +1439,51 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     state.resize_frame_to_fit(id, 16.0);
                     ui.close_menu();
                 }
+                ui.separator();
             }
-            // Group selection (works on any layer type)
-            if ui.button("Group Selection       Ctrl+G").clicked() {
+
+            // ── Visibility & Lock ──
+            let vis_label = if is_visible { "Hide         Ctrl+Shift+H" } else { "Show         Ctrl+Shift+H" };
+            if ui.button(vis_label).clicked() {
                 state.select_only(id);
-                state.wrap_in_group();
+                state.toggle_visibility_selected();
+                ui.close_menu();
+            }
+            let lock_label = if is_locked { "Unlock       Ctrl+Shift+L" } else { "Lock         Ctrl+Shift+L" };
+            if ui.button(lock_label).clicked() {
+                state.select_only(id);
+                state.toggle_lock_selected();
                 ui.close_menu();
             }
             ui.separator();
-            // Mask
-            let is_mask = state.layers.get(&id).map(|r| r.is_mask).unwrap_or(false);
-            let mask_label = if is_mask { "Remove Mask   Ctrl+Alt+M" } else { "Use as Mask   Ctrl+Alt+M" };
-            if ui.button(mask_label).clicked() {
+
+            // ── Transform ──
+            if ui.button("Flip Horizontal       Shift+H").clicked() {
                 state.select_only(id);
-                state.toggle_mask_selected();
+                state.flip_horizontal();
+                ui.close_menu();
+            }
+            if ui.button("Flip Vertical         Shift+V").clicked() {
+                state.select_only(id);
+                state.flip_vertical();
+                ui.close_menu();
+            }
+            ui.separator();
+
+            // ── Selection & deletion ──
+            if ui.button("Select").clicked() {
+                state.select_only(id);
+                ui.close_menu();
+            }
+            if ui.button("Duplicate            Ctrl+D").clicked() {
+                state.select_only(id);
+                state.duplicate_selected();
+                ui.close_menu();
+            }
+            if ui.button("Delete                  Del").clicked() {
+                state.remove_layer(id);
+                state.push_history("delete");
+                *ctx_menu_layer = None;
                 ui.close_menu();
             }
         } else {
