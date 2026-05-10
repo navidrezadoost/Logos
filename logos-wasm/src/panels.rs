@@ -649,6 +649,12 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             state.push_history("delete layer");
         }
         if let Some((src, new_parent, before)) = to_move {
+            // Auto-expand the destination frame so the dropped layer becomes visible
+            if let Some(np) = new_parent {
+                if let Some(r) = state.layers.get_mut(&np) {
+                    r.frame_expanded = true;
+                }
+            }
             state.move_layer(src, new_parent, before);
         }
         if let Some((id, name)) = to_rename {

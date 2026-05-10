@@ -1162,6 +1162,55 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         }
     }
 
+    // ── Canvas drop-target frame highlight (shown while move-dragging) ────
+    if state.drag.active && state.drag.resize_handle.is_none() && !state.drag.rotating {
+        if let Some(hpid) = state.drag.hovered_parent {
+            if let Some(fr) = state.layers.get(&hpid) {
+                let (sx, sy) = state.world_to_screen(fr.x, fr.y);
+                let (sw, sh) = (fr.width * state.zoom, fr.height * state.zoom);
+                let rect = Rect::from_min_size(
+                    pos2(origin.x + sx, origin.y + sy),
+                    vec2(sw, sh),
+                );
+                // Dashed blue border to indicate "will become child of this frame"
+                let color  = Color32::from_rgba_unmultiplied(80, 160, 255, 220);
+                let stroke = Stroke::new(2.0, color);
+                let dash = 8.0f32;
+                let gap  = 5.0f32;
+                for (p1, p2) in [
+                    (rect.left_top(),     rect.right_top()),
+                    (rect.right_top(),    rect.right_bottom()),
+                    (rect.right_bottom(), rect.left_bottom()),
+                    (rect.left_bottom(),  rect.left_top()),
+                ] {
+                    let dx = p2.x - p1.x;
+                    let dy = p2.y - p1.y;
+                    let len = (dx * dx + dy * dy).sqrt();
+                    if len < 1.0 { continue; }
+                    let nx2 = dx / len;
+                    let ny2 = dy / len;
+                    let mut t = 0.0f32;
+                    while t < len {
+                        let t2 = (t + dash).min(len);
+                        painter.line_segment([
+                            pos2(p1.x + nx2 * t,  p1.y + ny2 * t),
+                            pos2(p1.x + nx2 * t2, p1.y + ny2 * t2),
+                        ], stroke);
+                        t += dash + gap;
+                    }
+                }
+                // Label: "→ Frame name"
+                painter.text(
+                    rect.left_top() + vec2(4.0, -16.0),
+                    Align2::LEFT_BOTTOM,
+                    format!("→ {}", fr.name),
+                    FontId::proportional(11.0),
+                    color,
+                );
+            }
+        }
+    }
+
     // ── Measurement overlay (alt held, hover, or active drag – RL-ranked) ──
     let alt_held = ui.input(|i| i.modifiers.alt);
     let mp_screen = ui.input(|i| i.pointer.hover_pos());
@@ -2854,6 +2903,43 @@ fn handle_tool_input(
                                             }
                                         }
                                     }
+
+                                    // ── Live drop-target highlight ────────
+                                    // Compute which frame would receive the layer on drop
+                                    // and store it in hovered_parent for the render pass.
+                                    if !ui.input(|i| i.key_down(Key::Space)) {
+                                        if let Some(mrec) = state.layers.get(&id) {
+                                            let (mx, my, mw, mh) = (mrec.x, mrec.y, mrec.width, mrec.height);
+                                            let mut best: Option<Uuid> = None;
+                                            let mut best_area = f32::MAX;
+                                            let all_frames: Vec<Uuid> = state.pages[state.active_page].layers
+                                                .iter().cloned()
+                                                .filter(|&fid| {
+                                                    if fid == id { return false; }
+                                                    if state.is_ancestor_of(id, fid) { return false; }
+                                                    state.layers.get(&fid)
+                                                        .map(|r| matches!(r.layer_type, LayerType::Frame))
+                                                        .unwrap_or(false)
+                                                })
+                                                .collect();
+                                            for fid in all_frames {
+                                                if let Some(fr) = state.layers.get(&fid) {
+                                                    let area = fr.width * fr.height;
+                                                    if mx >= fr.x && my >= fr.y
+                                                        && mx + mw <= fr.x + fr.width
+                                                        && my + mh <= fr.y + fr.height
+                                                        && area < best_area
+                                                    {
+                                                        best = Some(fid);
+                                                        best_area = area;
+                                                    }
+                                                }
+                                            }
+                                            state.drag.hovered_parent = best;
+                                        }
+                                    } else {
+                                        state.drag.hovered_parent = None;
+                                    }
                                 }
                             }
                         }
@@ -2963,11 +3049,18 @@ fn handle_tool_input(
                                 r.y = old_wy - new_oy;
                                 r.parent_id = best;
                             }
+                            // Auto-expand the new parent frame in layers panel
+                            if let Some(nid) = best {
+                                if let Some(r) = state.layers.get_mut(&nid) {
+                                    r.frame_expanded = true;
+                                }
+                            }
                         }
                     }
                 }
             }
 
+            state.drag.hovered_parent = None;
             state.push_history(label);
         }
         if state.drag.layer_id.is_none() {

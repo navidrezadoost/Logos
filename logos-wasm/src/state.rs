@@ -590,6 +590,9 @@ pub struct DragState {
     pub shift_axis_lock: Option<bool>,
     /// True when this drag was initiated with Alt held — dragging clones of the originals.
     pub is_alt_clone: bool,
+    /// During a move-drag, the frame that would receive the layer if dropped now.
+    /// `None` = would go to top-level. Updated every frame while dragging.
+    pub hovered_parent: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1166,6 +1169,17 @@ impl EditorState {
     }
 
     /// Resize a Frame to the tight bounding box of all its visible children (+ optional padding).
+    /// Returns `true` if `ancestor_id` is a proper ancestor of `node_id`
+    /// (i.e. `ancestor_id` appears somewhere in node_id's parent chain).
+    pub fn is_ancestor_of(&self, ancestor_id: Uuid, node_id: Uuid) -> bool {
+        let mut pid = self.layers.get(&node_id).and_then(|r| r.parent_id);
+        while let Some(p) = pid {
+            if p == ancestor_id { return true; }
+            pid = self.layers.get(&p).and_then(|r| r.parent_id);
+        }
+        false
+    }
+
     /// Move `src_id` so it becomes a sibling of `target_id`, inserted **before**
     /// `target_id` in draw order (i.e. just below it in the layers panel).
     ///
@@ -1180,7 +1194,11 @@ impl EditorState {
         new_parent_id: Option<Uuid>,
         before_id: Option<Uuid>,
     ) {
-        if src_id == new_parent_id.unwrap_or(src_id) { return; }
+        // Block self-move and moving into own descendants
+        if Some(src_id) == new_parent_id { return; }
+        if let Some(np) = new_parent_id {
+            if self.is_ancestor_of(src_id, np) { return; }
+        }
 
         // ── World position of src ─────────────────────────────────────────────
         let src_world = {
