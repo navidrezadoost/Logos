@@ -877,6 +877,152 @@ impl EditorState {
         self.push_history("ungroup frame");
     }
 
+    // ── Z-Order ──────────────────────────────────────────────────────────────
+
+    /// Move `layer_id` to the top of its sibling group (rendered last = on top).
+    pub fn bring_to_front(&mut self, layer_id: Uuid) {
+        let parent = self.layers.get(&layer_id).and_then(|r| r.parent_id);
+        let order = &mut self.pages[self.active_page].layers;
+        if let Some(pos) = order.iter().position(|&x| x == layer_id) {
+            // Find the highest sibling index.
+            let top = order.iter().enumerate().rev()
+                .find(|(_, &id)| {
+                    self.layers.get(&id)
+                        .map(|r| r.parent_id == parent)
+                        .unwrap_or(false)
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(order.len() - 1);
+            order.remove(pos);
+            let insert_at = if top >= pos { top } else { top + 1 };
+            order.insert(insert_at.min(order.len()), layer_id);
+        }
+        self.push_history("bring to front");
+    }
+
+    /// Move `layer_id` to the bottom of its sibling group (rendered first = behind all).
+    pub fn send_to_back(&mut self, layer_id: Uuid) {
+        let parent = self.layers.get(&layer_id).and_then(|r| r.parent_id);
+        let order = &mut self.pages[self.active_page].layers;
+        if let Some(pos) = order.iter().position(|&x| x == layer_id) {
+            let bottom = order.iter().enumerate()
+                .find(|(_, &id)| {
+                    self.layers.get(&id)
+                        .map(|r| r.parent_id == parent)
+                        .unwrap_or(false)
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            order.remove(pos);
+            let insert_at = if bottom > pos { bottom - 1 } else { bottom };
+            order.insert(insert_at, layer_id);
+        }
+        self.push_history("send to back");
+    }
+
+    /// Move `layer_id` one step forward (higher z-order) among its siblings.
+    pub fn bring_forward(&mut self, layer_id: Uuid) {
+        let parent = self.layers.get(&layer_id).and_then(|r| r.parent_id);
+        let order = &mut self.pages[self.active_page].layers;
+        if let Some(pos) = order.iter().position(|&x| x == layer_id) {
+            // Find the next sibling above us.
+            if let Some(next) = order.iter().enumerate().skip(pos + 1)
+                .find(|(_, &id)| self.layers.get(&id).map(|r| r.parent_id == parent).unwrap_or(false))
+                .map(|(i, _)| i)
+            {
+                order.swap(pos, next);
+            }
+        }
+        self.push_history("bring forward");
+    }
+
+    /// Move `layer_id` one step backward (lower z-order) among its siblings.
+    pub fn send_backward(&mut self, layer_id: Uuid) {
+        let parent = self.layers.get(&layer_id).and_then(|r| r.parent_id);
+        let order = &mut self.pages[self.active_page].layers;
+        if let Some(pos) = order.iter().position(|&x| x == layer_id) {
+            if pos == 0 { return; }
+            // Find the next sibling below us.
+            if let Some(prev) = order[..pos].iter().enumerate().rev()
+                .find(|(_, &id)| self.layers.get(&id).map(|r| r.parent_id == parent).unwrap_or(false))
+                .map(|(i, _)| i)
+            {
+                order.swap(pos, prev);
+            }
+        }
+        self.push_history("send backward");
+    }
+
+    // ── Transform helpers ─────────────────────────────────────────────────────
+
+    /// Flip all selected layers horizontally (mirror on vertical axis through their own center).
+    pub fn flip_horizontal(&mut self) {
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get_mut(&id) {
+                r.rotation = std::f32::consts::PI - r.rotation;
+            }
+        }
+        self.push_history("flip horizontal");
+    }
+
+    /// Flip all selected layers vertically (mirror on horizontal axis through their own center).
+    pub fn flip_vertical(&mut self) {
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get_mut(&id) {
+                r.rotation = -r.rotation;
+            }
+        }
+        self.push_history("flip vertical");
+    }
+
+    // ── Visibility & Lock ─────────────────────────────────────────────────────
+
+    /// Toggle `visible` on all currently selected layers.
+    pub fn toggle_visibility_selected(&mut self) {
+        let first_visible = self.selection.first()
+            .and_then(|id| self.layers.get(id))
+            .map(|r| r.visible)
+            .unwrap_or(true);
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get_mut(&id) {
+                r.visible = !first_visible;
+            }
+        }
+        self.push_history("toggle visibility");
+    }
+
+    /// Toggle `locked` on all currently selected layers.
+    pub fn toggle_lock_selected(&mut self) {
+        let first_locked = self.selection.first()
+            .and_then(|id| self.layers.get(id))
+            .map(|r| r.locked)
+            .unwrap_or(false);
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get_mut(&id) {
+                r.locked = !first_locked;
+            }
+        }
+        self.push_history("toggle lock");
+    }
+
+    /// Add Auto Layout (with default settings) to selected Frame layers.
+    /// Non-frame layers are ignored.
+    pub fn add_auto_layout_to_selection(&mut self) {
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get_mut(&id) {
+                if matches!(r.layer_type, LayerType::Frame) && r.auto_layout.is_none() {
+                    r.auto_layout = Some(AutoLayout::default());
+                }
+            }
+        }
+        // Run initial layout pass on modified frames.
+        let targets: Vec<Uuid> = self.selection.iter().cloned()
+            .filter(|&id| self.layers.get(&id).map(|r| r.auto_layout.is_some()).unwrap_or(false))
+            .collect();
+        for id in targets { self.apply_auto_layout(id); }
+        self.push_history("add auto layout");
+    }
+
     /// Resize a Frame to the tight bounding box of all its visible children (+ optional padding).
     pub fn resize_frame_to_fit(&mut self, frame_id: Uuid, padding: f32) {
         let children = self.frame_children(frame_id);
