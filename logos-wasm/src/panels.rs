@@ -829,6 +829,53 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
         return;
     }
 
+    // ── Multi-selection header ────────────────────────────────────────────
+    if state.selection.len() > 1 {
+        let n = state.selection.len();
+        let targets = state.effective_selection_targets();
+        let is_flat = state.selection_is_flat();
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            // Badge showing count
+            let badge_size = vec2(28.0, 22.0);
+            let (badge_rect, _) = ui.allocate_exact_size(badge_size, Sense::hover());
+            ui.painter().rect_filled(
+                badge_rect, 4.0,
+                Color32::from_rgba_unmultiplied(59, 130, 246, 55),
+            );
+            ui.painter().text(
+                badge_rect.center(), Align2::CENTER_CENTER,
+                format!("{n}"),
+                FontId::proportional(11.0),
+                C_ACCENT,
+            );
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(format!("{n} layers selected")).size(12.5).strong());
+                if !is_flat {
+                    ui.label(RichText::new(
+                        format!("Mixed depth → acting on {} promoted targets",
+                            targets.len()))
+                        .size(10.5)
+                        .color(Color32::from_rgb(255, 193, 80))
+                    );
+                } else {
+                    let lca = state.selection_common_parent();
+                    let lca_name = lca.and_then(|id| state.layers.get(&id))
+                        .map(|r| r.name.as_str())
+                        .unwrap_or("Canvas");
+                    ui.label(RichText::new(format!("in {lca_name}"))
+                        .size(10.5)
+                        .color(C_MUTED));
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+    }
+
     let id = state.selection[0];
     if state.layers.get(&id).is_none() { return; }
 
@@ -1233,7 +1280,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             act
         }).inner;
         if let Some(act) = align_act {
-            let sel_ids: Vec<uuid::Uuid> = state.selection.clone();
+            // Use effective_selection_targets so mixed-depth selections (e.g. from
+            // rubber-band hitting a Frame and a sibling shape) are promoted to the
+            // level of their lowest common ancestor before aligning/distributing.
+            let sel_ids: Vec<uuid::Uuid> = state.effective_selection_targets();
 
             // Compute world-space bounding box of all selected layers.
             // For single selection: align against page bounds.

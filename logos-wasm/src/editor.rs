@@ -1450,7 +1450,19 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             let can_ungroup = is_frame || is_group;
 
             // ── Layer identity header ──
-            ui.label(RichText::new(&name).strong());
+            let n_sel = state.selection.len();
+            if n_sel > 1 {
+                let targets = state.effective_selection_targets();
+                let is_flat = state.selection_is_flat();
+                ui.label(RichText::new(format!("{n_sel} layers selected")).strong());
+                if !is_flat {
+                    ui.label(RichText::new(
+                        format!("Mixed depth (acting on {} promoted)", targets.len()))
+                        .size(10.5).color(Color32::from_rgb(255, 193, 80)));
+                }
+            } else {
+                ui.label(RichText::new(&name).strong());
+            }
             ui.separator();
 
             // ── Clipboard ──

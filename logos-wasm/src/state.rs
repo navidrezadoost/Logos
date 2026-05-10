@@ -770,6 +770,9 @@ impl EditorState {
                 new_sel.push(id);
             }
         }
+        // Post-filter: remove children whose parent is also in new_sel (prefer outermost hit)
+        let fully = new_sel.clone();
+        new_sel.retain(|&id| !fully.iter().any(|&other| other != id && self.is_ancestor_of(other, id)));
         self.selection = new_sel;
     }
 
@@ -883,8 +886,9 @@ impl EditorState {
     /// selection's bounding box. Selected layers become children of the frame.
     pub fn wrap_in_frame(&mut self) {
         if self.selection.is_empty() { return; }
-        // Use selection_roots so selecting both a parent and child doesn't double-count.
-        let roots = self.selection_roots();
+        // Use effective_selection_targets so mixed-depth selections are promoted
+        // to the level of their lowest common ancestor before wrapping.
+        let roots = self.effective_selection_targets();
         if roots.is_empty() { return; }
         // Compute world-space bbox over all roots.
         let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
@@ -1173,7 +1177,9 @@ impl EditorState {
     /// clip, auto-resizes to children — exactly like Figma's Ctrl+G group).
     pub fn wrap_in_group(&mut self) {
         if self.selection.is_empty() { return; }
-        let roots = self.selection_roots();
+        // Use effective_selection_targets so mixed-depth selections are promoted
+        // to the level of their lowest common ancestor before grouping.
+        let roots = self.effective_selection_targets();
         if roots.is_empty() { return; }
         // Compute world-space bbox over roots.
         let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
@@ -1328,6 +1334,57 @@ impl EditorState {
     /// If `new_parent_id` is `None`, `src` is promoted to top-level.
     ///
     /// Pass `target_id = None` to append at the end of the new parent's children.
+
+    /// Determine the "effective targets" for bulk operations on a mixed-depth selection.
+    ///
+    /// **Rule (Figma-compatible):**
+    /// 1. Compute `selection_roots()` — de-duplicate parent+child pairs.
+    /// 2. Find the `selection_common_parent()` (LCA).
+    /// 3. For each root that is NOT a direct child of the LCA, walk up until we
+    ///    reach the direct child of LCA and use that ancestor instead.
+    ///    (This "promotes" deeply nested selections to the level where the operation
+    ///    makes sense — e.g. aligning two items inside different sub-frames acts on
+    ///    those sub-frames, not the inner items.)
+    ///
+    /// Returns deduplicated Vec of layer IDs at the correct hierarchy level.
+    pub fn effective_selection_targets(&self) -> Vec<Uuid> {
+        let roots = self.selection_roots();
+        if roots.is_empty() { return vec![]; }
+
+        let lca = self.selection_common_parent(); // None = canvas root
+
+        let mut result: Vec<Uuid> = Vec::new();
+        for rid in roots {
+            // Walk up from rid until its parent == lca
+            let mut cur = rid;
+            loop {
+                let parent = self.layers.get(&cur).and_then(|r| r.parent_id);
+                if parent == lca {
+                    // cur is a direct child of lca — use it
+                    break;
+                }
+                match parent {
+                    Some(p) => cur = p,
+                    None    => break, // reached root without finding lca — use cur
+                }
+            }
+            if !result.contains(&cur) {
+                result.push(cur);
+            }
+        }
+        result
+    }
+
+    /// True if all effective selection targets share the same direct parent
+    /// (i.e. they are true siblings at the same level). This is the "happy path"
+    /// where Group/Frame/Align operations need no promotion step.
+    pub fn selection_is_flat(&self) -> bool {
+        let roots = self.effective_selection_targets();
+        if roots.len() <= 1 { return true; }
+        let first_parent = self.layers.get(&roots[0]).and_then(|r| r.parent_id);
+        roots.iter().all(|&id| self.layers.get(&id).and_then(|r| r.parent_id) == first_parent)
+    }
+
     pub fn move_layer(
         &mut self,
         src_id: Uuid,
@@ -1669,8 +1726,11 @@ impl EditorState {
     }
 
     pub fn delete_selected(&mut self) {
-        let ids: Vec<Uuid> = self.selection.drain(..).collect();
-        for id in ids {
+        // Use selection_roots so that if a parent AND its child are both selected,
+        // we only delete the parent (remove_layer recursively handles children).
+        let roots = self.selection_roots();
+        self.selection.clear();
+        for id in roots {
             self.remove_layer(id);
         }
         self.push_history("delete");
