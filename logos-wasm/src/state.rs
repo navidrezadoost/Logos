@@ -1495,22 +1495,36 @@ impl EditorState {
     }
 
     pub fn duplicate_selected(&mut self) {
-        let ids: Vec<Uuid> = self.selection.clone();
-        let mut new_ids = vec![];
-        for id in &ids {
-            if let Some(src) = self.layers.get(id).cloned() {
-                let mut new = src.clone();
-                new.id  = Uuid::new_v4();
-                new.name = format!("{} copy", src.name);
-                new.x   += 20.0;
-                new.y   += 20.0;
-                let nid = new.id;
-                self.pages[self.active_page].layers.push(nid);
-                self.layers.insert(nid, new);
-                new_ids.push(nid);
+        let roots: Vec<Uuid> = self.selection.clone();
+        // Collect full subtrees for all selected roots.
+        let mut all: Vec<LayerRecord> = vec![];
+        let mut seen = std::collections::HashSet::new();
+        for &rid in &roots {
+            for rec in self.collect_subtree(rid) {
+                if seen.insert(rec.id) { all.push(rec); }
             }
         }
-        self.selection = new_ids;
+        let clip_ids: std::collections::HashSet<Uuid> = all.iter().map(|r| r.id).collect();
+        let id_map: std::collections::HashMap<Uuid, Uuid> = clip_ids.iter()
+            .map(|&old| (old, Uuid::new_v4()))
+            .collect();
+        let mut root_new_ids = vec![];
+        for src in &all {
+            let new_id = id_map[&src.id];
+            let mut new = src.clone();
+            new.id = new_id;
+            new.name = format!("{} copy", src.name);
+            new.parent_id = src.parent_id.and_then(|pid| id_map.get(&pid).copied());
+            let is_root = src.parent_id.map(|pid| !clip_ids.contains(&pid)).unwrap_or(true);
+            if is_root {
+                new.x += 20.0;
+                new.y += 20.0;
+                root_new_ids.push(new_id);
+            }
+            self.pages[self.active_page].layers.push(new_id);
+            self.layers.insert(new_id, new);
+        }
+        self.selection = root_new_ids;
         self.push_history("duplicate");
     }
 
@@ -1522,35 +1536,77 @@ impl EditorState {
         self.push_history("delete");
     }
 
+    /// Collect a full DFS subtree rooted at `root_id` (root included).
+    pub fn collect_subtree(&self, root_id: Uuid) -> Vec<LayerRecord> {
+        let mut result = vec![];
+        let mut stack = vec![root_id];
+        while let Some(id) = stack.pop() {
+            if let Some(r) = self.layers.get(&id) {
+                result.push(r.clone());
+                // Push children (order doesn't matter — paste restores by parent_id graph)
+                let children = self.frame_children(id);
+                stack.extend(children);
+            }
+        }
+        result
+    }
+
+    /// Copy the selected layers **plus their full descendant subtrees** into the
+    /// clipboard.  On paste all UUIDs are remapped so each paste is independent.
     pub fn copy_selected(&mut self) {
-        self.clipboard = self.selection.iter()
-            .filter_map(|id| self.layers.get(id).cloned())
-            .collect();
+        let roots: Vec<Uuid> = self.selection.clone();
+        let mut all: Vec<LayerRecord> = vec![];
+        let mut seen = std::collections::HashSet::new();
+        for &rid in &roots {
+            for rec in self.collect_subtree(rid) {
+                if seen.insert(rec.id) {
+                    all.push(rec);
+                }
+            }
+        }
+        self.clipboard = all;
     }
 
     /// Paste at a specific world-space coordinate (e.g. the position the user right-clicked).
     /// Each pasted layer is positioned so the top-left of the selection bounding box lands at `(wx, wy)`.
     pub fn paste_here(&mut self, wx: f32, wy: f32) {
         if self.clipboard.is_empty() { return; }
-        // Find bounding box origin of clipboard items.
-        let (clip_min_x, clip_min_y) = self.clipboard.iter()
+        // Identify which clipboard entries are roots (parent is outside clipboard).
+        let clip_ids: std::collections::HashSet<Uuid> = self.clipboard.iter().map(|r| r.id).collect();
+        // Build UUID remap table: old_id → new_id.
+        let id_map: std::collections::HashMap<Uuid, Uuid> = clip_ids.iter()
+            .map(|&old| (old, Uuid::new_v4()))
+            .collect();
+
+        // Compute bbox of root layers only (children use parent-local coords).
+        let roots: Vec<&LayerRecord> = self.clipboard.iter()
+            .filter(|r| r.parent_id.map(|pid| !clip_ids.contains(&pid)).unwrap_or(true))
+            .collect();
+        let (clip_min_x, clip_min_y) = roots.iter()
             .fold((f32::MAX, f32::MAX), |(ax, ay), r| (ax.min(r.x), ay.min(r.y)));
-        let dx = wx - clip_min_x;
-        let dy = wy - clip_min_y;
-        let mut new_ids = vec![];
+        let (dx, dy) = (wx - clip_min_x, wy - clip_min_y);
+
+        let mut root_new_ids = vec![];
         let pastes: Vec<LayerRecord> = self.clipboard.clone();
-        for src in pastes {
+        for src in &pastes {
+            let new_id = id_map[&src.id];
             let mut new = src.clone();
-            new.id   = Uuid::new_v4();
+            new.id   = new_id;
             new.name = format!("{} paste", src.name);
-            new.x   += dx;
-            new.y   += dy;
-            let nid  = new.id;
-            self.pages[self.active_page].layers.push(nid);
-            self.layers.insert(nid, new);
-            new_ids.push(nid);
+            // Remap parent_id: if parent is in clipboard, use remapped id; else detach to top-level.
+            new.parent_id = src.parent_id
+                .and_then(|pid| id_map.get(&pid).copied());
+            // Only offset root layers (children stay in their parent-local space).
+            let is_root = src.parent_id.map(|pid| !clip_ids.contains(&pid)).unwrap_or(true);
+            if is_root {
+                new.x += dx;
+                new.y += dy;
+                root_new_ids.push(new_id);
+            }
+            self.pages[self.active_page].layers.push(new_id);
+            self.layers.insert(new_id, new);
         }
-        self.selection = new_ids;
+        self.selection = root_new_ids;
         self.push_history("paste here");
     }
 
@@ -1600,20 +1656,28 @@ impl EditorState {
 
     pub fn paste_clipboard(&mut self) {
         if self.clipboard.is_empty() { return; }
-        let mut new_ids = vec![];
+        let clip_ids: std::collections::HashSet<Uuid> = self.clipboard.iter().map(|r| r.id).collect();
+        let id_map: std::collections::HashMap<Uuid, Uuid> = clip_ids.iter()
+            .map(|&old| (old, Uuid::new_v4()))
+            .collect();
+        let mut root_new_ids = vec![];
         let pastes: Vec<LayerRecord> = self.clipboard.clone();
-        for src in pastes {
+        for src in &pastes {
+            let new_id = id_map[&src.id];
             let mut new = src.clone();
-            new.id   = Uuid::new_v4();
+            new.id = new_id;
             new.name = format!("{} copy", src.name);
-            new.x   += 20.0;
-            new.y   += 20.0;
-            let nid = new.id;
-            self.pages[self.active_page].layers.push(nid);
-            self.layers.insert(nid, new);
-            new_ids.push(nid);
+            new.parent_id = src.parent_id.and_then(|pid| id_map.get(&pid).copied());
+            let is_root = src.parent_id.map(|pid| !clip_ids.contains(&pid)).unwrap_or(true);
+            if is_root {
+                new.x += 20.0;
+                new.y += 20.0;
+                root_new_ids.push(new_id);
+            }
+            self.pages[self.active_page].layers.push(new_id);
+            self.layers.insert(new_id, new);
         }
-        self.selection = new_ids;
+        self.selection = root_new_ids;
         self.push_history("paste");
     }
 
