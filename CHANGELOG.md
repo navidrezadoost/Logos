@@ -6,6 +6,44 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — 2026-05-10
+
+### 2026-05-09 — Major Frames & Hierarchy System (d2053a6)
+
+**Identity**: navidrezadoost / navidrezadoost07@gmail.com  
+**Push**: `d2053a6` to navidrezadoost/Logos (no proxy used)
+
+#### Core Architecture
+- Full hierarchical layer system with `LayerRecord.parent_id: Option<Uuid>`
+- Local coordinate system for all children (positions relative to parent)
+- Recursive child handling and traversal helpers
+
+#### Figma-Style Frames
+- `Frame` layer type with `clip_content` (default `true`), `frame_expanded`, corner radius, fill, stroke, etc.
+- Hierarchical rendering with optional clipping, frame name label (Figma-style), parent chain tint, and dashed overflow indicator
+- Frame helpers: `wrap_in_frame()`, `ungroup_frame()`, `resize_frame_to_fit()`, `frame_children()`
+
+#### Auto Layout & Constraints
+- `AutoLayout` struct (direction, padding, gap, sizing modes: Hug/Fixed/Fill)
+- `Constraints` struct for regular frames
+- Full right-panel controls and layout pre-pass
+
+#### Drag, Drop & Reparenting
+- Canvas auto-reparenting when dropping layers into frames (Spacebar to suppress)
+- Layers panel tree drag & drop with indentation and insertion preview
+- When a frame is dragged, all children move together maintaining their local position relative to the frame
+
+#### UI/UX Improvements
+- Unicode icon system for tools and layer types
+- Layers panel: DFS tree, expand/collapse, context menu, visibility toggles
+- Right panel Frame section with Clip Content + Auto Layout controls
+- Keyboard shortcuts: `Ctrl+Alt+G` (wrap in frame), `Shift+Ctrl+G` (ungroup), `Enter` (drill in), `Shift+Enter` (select parent)
+- Effects system (7 types) + Blend Modes (18 CSS Compositing Level 1 modes) with hover preview
+
+This update establishes a solid, Figma-like foundation for hierarchy, frames, and responsive layout capabilities.
+
+---
+
 ## [Unreleased] — 2026-05-09
 
 ### Added — `logos-wasm` editor (Figma-style Frames, Auto Layout, interaction polish)

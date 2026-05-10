@@ -143,6 +143,27 @@ impl Effect {
     }
 }
 
+/// ## Coordinate System & Hierarchy Rules
+///
+/// Logos uses a **local coordinate system** for all child layers (exactly like Figma):
+///
+/// - Every layer has a position (`x`, `y`) **relative to its direct parent**.
+/// - Top-level layers (no `parent_id`) use canvas/world coordinates.
+/// - When a `Frame` (or any parent) is moved, all its descendants move rigidly with it.
+/// - Children **never** store absolute canvas positions. Their position is always local.
+///
+/// ### Key Implications:
+///
+/// - Dragging a frame that contains shapes/text/other frames moves the entire subtree together.
+/// - A child's `position` remains constant relative to the frame's top-left corner even when the frame moves.
+/// - `get_absolute_position(id)` / `get_absolute_bounds(id)` must walk up the parent chain and accumulate transforms.
+/// - Reparenting a layer (`reparent_layer()`) requires converting its absolute position into the new parent's local space.
+///
+/// ### Auto-Reparenting on Canvas:
+/// When a layer is dragged onto a frame, it is automatically reparented and its position is converted from
+/// old-parent-local → new-parent-local. Spacebar suppresses this behavior.
+///
+/// This design enables clean hierarchical movement, proper clipping, Auto Layout, and constraints.
 #[derive(Clone, Debug)]
 pub struct LayerRecord {
     pub id:       Uuid,
