@@ -1166,6 +1166,71 @@ impl EditorState {
     }
 
     /// Resize a Frame to the tight bounding box of all its visible children (+ optional padding).
+    /// Move `src_id` so it becomes a sibling of `target_id`, inserted **before**
+    /// `target_id` in draw order (i.e. just below it in the layers panel).
+    ///
+    /// If `new_parent_id` is `Some(p)`, `src` is reparented to frame `p` and its
+    /// coordinates are converted so it stays in the same absolute world position.
+    /// If `new_parent_id` is `None`, `src` is promoted to top-level.
+    ///
+    /// Pass `target_id = None` to append at the end of the new parent's children.
+    pub fn move_layer(
+        &mut self,
+        src_id: Uuid,
+        new_parent_id: Option<Uuid>,
+        before_id: Option<Uuid>,
+    ) {
+        if src_id == new_parent_id.unwrap_or(src_id) { return; }
+
+        // ── World position of src ─────────────────────────────────────────────
+        let src_world = {
+            let (mut wx, mut wy) = (0.0_f32, 0.0_f32);
+            if let Some(r) = self.layers.get(&src_id) {
+                wx = r.x; wy = r.y;
+                let mut pid = r.parent_id;
+                while let Some(p) = pid {
+                    if let Some(pr) = self.layers.get(&p) {
+                        wx += pr.x; wy += pr.y;
+                        pid = pr.parent_id;
+                    } else { break; }
+                }
+            }
+            (wx, wy)
+        };
+
+        // ── World origin of new parent ────────────────────────────────────────
+        let parent_world = {
+            let mut wx = 0.0_f32;
+            let mut wy = 0.0_f32;
+            let mut pid = new_parent_id;
+            while let Some(p) = pid {
+                if let Some(pr) = self.layers.get(&p) {
+                    wx += pr.x; wy += pr.y;
+                    pid = pr.parent_id;
+                } else { break; }
+            }
+            (wx, wy)
+        };
+
+        // ── Update coordinates and parent ──────────────────────────────────────
+        if let Some(src) = self.layers.get_mut(&src_id) {
+            src.x = src_world.0 - parent_world.0;
+            src.y = src_world.1 - parent_world.1;
+            src.parent_id = new_parent_id;
+        }
+
+        // ── Move in page order ────────────────────────────────────────────────
+        let page = &mut self.pages[self.active_page].layers;
+        page.retain(|&id| id != src_id);
+        let insert_at = match before_id {
+            Some(bid) => page.iter().position(|&id| id == bid).unwrap_or(page.len()),
+            None => page.len(),
+        };
+        page.insert(insert_at, src_id);
+
+        self.push_history("move layer");
+    }
+
     pub fn resize_frame_to_fit(&mut self, frame_id: Uuid, padding: f32) {
         let children = self.frame_children(frame_id);
         if children.is_empty() { return; }

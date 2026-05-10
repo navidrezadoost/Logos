@@ -479,6 +479,8 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
         let mut to_select: Option<uuid::Uuid> = None;
         let mut to_toggle_vis: Option<uuid::Uuid> = None;
         let mut to_toggle_exp: Option<uuid::Uuid> = None;
+        // (src_id, new_parent_id, before_id)
+        let mut to_move: Option<(uuid::Uuid, Option<uuid::Uuid>, Option<uuid::Uuid>)> = None;
 
         // Helper: draw one layer row at a given indent depth
         // We collect root ids then recurse inline with a stack.
@@ -487,11 +489,11 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             .cloned()
             .collect();
 
-        // Iterative DFS render using a stack of (id, depth)
-        let mut stack: Vec<(uuid::Uuid, usize)> = root_ids.iter().rev()
-            .map(|&id| (id, 0_usize)).collect();
+        // Iterative DFS render using a stack of (id, depth, parent_id)
+        let mut stack: Vec<(uuid::Uuid, usize, Option<uuid::Uuid>)> = root_ids.iter().rev()
+            .map(|&id| (id, 0_usize, None)).collect();
 
-        while let Some((id, depth)) = stack.pop() {
+        while let Some((id, depth, parent_id)) = stack.pop() {
             let (icon, name, visible, selected, is_frame, expanded, is_mask) = {
                 let rec = match state.layers.get(&id) {
                     Some(r) => r,
@@ -502,6 +504,29 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 (rec.type_icon(), rec.name.clone(), rec.visible, state.is_selected(id),
                  is_frame, rec.frame_expanded, rec.is_mask)
             };
+
+            // ── Drop gap above this row ───────────────────────────────────────
+            {
+                let gap_h = 4.0_f32;
+                let gap_resp = ui.allocate_response(
+                    vec2(ui.available_width(), gap_h),
+                    Sense::hover(),
+                );
+                // Highlight the gap when a dragged layer hovers over it
+                if gap_resp.dnd_hover_payload::<uuid::Uuid>().is_some() {
+                    ui.painter().hline(
+                        gap_resp.rect.x_range(),
+                        gap_resp.rect.center().y,
+                        Stroke::new(2.0, Color32::from_rgb(100, 180, 255)),
+                    );
+                }
+                // Accept drop: insert src before this row in its parent
+                if let Some(payload) = gap_resp.dnd_release_payload::<uuid::Uuid>() {
+                    if *payload != id {
+                        to_move = Some((*payload, parent_id, Some(id)));
+                    }
+                }
+            }
 
             ui.horizontal(|ui| {
                 // Indent
@@ -543,8 +568,28 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     .size(if depth > 0 { 12.0 } else { 13.0 });
                 let text = if selected || is_mask { base.strong() } else { base };
 
-                let resp = ui.add(Label::new(text).sense(Sense::click()))
-                    .on_hover_text("Click to select • Double-click to rename");
+                let resp = ui.add(Label::new(text).sense(Sense::click_and_drag()))
+                    .on_hover_text("Click to select • Double-click to rename • Drag to reorder");
+
+                // Mark as drag source
+                resp.dnd_set_drag_payload(id);
+
+                // Drop INTO a frame when dragging onto it
+                if is_frame {
+                    if resp.dnd_hover_payload::<uuid::Uuid>().is_some() {
+                        ui.painter().rect_stroke(
+                            resp.rect.expand(2.0),
+                            2.0,
+                            Stroke::new(1.5, Color32::from_rgb(100, 180, 255)),
+                        );
+                    }
+                    if let Some(payload) = resp.dnd_release_payload::<uuid::Uuid>() {
+                        if *payload != id {
+                            // Drop into frame: append as last child
+                            to_move = Some((*payload, Some(id), None));
+                        }
+                    }
+                }
 
                 if resp.clicked() { to_select = Some(id); }
                 if resp.double_clicked() { to_rename = Some((id, name.clone())); }
@@ -585,7 +630,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             if is_frame && expanded {
                 let children = state.frame_children(id);
                 for cid in children.into_iter().rev() {
-                    stack.push((cid, depth + 1));
+                    stack.push((cid, depth + 1, Some(id)));
                 }
             }
         }
@@ -602,6 +647,9 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
         if let Some(id) = to_delete      {
             state.remove_layer(id);
             state.push_history("delete layer");
+        }
+        if let Some((src, new_parent, before)) = to_move {
+            state.move_layer(src, new_parent, before);
         }
         if let Some((id, name)) = to_rename {
             state.rename_target = Some(id);
