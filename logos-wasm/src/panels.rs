@@ -967,6 +967,80 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     let mut needs_history = false;
 
     // ════════════════════════════════════════════════════════════════════
+    // COMPONENT INSTANCE banner (only shown when a ComponentInstance is selected)
+    // ════════════════════════════════════════════════════════════════════
+    let is_instance = state.is_component_instance(id);
+    if is_instance {
+        let (master_name, has_overrides, override_list) = {
+            let rec = state.layers.get(&id).unwrap();
+            let mid = rec.master_id;
+            let mname = mid
+                .and_then(|m| state.layers.get(&m))
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| "Unknown".into());
+            let ovr   = &rec.overrides;
+            let has   = ovr.any();
+            let list  = ovr.summary().join(", ");
+            (mname, has, list)
+        };
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            // Purple ◇ badge
+            let (badge_rect, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
+            ui.painter().rect_filled(badge_rect, 4.0,
+                Color32::from_rgba_unmultiplied(139, 92, 246, 40));
+            ui.painter().text(badge_rect.center(), Align2::CENTER_CENTER,
+                "◇", FontId::proportional(12.0), Color32::from_rgb(167, 118, 255));
+            ui.add_space(6.0);
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(format!("Instance of  {master_name}"))
+                        .size(12.0).strong()
+                        .color(Color32::from_rgb(167, 118, 255))
+                );
+                if has_overrides {
+                    ui.label(
+                        RichText::new(format!("Overriding: {override_list}"))
+                            .size(10.0)
+                            .color(Color32::from_rgb(96, 165, 250))
+                    );
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            if ui.add(
+                Button::new(RichText::new("Go to Master").size(10.5))
+                    .fill(Color32::from_rgba_unmultiplied(139, 92, 246, 30))
+                    .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(139, 92, 246, 120)))
+                    .rounding(4.0)
+                    .min_size(vec2(90.0, 22.0)),
+            ).on_hover_text("Select the master Component").clicked() {
+                if let Some(mid) = state.layers.get(&id).and_then(|r| r.master_id) {
+                    state.select_only(mid);
+                }
+            }
+            ui.add_space(6.0);
+            if has_overrides {
+                if ui.add(
+                    Button::new(RichText::new("Reset All Overrides").size(10.5))
+                        .fill(Color32::from_rgb(20, 20, 20))
+                        .stroke(Stroke::new(1.0, C_BORDER))
+                        .rounding(4.0)
+                        .min_size(vec2(120.0, 22.0)),
+                ).on_hover_text("Revert all properties to master values").clicked() {
+                    state.reset_all_overrides(id);
+                }
+            }
+        });
+        ui.add_space(4.0);
+        ui.separator();
+    }
+
+    // ════════════════════════════════════════════════════════════════════
     // HEADER  — layer name  +  visibility / lock buttons
     // ════════════════════════════════════════════════════════════════════
     {
@@ -1538,6 +1612,27 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     // APPEARANCE  (opacity + corner radius)
     // ════════════════════════════════════════════════════════════════════
     if section_header(ui, "sec_appearance", "Appearance", true) {
+        {
+            let ovr_op = state.layers.get(&id)
+                .map(|r| r.overrides.opacity.is_some() || r.overrides.corner_radii.is_some())
+                .unwrap_or(false);
+            if ovr_op { ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(RichText::new("● Opacity / Radius overridden").size(10.0)
+                    .color(Color32::from_rgb(96, 165, 250)));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(
+                        Button::new(RichText::new("↺ Reset").size(9.5))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(96,165,250)))
+                            .rounding(3.0).min_size(vec2(52.0, 18.0))
+                    ).on_hover_text("Reset opacity/radius to master").clicked() {
+                        state.reset_override_opacity(id);
+                        state.reset_override_corner_radii(id);
+                    }
+                });
+            });}
+        }
         ui.add_space(8.0);
         let rec = state.layers.get_mut(&id).unwrap();
 
@@ -1676,6 +1771,27 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     // FILL
     // ════════════════════════════════════════════════════════════════════
     if section_header(ui, "sec_fill", "Fill", true) {
+        // Override indicator (only when a ComponentInstance is selected)
+        {
+            let ovr_fill = state.layers.get(&id)
+                .map(|r| r.overrides.fill.is_some()).unwrap_or(false);
+            if ovr_fill { ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                let dot = RichText::new("● Fill overridden")
+                    .size(10.0).color(Color32::from_rgb(96, 165, 250));
+                ui.label(dot);
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(
+                        Button::new(RichText::new("↺ Reset").size(9.5))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(96,165,250)))
+                            .rounding(3.0).min_size(vec2(52.0, 18.0))
+                    ).on_hover_text("Reset fill to master value").clicked() {
+                        state.reset_override_fill(id);
+                    }
+                });
+            });}
+        }
         ui.add_space(8.0);
         let rec = state.layers.get_mut(&id).unwrap();
         ui.horizontal(|ui| {
@@ -1711,6 +1827,27 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     // STROKE
     // ════════════════════════════════════════════════════════════════════
     if section_header(ui, "sec_stroke", "Stroke", false) {
+        // Override indicator
+        {
+            let ovr_stroke = state.layers.get(&id)
+                .map(|r| r.overrides.stroke_color.is_some() || r.overrides.stroke_width.is_some())
+                .unwrap_or(false);
+            if ovr_stroke { ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(RichText::new("● Stroke overridden").size(10.0)
+                    .color(Color32::from_rgb(96, 165, 250)));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(
+                        Button::new(RichText::new("↺ Reset").size(9.5))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(96,165,250)))
+                            .rounding(3.0).min_size(vec2(52.0, 18.0))
+                    ).on_hover_text("Reset stroke to master value").clicked() {
+                        state.reset_override_stroke(id);
+                    }
+                });
+            });}
+        }
         ui.add_space(8.0);
         let rec = state.layers.get_mut(&id).unwrap();
         ui.horizontal(|ui| {
@@ -1777,6 +1914,27 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     // EFFECTS  (layer blend mode + individual effects)
     // ════════════════════════════════════════════════════════════════════
     if section_header(ui, "sec_effects", "Effects", false) {
+        {
+            let ovr_eff = state.layers.get(&id)
+                .map(|r| r.overrides.effects.is_some() || r.overrides.blend_mode.is_some())
+                .unwrap_or(false);
+            if ovr_eff { ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(RichText::new("● Effects / Blend overridden").size(10.0)
+                    .color(Color32::from_rgb(96, 165, 250)));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(
+                        Button::new(RichText::new("↺ Reset").size(9.5))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0, Color32::from_rgb(96,165,250)))
+                            .rounding(3.0).min_size(vec2(52.0, 18.0))
+                    ).on_hover_text("Reset effects/blend to master").clicked() {
+                        state.reset_override_effects(id);
+                        state.reset_override_blend_mode(id);
+                    }
+                });
+            });}
+        }
         ui.add_space(4.0);
 
         // ── Layer-level Blend Mode (top row, inside Effects) ─────────────
@@ -2117,6 +2275,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
 
     if needs_history {
         state.push_history("property");
+        // Capture which fields diverge from master (no-op for non-instances)
+        if state.is_component_instance(id) {
+            state.capture_overrides(id);
+        }
     }
 }
 

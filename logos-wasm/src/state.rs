@@ -114,7 +114,7 @@ impl EffectKind {
     pub fn has_amount(&self) -> bool { matches!(self, Self::Noise | Self::Glass | Self::Texture) }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Effect {
     pub kind:       EffectKind,
     pub enabled:    bool,
@@ -215,6 +215,9 @@ pub struct LayerRecord {
     /// quick access without pattern-matching the enum.
     /// `None` for all other layer types and for master Component layers themselves.
     pub master_id: Option<Uuid>,
+    /// Property-level overrides (only meaningful on ComponentInstance root layers).
+    /// Each `Some` field diverges from the master component value.
+    pub overrides: Overrides,
 }
 
 // ── Constraints ───────────────────────────────────────────────────────────────
@@ -340,6 +343,57 @@ pub enum PenMode {
     Pencil,
 }
 
+// ── Property Override Model ─────────────────────────────────────────────────
+
+/// Property-level overrides stored on a ComponentInstance root layer.
+///
+/// Each field is `Some(value)` when the instance has diverged from its master
+/// for that property.  `None` means "inherit from master".
+/// Updated by `EditorState::capture_overrides()` after any property change.
+#[derive(Clone, Debug, Default)]
+pub struct Overrides {
+    pub fill:         Option<[f32; 4]>,
+    pub stroke_color: Option<[f32; 4]>,
+    pub stroke_width: Option<f32>,
+    pub corner_radii: Option<[f32; 4]>,
+    pub opacity:      Option<f32>,
+    pub visible:      Option<bool>,
+    pub effects:      Option<Vec<Effect>>,
+    pub blend_mode:   Option<BlendMode>,
+    pub text_content: Option<String>,
+    pub size:         Option<(f32, f32)>,
+}
+
+impl Overrides {
+    /// Returns true if any property is overridden.
+    pub fn any(&self) -> bool {
+        self.fill.is_some()
+            || self.stroke_color.is_some()
+            || self.stroke_width.is_some()
+            || self.corner_radii.is_some()
+            || self.opacity.is_some()
+            || self.visible.is_some()
+            || self.effects.is_some()
+            || self.blend_mode.is_some()
+            || self.text_content.is_some()
+            || self.size.is_some()
+    }
+    /// Human-readable summary of which properties are overridden.
+    pub fn summary(&self) -> Vec<&'static str> {
+        let mut v = Vec::new();
+        if self.fill.is_some()         { v.push("Fill"); }
+        if self.stroke_color.is_some() || self.stroke_width.is_some() { v.push("Stroke"); }
+        if self.corner_radii.is_some() { v.push("Corner Radius"); }
+        if self.opacity.is_some()      { v.push("Opacity"); }
+        if self.visible.is_some()      { v.push("Visibility"); }
+        if self.effects.is_some()      { v.push("Effects"); }
+        if self.blend_mode.is_some()   { v.push("Blend Mode"); }
+        if self.text_content.is_some() { v.push("Text"); }
+        if self.size.is_some()         { v.push("Size"); }
+        v
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LayerType {
     Rect,
@@ -399,6 +453,7 @@ impl LayerRecord {
             layout_sizing_v: SizingMode::Fixed,
             is_mask: false,
             master_id: None,
+            overrides: Overrides::default(),
         }
     }
 
@@ -939,6 +994,136 @@ impl EditorState {
 
     pub fn is_component_instance(&self, id: Uuid) -> bool {
         matches!(self.layers.get(&id), Some(r) if matches!(r.layer_type, LayerType::ComponentInstance { .. }))
+    }
+
+    // ── Property Override Helpers ─────────────────────────────────────────────
+
+    /// Compare every tracked property of an instance to its master and
+    /// populate `rec.overrides` accordingly.  Call after any property change
+    /// on an instance layer.
+    pub fn capture_overrides(&mut self, instance_id: Uuid) {
+        let master_id = match self.layers.get(&instance_id) {
+            Some(r) => r.master_id,
+            None    => return,
+        };
+        let master_id = match master_id { Some(m) => m, None => return };
+        // Read master props
+        let (mfill, msc, msw, mcr, mop, mvis, meff, mbm, msize) =
+            match self.layers.get(&master_id) {
+                Some(m) => (m.fill, m.stroke_color, m.stroke_width, m.corner_radii,
+                            m.opacity, m.visible, m.effects.clone(), m.blend_mode.clone(),
+                            (m.width, m.height)),
+                None    => return,
+            };
+        let mtext = match self.layers.get(&master_id) {
+            Some(m) => if let LayerType::Text(t) = &m.layer_type { Some(t.clone()) } else { None },
+            None    => None,
+        };
+        let rec = match self.layers.get_mut(&instance_id) {
+            Some(r) => r,
+            None    => return,
+        };
+        rec.overrides.fill         = if rec.fill         != mfill  { Some(rec.fill)         } else { None };
+        rec.overrides.stroke_color = if rec.stroke_color != msc    { Some(rec.stroke_color)  } else { None };
+        rec.overrides.stroke_width = if (rec.stroke_width - msw).abs() > f32::EPSILON { Some(rec.stroke_width) } else { None };
+        rec.overrides.corner_radii = if rec.corner_radii != mcr    { Some(rec.corner_radii) } else { None };
+        rec.overrides.opacity      = if (rec.opacity - mop).abs() > f32::EPSILON { Some(rec.opacity)  } else { None };
+        rec.overrides.visible      = if rec.visible      != mvis   { Some(rec.visible)      } else { None };
+        rec.overrides.blend_mode   = if rec.blend_mode   != mbm    { Some(rec.blend_mode.clone()) } else { None };
+        rec.overrides.effects      = if rec.effects      != meff   { Some(rec.effects.clone())    } else { None };
+        rec.overrides.size         = if (rec.width, rec.height) != msize { Some((rec.width, rec.height)) } else { None };
+        rec.overrides.text_content = match (&rec.layer_type, mtext) {
+            (LayerType::Text(t), Some(mt)) if *t != mt => Some(t.clone()),
+            _ => None,
+        };
+    }
+
+    /// Reset a single override field by re-reading its value from the master.
+    pub fn reset_override_fill(&mut self, id: Uuid) {
+        if let Some(mid) = self.layers.get(&id).and_then(|r| r.master_id) {
+            if let Some(v) = self.layers.get(&mid).map(|m| m.fill) {
+                if let Some(r) = self.layers.get_mut(&id) { r.fill = v; r.overrides.fill = None; }
+            }
+        }
+        self.push_history("reset fill override");
+    }
+
+    pub fn reset_override_stroke(&mut self, id: Uuid) {
+        if let Some(mid) = self.layers.get(&id).and_then(|r| r.master_id) {
+            let vals = self.layers.get(&mid).map(|m| (m.stroke_color, m.stroke_width));
+            if let (Some((sc, sw)), Some(r)) = (vals, self.layers.get_mut(&id)) {
+                r.stroke_color = sc; r.stroke_width = sw;
+                r.overrides.stroke_color = None; r.overrides.stroke_width = None;
+            }
+        }
+        self.push_history("reset stroke override");
+    }
+
+    pub fn reset_override_opacity(&mut self, id: Uuid) {
+        if let Some(mid) = self.layers.get(&id).and_then(|r| r.master_id) {
+            if let Some(v) = self.layers.get(&mid).map(|m| m.opacity) {
+                if let Some(r) = self.layers.get_mut(&id) { r.opacity = v; r.overrides.opacity = None; }
+            }
+        }
+        self.push_history("reset opacity override");
+    }
+
+    pub fn reset_override_corner_radii(&mut self, id: Uuid) {
+        if let Some(mid) = self.layers.get(&id).and_then(|r| r.master_id) {
+            if let Some(v) = self.layers.get(&mid).map(|m| m.corner_radii) {
+                if let Some(r) = self.layers.get_mut(&id) { r.corner_radii = v; r.overrides.corner_radii = None; }
+            }
+        }
+        self.push_history("reset corner radius override");
+    }
+
+    pub fn reset_override_effects(&mut self, id: Uuid) {
+        if let Some(mid) = self.layers.get(&id).and_then(|r| r.master_id) {
+            if let Some(v) = self.layers.get(&mid).map(|m| m.effects.clone()) {
+                if let Some(r) = self.layers.get_mut(&id) { r.effects = v; r.overrides.effects = None; }
+            }
+        }
+        self.push_history("reset effects override");
+    }
+
+    pub fn reset_override_blend_mode(&mut self, id: Uuid) {
+        if let Some(mid) = self.layers.get(&id).and_then(|r| r.master_id) {
+            if let Some(v) = self.layers.get(&mid).map(|m| m.blend_mode.clone()) {
+                if let Some(r) = self.layers.get_mut(&id) { r.blend_mode = v; r.overrides.blend_mode = None; }
+            }
+        }
+        self.push_history("reset blend mode override");
+    }
+
+    pub fn reset_override_visible(&mut self, id: Uuid) {
+        if let Some(mid) = self.layers.get(&id).and_then(|r| r.master_id) {
+            if let Some(v) = self.layers.get(&mid).map(|m| m.visible) {
+                if let Some(r) = self.layers.get_mut(&id) { r.visible = v; r.overrides.visible = None; }
+            }
+        }
+        self.push_history("reset visibility override");
+    }
+
+    /// Clear **all** overrides at once (same as `reset_overrides` but keeps position/name).
+    pub fn reset_all_overrides(&mut self, id: Uuid) {
+        let mid = match self.layers.get(&id).and_then(|r| r.master_id) {
+            Some(m) => m, None => return,
+        };
+        let snap = match self.layers.get(&mid).cloned() {
+            Some(s) => s, None => return,
+        };
+        if let Some(r) = self.layers.get_mut(&id) {
+            r.fill          = snap.fill;
+            r.stroke_color  = snap.stroke_color;
+            r.stroke_width  = snap.stroke_width;
+            r.corner_radii  = snap.corner_radii;
+            r.opacity       = snap.opacity;
+            r.visible       = snap.visible;
+            r.effects       = snap.effects;
+            r.blend_mode    = snap.blend_mode;
+            r.overrides     = Overrides::default();
+        }
+        self.push_history("reset all overrides");
     }
 
     /// overlaps the given world-space rectangle. Replaces the current selection.
