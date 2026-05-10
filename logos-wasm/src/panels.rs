@@ -903,6 +903,42 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     ui.painter().rect_filled(panel_rect, 0.0, Color32::from_rgb(20, 20, 20));
     ui.set_clip_rect(panel_rect);
 
+    // ── Master edit mode banner ─────────────────────────────────────────
+    if let Some(master_id) = state.editing_master_id {
+        let master_name = state.layers.get(&master_id)
+            .map(|r| if r.component_name.is_empty() { r.name.clone() } else { r.component_name.clone() })
+            .unwrap_or_else(|| "Component".into());
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            let banner_rect = ui.available_rect_before_wrap();
+            let h = 52.0;
+            let rect = Rect::from_min_size(banner_rect.min, vec2(banner_rect.width(), h));
+            ui.painter().rect_filled(rect, 6.0, Color32::from_rgba_unmultiplied(139, 92, 246, 28));
+            ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(167, 118, 255, 110)));
+            ui.allocate_ui_at_rect(rect.shrink2(vec2(10.0, 8.0)), |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("◆").size(13.0).color(Color32::from_rgb(167, 118, 255)).strong());
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(format!("Editing Master: {master_name}")).size(12.0).strong());
+                        ui.label(RichText::new("Changes propagate to instances unless overridden").size(9.5).color(C_MUTED));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.small_button("Done").clicked() {
+                            state.exit_master_edit_mode();
+                        }
+                        if state.return_to_instance_id.is_some() {
+                            if ui.small_button("Back to Instance").clicked() {
+                                state.exit_master_edit_mode();
+                            }
+                        }
+                    });
+                });
+            });
+        });
+        ui.add_space(56.0);
+    }
+
     // ── No selection ─────────────────────────────────────────────────────
     if state.selection.is_empty() {
         ui.add_space(12.0);
@@ -1020,7 +1056,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                     .min_size(vec2(90.0, 22.0)),
             ).on_hover_text("Select the master Component").clicked() {
                 if let Some(mid) = state.layers.get(&id).and_then(|r| r.master_id) {
-                    state.select_only(mid);
+                    state.enter_master_edit_mode(mid, Some(id));
                 }
             }
             ui.add_space(6.0);

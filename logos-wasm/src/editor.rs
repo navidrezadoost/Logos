@@ -106,7 +106,11 @@ impl eframe::App for LogosEditor {
                     state.delete_selected();
                 }
                 if i.key_pressed(Key::Escape) {
-                    state.clear_selection();
+                    if state.editing_master_id.is_some() {
+                        state.exit_master_edit_mode();
+                    } else {
+                        state.clear_selection();
+                    }
                     state.pen_in_progress = None;  // cancel any in-progress pen path
                     state.tool = Tool::Select;
                 }
@@ -121,10 +125,14 @@ impl eframe::App for LogosEditor {
                         }
                         state.tool = Tool::Select;
                     } else if let Some(&sel_id) = state.selection.first() {
-                        // Enter on a Frame → drill in (select first child)
-                        let children = state.frame_children(sel_id);
-                        if !children.is_empty() {
-                            state.select_only(children[0]);
+                        if let Some(mid) = state.find_master(sel_id) {
+                            state.enter_master_edit_mode(mid, Some(sel_id));
+                        } else {
+                            // Enter on a Frame → drill in (select first child)
+                            let children = state.frame_children(sel_id);
+                            if !children.is_empty() {
+                                state.select_only(children[0]);
+                            }
                         }
                     }
                 }
@@ -1287,6 +1295,36 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         }
     }
 
+    if let Some(master_id) = state.editing_master_id {
+        if let Some(master) = state.layers.get(&master_id) {
+            let master_name = if master.component_name.is_empty() {
+                master.name.as_str()
+            } else {
+                master.component_name.as_str()
+            };
+            let (msx, msy) = state.world_to_screen(master.x, master.y);
+            let mrect = Rect::from_min_size(
+                pos2(origin.x + msx, origin.y + msy),
+                vec2(master.width * state.zoom, master.height * state.zoom),
+            );
+            painter.rect_stroke(
+                mrect.expand(4.0),
+                8.0,
+                Stroke::new(2.0, Color32::from_rgba_unmultiplied(167, 118, 255, 210)),
+            );
+            let badge = Rect::from_min_size(resp.rect.left_top() + vec2(12.0, 12.0), vec2(188.0, 28.0));
+            painter.rect_filled(badge, 6.0, Color32::from_rgba_unmultiplied(139, 92, 246, 34));
+            painter.rect_stroke(badge, 6.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(167, 118, 255, 110)));
+            painter.text(
+                badge.left_center() + vec2(10.0, 0.0),
+                Align2::LEFT_CENTER,
+                format!("◆ Editing Master: {master_name}"),
+                FontId::proportional(11.0),
+                Color32::from_rgb(225, 214, 255),
+            );
+        }
+    }
+
     // ── Rubber-band marquee rectangle ──────────────────────────────────────
     if let Some((rx0, ry0, rx1, ry1)) = state.drag.rubber_band {
         let (sx0, sy0) = state.world_to_screen(rx0, ry0);
@@ -2391,6 +2429,13 @@ fn handle_tool_input(
                 }
                 state.tool = Tool::Select;
                 return;
+            }
+
+            if let Some(id) = state.hit_test(wx, wy) {
+                if let Some(mid) = state.find_master(id) {
+                    state.enter_master_edit_mode(mid, Some(id));
+                    return;
+                }
             }
 
 

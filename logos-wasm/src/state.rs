@@ -233,6 +233,10 @@ pub struct LayerRecord {
     pub current_variant: Option<String>,
     /// Per-property selections on this instance. Kept in sync when a variant is applied.
     pub variant_values: std::collections::HashMap<String, String>,
+    /// True only for the master currently being edited in focused component mode.
+    pub is_editing_master: bool,
+    /// Human-readable component name shown in banners and instance labels.
+    pub component_name: String,
 }
 
 // ── Constraints ───────────────────────────────────────────────────────────────
@@ -473,6 +477,8 @@ impl LayerRecord {
             variant_set: std::collections::HashMap::new(),
             current_variant: None,
             variant_values: std::collections::HashMap::new(),
+            is_editing_master: false,
+            component_name: String::new(),
         }
     }
 
@@ -642,6 +648,11 @@ pub struct EditorState {
     /// Used to populate the “Local Components” panel strip.
     pub component_ids: Vec<Uuid>,
 
+    /// Currently focused master component in edit mode.
+    pub editing_master_id: Option<Uuid>,
+    /// Instance to restore when the user exits master edit mode.
+    pub return_to_instance_id: Option<Uuid>,
+
     // ── Blend mode hover-preview ──────────────────────────────────────
     // Set each frame by the Effects panel when the user hovers a blend mode
     // option.  Cleared at the start of every right-panel frame so it
@@ -727,6 +738,8 @@ impl EditorState {
             rename_buf:     String::new(),
             layer_search:   String::new(),
             component_ids:  Vec::new(),
+            editing_master_id: None,
+            return_to_instance_id: None,
             show_grid:     true,
             snap_to_grid:  false,
             grid_size:     8.0,
@@ -849,6 +862,7 @@ impl EditorState {
         if let Some(rec) = self.layers.get_mut(&id) {
             rec.layer_type = LayerType::Component;
             rec.master_id  = None;
+            rec.component_name = rec.name.clone();
         }
         if !self.component_ids.contains(&id) {
             self.component_ids.push(id);
@@ -876,6 +890,7 @@ impl EditorState {
             rec.id        = remap[&rec.id];
             rec.parent_id = rec.parent_id.and_then(|p| remap.get(&p).copied());
             rec.master_id = Some(master_id);
+            rec.is_editing_master = false;
             rec
         }).collect();
 
@@ -884,6 +899,9 @@ impl EditorState {
             root.layer_type = LayerType::ComponentInstance { master_id };
             root.x += 20.0;
             root.y += 20.0;
+            if root.component_name.is_empty() {
+                root.component_name = root.name.clone();
+            }
         }
 
         let root_id = cloned[0].id;
@@ -1013,6 +1031,142 @@ impl EditorState {
 
     pub fn is_component_instance(&self, id: Uuid) -> bool {
         matches!(self.layers.get(&id), Some(r) if matches!(r.layer_type, LayerType::ComponentInstance { .. }))
+    }
+
+    pub fn find_master(&self, instance_id: Uuid) -> Option<Uuid> {
+        self.layers.get(&instance_id).and_then(|r| r.master_id)
+    }
+
+    pub fn component_instances_of(&self, master_id: Uuid) -> Vec<Uuid> {
+        self.layers.iter()
+            .filter(|(_, r)| {
+                r.master_id == Some(master_id)
+                    && matches!(r.layer_type, LayerType::ComponentInstance { .. })
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    pub fn enter_master_edit_mode(&mut self, master_id: Uuid, return_instance: Option<Uuid>) {
+        if let Some(old_id) = self.editing_master_id {
+            if let Some(old) = self.layers.get_mut(&old_id) {
+                old.is_editing_master = false;
+            }
+        }
+        self.editing_master_id = Some(master_id);
+        self.return_to_instance_id = return_instance;
+        if let Some(master) = self.layers.get_mut(&master_id) {
+            master.is_editing_master = true;
+            if master.component_name.is_empty() {
+                master.component_name = master.name.clone();
+            }
+        }
+        self.select_only(master_id);
+    }
+
+    pub fn exit_master_edit_mode(&mut self) {
+        if let Some(master_id) = self.editing_master_id {
+            let instance_ids = self.component_instances_of(master_id);
+            for iid in instance_ids {
+                self.refresh_instance_from_master(iid);
+            }
+            if let Some(master) = self.layers.get_mut(&master_id) {
+                master.is_editing_master = false;
+            }
+        }
+        let return_instance = self.return_to_instance_id.take();
+        self.editing_master_id = None;
+        if let Some(instance_id) = return_instance.filter(|id| self.layers.contains_key(id)) {
+            self.select_only(instance_id);
+        }
+    }
+
+    pub fn is_editing_master_layer(&self, id: Uuid) -> bool {
+        self.editing_master_id == Some(id)
+    }
+
+    pub fn refresh_instance_from_master(&mut self, instance_id: Uuid) {
+        let master_id = match self.layers.get(&instance_id) {
+            Some(LayerRecord { layer_type: LayerType::ComponentInstance { master_id }, .. }) => *master_id,
+            _ => return,
+        };
+
+        let (inst_x, inst_y, inst_name, inst_parent, overrides, current_variant, variant_values, component_name) =
+            match self.layers.get(&instance_id) {
+                Some(r) => (
+                    r.x,
+                    r.y,
+                    r.name.clone(),
+                    r.parent_id,
+                    r.overrides.clone(),
+                    r.current_variant.clone(),
+                    r.variant_values.clone(),
+                    r.component_name.clone(),
+                ),
+                None => return,
+            };
+
+        let old_children: Vec<Uuid> = self.collect_subtree(instance_id)
+            .into_iter().map(|r| r.id).filter(|&id| id != instance_id).collect();
+        for cid in old_children {
+            self.layers.remove(&cid);
+            for page in &mut self.pages {
+                page.layers.retain(|&id| id != cid);
+            }
+        }
+
+        let master_children: Vec<LayerRecord> = self.collect_subtree(master_id)
+            .into_iter().filter(|r| r.id != master_id).collect();
+
+        let mut remap: std::collections::HashMap<Uuid, Uuid> = std::collections::HashMap::new();
+        remap.insert(master_id, instance_id);
+        for rec in &master_children {
+            remap.insert(rec.id, Uuid::new_v4());
+        }
+
+        for mut rec in master_children {
+            rec.id        = remap[&rec.id];
+            rec.parent_id = rec.parent_id.and_then(|p| remap.get(&p).copied());
+            rec.master_id = Some(master_id);
+            rec.is_editing_master = false;
+            self.layers.insert(rec.id, rec);
+        }
+
+        let master_snap = match self.layers.get(&master_id).cloned() {
+            Some(r) => r,
+            None => return,
+        };
+
+        if let Some(rec) = self.layers.get_mut(&instance_id) {
+            *rec = master_snap;
+            rec.id = instance_id;
+            rec.parent_id = inst_parent;
+            rec.layer_type = LayerType::ComponentInstance { master_id };
+            rec.master_id = Some(master_id);
+            rec.is_editing_master = false;
+            rec.x = inst_x;
+            rec.y = inst_y;
+            rec.name = inst_name;
+            rec.component_name = if component_name.is_empty() { rec.name.clone() } else { component_name };
+            rec.current_variant = current_variant;
+            rec.variant_values = variant_values;
+            rec.overrides = overrides.clone();
+
+            if let Some(v) = overrides.fill { rec.fill = v; }
+            if let Some(v) = overrides.stroke_color { rec.stroke_color = v; }
+            if let Some(v) = overrides.stroke_width { rec.stroke_width = v; }
+            if let Some(v) = overrides.corner_radii { rec.corner_radii = v; }
+            if let Some(v) = overrides.opacity { rec.opacity = v; }
+            if let Some(v) = overrides.visible { rec.visible = v; }
+            if let Some(v) = overrides.effects.clone() { rec.effects = v; }
+            if let Some(v) = overrides.blend_mode.clone() { rec.blend_mode = v; }
+            if let Some((w, h)) = overrides.size { rec.width = w; rec.height = h; }
+            if let Some(text) = overrides.text_content.clone() {
+                if matches!(rec.layer_type, LayerType::Text(_)) {
+                    rec.layer_type = LayerType::Text(text);
+                }
+            }
+        }
     }
 
     // ── Property Override Helpers ─────────────────────────────────────────────
@@ -2439,6 +2593,12 @@ impl EditorState {
     /// Snapshot the current state AFTER a mutation so it can be undone.
     /// `history_idx` always points to the current snapshot in `history`.
     pub fn push_history(&mut self, label: impl Into<String>) {
+        if let Some(master_id) = self.editing_master_id.filter(|id| self.layers.contains_key(id)) {
+            let instance_ids = self.component_instances_of(master_id);
+            for iid in instance_ids {
+                self.refresh_instance_from_master(iid);
+            }
+        }
         // Drop any redone-future snapshots
         if self.history_idx + 1 < self.history.len() {
             self.history.truncate(self.history_idx + 1);
