@@ -492,7 +492,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             .map(|&id| (id, 0_usize)).collect();
 
         while let Some((id, depth)) = stack.pop() {
-            let (icon, name, visible, selected, is_frame, expanded) = {
+            let (icon, name, visible, selected, is_frame, expanded, is_mask) = {
                 let rec = match state.layers.get(&id) {
                     Some(r) => r,
                     None => continue,
@@ -500,7 +500,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 let is_frame = matches!(rec.layer_type, LayerType::Frame)
                     || matches!(rec.layer_type, LayerType::Group);
                 (rec.type_icon(), rec.name.clone(), rec.visible, state.is_selected(id),
-                 is_frame, rec.frame_expanded)
+                 is_frame, rec.frame_expanded, rec.is_mask)
             };
 
             ui.horizontal(|ui| {
@@ -524,17 +524,24 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     to_toggle_vis = Some(id);
                 }
 
-                // Icon + name
-                let label = format!("{icon}  {name}");
-                let text = if selected {
-                    RichText::new(label).strong().color(Color32::from_rgb(133, 96, 255))
+                // Icon + name (with mask badge)
+                let mask_tag = if is_mask { " [M]" } else { "" };
+                let label = format!("{icon}  {name}{mask_tag}");
+                let label_color = if is_mask && selected {
+                    Color32::from_rgb(255, 100, 220)
+                } else if is_mask {
+                    Color32::from_rgb(255, 60, 200)
+                } else if selected {
+                    Color32::from_rgb(133, 96, 255)
                 } else if !visible {
-                    RichText::new(label).color(Color32::GRAY)
-                } else if depth > 0 {
-                    RichText::new(label).size(12.0)
+                    Color32::GRAY
                 } else {
-                    RichText::new(label)
+                    Color32::WHITE
                 };
+                let base = RichText::new(label)
+                    .color(label_color)
+                    .size(if depth > 0 { 12.0 } else { 13.0 });
+                let text = if selected || is_mask { base.strong() } else { base };
 
                 let resp = ui.add(Label::new(text).sense(Sense::click()))
                     .on_hover_text("Click to select • Double-click to rename");

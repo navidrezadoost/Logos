@@ -158,6 +158,14 @@ impl eframe::App for LogosEditor {
             if !typing && i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(Key::G) {
                 state.wrap_in_frame();
             }
+            // Ctrl+G — Group selection
+            if !typing && i.modifiers.ctrl && !i.modifiers.alt && !i.modifiers.shift && i.key_pressed(Key::G) {
+                state.wrap_in_group();
+            }
+            // Ctrl+Alt+M — Toggle mask on selected layer
+            if !typing && i.modifiers.ctrl && i.modifiers.alt && i.key_pressed(Key::M) {
+                state.toggle_mask_selected();
+            }
             // Shift+Ctrl+G — Unwrap / Ungroup selected Frame
             if !typing && i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(Key::G) {
                 let ids: Vec<uuid::Uuid> = state.selection.clone();
@@ -916,6 +924,33 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             hover_painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(30, 180, 255));
         }
 
+        // Mask indicator — dashed magenta border + "M" badge
+        if state.layers.get(&id).map(|r| r.is_mask).unwrap_or(false) {
+            let dash_period = 8.0_f32;
+            let dash_len    = 5.0_f32;
+            let mask_col    = Color32::from_rgb(255, 60, 200);
+            let draw_dash_line = |p0: Pos2, p1: Pos2| {
+                let d = p1 - p0;
+                let len = d.length().max(0.001);
+                let dir = d / len;
+                let mut t = 0.0_f32;
+                while t < len {
+                    let t1 = (t + dash_len).min(len);
+                    painter.line_segment([p0 + dir * t, p0 + dir * t1], Stroke::new(1.5, mask_col));
+                    t += dash_period;
+                }
+            };
+            let tl = rect.left_top();  let tr = rect.right_top();
+            let bl = rect.left_bottom(); let br = rect.right_bottom();
+            draw_dash_line(tl, tr); draw_dash_line(tr, br);
+            draw_dash_line(br, bl); draw_dash_line(bl, tl);
+            let badge_pos = rect.right_top() + vec2(2.0, -14.0);
+            painter.rect(Rect::from_min_size(badge_pos, vec2(14.0, 12.0)), Rounding::same(2.0),
+                mask_col, Stroke::NONE);
+            painter.text(badge_pos + vec2(3.0, 0.0), Align2::LEFT_TOP, "M",
+                FontId::monospace(10.0), Color32::WHITE);
+        }
+
         // Selection highlight
         if is_selected {
             if rotation.abs() > 0.001 {
@@ -1299,6 +1334,26 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             let is_locked  = state.layers.get(&id).map(|r| r.locked).unwrap_or(false);
             let has_al     = state.layers.get(&id).map(|r| r.auto_layout.is_some()).unwrap_or(false);
 
+            // ── Clipboard at top ──
+            if ui.button("Copy                Ctrl+C").clicked() {
+                state.select_only(id);
+                state.copy_selected();
+                ui.close_menu();
+            }
+            if ui.button("Paste Here").clicked() {
+                let (wx, wy) = state.right_click_world_pos;
+                state.paste_here(wx, wy);
+                ui.close_menu();
+            }
+            if !state.clipboard.is_empty() {
+                if ui.button("Paste to Replace  Ctrl+Shift+R").clicked() {
+                    state.select_only(id);
+                    state.paste_to_replace();
+                    ui.close_menu();
+                }
+            }
+            ui.separator();
+
             ui.label(RichText::new(&name).strong());
             ui.separator();
 
@@ -1378,13 +1433,13 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     state.ungroup_frame(id);
                     ui.close_menu();
                 }
-                if is_frame && !has_al {
+                if !has_al {
                     if ui.button("Add Auto Layout       Shift+A").clicked() {
                         state.select_only(id);
                         state.add_auto_layout_to_selection();
                         ui.close_menu();
                     }
-                } else if has_al {
+                } else {
                     if ui.button("Remove Auto Layout").clicked() {
                         if let Some(r) = state.layers.get_mut(&id) {
                             r.auto_layout = None;
@@ -1398,8 +1453,32 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     ui.close_menu();
                 }
             }
+            // Group selection (works on any layer type)
+            if ui.button("Group Selection       Ctrl+G").clicked() {
+                state.select_only(id);
+                state.wrap_in_group();
+                ui.close_menu();
+            }
+            ui.separator();
+            // Mask
+            let is_mask = state.layers.get(&id).map(|r| r.is_mask).unwrap_or(false);
+            let mask_label = if is_mask { "Remove Mask   Ctrl+Alt+M" } else { "Use as Mask   Ctrl+Alt+M" };
+            if ui.button(mask_label).clicked() {
+                state.select_only(id);
+                state.toggle_mask_selected();
+                ui.close_menu();
+            }
         } else {
-            if ui.button("Paste").clicked() { ui.close_menu(); }
+            // Empty canvas right-click
+            if !state.clipboard.is_empty() {
+                if ui.button("Paste Here").clicked() {
+                    let (wx, wy) = state.right_click_world_pos;
+                    state.paste_here(wx, wy);
+                    ui.close_menu();
+                }
+                ui.separator();
+            }
+            if ui.button("Paste").clicked() { state.paste_clipboard(); ui.close_menu(); }
             ui.separator();
             if ui.button("Add Rectangle").clicked() {
                 let id = state.add_rect_layer("Rectangle", 100.0, 100.0, 120.0, 80.0, [0.4, 0.6, 1.0, 1.0]);
@@ -2913,6 +2992,7 @@ fn handle_tool_input(
     if resp.secondary_clicked() {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
+            state.right_click_world_pos = (wx, wy);
             *ctx_menu_layer = state.hit_test(wx, wy);
             if let Some(id) = *ctx_menu_layer {
                 if !state.is_selected(id) { state.select_only(id); }

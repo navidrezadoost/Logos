@@ -207,6 +207,9 @@ pub struct LayerRecord {
     pub layout_sizing_h: SizingMode,
     /// How this layer sizes itself on the vertical axis when its parent has Auto Layout.
     pub layout_sizing_v: SizingMode,
+    /// When `true` this layer acts as a luminance/alpha mask for all siblings
+    /// above it within the same parent container.
+    pub is_mask: bool,
 }
 
 // ── Constraints ───────────────────────────────────────────────────────────────
@@ -381,6 +384,7 @@ impl LayerRecord {
             constraints: Constraints::default(),
             layout_sizing_h: SizingMode::Fixed,
             layout_sizing_v: SizingMode::Fixed,
+            is_mask: false,
         }
     }
 
@@ -499,7 +503,9 @@ pub struct EditorState {
     pub selection:     Vec<Uuid>,
 
     // Clipboard (cut/copy/paste)
-    pub clipboard:     Vec<LayerRecord>,
+    pub clipboard:             Vec<LayerRecord>,
+    /// World-space coordinate of the last right-click (used by Paste Here).
+    pub right_click_world_pos: (f32, f32),
 
     // Active tool
     pub tool:          Tool,
@@ -608,7 +614,8 @@ impl EditorState {
             active_page: 0,
             layers:      HashMap::new(),
             selection:   vec![],
-            clipboard:   vec![],
+            clipboard:             vec![],
+            right_click_world_pos: (0.0, 0.0),
             tool:        Tool::Select,
             pan_x:       0.0,
             pan_y:       0.0,
@@ -1086,6 +1093,60 @@ impl EditorState {
         self.push_history("toggle lock");
     }
 
+    /// Toggle the `is_mask` flag on the selected layer.
+    /// When a layer is a mask, siblings above it within the same parent
+    /// are clipped to its shape.
+    pub fn toggle_mask_selected(&mut self) {
+        if let Some(&id) = self.selection.first() {
+            if let Some(r) = self.layers.get_mut(&id) {
+                r.is_mask = !r.is_mask;
+            }
+            self.push_history("toggle mask");
+        }
+    }
+
+    /// Wrap the current selection in a lightweight **Group** (no fill, no
+    /// clip, auto-resizes to children — exactly like Figma's Ctrl+G group).
+    pub fn wrap_in_group(&mut self) {
+        if self.selection.is_empty() { return; }
+        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get(&id) {
+                min_x = min_x.min(r.x);   min_y = min_y.min(r.y);
+                max_x = max_x.max(r.x + r.width);
+                max_y = max_y.max(r.y + r.height);
+            }
+        }
+        if min_x == f32::MAX { return; }
+        // Create a Group layer (transparent frame, no clip).
+        let mut group = LayerRecord::new_rect(min_x, min_y, max_x - min_x, max_y - min_y);
+        group.name        = "Group".into();
+        group.layer_type  = LayerType::Group;
+        group.fill        = [0.0; 4];      // fully transparent
+        group.stroke_width = 0.0;
+        group.clip_content = false;        // groups do not clip children
+        let gid = group.id;
+        // Insert at the first selected layer's page position.
+        let page = &mut self.pages[self.active_page];
+        let first_pos = page.layers.iter()
+            .position(|id| self.selection.contains(id))
+            .unwrap_or(page.layers.len());
+        page.layers.insert(first_pos, gid);
+        self.layers.insert(gid, group);
+        // Reparent selected layers with coordinate conversion.
+        let sel = self.selection.clone();
+        for &id in &sel {
+            if let Some(r) = self.layers.get_mut(&id) {
+                r.x -= min_x;
+                r.y -= min_y;
+                r.parent_id = Some(gid);
+            }
+        }
+        self.selection = vec![gid];
+        self.push_history("group");
+    }
+
     /// Add Auto Layout (with default settings) to selected Frame layers.
     /// Non-frame layers are ignored.
     pub fn add_auto_layout_to_selection(&mut self) {
@@ -1382,6 +1443,65 @@ impl EditorState {
         self.clipboard = self.selection.iter()
             .filter_map(|id| self.layers.get(id).cloned())
             .collect();
+    }
+
+    /// Paste at a specific world-space coordinate (e.g. the position the user right-clicked).
+    /// Each pasted layer is positioned so the top-left of the selection bounding box lands at `(wx, wy)`.
+    pub fn paste_here(&mut self, wx: f32, wy: f32) {
+        if self.clipboard.is_empty() { return; }
+        // Find bounding box origin of clipboard items.
+        let (clip_min_x, clip_min_y) = self.clipboard.iter()
+            .fold((f32::MAX, f32::MAX), |(ax, ay), r| (ax.min(r.x), ay.min(r.y)));
+        let dx = wx - clip_min_x;
+        let dy = wy - clip_min_y;
+        let mut new_ids = vec![];
+        let pastes: Vec<LayerRecord> = self.clipboard.clone();
+        for src in pastes {
+            let mut new = src.clone();
+            new.id   = Uuid::new_v4();
+            new.name = format!("{} paste", src.name);
+            new.x   += dx;
+            new.y   += dy;
+            let nid  = new.id;
+            self.pages[self.active_page].layers.push(nid);
+            self.layers.insert(nid, new);
+            new_ids.push(nid);
+        }
+        self.selection = new_ids;
+        self.push_history("paste here");
+    }
+
+    /// Replace the current selection with the clipboard content, preserving each
+    /// replaced layer's position and size.
+    pub fn paste_to_replace(&mut self) {
+        if self.clipboard.is_empty() || self.selection.is_empty() { return; }
+        let targets: Vec<Uuid> = self.selection.clone();
+        let pastes: Vec<LayerRecord> = self.clipboard.clone();
+        let mut new_ids = vec![];
+        for (i, &tid) in targets.iter().enumerate() {
+            let src = &pastes[i % pastes.len()];
+            // Inherit the *target's* position, size, parent, and name.
+            let (tx, ty, tw, th, tpid, tname) = self.layers.get(&tid)
+                .map(|r| (r.x, r.y, r.width, r.height, r.parent_id, r.name.clone()))
+                .unwrap_or((src.x, src.y, src.width, src.height, None, src.name.clone()));
+            let mut new = src.clone();
+            new.id        = Uuid::new_v4();
+            new.name      = tname;
+            new.x         = tx;  new.y      = ty;
+            new.width     = tw;  new.height = th;
+            new.parent_id = tpid;
+            // Insert at the position of the target in page order.
+            let page = &mut self.pages[self.active_page];
+            let pos = page.layers.iter().position(|&id| id == tid).unwrap_or(page.layers.len());
+            self.layers.remove(&tid);
+            page.layers.retain(|&id| id != tid);
+            let nid = new.id;
+            page.layers.insert(pos, nid);
+            self.layers.insert(nid, new);
+            new_ids.push(nid);
+        }
+        self.selection = new_ids;
+        self.push_history("paste to replace");
     }
 
     pub fn cut_selected(&mut self) {
