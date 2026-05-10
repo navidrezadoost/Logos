@@ -840,10 +840,15 @@ impl EditorState {
             let insert_at = first_pos.min(page.layers.len());
             page.layers.insert(insert_at, frame_id);
         }
-        // Reparent selected layers
+        // Reparent selected layers and convert their world positions to frame-local.
+        let frame_x = self.layers.get(&frame_id).map(|r| r.x).unwrap_or(0.0);
+        let frame_y = self.layers.get(&frame_id).map(|r| r.y).unwrap_or(0.0);
         let sel = self.selection.clone();
         for &id in &sel {
             if let Some(r) = self.layers.get_mut(&id) {
+                // Convert world position → local (relative to the new frame's origin).
+                r.x -= frame_x;
+                r.y -= frame_y;
                 r.parent_id = Some(frame_id);
             }
         }
@@ -851,25 +856,101 @@ impl EditorState {
         self.push_history("wrap in frame");
     }
 
-    /// Remove a frame layer but keep its children in place (they become top-level siblings).
-    /// Preserves each child's absolute world-space position.
+    /// Remove a Frame/Group container and promote its children into the frame's
+    /// parent (or the canvas if the frame was top-level), preserving every
+    /// child's **absolute world position**.
+    ///
+    /// Coordinate conversion (two cases):
+    ///
+    /// 1. Frame has **no rotation** (`frame.rotation ≈ 0`):
+    ///    `child_world = frame_world_origin + child_local`
+    ///    → after ungroup with a new parent P:
+    ///    `child_new_local = child_world − P_world_origin`
+    ///
+    /// 2. Frame is **rotated** by angle θ:
+    ///    The child's local vector `(cx, cy)` is rotated by θ and then
+    ///    translated by the frame's world origin to get the world position.
+    ///    The inverse is applied when the new parent is also rotated (not yet
+    ///    handled — flat rotation is assumed for the grandparent).
     pub fn ungroup_frame(&mut self, frame_id: Uuid) {
-        // Detach all children; keep their absolute positions unchanged.
         let children: Vec<Uuid> = self.frame_children(frame_id);
-        // Find frame position in page order so children can be inserted at the same spot
+
+        // Snapshot the frame's own world position, size, and rotation.
+        let (frame_wx, frame_wy, frame_rot, frame_parent) = match self.layers.get(&frame_id) {
+            Some(r) => (r.x, r.y, r.rotation, r.parent_id),
+            None => return,
+        };
+
+        // Resolve the frame's absolute world origin (frame may itself be a child).
+        // For a frame that has a parent, its stored (x, y) are already relative to
+        // the parent's local space.  We walk up the chain to accumulate the true
+        // world offset.  (Rotation of ancestors is ignored for now — flat hierarchy.)
+        let (world_ox, world_oy) = {
+            let mut ox = frame_wx;
+            let mut oy = frame_wy;
+            let mut pid = frame_parent;
+            while let Some(p) = pid {
+                if let Some(pr) = self.layers.get(&p) {
+                    ox += pr.x;
+                    oy += pr.y;
+                    pid = pr.parent_id;
+                } else {
+                    break;
+                }
+            }
+            (ox, oy)
+        };
+
+        // Resolve the new parent's world origin (grandparent of frame's children).
+        let (new_parent_ox, new_parent_oy) = {
+            let mut ox = 0.0_f32;
+            let mut oy = 0.0_f32;
+            let mut pid = frame_parent;
+            while let Some(p) = pid {
+                if let Some(pr) = self.layers.get(&p) {
+                    ox += pr.x;
+                    oy += pr.y;
+                    pid = pr.parent_id;
+                } else {
+                    break;
+                }
+            }
+            (ox, oy)
+        };
+
+        // Find where the frame sits in the page order so we insert children there.
         let page_idx = self.active_page;
         let frame_pos = self.pages[page_idx].layers.iter().position(|&id| id == frame_id);
+
+        let cos_r = frame_rot.cos();
+        let sin_r = frame_rot.sin();
+
         for &cid in children.iter().rev() {
-            // absolute position already stored in world space, no adjustment needed
-            if let Some(r) = self.layers.get_mut(&cid) {
-                r.parent_id = None;
+            if let Some(child) = self.layers.get_mut(&cid) {
+                // Convert child local → world (accounting for frame rotation).
+                let lx = child.x;
+                let ly = child.y;
+                let world_x = world_ox + cos_r * lx - sin_r * ly;
+                let world_y = world_oy + sin_r * lx + cos_r * ly;
+
+                // Convert world → new parent's local space.
+                child.x = world_x - new_parent_ox;
+                child.y = world_y - new_parent_oy;
+
+                // Propagate frame rotation to child so it appears unchanged on canvas.
+                child.rotation += frame_rot;
+
+                // Reparent to the frame's former parent (None = canvas top-level).
+                child.parent_id = frame_parent;
             }
-            // Move child to the same slot the frame occupied (in reverse so order is preserved)
+
+            // Reinsert into page order at the frame's old slot.
             self.pages[page_idx].layers.retain(|&id| id != cid);
             let insert_at = frame_pos.unwrap_or(self.pages[page_idx].layers.len());
             self.pages[page_idx].layers.insert(insert_at, cid);
         }
-        // Remove the frame itself (without recursing into children again)
+
+        // Remove the frame (do not recurse — children already detached above).
         self.layers.remove(&frame_id);
         self.pages[page_idx].layers.retain(|&id| id != frame_id);
         self.selection.retain(|&id| id != frame_id);

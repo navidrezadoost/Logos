@@ -2827,10 +2827,43 @@ fn handle_tool_input(
                                 }
                             }
                         }
-                        // Update parent: detach if not inside any frame; nest if inside one
+                        // Update parent: detach if not inside any frame; nest if inside one.
+                        // When parent changes we must convert the layer's position:
+                        //   old_parent_local → world → new_parent_local
                         let current_parent = state.layers.get(&mid).and_then(|r| r.parent_id);
                         if best != current_parent {
+                            // 1. Build the layer's current world position by walking up the old parent chain.
+                            let (old_wx, old_wy) = {
+                                let mut ox = state.layers.get(&mid).map(|r| r.x).unwrap_or(0.0);
+                                let mut oy = state.layers.get(&mid).map(|r| r.y).unwrap_or(0.0);
+                                let mut pid = current_parent;
+                                while let Some(p) = pid {
+                                    if let Some(pr) = state.layers.get(&p) {
+                                        ox += pr.x; oy += pr.y;
+                                        pid = pr.parent_id;
+                                    } else { break; }
+                                }
+                                (ox, oy)
+                            };
+                            // 2. Subtract new parent's world origin to get new local coords.
+                            let (new_ox, new_oy) = match best {
+                                Some(nid) => {
+                                    let mut ox = state.layers.get(&nid).map(|r| r.x).unwrap_or(0.0);
+                                    let mut oy = state.layers.get(&nid).map(|r| r.y).unwrap_or(0.0);
+                                    let mut pid = state.layers.get(&nid).and_then(|r| r.parent_id);
+                                    while let Some(p) = pid {
+                                        if let Some(pr) = state.layers.get(&p) {
+                                            ox += pr.x; oy += pr.y;
+                                            pid = pr.parent_id;
+                                        } else { break; }
+                                    }
+                                    (ox, oy)
+                                }
+                                None => (0.0, 0.0),
+                            };
                             if let Some(r) = state.layers.get_mut(&mid) {
+                                r.x = old_wx - new_ox;
+                                r.y = old_wy - new_oy;
                                 r.parent_id = best;
                             }
                         }
