@@ -218,6 +218,21 @@ pub struct LayerRecord {
     /// Property-level overrides (only meaningful on ComponentInstance root layers).
     /// Each `Some` field diverges from the master component value.
     pub overrides: Overrides,
+
+    // ── Variant System ────────────────────────────────────────────────────────
+    //  Master-only fields:
+    /// Property names defined on this Component (e.g. ["State", "Size"]).
+    /// Only populated on `LayerType::Component` roots.
+    pub variant_properties: Vec<String>,
+    /// Named variants: variant_name → {property → value}.
+    /// e.g. {"Default" → {"State":"Default","Size":"Medium"},
+    ///        "Hover"   → {"State":"Hover",  "Size":"Medium"} }
+    pub variant_set: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+    //  Instance-only fields:
+    /// The name of the currently applied variant (must exist in master's `variant_set`).
+    pub current_variant: Option<String>,
+    /// Per-property selections on this instance. Kept in sync when a variant is applied.
+    pub variant_values: std::collections::HashMap<String, String>,
 }
 
 // ── Constraints ───────────────────────────────────────────────────────────────
@@ -454,6 +469,10 @@ impl LayerRecord {
             is_mask: false,
             master_id: None,
             overrides: Overrides::default(),
+            variant_properties: Vec::new(),
+            variant_set: std::collections::HashMap::new(),
+            current_variant: None,
+            variant_values: std::collections::HashMap::new(),
         }
     }
 
@@ -1126,7 +1145,162 @@ impl EditorState {
         self.push_history("reset all overrides");
     }
 
-    /// overlaps the given world-space rectangle. Replaces the current selection.
+    // ── Variant System ────────────────────────────────────────────────────────
+
+    /// Add a new variant property name to a master Component.
+    /// e.g. `add_variant_property(id, "State")`.
+    pub fn add_variant_property(&mut self, master_id: Uuid, name: &str) {
+        if let Some(rec) = self.layers.get_mut(&master_id) {
+            let name = name.trim().to_owned();
+            if !name.is_empty() && !rec.variant_properties.contains(&name) {
+                // Add a default value for this property in every existing variant
+                for values in rec.variant_set.values_mut() {
+                    values.entry(name.clone()).or_insert_with(|| "Default".into());
+                }
+                rec.variant_properties.push(name);
+                self.push_history("add variant property");
+            }
+        }
+    }
+
+    /// Remove a variant property and all its stored values.
+    pub fn remove_variant_property(&mut self, master_id: Uuid, name: &str) {
+        if let Some(rec) = self.layers.get_mut(&master_id) {
+            rec.variant_properties.retain(|p| p != name);
+            for values in rec.variant_set.values_mut() {
+                values.remove(name);
+            }
+            self.push_history("remove variant property");
+        }
+    }
+
+    /// Add a new named variant to a master (with optional initial property values).
+    /// If `values` is empty, each property defaults to "Default".
+    pub fn add_variant(
+        &mut self,
+        master_id: Uuid,
+        variant_name: &str,
+        values: std::collections::HashMap<String, String>,
+    ) {
+        if let Some(rec) = self.layers.get_mut(&master_id) {
+            let variant_name = variant_name.trim().to_owned();
+            if variant_name.is_empty() { return; }
+            let mut map = values;
+            // Ensure every defined property has a value
+            for prop in &rec.variant_properties {
+                map.entry(prop.clone()).or_insert_with(|| "Default".into());
+            }
+            rec.variant_set.insert(variant_name, map);
+            self.push_history("add variant");
+        }
+    }
+
+    /// Remove a named variant from a master.
+    pub fn remove_variant(&mut self, master_id: Uuid, variant_name: &str) {
+        if let Some(rec) = self.layers.get_mut(&master_id) {
+            rec.variant_set.remove(variant_name);
+            self.push_history("remove variant");
+        }
+    }
+
+    /// Rename an existing variant on a master.
+    pub fn rename_variant(&mut self, master_id: Uuid, old_name: &str, new_name: &str) {
+        let new_name = new_name.trim().to_owned();
+        if new_name.is_empty() || old_name == new_name { return; }
+        if let Some(rec) = self.layers.get_mut(&master_id) {
+            if let Some(values) = rec.variant_set.remove(old_name) {
+                rec.variant_set.insert(new_name.clone(), values);
+            }
+        }
+        // Update any instances pointing to old_name
+        let instance_ids: Vec<Uuid> = self.layers.iter()
+            .filter(|(_, r)| r.master_id == Some(master_id)
+                && r.current_variant.as_deref() == Some(old_name))
+            .map(|(id, _)| *id)
+            .collect();
+        for iid in instance_ids {
+            if let Some(r) = self.layers.get_mut(&iid) {
+                r.current_variant = Some(new_name.clone());
+            }
+        }
+        self.push_history("rename variant");
+    }
+
+    /// Apply a named variant to a ComponentInstance.
+    /// Copies the variant's property values into `instance.variant_values` and into
+    /// `instance.current_variant`.  Also applies the corresponding visual overrides
+    /// if they were stored by `save_variant_overrides`.
+    pub fn apply_variant_to_instance(&mut self, instance_id: Uuid, variant_name: &str) {
+        let master_id = match self.layers.get(&instance_id) {
+            Some(r) if r.master_id.is_some() => r.master_id.unwrap(),
+            _ => return,
+        };
+        // Read variant property values from master
+        let values = match self.layers.get(&master_id) {
+            Some(m) => m.variant_set.get(variant_name).cloned(),
+            None    => return,
+        };
+        let values = match values { Some(v) => v, None => return };
+        // Apply to instance
+        if let Some(r) = self.layers.get_mut(&instance_id) {
+            r.current_variant = Some(variant_name.to_owned());
+            r.variant_values  = values;
+        }
+        self.push_history("apply variant");
+    }
+
+    /// Set one property→value on an instance without switching to a named variant.
+    pub fn set_instance_variant_value(
+        &mut self, instance_id: Uuid, property: &str, value: &str,
+    ) {
+        if let Some(r) = self.layers.get_mut(&instance_id) {
+            r.variant_values.insert(property.to_owned(), value.to_owned());
+            // Check if this now matches any named variant in the master
+            let mid = r.master_id;
+            drop(r);  // release mutable borrow
+            if let Some(mid) = mid {
+                if let Some(master) = self.layers.get(&mid) {
+                    let inst_values = self.layers.get(&instance_id)
+                        .map(|r| &r.variant_values).cloned()
+                        .unwrap_or_default();
+                    let matched = master.variant_set.iter()
+                        .find(|(_, v)| **v == inst_values)
+                        .map(|(k, _)| k.clone());
+                    if let Some(r) = self.layers.get_mut(&instance_id) {
+                        r.current_variant = matched;
+                    }
+                }
+            }
+        }
+        self.push_history("set variant value");
+    }
+
+    /// Collect the distinct values defined across all variants for a given property
+    /// on the master.  Used to populate dropdown options in the instance panel.
+    pub fn variant_values_for_property(&self, master_id: Uuid, property: &str) -> Vec<String> {
+        if let Some(master) = self.layers.get(&master_id) {
+            let mut vals: Vec<String> = master.variant_set.values()
+                .filter_map(|m| m.get(property))
+                .cloned()
+                .collect();
+            vals.sort();
+            vals.dedup();
+            return vals;
+        }
+        Vec::new()
+    }
+
+    /// Convenience: list of (variant_name, property_map) pairs sorted by name.
+    pub fn list_variants(&self, master_id: Uuid) -> Vec<(String, std::collections::HashMap<String, String>)> {
+        if let Some(master) = self.layers.get(&master_id) {
+            let mut v: Vec<_> = master.variant_set.iter()
+                .map(|(k, m)| (k.clone(), m.clone()))
+                .collect();
+            v.sort_by(|a, b| a.0.cmp(&b.0));
+            return v;
+        }
+        Vec::new()
+    }
     pub fn select_in_rect(&mut self, rx0: f32, ry0: f32, rx1: f32, ry1: f32) {
         let (rx0, rx1) = if rx0 < rx1 { (rx0, rx1) } else { (rx1, rx0) };
         let (ry0, ry1) = if ry0 < ry1 { (ry0, ry1) } else { (ry1, ry0) };

@@ -1036,6 +1036,89 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                 }
             }
         });
+
+        // ── Variant Switcher ─────────────────────────────────────────────────
+        let (master_id_opt, variant_props, current_var, var_values) = {
+            let rec = state.layers.get(&id).unwrap();
+            let mid = rec.master_id;
+            let props = mid
+                .and_then(|m| state.layers.get(&m))
+                .map(|m| m.variant_properties.clone())
+                .unwrap_or_default();
+            (mid, props, rec.current_variant.clone(), rec.variant_values.clone())
+        };
+        if master_id_opt.is_some() && !variant_props.is_empty() {
+            let mid = master_id_opt.unwrap();
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new("VARIANTS")
+                        .size(9.5).strong()
+                        .color(Color32::from_rgb(167, 118, 255))
+                );
+                // Show current variant name badge
+                if let Some(ref cv) = current_var {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("◇ {cv}"))
+                            .size(9.5)
+                            .color(Color32::from_rgb(139, 92, 246))
+                    );
+                }
+            });
+            ui.add_space(2.0);
+            // Named variant buttons
+            let variants = state.list_variants(mid);
+            if !variants.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(10.0);
+                    for (vname, _) in &variants {
+                        let is_active = current_var.as_deref() == Some(vname.as_str());
+                        let btn_color = if is_active {
+                            Color32::from_rgba_unmultiplied(139, 92, 246, 80)
+                        } else {
+                            Color32::from_rgb(20, 20, 20)
+                        };
+                        let vn = vname.clone();
+                        if ui.add(
+                            Button::new(RichText::new(vn.as_str()).size(10.0))
+                                .fill(btn_color)
+                                .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(139,92,246,120)))
+                                .rounding(4.0)
+                                .min_size(vec2(50.0, 20.0)),
+                        ).on_hover_text(format!("Apply variant: {vn}")).clicked() {
+                            state.apply_variant_to_instance(id, &vn);
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+            }
+            // Per-property value dropdowns
+            for prop in &variant_props {
+                let possible_values = state.variant_values_for_property(mid, prop);
+                let cur_val = var_values.get(prop).cloned().unwrap_or_default();
+                ui.horizontal(|ui| {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new(prop.as_str()).size(10.0).color(C_MUTED));
+                    ui.add_space(4.0);
+                    let prop_c = prop.clone();
+                    ComboBox::from_id_salt(format!("var_prop_{prop}"))
+                        .selected_text(cur_val.clone())
+                        .width(100.0)
+                        .show_ui(ui, |ui| {
+                            for val in &possible_values {
+                                let sel = cur_val == *val;
+                                if ui.selectable_label(sel, val).clicked() {
+                                    state.set_instance_variant_value(id, &prop_c, val);
+                                }
+                            }
+                        });
+                });
+            }
+            ui.add_space(4.0);
+        }
+
         ui.add_space(4.0);
         ui.separator();
     }
@@ -1099,6 +1182,142 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
         Stroke::new(1.0, C_BORDER),
     );
     ui.add_space(6.0);
+
+    // ════════════════════════════════════════════════════════════════════
+    // VARIANTS EDITOR  (only shown when a master Component is selected)
+    // ════════════════════════════════════════════════════════════════════
+    if state.is_component(id) && section_header(ui, "sec_variants", "Variants", true) {
+        ui.add_space(6.0);
+
+        // ── Variant Properties list ───────────────────────────────────────────
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.label(RichText::new("PROPERTIES").size(9.5).color(C_MUTED).strong());
+        });
+        ui.add_space(2.0);
+        let props: Vec<String> = state.layers.get(&id)
+            .map(|r| r.variant_properties.clone())
+            .unwrap_or_default();
+        let mut to_remove_prop: Option<String> = None;
+        for prop in &props {
+            ui.horizontal(|ui| {
+                ui.add_space(14.0);
+                ui.label(RichText::new(prop.as_str()).size(11.0));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    if ui.add(
+                        Button::new(RichText::new("✕").size(9.0))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0, C_BORDER))
+                            .rounding(3.0)
+                            .min_size(vec2(18.0, 18.0)),
+                    ).on_hover_text("Remove this property").clicked() {
+                        to_remove_prop = Some(prop.clone());
+                    }
+                });
+            });
+        }
+        if let Some(p) = to_remove_prop {
+            state.remove_variant_property(id, &p);
+        }
+        // Add new property
+        {
+            let buf_key = ui.make_persistent_id(format!("var_prop_buf_{id}"));
+            let mut buf: String = ui.ctx().data_mut(|d| d.get_temp_mut_or(buf_key, String::new()).clone());
+            ui.horizontal(|ui| {
+                ui.add_space(14.0);
+                let te = ui.add(
+                    TextEdit::singleline(&mut buf)
+                        .hint_text("New property…")
+                        .font(FontId::proportional(10.5))
+                        .desired_width(90.0)
+                        .frame(true)
+                );
+                if (te.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
+                    || ui.small_button("+ Add").clicked()
+                {
+                    if !buf.trim().is_empty() {
+                        state.add_variant_property(id, &buf);
+                        buf.clear();
+                    }
+                }
+                ui.ctx().data_mut(|d| d.insert_temp(buf_key, buf));
+            });
+        }
+
+        ui.add_space(8.0);
+
+        // ── Named Variants list ──────────────────────────────────────────────
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.label(RichText::new("NAMED VARIANTS").size(9.5).color(C_MUTED).strong());
+        });
+        ui.add_space(2.0);
+        let variants = state.list_variants(id);
+        let mut to_remove_var: Option<String> = None;
+        let var_props_count = state.layers.get(&id)
+            .map(|r| r.variant_properties.len()).unwrap_or(0);
+        for (vname, vmap) in &variants {
+            ui.horizontal(|ui| {
+                ui.add_space(14.0);
+                // Purple badge
+                let (badge_r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
+                ui.painter().rect_filled(badge_r, 3.0,
+                    Color32::from_rgba_unmultiplied(139, 92, 246, 50));
+                ui.painter().text(badge_r.center(), Align2::CENTER_CENTER,
+                    "◇", FontId::proportional(9.0), Color32::from_rgb(167,118,255));
+                ui.add_space(4.0);
+                // Name + value summary
+                let mut summary = vname.clone();
+                if var_props_count > 0 {
+                    let pairs: Vec<String> = vmap.iter()
+                        .map(|(k,v)| format!("{k}={v}")).collect();
+                    summary = format!("{vname}  ({})", pairs.join(", "));
+                }
+                ui.label(RichText::new(summary).size(10.5));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    if ui.add(
+                        Button::new(RichText::new("✕").size(9.0))
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::new(1.0, C_BORDER))
+                            .rounding(3.0)
+                            .min_size(vec2(18.0, 18.0)),
+                    ).on_hover_text(format!("Delete variant '{vname}'")).clicked() {
+                        to_remove_var = Some(vname.clone());
+                    }
+                });
+            });
+        }
+        if let Some(v) = to_remove_var {
+            state.remove_variant(id, &v);
+        }
+        // Add new variant with default values
+        {
+            let buf_key = ui.make_persistent_id(format!("var_name_buf_{id}"));
+            let mut buf: String = ui.ctx().data_mut(|d| d.get_temp_mut_or(buf_key, String::new()).clone());
+            ui.horizontal(|ui| {
+                ui.add_space(14.0);
+                let te = ui.add(
+                    TextEdit::singleline(&mut buf)
+                        .hint_text("New variant…")
+                        .font(FontId::proportional(10.5))
+                        .desired_width(90.0)
+                        .frame(true)
+                );
+                if (te.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
+                    || ui.small_button("+ Add").clicked()
+                {
+                    if !buf.trim().is_empty() {
+                        state.add_variant(id, &buf, std::collections::HashMap::new());
+                        buf.clear();
+                    }
+                }
+                ui.ctx().data_mut(|d| d.insert_temp(buf_key, buf));
+            });
+        }
+        ui.add_space(8.0);
+    }
 
     // ════════════════════════════════════════════════════════════════════
     // FRAME  (frame-specific properties — only shown when a Frame is selected)
