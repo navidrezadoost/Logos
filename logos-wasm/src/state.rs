@@ -355,6 +355,8 @@ pub enum LayerType {
     Arrow { head_size: f32 },
     /// N-pointed star; inner_ratio = inner-radius / outer-radius (0 < r < 1).
     Star { points: u32, inner_ratio: f32 },
+    /// Organisational Section (top-level only). optional header colour.
+    Section { color: Option<[f32; 4]> },
 }
 
 impl LayerRecord {
@@ -466,6 +468,7 @@ impl LayerRecord {
             LayerType::Line     => "╱",
             LayerType::Arrow { .. } => "→",
             LayerType::Star { .. }  => "★",
+            LayerType::Section { .. } => "▦",
         }
     }
 }
@@ -518,6 +521,8 @@ pub struct EditorState {
     // UI state
     pub rename_target: Option<Uuid>,
     pub rename_buf:    String,
+    /// Text typed in the layers-panel search box (empty = show all).
+    pub layer_search:  String,
     pub show_grid:     bool,
     pub snap_to_grid:  bool,
     pub grid_size:     f32,
@@ -593,6 +598,9 @@ pub struct DragState {
     /// During a move-drag, the frame that would receive the layer if dropped now.
     /// `None` = would go to top-level. Updated every frame while dragging.
     pub hovered_parent: Option<Uuid>,
+    /// Active marquee-selection rectangle in **world** coordinates (x0,y0,x1,y1).
+    /// `Some` only while the user is box-selecting on empty canvas.
+    pub rubber_band: Option<(f32, f32, f32, f32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -625,6 +633,7 @@ impl EditorState {
             zoom:        1.0,
             rename_target: None,
             rename_buf:    String::new(),
+            layer_search:  String::new(),
             show_grid:     true,
             snap_to_grid:  false,
             grid_size:     8.0,
@@ -711,6 +720,57 @@ impl EditorState {
         self.pages[self.active_page].layers.push(id);
         self.layers.insert(id, rec);
         id
+    }
+
+    /// Add a top-level Section container (organisational, not clipping).
+    pub fn add_section(&mut self, name: &str, x: f32, y: f32, w: f32, h: f32) -> Uuid {
+        let mut rec = LayerRecord::new_frame(x, y, w, h);
+        rec.name       = name.to_owned();
+        rec.layer_type = LayerType::Section { color: Some([0.38, 0.55, 0.95, 1.0]) };
+        rec.clip_content = false;
+        let id = rec.id;
+        self.pages[self.active_page].layers.push(id);
+        self.layers.insert(id, rec);
+        id
+    }
+
+    /// Convert selected layer(s) into a Section in-place.
+    pub fn convert_to_section(&mut self, id: Uuid) {
+        if let Some(rec) = self.layers.get_mut(&id) {
+            rec.layer_type  = LayerType::Section { color: Some([0.38, 0.55, 0.95, 1.0]) };
+            rec.clip_content = false;
+            rec.auto_layout  = None;
+        }
+        self.push_history("convert to section");
+    }
+
+    /// Select all **visible**, **unlocked** layers whose world bounding box
+    /// overlaps the given world-space rectangle. Replaces the current selection.
+    pub fn select_in_rect(&mut self, rx0: f32, ry0: f32, rx1: f32, ry1: f32) {
+        let (rx0, rx1) = if rx0 < rx1 { (rx0, rx1) } else { (rx1, rx0) };
+        let (ry0, ry1) = if ry0 < ry1 { (ry0, ry1) } else { (ry1, ry0) };
+
+        let page_ids: Vec<Uuid> = self.pages[self.active_page].layers.clone();
+        let mut new_sel: Vec<Uuid> = Vec::new();
+
+        for &id in &page_ids {
+            let rec = match self.layers.get(&id) {
+                Some(r) => r,
+                None    => continue,
+            };
+            if !rec.visible || rec.locked { continue; }
+            // Use world position helper so nested layers are handled correctly
+            let (wx, wy) = self.layer_world_pos(id);
+            let lx0 = wx;
+            let ly0 = wy;
+            let lx1 = wx + rec.width;
+            let ly1 = wy + rec.height;
+            // Intersection check
+            if lx1 >= rx0 && lx0 <= rx1 && ly1 >= ry0 && ly0 <= ry1 {
+                new_sel.push(id);
+            }
+        }
+        self.selection = new_sel;
     }
 
     pub fn add_ellipse(&mut self, x: f32, y: f32, w: f32, h: f32) -> Uuid {

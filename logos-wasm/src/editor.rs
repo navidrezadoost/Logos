@@ -704,6 +704,55 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     painter.text(rect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &content,
                         FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
                 }
+                LayerType::Section { color } => {
+                    // ── Section: light tinted background + header band + label ──
+                    let base_col = color.map(|c| Color32::from_rgba_unmultiplied(
+                        (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 20
+                    )).unwrap_or(Color32::from_rgba_unmultiplied(80, 100, 200, 18));
+                    let border_col = color.map(|c| Color32::from_rgba_unmultiplied(
+                        (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 160
+                    )).unwrap_or(Color32::from_rgba_unmultiplied(80, 100, 200, 160));
+
+                    // Body
+                    painter.rect_filled(rect, 4.0, base_col);
+                    painter.rect_stroke(rect, 4.0, Stroke::new(1.5, border_col));
+
+                    // Header band (top portion)
+                    let header_h = (20.0_f32 * state.zoom).clamp(14.0, 28.0);
+                    let header_rect = Rect::from_min_size(rect.left_top(), vec2(rect.width(), header_h));
+                    painter.rect_filled(header_rect, Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 }, border_col);
+
+                    // Name label in header
+                    let label_painter = painter.with_clip_rect(painter.clip_rect().expand(40.0));
+                    label_painter.text(
+                        pos2(rect.left() + 6.0, header_rect.center().y),
+                        Align2::LEFT_CENTER,
+                        &rec.name.clone(),
+                        FontId::proportional((10.0 * state.zoom).clamp(8.0, 16.0)),
+                        Color32::WHITE,
+                    );
+
+                    // Render children (unclipped)
+                    let child_ids: Vec<Uuid> = state.frame_children(id);
+                    let child_painter = painter.with_clip_rect(painter.clip_rect());
+                    for &cid in &child_ids {
+                        let crec = match state.layers.get(&cid) {
+                            Some(r) => r.clone(),
+                            None    => continue,
+                        };
+                        if !crec.visible { continue; }
+                        let csx = crec.x * state.zoom;
+                        let csy = crec.y * state.zoom;
+                        let csw = crec.width  * state.zoom;
+                        let csh = crec.height * state.zoom;
+                        // For a Section, children are in world coords already (no clip offset needed)
+                        let crect = Rect::from_min_size(
+                            pos2(origin.x + csx, origin.y + csy),
+                            vec2(csw, csh),
+                        );
+                        let _ = (crec, crect, &child_painter); // rendered in main pass
+                    }
+                }
                 LayerType::Frame => {
                     let this_selected = state.is_selected(id);
                     let this_hovered  = state.hovered_layer == Some(id);
@@ -1209,6 +1258,20 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 );
             }
         }
+    }
+
+    // ── Rubber-band marquee rectangle ──────────────────────────────────────
+    if let Some((rx0, ry0, rx1, ry1)) = state.drag.rubber_band {
+        let (sx0, sy0) = state.world_to_screen(rx0, ry0);
+        let (sx1, sy1) = state.world_to_screen(rx1, ry1);
+        let rect = Rect::from_two_pos(
+            pos2(origin.x + sx0, origin.y + sy0),
+            pos2(origin.x + sx1, origin.y + sy1),
+        );
+        painter.rect_filled(rect, 0.0,
+            Color32::from_rgba_unmultiplied(100, 120, 255, 30));
+        painter.rect_stroke(rect, 0.0,
+            Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 140, 255, 200)));
     }
 
     // ── Measurement overlay (alt held, hover, or active drag – RL-ranked) ──
@@ -2557,8 +2620,11 @@ fn handle_tool_input(
                         }
 
                         if !did_something {
-                            state.clear_selection();
-                            state.drag.active = false;
+                            // Start rubber-band marquee selection
+                            let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
+                            if !multi { state.clear_selection(); }
+                            state.drag.rubber_band = Some((wx, wy, wx, wy));
+                            state.drag.active    = false; // rubber-band is independent of drag.active
                         }
                     }
                 }
@@ -2609,6 +2675,16 @@ fn handle_tool_input(
             }
         }
     }
+    // ── Rubber-band marquee: update second corner while dragging ────────────
+    if resp.dragged_by(PointerButton::Primary) && state.drag.rubber_band.is_some() {
+        if let Some(mp) = pointer.hover_pos() {
+            let (wx, wy) = to_world(mp, state);
+            if let Some(rb) = state.drag.rubber_band.as_mut() {
+                rb.2 = wx;
+                rb.3 = wy;
+            }
+        }
+    }
     if resp.dragged_by(PointerButton::Primary) && state.drag.active {
         if let Some(mp) = pointer.hover_pos() {
             let (wx, wy) = to_world(mp, state);
@@ -2624,7 +2700,6 @@ fn handle_tool_input(
                                     match handle {
                                         ShapeHandle::CornerRadius(idx) => {
                                             let max_r = rec.width.min(rec.height) * 0.5;
-                                            // Shape centre in world space.
                                             let scx = rec.x + rec.width  * 0.5;
                                             let scy = rec.y + rec.height * 0.5;
                                             // Transform cursor into the shape's local (unrotated)
@@ -2968,6 +3043,18 @@ fn handle_tool_input(
             }
             state.drag.active = false;
             return;
+        }
+        // Rubber-band marquee: commit selection
+        if let Some((rx0, ry0, rx1, ry1)) = state.drag.rubber_band.take() {
+            let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
+            if multi {
+                // Additive: merge with current
+                let prev = state.selection.clone();
+                state.select_in_rect(rx0, ry0, rx1, ry1);
+                for id in prev { if !state.selection.contains(&id) { state.selection.push(id); } }
+            } else {
+                state.select_in_rect(rx0, ry0, rx1, ry1);
+            }
         }
     }
     if resp.drag_stopped() && state.drag.active {

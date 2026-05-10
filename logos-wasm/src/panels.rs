@@ -453,7 +453,7 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
     });
     ui.separator();
 
-    // Search / filter (placeholder)
+    // Layers header + search
     ui.horizontal(|ui| {
         ui.label(RichText::new("Layers").size(12.0).strong());
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -466,12 +466,33 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             }
         });
     });
+    ui.add_space(4.0);
+    // Search / filter input
+    ui.horizontal(|ui| {
+        ui.add_space(4.0);
+        let search_resp = ui.add(
+            TextEdit::singleline(&mut state.layer_search)
+                .hint_text("🔍  Search layers…")
+                .desired_width(ui.available_width() - 8.0)
+                .font(TextStyle::Small),
+        );
+        if search_resp.changed() {
+            // Expand all frames so matches are visible
+            if !state.layer_search.is_empty() {
+                let ids: Vec<uuid::Uuid> = state.layers.keys().cloned().collect();
+                for id in ids {
+                    if let Some(r) = state.layers.get_mut(&id) { r.frame_expanded = true; }
+                }
+            }
+        }
+    });
 
     ui.add_space(4.0);
 
     // Layer tree (top = front). Root layers only; children indented under their frame.
     let layer_ids: Vec<uuid::Uuid> = state.pages[state.active_page].layers
         .iter().rev().cloned().collect();
+    let search_query = state.layer_search.to_lowercase();
 
     ScrollArea::vertical().id_salt("layers_scroll").show(ui, |ui| {
         let mut to_rename: Option<(uuid::Uuid, String)> = None;
@@ -494,16 +515,31 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             .map(|&id| (id, 0_usize, None)).collect();
 
         while let Some((id, depth, parent_id)) = stack.pop() {
-            let (icon, name, visible, selected, is_frame, expanded, is_mask) = {
+            let (icon, name, visible, selected, is_frame, expanded, is_mask, is_section) = {
                 let rec = match state.layers.get(&id) {
                     Some(r) => r,
                     None => continue,
                 };
                 let is_frame = matches!(rec.layer_type, LayerType::Frame)
-                    || matches!(rec.layer_type, LayerType::Group);
+                    || matches!(rec.layer_type, LayerType::Group)
+                    || matches!(rec.layer_type, LayerType::Section { .. });
+                let is_section = matches!(rec.layer_type, LayerType::Section { .. });
                 (rec.type_icon(), rec.name.clone(), rec.visible, state.is_selected(id),
-                 is_frame, rec.frame_expanded, rec.is_mask)
+                 is_frame, rec.frame_expanded, rec.is_mask, is_section)
             };
+
+            // ── Push children first so they still appear when filtering ──────
+            if is_frame && expanded {
+                let children = state.frame_children(id);
+                for cid in children.into_iter().rev() {
+                    stack.push((cid, depth + 1, Some(id)));
+                }
+            }
+
+            // ── Search filter: skip row if name doesn't match ─────────────────
+            if !search_query.is_empty() && !name.to_lowercase().contains(&search_query) {
+                continue;
+            }
 
             // ── Drop gap above this row ───────────────────────────────────────
             {
@@ -563,10 +599,16 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 } else {
                     Color32::WHITE
                 };
+                // Section rows get a blue tint
+                let label_color = if is_section && !selected {
+                    Color32::from_rgb(120, 160, 255)
+                } else {
+                    label_color
+                };
                 let base = RichText::new(label)
                     .color(label_color)
                     .size(if depth > 0 { 12.0 } else { 13.0 });
-                let text = if selected || is_mask { base.strong() } else { base };
+                let text = if selected || is_mask || is_section { base.strong() } else { base };
 
                 let resp = ui.add(Label::new(text).sense(Sense::click_and_drag()))
                     .on_hover_text("Click to select • Double-click to rename • Drag to reorder");
@@ -609,6 +651,12 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     }
                     if is_frame {
                         ui.separator();
+                        if !is_section {
+                            if ui.button("Convert to Section").clicked() {
+                                state.convert_to_section(id);
+                                ui.close_menu();
+                            }
+                        }
                         if ui.button("Unwrap Frame  (Shift+Ctrl+G)").clicked() {
                             state.ungroup_frame(id);
                             ui.close_menu();
@@ -625,14 +673,6 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     }
                 });
             });
-
-            // Push children onto stack if frame is expanded (in reverse order to maintain visual order)
-            if is_frame && expanded {
-                let children = state.frame_children(id);
-                for cid in children.into_iter().rev() {
-                    stack.push((cid, depth + 1, Some(id)));
-                }
-            }
         }
 
         // Apply deferred mutations
@@ -1152,6 +1192,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             ("⟸", 4, "Center V"),
             ("⇣", 5, "Align bottom"),
         ];
+        let dist_items: &[(&str, u8, &str)] = &[
+            ("↔", 6, "Distribute horizontally"),
+            ("↕", 7, "Distribute vertically"),
+        ];
         ui.horizontal(|ui| {
             ui.add_space(12.0);
             ui.label(RichText::new("ALIGN").size(10.0).color(C_MUTED));
@@ -1161,7 +1205,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             ui.add_space(12.0);
             let mut act: Option<u8> = None;
             for (grp_start, count) in [(0usize, 3usize), (3, 3)] {
-                // group frame
                 Frame::none()
                     .stroke(Stroke::new(1.0, C_BORDER))
                     .rounding(4.0)
@@ -1175,29 +1218,39 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                     });
                 ui.add_space(4.0);
             }
+            // Distribute group
+            Frame::none()
+                .stroke(Stroke::new(1.0, C_BORDER))
+                .rounding(4.0)
+                .inner_margin(Margin::same(2.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for &(icon, idx, tip) in dist_items {
+                            if icon_btn(ui, icon, tip, false) { act = Some(idx); }
+                        }
+                    });
+                });
             act
         }).inner;
         if let Some(act) = align_act {
             let sel_ids: Vec<uuid::Uuid> = state.selection.clone();
 
-            // Compute the bounding box of all selected layers.
-            // For a single selection we align against page bounds;
-            // for multiple selections we align inside the selection's own bbox.
+            // Compute world-space bounding box of all selected layers.
+            // For single selection: align against page bounds.
+            // For multiple: align inside selection's world bbox.
             let use_page_bounds = sel_ids.len() == 1;
             let ref_bounds = if use_page_bounds {
                 bounds
             } else {
-                // Union of all selected layer rects
-                let mut x0 = f32::MAX;
-                let mut y0 = f32::MAX;
-                let mut x1 = f32::MIN;
-                let mut y1 = f32::MIN;
+                let mut x0 = f32::MAX; let mut y0 = f32::MAX;
+                let mut x1 = f32::MIN; let mut y1 = f32::MIN;
                 for &sid in &sel_ids {
+                    let (wx, wy) = state.layer_world_pos(sid);
                     if let Some(r) = state.layers.get(&sid) {
-                        x0 = x0.min(r.x);
-                        y0 = y0.min(r.y);
-                        x1 = x1.max(r.x + r.width);
-                        y1 = y1.max(r.y + r.height);
+                        x0 = x0.min(wx);
+                        y0 = y0.min(wy);
+                        x1 = x1.max(wx + r.width);
+                        y1 = y1.max(wy + r.height);
                     }
                 }
                 (x0, y0, x1, y1)
@@ -1207,17 +1260,59 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             let rcx = (rx0 + rx1) * 0.5;
             let rcy = (ry0 + ry1) * 0.5;
 
-            for &sid in &sel_ids {
-                if let Some(rec) = state.layers.get_mut(&sid) {
-                    match act {
-                        0 => rec.x = rx0,
-                        1 => rec.x = rcx - rec.width  * 0.5,
-                        2 => rec.x = rx1 - rec.width,
-                        3 => rec.y = ry0,
-                        4 => rec.y = rcy - rec.height * 0.5,
-                        5 => rec.y = ry1 - rec.height,
-                        _ => {}
+            if act <= 5 {
+                // Align operations: compute the delta in world-space, apply to rec.x/rec.y
+                for &sid in &sel_ids {
+                    let (wx, wy) = state.layer_world_pos(sid);
+                    if let Some(rec) = state.layers.get_mut(&sid) {
+                        match act {
+                            0 => rec.x += rx0 - wx,                           // align left
+                            1 => rec.x += rcx - rec.width * 0.5 - wx,         // center H
+                            2 => rec.x += rx1 - rec.width - wx,                // align right
+                            3 => rec.y += ry0 - wy,                           // align top
+                            4 => rec.y += rcy - rec.height * 0.5 - wy,        // center V
+                            5 => rec.y += ry1 - rec.height - wy,               // align bottom
+                            _ => {}
+                        }
                     }
+                }
+            } else if act == 6 && sel_ids.len() >= 3 {
+                // Distribute horizontally: sort by world X, evenly space
+                let mut items: Vec<(uuid::Uuid, f32, f32)> = sel_ids.iter()
+                    .filter_map(|&sid| {
+                        let (wx, _) = state.layer_world_pos(sid);
+                        state.layers.get(&sid).map(|r| (sid, wx, r.width))
+                    }).collect();
+                items.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                let total_w: f32 = items.iter().map(|i| i.2).sum();
+                let span = items.last().map(|i| i.1 + i.2).unwrap_or(0.0) - items[0].1;
+                let gap = (span - total_w) / (items.len() - 1) as f32;
+                let mut cx = items[0].1;
+                for (sid, cur_wx, w) in &items {
+                    let (cur_wx_actual, _) = state.layer_world_pos(*sid);
+                    if let Some(rec) = state.layers.get_mut(sid) {
+                        rec.x += cx - cur_wx_actual;
+                    }
+                    cx += w + gap;
+                }
+            } else if act == 7 && sel_ids.len() >= 3 {
+                // Distribute vertically: sort by world Y, evenly space
+                let mut items: Vec<(uuid::Uuid, f32, f32)> = sel_ids.iter()
+                    .filter_map(|&sid| {
+                        let (_, wy) = state.layer_world_pos(sid);
+                        state.layers.get(&sid).map(|r| (sid, wy, r.height))
+                    }).collect();
+                items.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                let total_h: f32 = items.iter().map(|i| i.2).sum();
+                let span = items.last().map(|i| i.1 + i.2).unwrap_or(0.0) - items[0].1;
+                let gap = (span - total_h) / (items.len() - 1) as f32;
+                let mut cy = items[0].1;
+                for (sid, _, h) in &items {
+                    let (_, cur_wy_actual) = state.layer_world_pos(*sid);
+                    if let Some(rec) = state.layers.get_mut(sid) {
+                        rec.y += cy - cur_wy_actual;
+                    }
+                    cy += h + gap;
                 }
             }
             needs_history = true;
