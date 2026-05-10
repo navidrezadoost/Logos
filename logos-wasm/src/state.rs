@@ -823,13 +823,17 @@ impl EditorState {
     /// selection's bounding box. Selected layers become children of the frame.
     pub fn wrap_in_frame(&mut self) {
         if self.selection.is_empty() { return; }
+        // Use selection_roots so selecting both a parent and child doesn't double-count.
+        let roots = self.selection_roots();
+        if roots.is_empty() { return; }
+        // Compute world-space bbox over all roots.
         let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
         let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
-        for &id in &self.selection {
+        for &id in &roots {
             if let Some(r) = self.layers.get(&id) {
-                min_x = min_x.min(r.x);   min_y = min_y.min(r.y);
-                max_x = max_x.max(r.x + r.width);
-                max_y = max_y.max(r.y + r.height);
+                let (wx, wy) = self.layer_world_pos(id);
+                min_x = min_x.min(wx);          min_y = min_y.min(wy);
+                max_x = max_x.max(wx + r.width); max_y = max_y.max(wy + r.height);
             }
         }
         if min_x == f32::MAX { return; }
@@ -840,25 +844,22 @@ impl EditorState {
             (max_x - min_x) + padding * 2.0,
             (max_y - min_y) + padding * 2.0,
         );
-        // Move the new frame to just before the first selected layer in page order
+        // Move the new frame to just before the topmost selected layer in page order.
         let page = &mut self.pages[self.active_page];
-        if let Some(first_pos) = page.layers.iter()
-            .position(|id| self.selection.contains(id))
-        {
+        if let Some(first_pos) = page.layers.iter().position(|id| roots.contains(id)) {
             let fi = page.layers.iter().position(|&id| id == frame_id).unwrap();
             page.layers.remove(fi);
             let insert_at = first_pos.min(page.layers.len());
             page.layers.insert(insert_at, frame_id);
         }
-        // Reparent selected layers and convert their world positions to frame-local.
-        let frame_x = self.layers.get(&frame_id).map(|r| r.x).unwrap_or(0.0);
-        let frame_y = self.layers.get(&frame_id).map(|r| r.y).unwrap_or(0.0);
-        let sel = self.selection.clone();
-        for &id in &sel {
+        // Reparent root layers, converting world → frame-local.
+        let frame_wx = self.layers.get(&frame_id).map(|r| r.x).unwrap_or(0.0);
+        let frame_wy = self.layers.get(&frame_id).map(|r| r.y).unwrap_or(0.0);
+        for &id in &roots {
+            let (wx, wy) = self.layer_world_pos(id);
             if let Some(r) = self.layers.get_mut(&id) {
-                // Convert world position → local (relative to the new frame's origin).
-                r.x -= frame_x;
-                r.y -= frame_y;
+                r.x = wx - frame_wx;
+                r.y = wy - frame_wy;
                 r.parent_id = Some(frame_id);
             }
         }
@@ -1112,37 +1113,40 @@ impl EditorState {
     /// clip, auto-resizes to children — exactly like Figma's Ctrl+G group).
     pub fn wrap_in_group(&mut self) {
         if self.selection.is_empty() { return; }
+        let roots = self.selection_roots();
+        if roots.is_empty() { return; }
+        // Compute world-space bbox over roots.
         let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
         let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
-        for &id in &self.selection {
+        for &id in &roots {
             if let Some(r) = self.layers.get(&id) {
-                min_x = min_x.min(r.x);   min_y = min_y.min(r.y);
-                max_x = max_x.max(r.x + r.width);
-                max_y = max_y.max(r.y + r.height);
+                let (wx, wy) = self.layer_world_pos(id);
+                min_x = min_x.min(wx);          min_y = min_y.min(wy);
+                max_x = max_x.max(wx + r.width); max_y = max_y.max(wy + r.height);
             }
         }
         if min_x == f32::MAX { return; }
-        // Create a Group layer (transparent frame, no clip).
+        // Create a Group layer (transparent, no clip) at the world bbox origin.
         let mut group = LayerRecord::new_rect(min_x, min_y, max_x - min_x, max_y - min_y);
         group.name        = "Group".into();
         group.layer_type  = LayerType::Group;
-        group.fill        = [0.0; 4];      // fully transparent
+        group.fill        = [0.0; 4];
         group.stroke_width = 0.0;
-        group.clip_content = false;        // groups do not clip children
+        group.clip_content = false;
         let gid = group.id;
-        // Insert at the first selected layer's page position.
+        // Insert at the topmost selected layer's page position.
         let page = &mut self.pages[self.active_page];
         let first_pos = page.layers.iter()
-            .position(|id| self.selection.contains(id))
+            .position(|id| roots.contains(id))
             .unwrap_or(page.layers.len());
         page.layers.insert(first_pos, gid);
         self.layers.insert(gid, group);
-        // Reparent selected layers with coordinate conversion.
-        let sel = self.selection.clone();
-        for &id in &sel {
+        // Reparent roots: world → group-local.
+        for &id in &roots {
+            let (wx, wy) = self.layer_world_pos(id);
             if let Some(r) = self.layers.get_mut(&id) {
-                r.x -= min_x;
-                r.y -= min_y;
+                r.x = wx - min_x;
+                r.y = wy - min_y;
                 r.parent_id = Some(gid);
             }
         }
@@ -1178,6 +1182,82 @@ impl EditorState {
             pid = self.layers.get(&p).and_then(|r| r.parent_id);
         }
         false
+    }
+
+    /// Accumulated world-space origin (top-left) of a layer — walks the ancestor
+    /// chain summing (x, y) offsets.  Rotation of ancestors is NOT applied here
+    /// (flat hierarchy assumption kept consistent with the rest of the engine).
+    pub fn layer_world_pos(&self, id: Uuid) -> (f32, f32) {
+        let mut wx = 0.0_f32;
+        let mut wy = 0.0_f32;
+        if let Some(r) = self.layers.get(&id) {
+            wx = r.x; wy = r.y;
+            let mut pid = r.parent_id;
+            while let Some(p) = pid {
+                if let Some(pr) = self.layers.get(&p) {
+                    wx += pr.x; wy += pr.y;
+                    pid = pr.parent_id;
+                } else { break; }
+            }
+        }
+        (wx, wy)
+    }
+
+    /// From the current selection, return only the "root" layers — i.e. those
+    /// whose ancestors are not themselves in the selection.  This prevents
+    /// double-counting when a parent *and* its children are both selected.
+    pub fn selection_roots(&self) -> Vec<Uuid> {
+        self.selection.iter().cloned()
+            .filter(|&id| !self.selection.iter().any(|&other| {
+                other != id && self.is_ancestor_of(other, id)
+            }))
+            .collect()
+    }
+
+    /// World-space bounding box that spans all currently selected layers:
+    /// returns `(world_x, world_y, width, height)` or `None` if nothing selected.
+    pub fn selection_world_bbox(&self) -> Option<(f32, f32, f32, f32)> {
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        for &id in &self.selection {
+            if let Some(r) = self.layers.get(&id) {
+                let (wx, wy) = self.layer_world_pos(id);
+                min_x = min_x.min(wx);
+                min_y = min_y.min(wy);
+                max_x = max_x.max(wx + r.width);
+                max_y = max_y.max(wy + r.height);
+            }
+        }
+        if min_x == f32::MAX { None } else { Some((min_x, min_y, max_x - min_x, max_y - min_y)) }
+    }
+
+    /// The lowest common ancestor of all selected layers: the deepest single
+    /// parent that contains all selected items.  Returns `None` = canvas root.
+    pub fn selection_common_parent(&self) -> Option<Uuid> {
+        let roots = self.selection_roots();
+        if roots.is_empty() { return None; }
+        // Start with the first root's ancestor list then intersect.
+        let chain_of = |id: Uuid| -> Vec<Option<Uuid>> {
+            let mut chain = vec![];
+            let mut pid = self.layers.get(&id).and_then(|r| r.parent_id);
+            loop {
+                chain.push(pid);
+                match pid {
+                    Some(p) => pid = self.layers.get(&p).and_then(|r| r.parent_id),
+                    None => break,
+                }
+            }
+            chain
+        };
+        let mut common: Vec<Option<Uuid>> = chain_of(roots[0]);
+        for &rid in &roots[1..] {
+            let other = chain_of(rid);
+            common.retain(|c| other.contains(c));
+        }
+        // The first entry in `common` is the deepest shared ancestor.
+        common.into_iter().next().flatten()
     }
 
     /// Move `src_id` so it becomes a sibling of `target_id`, inserted **before**

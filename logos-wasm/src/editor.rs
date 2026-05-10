@@ -1598,7 +1598,9 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
 /// raw screen rect.  For rotated layers it returns the tight AABB around the
 /// rotated corners so gap measurements stay accurate.
 fn layer_screen_aabb(rec: &crate::state::LayerRecord, state: &EditorState, origin: Pos2) -> Rect {
-    let (sx, sy) = state.world_to_screen(rec.x, rec.y);
+    // Use world position (accumulated through parent chain) instead of local rec.x/y
+    let (world_x, world_y) = state.layer_world_pos(rec.id);
+    let (sx, sy) = state.world_to_screen(world_x, world_y);
     let sw = rec.width  * state.zoom;
     let sh = rec.height * state.zoom;
     let raw = Rect::from_min_size(pos2(origin.x + sx, origin.y + sy), vec2(sw, sh));
@@ -3185,7 +3187,8 @@ fn handle_tool_input(
                     None
                 };
 
-                let shift = ui.input(|i| i.modifiers.shift);
+                // Shift OR Ctrl → toggle layer in/out of selection (multi-select)
+                let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
                 match target {
                     Some(id) => {
                         clog!("[CLICK] → selecting '{}'  W:{:.0} H:{:.0}",
@@ -3193,7 +3196,7 @@ fn handle_tool_input(
                             state.layers.get(&id).map(|r| r.width).unwrap_or(0.0),
                             state.layers.get(&id).map(|r| r.height).unwrap_or(0.0),
                         );
-                        if shift {
+                        if multi {
                             state.toggle_select(id);
                         } else {
                             state.select_only(id);
@@ -3204,7 +3207,7 @@ fn handle_tool_input(
                         let is_draw_tool = matches!(state.tool,
                             Tool::Ellipse | Tool::Rect | Tool::Polygon |
                             Tool::Line | Tool::Arrow | Tool::Star | Tool::Frame);
-                        if is_draw_tool && !shift {
+                        if is_draw_tool && !multi {
                             let ds = 100.0_f32;
                             let cx = wx - ds * 0.5;
                             let cy = wy - ds * 0.5;
@@ -3223,7 +3226,7 @@ fn handle_tool_input(
                             state.tool = Tool::Select;
                         } else {
                             clog!("[CLICK] → clear selection");
-                            if !shift { state.clear_selection(); }
+                            if !multi { state.clear_selection(); }
                         }
                     }
                 }
