@@ -902,6 +902,241 @@ fn icon_btn(ui: &mut Ui, icon: &str, tip: &str, active: bool) -> bool {
 #[inline]
 fn prop_drag<'a>(_label: &str, dv: DragValue<'a>) -> DragValue<'a> { dv }
 
+// ── Frame presets ─────────────────────────────────────────────────────────────
+
+/// All Figma-compatible frame presets, grouped by category.
+/// Each entry: (category_label, &[(preset_name, width, height)])
+static FRAME_PRESETS: &[(&str, &[(&str, f32, f32)])] = &[
+    ("Phone — Current", &[
+        ("iPhone 17",             402.0,  874.0),
+        ("iPhone 16 & 17 Pro",    402.0,  874.0),
+        ("iPhone 16",             393.0,  852.0),
+        ("iPhone 16 & 17 Pro Max",440.0,  956.0),
+        ("iPhone 16 Plus",        430.0,  932.0),
+        ("iPhone Air",            420.0,  912.0),
+        ("iPhone 14 & 15 Pro Max",430.0,  932.0),
+        ("iPhone 14 & 15 Pro",    393.0,  852.0),
+        ("iPhone 13 & 14",        390.0,  844.0),
+        ("iPhone 14 Plus",        428.0,  926.0),
+        ("Android Compact",       412.0,  917.0),
+        ("Android Medium",        700.0,  840.0),
+    ]),
+    ("Phone — Archive", &[
+        ("iPhone 13 mini",        375.0,  812.0),
+        ("iPhone SE",             320.0,  568.0),
+        ("iPhone 13 Pro Max",     428.0,  926.0),
+        ("iPhone 13 / 13 Pro",    390.0,  844.0),
+        ("iPhone 11 Pro Max",     414.0,  896.0),
+        ("iPhone 11 Pro / X",     375.0,  812.0),
+        ("iPhone 8 Plus",         414.0,  736.0),
+        ("iPhone 8",              375.0,  667.0),
+        ("iPhone 4",              320.0,  480.0),
+        ("Android Small",         360.0,  640.0),
+        ("Android Large",         360.0,  800.0),
+        ("Google Pixel 2",        411.0,  731.0),
+        ("Google Pixel 2 XL",     411.0,  823.0),
+    ]),
+    ("Tablet", &[
+        ("iPad mini 8.3\"",        744.0, 1133.0),
+        ("iPad mini 5",            768.0, 1024.0),
+        ("Surface Pro 8",         1440.0,  960.0),
+        ("Surface Pro 4",         1368.0,  912.0),
+        ("iPad Pro 11\"",          834.0, 1194.0),
+        ("iPad Pro 12.9\"",       1024.0, 1366.0),
+        ("Android Expanded",      1280.0,  800.0),
+    ]),
+    ("Watch", &[
+        ("Apple Watch S10 42mm",  187.0,  223.0),
+        ("Apple Watch S10 46mm",  208.0,  248.0),
+        ("Apple Watch 41mm",      176.0,  215.0),
+        ("Apple Watch 45mm",      198.0,  242.0),
+        ("Apple Watch 44mm",      184.0,  224.0),
+        ("Apple Watch 40mm",      162.0,  197.0),
+        ("Apple Watch 42mm",      156.0,  195.0),
+        ("Apple Watch 38mm",      136.0,  170.0),
+    ]),
+    ("Desktop", &[
+        ("MacBook",               1152.0,  700.0),
+        ("MacBook Pro",           1440.0,  900.0),
+        ("Surface Book",          1500.0, 1000.0),
+        ("iMac",                  1280.0,  720.0),
+        ("Macintosh 128k",         512.0,  342.0),
+        ("iMac 5K",               2560.0, 1440.0),
+        ("Desktop 1440",          1440.0,  900.0),
+        ("Desktop 1920",          1920.0, 1080.0),
+        ("4K Display",            3840.0, 2160.0),
+    ]),
+    ("Presentation", &[
+        ("Slide 16:9",            1920.0, 1080.0),
+        ("Slide 4:3",             1024.0,  768.0),
+    ]),
+    ("Paper", &[
+        ("A4",     595.0,  842.0),
+        ("A5",     420.0,  595.0),
+        ("A6",     297.0,  420.0),
+        ("Letter", 612.0,  792.0),
+        ("Tabloid", 792.0, 1224.0),
+    ]),
+    ("Social Media", &[
+        ("Twitter post",      1200.0,  675.0),
+        ("Twitter header",    1500.0,  500.0),
+        ("Facebook post",     1200.0,  630.0),
+        ("Facebook cover",     820.0,  312.0),
+        ("Instagram post",    1080.0, 1350.0),
+        ("Instagram story",   1080.0, 1920.0),
+        ("Dribbble shot",      400.0,  300.0),
+        ("Dribbble shot HD",   800.0,  600.0),
+        ("LinkedIn cover",    1584.0,  396.0),
+    ]),
+];
+
+/// Search box key for the frame-presets filter.
+const FP_SEARCH_KEY: &str = "frame_presets_search";
+
+/// Render the Frame Presets panel (shown in the right panel when the Frame
+/// tool is active and nothing is selected).
+fn frame_presets_panel(ui: &mut Ui, state: &mut EditorState) {
+    let accent   = Color32::from_rgb(59, 130, 246);
+    let cat_bg   = Color32::from_rgb(28, 28, 38);
+    let row_bg   = Color32::from_rgb(22, 22, 30);
+    let row_hover= Color32::from_rgb(35, 45, 68);
+    let dim_fg   = Color32::from_rgb(120, 130, 150);
+
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.label(RichText::new("Frame Presets").size(13.0).strong().color(Color32::WHITE));
+    });
+    ui.add_space(6.0);
+
+    // ── Search filter ─────────────────────────────────────────────────────
+    let search_id = ui.id().with(FP_SEARCH_KEY);
+    let mut search: String = ui.data_mut(|d| d.get_temp::<String>(search_id).unwrap_or_default());
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        let resp = ui.add(
+            TextEdit::singleline(&mut search)
+                .hint_text("Search presets…")
+                .desired_width(ui.available_width() - 20.0)
+                .font(TextStyle::Small),
+        );
+        if resp.changed() {
+            let s = search.clone();
+            ui.data_mut(|d| d.insert_temp(search_id, s));
+        }
+    });
+    let filter = search.to_lowercase();
+    ui.add_space(6.0);
+
+    // ── Preset list (scrollable) ──────────────────────────────────────────
+    let avail_h = ui.available_height() - 8.0;
+    ScrollArea::vertical()
+        .id_salt("frame_presets_scroll")
+        .max_height(avail_h)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            for &(cat_name, presets) in FRAME_PRESETS {
+                // Apply search filter — skip category if no presets match
+                let visible: Vec<_> = presets.iter()
+                    .filter(|&&(name, w, h)| {
+                        if filter.is_empty() { return true; }
+                        name.to_lowercase().contains(&filter)
+                            || w.to_string().contains(&filter)
+                            || h.to_string().contains(&filter)
+                    })
+                    .collect();
+                if visible.is_empty() { continue; }
+
+                // Category header
+                let cat_rect = ui.available_rect_before_wrap();
+                let header_h = 22.0;
+                let header_rect = Rect::from_min_size(
+                    cat_rect.min,
+                    vec2(cat_rect.width(), header_h),
+                );
+                ui.allocate_ui_at_rect(header_rect, |ui| {
+                    ui.painter().rect_filled(header_rect, 0.0, cat_bg);
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(
+                            RichText::new(cat_name)
+                                .size(10.5)
+                                .strong()
+                                .color(dim_fg),
+                        );
+                    });
+                });
+                ui.add_space(header_h);
+
+                // Preset rows
+                for &&(name, w, h) in &visible {
+                    let row_available = ui.available_rect_before_wrap();
+                    let row_h = 28.0;
+                    let row_rect = Rect::from_min_size(row_available.min, vec2(row_available.width(), row_h));
+                    let resp = ui.allocate_rect(row_rect, Sense::click());
+
+                    let bg = if resp.hovered() { row_hover } else { row_bg };
+                    ui.painter().rect_filled(row_rect, 3.0, bg);
+
+                    // Preset name (left)
+                    let name_rect = Rect::from_min_size(
+                        row_rect.min + vec2(12.0, 0.0),
+                        vec2(row_rect.width() * 0.58, row_h),
+                    );
+                    ui.painter().text(
+                        name_rect.left_center(),
+                        Align2::LEFT_CENTER,
+                        name,
+                        FontId::proportional(11.5),
+                        Color32::from_gray(220),
+                    );
+
+                    // Dimensions (right, muted)
+                    let dim_str = format!("{}×{}", w as u32, h as u32);
+                    let dim_rect = Rect::from_min_size(
+                        row_rect.min + vec2(0.0, 0.0),
+                        vec2(row_rect.width() - 10.0, row_h),
+                    );
+                    ui.painter().text(
+                        dim_rect.right_center(),
+                        Align2::RIGHT_CENTER,
+                        &dim_str,
+                        FontId::proportional(10.5),
+                        dim_fg,
+                    );
+
+                    // Blue left-edge highlight on hover
+                    if resp.hovered() {
+                        let bar = Rect::from_min_size(row_rect.min, vec2(3.0, row_h));
+                        ui.painter().rect_filled(bar, 1.5, accent);
+                    }
+
+                    // Click: place frame centered on viewport
+                    if resp.clicked() {
+                        // Compute world-space centre of current viewport
+                        // viewport pixel size is not easily available here, so use a
+                        // canonical 1280×800 estimate — the frame is placed at world 0,0
+                        // offset by (pan_x, pan_y) converted back to world space.
+                        let vw = 1280.0_f32;
+                        let vh =  800.0_f32;
+                        let cx = (-state.pan_x + vw * 0.5) / state.zoom;
+                        let cy = (-state.pan_y + vh * 0.5) / state.zoom;
+                        let fx = cx - w * 0.5;
+                        let fy = cy - h * 0.5;
+                        let frame_id = state.add_frame(name, fx, fy, w, h);
+                        state.select_only(frame_id);
+                        state.push_history(&format!("add frame {name}"));
+                        // Return to Select tool so the user can immediately position
+                        state.tool = crate::tools::Tool::Select;
+                    }
+                }
+                ui.add_space(4.0);
+            }
+        });
+}
+
+// ── Right panel ───────────────────────────────────────────────────────────────
+
 pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     use crate::state::StrokePosition;
 
@@ -951,6 +1186,11 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
 
     // ── No selection ─────────────────────────────────────────────────────
     if state.selection.is_empty() {
+        // Frame tool → show preset picker instead of the empty-state message
+        if state.tool == Tool::Frame {
+            frame_presets_panel(ui, state);
+            return;
+        }
         ui.add_space(12.0);
         ui.indent("no_sel", |ui| {
             ui.label(RichText::new("Nothing selected").size(12.0).color(C_MUTED).italics());
