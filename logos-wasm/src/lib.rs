@@ -13,12 +13,15 @@ use wasm_bindgen::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 mod camera;
+mod canvas;       // canvas panel rendering
+mod canvas_input; // tool input handling
 mod collab;
-mod editor;   // egui design-editor application
+mod draw_utils;   // pure rendering helpers
+mod editor;       // egui application shell
 mod error;
-mod panels;   // left / right / toolbar panels
-mod state;    // editor state model
-mod tools;    // tool modes
+mod panels;       // left / right / toolbar panels
+mod state;        // editor state model
+mod tools;        // tool modes
 
 pub use camera::Camera;
 pub use collab::{WasmConnectionState, WasmSyncConfig, WasmSyncState};
