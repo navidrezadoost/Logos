@@ -1621,7 +1621,59 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             .unwrap_or(false);
         if is_section && section_header(ui, "sec_section", "Section", true) {
             ui.add_space(4.0);
-            // Header color picker
+
+            // ── Collapse / Expand toggle ───────────────────────────────
+            {
+                let collapsed = state.layers.get(&id).map(|r| r.section_collapsed).unwrap_or(false);
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    let lbl = if collapsed { "Expand Section" } else { "Collapse Section" };
+                    let icon = if collapsed { "▶ " } else { "▼ " };
+                    if ui.add(Button::new(
+                        RichText::new(format!("{icon}{lbl}")).size(11.5))
+                        .fill(Color32::from_rgb(35, 35, 47))
+                        .min_size(vec2(0.0, 24.0))
+                    ).clicked() {
+                        if let Some(rec) = state.layers.get_mut(&id) {
+                            rec.section_collapsed = !rec.section_collapsed;
+                        }
+                        needs_history = true;
+                    }
+                });
+            }
+            ui.add_space(4.0);
+
+            // ── Jump to Section ───────────────────────────────────────
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                if ui.add(Button::new(
+                    RichText::new("↗  Jump to Section").size(11.5))
+                    .fill(Color32::from_rgb(35, 35, 47))
+                    .min_size(vec2(0.0, 24.0))
+                ).clicked() {
+                    // Treat viewport as 1280×800 (same canonical size as frame
+                    // presets panel — close enough for typical canvas sizes).
+                    state.jump_to_section(id, 1280.0, 800.0);
+                }
+            });
+            ui.add_space(4.0);
+
+            // ── Fit bounds to children ────────────────────────────────
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                if ui.add(Button::new(
+                    RichText::new("⊡  Fit to Children").size(11.5))
+                    .fill(Color32::from_rgb(35, 35, 47))
+                    .min_size(vec2(0.0, 24.0))
+                ).on_hover_text("Resize section to tightly contain all children")
+                .clicked() {
+                    state.sync_section_bounds(id);
+                    needs_history = true;
+                }
+            });
+            ui.add_space(6.0);
+
+            // ── Header color picker ───────────────────────────────────
             if let Some(rec) = state.layers.get_mut(&id) {
                 if let LayerType::Section { ref mut color } = rec.layer_type {
                     let col_arr = color.get_or_insert([0.38, 0.55, 0.95, 1.0]);

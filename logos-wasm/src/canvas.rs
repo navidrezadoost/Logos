@@ -101,6 +101,18 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
         state.apply_auto_layout(fid);
     }
 
+    // ── Section bounds-sync pre-pass: auto-fit each Section to its children ──
+    // This keeps hit-testing, marquee-select and viewport culling consistent.
+    let section_ids: Vec<Uuid> = layer_ids.iter()
+        .filter(|&&sid| state.layers.get(&sid)
+            .map(|r| matches!(r.layer_type, crate::state::LayerType::Section { .. }))
+            .unwrap_or(false))
+        .cloned()
+        .collect();
+    for sid in section_ids {
+        state.sync_section_bounds(sid);
+    }
+
     for &id in &layer_ids {
         let rec = match state.layers.get(&id) {
             Some(r) if r.visible => r,
@@ -442,7 +454,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
                 }
                 LayerType::Section { color } => {
-                    // ── Section: light tinted background + header band + label ──
+                    // ── Section: organisational overlay (no render surface) ──
                     let base_col = color.map(|c| Color32::from_rgba_unmultiplied(
                         (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 20
                     )).unwrap_or(Color32::from_rgba_unmultiplied(80, 100, 200, 18));
@@ -450,24 +462,65 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 160
                     )).unwrap_or(Color32::from_rgba_unmultiplied(80, 100, 200, 160));
 
-                    // Body
-                    painter.rect_filled(rect, 4.0, base_col);
-                    painter.rect_stroke(rect, 4.0, Stroke::new(1.5, border_col));
+                    let collapsed = rec.section_collapsed;
+
+                    // Body region — only draw full region when expanded
+                    if !collapsed {
+                        painter.rect_filled(rect, 4.0, base_col);
+                        painter.rect_stroke(rect, 4.0, Stroke::new(1.5, border_col));
+                    }
 
                     // Header band (top portion)
                     let header_h = (20.0_f32 * state.zoom).clamp(14.0, 28.0);
                     let header_rect = Rect::from_min_size(rect.left_top(), vec2(rect.width(), header_h));
-                    painter.rect_filled(header_rect, Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 }, border_col);
+                    // When collapsed the header represents the whole visible region
+                    let _visible_rect = if collapsed { header_rect } else { rect };
+                    let header_rounding = if collapsed {
+                        Rounding::same(4.0)
+                    } else {
+                        Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 }
+                    };
+                    painter.rect_filled(header_rect, header_rounding, border_col);
+                    // Dashed border when collapsed to indicate hidden content
+                    if collapsed {
+                        painter.rect_stroke(header_rect, header_rounding, Stroke::new(1.0,
+                            Color32::from_rgba_unmultiplied(200, 210, 255, 110)));
+                    }
 
-                    // Name label in header
+                    // Collapse chevron ▶ / ▼
+                    let chevron = if collapsed { "▶" } else { "▼" };
                     let label_painter = painter.with_clip_rect(painter.clip_rect().expand(40.0));
                     label_painter.text(
                         pos2(rect.left() + 6.0, header_rect.center().y),
+                        Align2::LEFT_CENTER,
+                        chevron,
+                        FontId::proportional((9.0 * state.zoom).clamp(7.0, 14.0)),
+                        Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                    );
+                    // Name label
+                    label_painter.text(
+                        pos2(rect.left() + 6.0 + (14.0 * state.zoom).clamp(10.0, 18.0),
+                             header_rect.center().y),
                         Align2::LEFT_CENTER,
                         &rec.name.clone(),
                         FontId::proportional((10.0 * state.zoom).clamp(8.0, 16.0)),
                         Color32::WHITE,
                     );
+
+                    // Child count badge when collapsed
+                    if collapsed {
+                        let child_count = state.frame_children(id).len();
+                        if child_count > 0 {
+                            let badge_str = format!("{child_count}");
+                            label_painter.text(
+                                pos2(rect.right() - 8.0, header_rect.center().y),
+                                Align2::RIGHT_CENTER,
+                                &badge_str,
+                                FontId::proportional((9.0 * state.zoom).clamp(7.0, 13.0)),
+                                Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                            );
+                        }
+                    }
 
                     // ── Section members: no coordinate space — children store section-local
                     // coords, so add the Section's world origin, same as Frame but unclipped.
@@ -475,7 +528,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     let section_wx = rec.x;
                     let section_wy = rec.y;
                     let child_painter = painter.with_clip_rect(painter.clip_rect());
-                    for &cid in &child_ids {
+                    // When collapsed, skip child rendering entirely
+                    for &cid in if collapsed { &[][..] } else { child_ids.as_slice() } {
                         let crec = match state.layers.get(&cid) {
                             Some(r) if r.visible => r.clone(),
                             _ => continue,

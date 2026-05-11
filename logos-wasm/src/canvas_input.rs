@@ -163,6 +163,30 @@ pub(crate) fn handle_tool_input(
                 return;
             }
 
+            // ── Double-click on a Section header → toggle collapse ────────────
+            if let Some(id) = state.hit_test(wx, wy) {
+                if matches!(state.layers.get(&id).map(|r| &r.layer_type),
+                    Some(LayerType::Section { .. }))
+                {
+                    // Compute approximate header rect in world space so we only
+                    // toggle when the click is on the header band, not the body.
+                    let in_header = state.layers.get(&id).map(|r| {
+                        // header_h ≈ 20 world units (unzoomed)
+                        let header_h_world = 20.0;
+                        wy >= r.y && wy <= r.y + header_h_world
+                            && wx >= r.x && wx <= r.x + r.width
+                    }).unwrap_or(false);
+                    if in_header {
+                        if let Some(rec) = state.layers.get_mut(&id) {
+                            rec.section_collapsed = !rec.section_collapsed;
+                        }
+                        state.select_only(id);
+                        state.push_history("toggle section collapse");
+                        return;
+                    }
+                }
+            }
+
             if let Some(id) = state.hit_test(wx, wy) {
                 if let Some(mid) = state.find_master(id) {
                     state.enter_master_edit_mode(mid, Some(id));

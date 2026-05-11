@@ -198,6 +198,9 @@ pub struct LayerRecord {
     pub clip_content: bool,
     /// Whether this frame/group is expanded in the layers panel tree.
     pub frame_expanded: bool,
+    /// Whether this Section is collapsed (children hidden on canvas).
+    /// Has no effect on non-Section nodes.
+    pub section_collapsed: bool,
     /// Auto Layout config (None = regular free-form frame).
     pub auto_layout: Option<AutoLayout>,
     /// Constraint for how this layer resizes inside its parent frame (no AL on parent).
@@ -466,6 +469,7 @@ impl LayerRecord {
             parent_id: None,
             clip_content: false,
             frame_expanded: true,
+            section_collapsed: false,
             auto_layout: None,
             constraints: Constraints::default(),
             layout_sizing_h: SizingMode::Fixed,
@@ -845,6 +849,61 @@ impl EditorState {
         self.pages[self.active_page].layers.push(id);
         self.layers.insert(id, rec);
         id
+    }
+
+    /// Expand the Section's bounds to tightly fit all its children
+    /// (with a fixed padding on each side).  A Section with no children
+    /// keeps its current size.
+    pub fn sync_section_bounds(&mut self, section_id: Uuid) {
+        let children: Vec<Uuid> = self.frame_children(section_id);
+        if children.is_empty() { return; }
+        let sec = match self.layers.get(&section_id) {
+            Some(r) if matches!(r.layer_type, LayerType::Section { .. }) => r,
+            _ => return,
+        };
+        let sx = sec.x;
+        let sy = sec.y;
+        // Children are stored in Section-local coords
+        let pad = 24.0_f32;
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        for &cid in &children {
+            if let Some(cr) = self.layers.get(&cid) {
+                min_x = min_x.min(sx + cr.x);
+                min_y = min_y.min(sy + cr.y);
+                max_x = max_x.max(sx + cr.x + cr.width);
+                max_y = max_y.max(sy + cr.y + cr.height);
+            }
+        }
+        // Apply tight bounds + padding
+        let new_x = min_x - pad;
+        let new_y = min_y - pad;
+        let new_w = (max_x - min_x + pad * 2.0).max(64.0);
+        // Extra top padding to leave room for the header band
+        let header_pad = 32.0;
+        let new_full_y = new_y - header_pad;
+        let new_h = (max_y - min_y + pad * 2.0 + header_pad).max(64.0);
+        if let Some(sec) = self.layers.get_mut(&section_id) {
+            sec.x = new_x;
+            sec.y = new_full_y;
+            sec.width  = new_w;
+            sec.height = new_h;
+        }
+    }
+
+    /// Pan the viewport so the Section with the given ID is centered on screen.
+    /// `viewport_w` / `viewport_h` are the canvas pixel dimensions.
+    pub fn jump_to_section(&mut self, section_id: Uuid, viewport_w: f32, viewport_h: f32) {
+        if let Some(sec) = self.layers.get(&section_id) {
+            let cx = sec.x + sec.width  * 0.5;
+            let cy = sec.y + sec.height * 0.5;
+            // pan_x / pan_y: the world offset applied before scaling, so that
+            // world origin lands at (pan_x, pan_y) in screen space.
+            self.pan_x = cx - viewport_w  * 0.5 / self.zoom;
+            self.pan_y = cy - viewport_h * 0.5 / self.zoom;
+        }
     }
 
     /// Convert selected layer(s) into a Section in-place.
