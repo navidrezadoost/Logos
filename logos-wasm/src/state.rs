@@ -708,6 +708,9 @@ pub struct DragState {
     /// Active marquee-selection rectangle in **world** coordinates (x0,y0,x1,y1).
     /// `Some` only while the user is box-selecting on empty canvas.
     pub rubber_band: Option<(f32, f32, f32, f32)>,
+    /// While dragging over an Auto Layout frame: the insertion slot index (0 = before all
+    /// children, N = after all). `None` when the hovered parent has no Auto Layout.
+    pub al_insertion_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2208,6 +2211,34 @@ impl EditorState {
         page.insert(insert_at, src_id);
 
         self.push_history("move layer");
+    }
+
+    /// Compute the child-slot insertion index for dragging into an Auto Layout frame.
+    /// Returns the slot index (0 = before first child) based on where `cursor_wx/wy` falls
+    /// along the frame's primary axis.
+    pub fn al_insertion_index_for(&self, frame_id: Uuid, cursor_wx: f32, cursor_wy: f32) -> usize {
+        let al = match self.layers.get(&frame_id).and_then(|r| r.auto_layout.as_ref()) {
+            Some(al) => al.clone(),
+            None => return 0,
+        };
+        let fr = match self.layers.get(&frame_id) { Some(r) => r, None => return 0 };
+        let frame_wx = fr.x;
+        let frame_wy = fr.y;
+        let is_horiz = al.direction == AutoLayoutDirection::Horizontal;
+        let children = self.frame_children(frame_id);
+        for (i, &cid) in children.iter().enumerate() {
+            if let Some(crec) = self.layers.get(&cid) {
+                // Children store positions in frame-local space.
+                let child_cx = frame_wx + crec.x + crec.width  * 0.5;
+                let child_cy = frame_wy + crec.y + crec.height * 0.5;
+                if is_horiz {
+                    if cursor_wx < child_cx { return i; }
+                } else if cursor_wy < child_cy {
+                    return i;
+                }
+            }
+        }
+        children.len()
     }
 
     pub fn resize_frame_to_fit(&mut self, frame_id: Uuid, padding: f32) {

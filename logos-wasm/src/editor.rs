@@ -1385,6 +1385,104 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     FontId::proportional(11.0),
                     color,
                 );
+
+                // ── Auto Layout insertion line (blue bar + index badge) ──────
+                if let Some(al_idx) = state.drag.al_insertion_index {
+                    let al = fr.auto_layout.as_ref().map(|a| a.clone());
+                    if let Some(al) = al {
+                        let is_horiz = al.direction == crate::state::AutoLayoutDirection::Horizontal;
+                        let children = state.frame_children(hpid);
+                        let n = children.len();
+                        let fr_x  = fr.x;
+                        let fr_y  = fr.y;
+                        let fr_w  = fr.width;
+                        let fr_h  = fr.height;
+                        let pad   = al.padding.clone();
+                        let gap   = al.gap;
+
+                        // Compute the screen-space coordinate of the insertion line.
+                        // Slot 0 = before first child; slot n = after last child.
+                        let line_world: f32 = if is_horiz {
+                            if n == 0 {
+                                fr_x + pad.left
+                            } else if al_idx == 0 {
+                                // Before first child
+                                let c0 = children[0];
+                                state.layers.get(&c0).map(|r| fr_x + r.x).unwrap_or(fr_x + pad.left) - gap * 0.5
+                            } else if al_idx >= n {
+                                // After last child
+                                let cn = children[n - 1];
+                                state.layers.get(&cn).map(|r| fr_x + r.x + r.width).unwrap_or(fr_x + fr_w - pad.right) + gap * 0.5
+                            } else {
+                                // Between slot al_idx-1 and al_idx
+                                let ca = children[al_idx - 1];
+                                let cb = children[al_idx];
+                                let xa = state.layers.get(&ca).map(|r| fr_x + r.x + r.width).unwrap_or(fr_x);
+                                let xb = state.layers.get(&cb).map(|r| fr_x + r.x).unwrap_or(fr_x);
+                                (xa + xb) * 0.5
+                            }
+                        } else {
+                            if n == 0 {
+                                fr_y + pad.top
+                            } else if al_idx == 0 {
+                                let c0 = children[0];
+                                state.layers.get(&c0).map(|r| fr_y + r.y).unwrap_or(fr_y + pad.top) - gap * 0.5
+                            } else if al_idx >= n {
+                                let cn = children[n - 1];
+                                state.layers.get(&cn).map(|r| fr_y + r.y + r.height).unwrap_or(fr_y + fr_h - pad.bottom) + gap * 0.5
+                            } else {
+                                let ca = children[al_idx - 1];
+                                let cb = children[al_idx];
+                                let ya = state.layers.get(&ca).map(|r| fr_y + r.y + r.height).unwrap_or(fr_y);
+                                let yb = state.layers.get(&cb).map(|r| fr_y + r.y).unwrap_or(fr_y);
+                                (ya + yb) * 0.5
+                            }
+                        };
+
+                        let ins_color = Color32::from_rgb(50, 155, 255);
+                        let ins_stroke = Stroke::new(2.5, ins_color);
+                        let margin = 4.0f32;
+
+                        if is_horiz {
+                            let (lsx, _) = state.world_to_screen(line_world, fr_y);
+                            let lx = origin.x + lsx;
+                            // Vertical line spanning the frame height
+                            let top_y    = rect.min.y + margin;
+                            let bottom_y = rect.max.y - margin;
+                            painter.line_segment([pos2(lx, top_y), pos2(lx, bottom_y)], ins_stroke);
+                            // Caps
+                            painter.circle_filled(pos2(lx, top_y),    3.5, ins_color);
+                            painter.circle_filled(pos2(lx, bottom_y), 3.5, ins_color);
+                            // Index badge
+                            let badge_r = Rect::from_center_size(
+                                pos2(lx, rect.center().y),
+                                vec2(22.0, 18.0),
+                            );
+                            painter.rect_filled(badge_r, 4.0, ins_color);
+                            painter.text(badge_r.center(), Align2::CENTER_CENTER,
+                                format!("{al_idx}"),
+                                FontId::proportional(10.0),
+                                Color32::WHITE);
+                        } else {
+                            let (_, lsy) = state.world_to_screen(fr_x, line_world);
+                            let ly = origin.y + lsy;
+                            let left_x  = rect.min.x + margin;
+                            let right_x = rect.max.x - margin;
+                            painter.line_segment([pos2(left_x, ly), pos2(right_x, ly)], ins_stroke);
+                            painter.circle_filled(pos2(left_x,  ly), 3.5, ins_color);
+                            painter.circle_filled(pos2(right_x, ly), 3.5, ins_color);
+                            let badge_r = Rect::from_center_size(
+                                pos2(rect.center().x, ly),
+                                vec2(22.0, 18.0),
+                            );
+                            painter.rect_filled(badge_r, 4.0, ins_color);
+                            painter.text(badge_r.center(), Align2::CENTER_CENTER,
+                                format!("{al_idx}"),
+                                FontId::proportional(10.0),
+                                Color32::WHITE);
+                        }
+                    }
+                }
             }
         }
     }
@@ -3300,9 +3398,14 @@ fn handle_tool_input(
                                                 }
                                             }
                                             state.drag.hovered_parent = best;
+                                            // Compute AL insertion slot when hovering an AL frame.
+                                            state.drag.al_insertion_index = best.filter(|&hp| {
+                                                state.layers.get(&hp).map(|r| r.auto_layout.is_some()).unwrap_or(false)
+                                            }).map(|hp| state.al_insertion_index_for(hp, wx, wy));
                                         }
                                     } else {
                                         state.drag.hovered_parent = None;
+                                        state.drag.al_insertion_index = None;
                                     }
                                 }
                             }
@@ -3447,6 +3550,33 @@ fn handle_tool_input(
                     } // end containment block
                 }
             }
+
+            // ── If dropped into an AL frame, reorder per the insertion index ─
+            if let (Some(al_parent), Some(al_idx)) =
+                (state.drag.hovered_parent, state.drag.al_insertion_index)
+            {
+                if state.layers.get(&al_parent).map(|r| r.auto_layout.is_some()).unwrap_or(false) {
+                    let moved_ids: Vec<Uuid> = state.selection.clone();
+                    for &mid in &moved_ids {
+                        // Get current children of AL frame (excluding the layer being moved)
+                        let siblings: Vec<Uuid> = state.frame_children(al_parent)
+                            .into_iter().filter(|&cid| cid != mid).collect();
+                        // Insert before siblings[al_idx] — None means append at end
+                        let before_id = siblings.get(al_idx).copied();
+                        // Re-insert mid in page order just before before_id (or at end)
+                        let page = &mut state.pages[state.active_page].layers;
+                        page.retain(|&id| id != mid);
+                        let insert_at = match before_id {
+                            Some(bid) => page.iter().position(|&id| id == bid).unwrap_or(page.len()),
+                            None => page.len(),
+                        };
+                        page.insert(insert_at, mid);
+                    }
+                    // Re-run AL to position children at new order
+                    let _ = state.apply_auto_layout(al_parent);
+                }
+            }
+            state.drag.al_insertion_index = None;
 
             state.drag.hovered_parent = None;
             state.push_history(label);
