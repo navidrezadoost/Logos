@@ -272,6 +272,49 @@ impl eframe::App for LogosEditor {
                 });
             });
 
+        // ─── Master-Edit mode banner (shown when editing a Component master) ──
+        if state.editing_master_id.is_some() {
+            let master_name = state.editing_master_id
+                .and_then(|mid| state.layers.get(&mid))
+                .map(|r| if r.component_name.is_empty() { r.name.clone() } else { r.component_name.clone() })
+                .unwrap_or_else(|| "Component".to_string());
+            let page_name = state.pages.get(state.active_page)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "Page".to_string());
+
+            TopBottomPanel::top("master_edit_banner")
+                .exact_height(36.0)
+                .frame(Frame::none()
+                    .fill(Color32::from_rgb(48, 32, 80))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(110, 60, 180))))
+                .show(ctx, |ui| {
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.add_space(12.0);
+                        // ◆ breadcrumb
+                        ui.label(RichText::new(format!("◆  {page_name}  /  {master_name}"))
+                            .size(12.5)
+                            .color(Color32::from_rgb(210, 185, 255))
+                            .strong());
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.add_space(12.0);
+                            let done_btn = ui.add(
+                                Button::new(RichText::new("Done  ✕").size(12.0)
+                                    .color(Color32::from_rgb(210, 185, 255)))
+                                    .fill(Color32::from_rgb(80, 40, 130))
+                                    .stroke(Stroke::new(1.0, Color32::from_rgb(130, 80, 200)))
+                                    .rounding(6.0)
+                            );
+                            if done_btn.clicked() {
+                                state.exit_master_edit_mode();
+                            }
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Editing Master — changes will update all instances")
+                                .size(10.5).color(Color32::from_rgb(160, 140, 200)));
+                        });
+                    });
+                });
+        }
+
         // ─── Canvas ────────────────────────────────────────────────────────
         CentralPanel::default()
             .frame(Frame::none().fill(Color32::from_rgb(18, 18, 24)))
@@ -1348,30 +1391,38 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
 
     if let Some(master_id) = state.editing_master_id {
         if let Some(master) = state.layers.get(&master_id) {
-            let master_name = if master.component_name.is_empty() {
-                master.name.as_str()
-            } else {
-                master.component_name.as_str()
-            };
             let (msx, msy) = state.world_to_screen(master.x, master.y);
             let mrect = Rect::from_min_size(
                 pos2(origin.x + msx, origin.y + msy),
                 vec2(master.width * state.zoom, master.height * state.zoom),
             );
-            painter.rect_stroke(
-                mrect.expand(4.0),
-                8.0,
-                Stroke::new(2.0, Color32::from_rgba_unmultiplied(167, 118, 255, 210)),
-            );
-            let badge = Rect::from_min_size(resp.rect.left_top() + vec2(12.0, 12.0), vec2(188.0, 28.0));
-            painter.rect_filled(badge, 6.0, Color32::from_rgba_unmultiplied(139, 92, 246, 34));
-            painter.rect_stroke(badge, 6.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(167, 118, 255, 110)));
+            let canvas_rect = resp.rect;
+            let dim = Color32::from_rgba_unmultiplied(8, 6, 16, 165);
+
+            // Paint dim surround as 4 clipped rects (top, bottom, left, right)
+            // leaving the master's bounds at full brightness.
+            let top    = Rect::from_min_max(canvas_rect.min, pos2(canvas_rect.max.x, mrect.min.y));
+            let bottom = Rect::from_min_max(pos2(canvas_rect.min.x, mrect.max.y), canvas_rect.max);
+            let left   = Rect::from_min_max(
+                pos2(canvas_rect.min.x, mrect.min.y), pos2(mrect.min.x, mrect.max.y));
+            let right  = Rect::from_min_max(
+                pos2(mrect.max.x, mrect.min.y), pos2(canvas_rect.max.x, mrect.max.y));
+            for r in [top, bottom, left, right] {
+                if r.is_positive() { painter.rect_filled(r, 0.0, dim); }
+            }
+
+            // Purple border around the master
+            painter.rect_stroke(mrect.expand(3.0), 6.0,
+                Stroke::new(2.0, Color32::from_rgba_unmultiplied(167, 118, 255, 230)));
+
+            // Master name label just above the master rect
+            let master_name = if master.component_name.is_empty() { &master.name } else { &master.component_name };
             painter.text(
-                badge.left_center() + vec2(10.0, 0.0),
-                Align2::LEFT_CENTER,
-                format!("◆ Editing Master: {master_name}"),
-                FontId::proportional(11.0),
-                Color32::from_rgb(225, 214, 255),
+                pos2(mrect.min.x, mrect.min.y - 18.0),
+                Align2::LEFT_BOTTOM,
+                format!("◆ {master_name}"),
+                FontId::proportional((11.0 * state.zoom).clamp(9.0, 14.0)),
+                Color32::from_rgb(200, 170, 255),
             );
         }
     }
@@ -2611,6 +2662,18 @@ fn handle_tool_input(
         if let Some(mp) = pointer.press_origin() {
             let (wx, wy) = to_world(mp, state);
 
+            // ── Clicking outside master in master edit mode → exit ──────────
+            if let Some(master_id) = state.editing_master_id {
+                if let Some(mr) = state.layers.get(&master_id) {
+                    let outside = wx < mr.x || wx > mr.x + mr.width
+                               || wy < mr.y || wy > mr.y + mr.height;
+                    if outside {
+                        state.exit_master_edit_mode();
+                        return;
+                    }
+                }
+            }
+
             match state.tool {
                 Tool::Select | Tool::Scale => {
                     let mut did_something = false;
@@ -3443,6 +3506,17 @@ fn handle_tool_input(
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
 
+            // ── If editing a master, clicking strictly outside it exits the mode ──
+            if let Some(master_id) = state.editing_master_id {
+                if let Some(mr) = state.layers.get(&master_id) {
+                    let outside = wx < mr.x || wx > mr.x + mr.width
+                               || wy < mr.y || wy > mr.y + mr.height;
+                    if outside {
+                        state.exit_master_edit_mode();
+                        return;
+                    }
+                }
+            }
             // When a draw tool is active, ANY click (even over an existing shape) creates
             // a new default-sized shape. Double-click selects existing.
             let is_draw_tool = matches!(state.tool,
