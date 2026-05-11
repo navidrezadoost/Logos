@@ -1611,6 +1611,7 @@ impl EditorState {
                 self.layers.get(&fid).map(|r| matches!(r.layer_type,
                     LayerType::Frame | LayerType::Component
                     | LayerType::ComponentInstance { .. }
+                    | LayerType::Section { .. }
                 )).unwrap_or(false)
             })
             .cloned()

@@ -1689,14 +1689,22 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             ui.separator();
 
             // ── Structural hierarchy (matches Figma order) ──
-            if ui.button("Convert to Section").clicked() {
-                // Treat as Frame with clip_content=false, section semantics
-                if let Some(r) = state.layers.get_mut(&id) {
-                    r.layer_type = crate::state::LayerType::Frame;
-                    r.clip_content = false;
+            let is_section = state.layers.get(&id).map(|r| matches!(r.layer_type, crate::state::LayerType::Section { .. })).unwrap_or(false);
+            if !is_section {
+                if ui.button("Convert to Section").clicked() {
+                    state.convert_to_section(id);
+                    ui.close_menu();
                 }
-                state.push_history("convert to section");
-                ui.close_menu();
+            }
+            if is_section {
+                if ui.button("Convert to Frame").clicked() {
+                    if let Some(r) = state.layers.get_mut(&id) {
+                        r.layer_type   = crate::state::LayerType::Frame;
+                        r.clip_content = false;
+                    }
+                    state.push_history("convert to frame");
+                    ui.close_menu();
+                }
             }
             if ui.button("Group Selection      Ctrl+G").clicked() {
                 state.select_only(id);

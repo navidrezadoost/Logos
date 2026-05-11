@@ -670,6 +670,16 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                                 ui.close_menu();
                             }
                         }
+                        if is_section {
+                            if ui.button("Convert to Frame").clicked() {
+                                if let Some(r) = state.layers.get_mut(&id) {
+                                    r.layer_type   = LayerType::Frame;
+                                    r.clip_content = false;
+                                }
+                                state.push_history("convert to frame");
+                                ui.close_menu();
+                            }
+                        }
                         if is_component {
                             if ui.button("Instantiate Component").clicked() {
                                 state.instantiate_component(id);
@@ -1353,6 +1363,42 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             });
         }
         ui.add_space(8.0);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // SECTION  (section-specific properties)
+    // ════════════════════════════════════════════════════════════════════
+    {
+        let is_section = state.layers.get(&id)
+            .map(|r| matches!(r.layer_type, LayerType::Section { .. }))
+            .unwrap_or(false);
+        if is_section && section_header(ui, "sec_section", "Section", true) {
+            ui.add_space(4.0);
+            // Header color picker
+            if let Some(rec) = state.layers.get_mut(&id) {
+                if let LayerType::Section { ref mut color } = rec.layer_type {
+                    let col_arr = color.get_or_insert([0.38, 0.55, 0.95, 1.0]);
+                    let mut egui_color = Color32::from_rgba_unmultiplied(
+                        (col_arr[0] * 255.0) as u8,
+                        (col_arr[1] * 255.0) as u8,
+                        (col_arr[2] * 255.0) as u8,
+                        (col_arr[3] * 255.0) as u8,
+                    );
+                    ui.horizontal(|ui| {
+                        ui.add_space(12.0);
+                        ui.label(RichText::new("Header Color").size(11.5).color(C_MUTED));
+                        if ui.color_edit_button_srgba(&mut egui_color).changed() {
+                            col_arr[0] = egui_color.r() as f32 / 255.0;
+                            col_arr[1] = egui_color.g() as f32 / 255.0;
+                            col_arr[2] = egui_color.b() as f32 / 255.0;
+                            col_arr[3] = egui_color.a() as f32 / 255.0;
+                            needs_history = true;
+                        }
+                    });
+                }
+            }
+            ui.add_space(6.0);
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════
