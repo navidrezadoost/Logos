@@ -672,6 +672,10 @@ pub enum ShapeHandle {
     ArcInner,
     PolygonCornerRadius,
     PolygonSides,
+    /// Drag the start point of a Line / Arrow (rec.x, rec.y).
+    LineStart,
+    /// Drag the end point of a Line / Arrow (rec.x + rec.width, rec.y + rec.height).
+    LineEnd,
 }
 
 #[derive(Default, Debug)]

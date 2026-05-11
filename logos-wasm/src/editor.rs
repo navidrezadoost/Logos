@@ -402,10 +402,17 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
         let (sx, sy) = state.world_to_screen(rec.x, rec.y);
         let sw = rec.width  * state.zoom;
         let sh = rec.height * state.zoom;
-        let rect = Rect::from_min_size(
-            pos2(origin.x + sx, origin.y + sy),
-            vec2(sw, sh),
-        );
+        // For Line/Arrow: rec.x,y = start; rec.x+w, rec.y+h = end (may be negative delta).
+        // Use from_two_pos so the bounding box is always normalized regardless of direction.
+        let rect = if matches!(rec.layer_type, LayerType::Line | LayerType::Arrow { .. }) {
+            let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+            Rect::from_two_pos(
+                pos2(origin.x + sx, origin.y + sy),
+                pos2(origin.x + ex, origin.y + ey),
+            )
+        } else {
+            Rect::from_min_size(pos2(origin.x + sx, origin.y + sy), vec2(sw, sh))
+        };
 
         // Fill — apply layer-level blend mode (with hover-preview support)
         let fill = {
@@ -593,27 +600,28 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                     painter.add(Shape::Path(epaint::PathShape { points: pts2, closed: true, fill, stroke: stroke.into() }));
                 }
                 LayerType::Line => {
-                    let c = rect.center();
-                    let lc = rotate_point(rect.left_center(), c, rotation);
-                    let rc2 = rotate_point(rect.right_center(), c, rotation);
+                    // Line/Arrow use start=(rec.x,rec.y) end=(rec.x+w, rec.y+h); rotation ignored
                     let lw  = (rec.stroke_width * state.zoom).max(2.0);
                     let col = if stroke.width > 0.0 { stroke.color } else { fill };
-                    painter.line_segment([lc, rc2], Stroke::new(lw, col));
+                    let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+                    let sp = pos2(origin.x + sx, origin.y + sy);
+                    let ep = pos2(origin.x + ex, origin.y + ey);
+                    painter.line_segment([sp, ep], Stroke::new(lw, col));
                 }
                 LayerType::Arrow { head_size } => {
-                    let c = rect.center();
-                    let lc = rotate_point(rect.left_center(), c, rotation);
-                    let rc2 = rotate_point(rect.right_center(), c, rotation);
                     let head_s = head_size * state.zoom;
-                    let dir  = (rc2 - lc).normalized();
+                    let lw    = (rec.stroke_width * state.zoom).max(2.0);
+                    let col   = if stroke.width > 0.0 { stroke.color } else { fill };
+                    let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+                    let sp = pos2(origin.x + sx, origin.y + sy);
+                    let ep = pos2(origin.x + ex, origin.y + ey);
+                    if sp.distance(ep) < head_s * 0.5 { continue; }
+                    let dir  = (ep - sp).normalized();
                     let perp = vec2(-dir.y, dir.x);
-                    let tip  = rc2;
-                    let back = tip - dir * head_s;
-                    let p1   = back + perp * (head_s * 0.45);
-                    let p2   = back - perp * (head_s * 0.45);
-                    let lw   = (rec.stroke_width * state.zoom).max(2.0);
-                    let col  = if stroke.width > 0.0 { stroke.color } else { fill };
-                    painter.line_segment([lc, back + dir * (head_s * 0.15)], Stroke::new(lw, col));
+                    let tip  = ep;
+                    let p1   = tip - dir * head_s + perp * (head_s * 0.45);
+                    let p2   = tip - dir * head_s - perp * (head_s * 0.45);
+                    painter.line_segment([sp, tip - dir * (head_s * 0.85)], Stroke::new(lw, col));
                     painter.add(Shape::Path(epaint::PathShape {
                         points: vec![tip, p1, p2], closed: true, fill: col,
                         stroke: epaint::PathStroke::NONE,
@@ -690,18 +698,25 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                 LayerType::Line => {
                     let lw  = (rec.stroke_width * state.zoom).max(2.0);
                     let col = if stroke.width > 0.0 { stroke.color } else { fill };
-                    painter.line_segment([rect.left_center(), rect.right_center()], Stroke::new(lw, col));
+                    let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+                    let sp = pos2(origin.x + sx, origin.y + sy);
+                    let ep = pos2(origin.x + ex, origin.y + ey);
+                    painter.line_segment([sp, ep], Stroke::new(lw, col));
                 }
                 LayerType::Arrow { head_size } => {
                     let head_s = head_size * state.zoom;
                     let lw    = (rec.stroke_width * state.zoom).max(2.0);
                     let col   = if stroke.width > 0.0 { stroke.color } else { fill };
-                    let lc    = rect.left_center();
-                    let rc2   = rect.right_center();
-                    let tip   = rc2;
-                    let p1    = pos2(tip.x - head_s, tip.y - head_s * 0.45);
-                    let p2    = pos2(tip.x - head_s, tip.y + head_s * 0.45);
-                    painter.line_segment([lc, pos2(tip.x - head_s * 0.85, tip.y)], Stroke::new(lw, col));
+                    let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+                    let sp = pos2(origin.x + sx, origin.y + sy);
+                    let ep = pos2(origin.x + ex, origin.y + ey);
+                    if sp.distance(ep) < head_s * 0.5 { return; }
+                    let dir  = (ep - sp).normalized();
+                    let perp = vec2(-dir.y, dir.x);
+                    let tip  = ep;
+                    let p1   = tip - dir * head_s + perp * (head_s * 0.45);
+                    let p2   = tip - dir * head_s - perp * (head_s * 0.45);
+                    painter.line_segment([sp, tip - dir * (head_s * 0.85)], Stroke::new(lw, col));
                     painter.add(Shape::Path(epaint::PathShape {
                         points: vec![tip, p1, p2], closed: true, fill: col,
                         stroke: epaint::PathStroke::NONE,
@@ -921,16 +936,25 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                             LayerType::Line => {
                                 let lw = (crec.stroke_width * state.zoom).max(2.0);
                                 let col = if cstroke.width > 0.0 { cstroke.color } else { cfill };
-                                child_painter.line_segment([crect.left_center(), crect.right_center()], Stroke::new(lw, col));
+                                let (cex, cey) = state.world_to_screen(parent_wx + crec.x + crec.width, parent_wy + crec.y + crec.height);
+                                let csp = pos2(origin.x + csx, origin.y + csy);
+                                let cep = pos2(origin.x + cex, origin.y + cey);
+                                child_painter.line_segment([csp, cep], Stroke::new(lw, col));
                             }
                             LayerType::Arrow { head_size } => {
-                                let hs = head_size * state.zoom;
-                                let lw = (crec.stroke_width * state.zoom).max(2.0);
+                                let hs  = head_size * state.zoom;
+                                let lw  = (crec.stroke_width * state.zoom).max(2.0);
                                 let col = if cstroke.width > 0.0 { cstroke.color } else { cfill };
-                                let tip = crect.right_center();
-                                let p1 = pos2(tip.x - hs, tip.y - hs * 0.45);
-                                let p2 = pos2(tip.x - hs, tip.y + hs * 0.45);
-                                child_painter.line_segment([crect.left_center(), pos2(tip.x - hs * 0.85, tip.y)], Stroke::new(lw, col));
+                                let (cex, cey) = state.world_to_screen(parent_wx + crec.x + crec.width, parent_wy + crec.y + crec.height);
+                                let csp = pos2(origin.x + csx, origin.y + csy);
+                                let cep = pos2(origin.x + cex, origin.y + cey);
+                                if csp.distance(cep) < hs * 0.5 { continue; }
+                                let dir  = (cep - csp).normalized();
+                                let perp = vec2(-dir.y, dir.x);
+                                let tip  = cep;
+                                let p1   = tip - dir * hs + perp * (hs * 0.45);
+                                let p2   = tip - dir * hs - perp * (hs * 0.45);
+                                child_painter.line_segment([csp, tip - dir * (hs * 0.85)], Stroke::new(lw, col));
                                 child_painter.add(Shape::Path(epaint::PathShape {
                                     points: vec![tip, p1, p2], closed: true, fill: col,
                                     stroke: epaint::PathStroke::NONE,
@@ -1043,7 +1067,14 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
 
         // Selection highlight
         if is_selected {
-            if rotation.abs() > 0.001 {
+            let is_line_shape = matches!(rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
+            if is_line_shape {
+                // For lines/arrows: draw a colored line along the true start→end direction
+                let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+                let sp = pos2(origin.x + sx, origin.y + sy);
+                let ep = pos2(origin.x + ex, origin.y + ey);
+                painter.line_segment([sp, ep], Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
+            } else if rotation.abs() > 0.001 {
                 let pts = rotated_corners(rect, rotation);
                 let mut closed = pts.clone();
                 closed.push(pts[0]);
@@ -1054,8 +1085,6 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
             } else {
                 painter.rect_stroke(rect, rounding, Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
             }
-            let is_line_shape = matches!(state.layers.get(&id).map(|r| &r.layer_type),
-                Some(LayerType::Line) | Some(LayerType::Arrow { .. }));
             draw_selection_handles(&painter, rect, rotation, state.zoom, is_line_shape);
 
             // ── Shape-specific handles ──────────────────────────────────────────
@@ -1120,6 +1149,22 @@ fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer: &mut Optio
                         let badge = format!("{sides}");
                         painter.text(sides_pt + vec2(10.0, -8.0), Align2::LEFT_CENTER, &badge,
                             FontId::proportional(11.0), Color32::from_rgb(120, 255, 120));
+                    }
+                    LayerType::Line | LayerType::Arrow { .. } => {
+                        // Endpoint handles: white circle = start (moveable), purple = end
+                        let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+                        let sp = pos2(origin.x + sx, origin.y + sy);
+                        let ep = pos2(origin.x + ex, origin.y + ey);
+                        painter.circle(sp, 7.0, Color32::WHITE, Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
+                        painter.circle(ep, 7.0, Color32::from_rgb(133, 96, 255), Stroke::new(2.0, Color32::WHITE));
+                        // Length label
+                        let dx = rec.width; let dy = rec.height;
+                        let len = (dx * dx + dy * dy).sqrt();
+                        let mid = (sp + ep.to_vec2()) * 0.5;
+                        let lp = painter.with_clip_rect(painter.clip_rect().expand(40.0));
+                        lp.text(mid + vec2(6.0, -14.0), Align2::LEFT_BOTTOM,
+                            format!("{:.0}px", len),
+                            FontId::proportional(11.0), Color32::from_rgb(160, 120, 255));
                     }
                     _ => {}
                 }
@@ -2410,6 +2455,8 @@ fn draw_grid(painter: &Painter, bounds: Rect, state: &EditorState) {
 }
 
 fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f32, zoom: f32, line_mode: bool) {
+    // For Line/Arrow: endpoint circles are drawn by the shape-specific handles section.
+    if line_mode { return; }
     use crate::state::ResizeHandle;
     let size    = (6.0_f32 * zoom.sqrt()).clamp(4.0, 10.0);
     let col     = Color32::WHITE;
@@ -2612,6 +2659,15 @@ fn handle_tool_input(
                                             let sides_pt = pos2(sr.right(), sr.center().y);
                                             if mp.distance(cr_pt)    <= hit_r { Some(ShapeHandle::PolygonCornerRadius) }
                                             else if mp.distance(sides_pt) <= hit_r { Some(ShapeHandle::PolygonSides) }
+                                            else { None }
+                                        }
+                                        LayerType::Line | LayerType::Arrow { .. } => {
+                                            let (ssx, ssy) = state.world_to_screen(rec.x, rec.y);
+                                            let sp = pos2(origin.x + ssx, origin.y + ssy);
+                                            let (eex, eey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
+                                            let ep = pos2(origin.x + eex, origin.y + eey);
+                                            if mp.distance(sp) <= hit_r { Some(ShapeHandle::LineStart) }
+                                            else if mp.distance(ep) <= hit_r { Some(ShapeHandle::LineEnd) }
                                             else { None }
                                         }
                                         _ => None,
@@ -2910,6 +2966,22 @@ fn handle_tool_input(
                                                 let total_dx = mp.x - state.drag.origin.x;
                                                 *sides = (3i32 + (total_dx / 20.0) as i32).clamp(3, 20) as u32;
                                             }
+                                        }
+                                        ShapeHandle::LineStart => {
+                                            // Move start point; end point stays fixed
+                                            let end_x = state.drag.layer_start.x + state.drag.layer_size.x;
+                                            let end_y = state.drag.layer_start.y + state.drag.layer_size.y;
+                                            rec.x      = wx2;
+                                            rec.y      = wy2;
+                                            rec.width  = end_x - wx2;
+                                            rec.height = end_y - wy2;
+                                        }
+                                        ShapeHandle::LineEnd => {
+                                            // Move end point; start stays fixed
+                                            rec.x      = state.drag.layer_start.x;
+                                            rec.y      = state.drag.layer_start.y;
+                                            rec.width  = wx2 - state.drag.layer_start.x;
+                                            rec.height = wy2 - state.drag.layer_start.y;
                                         }
                                     }
                                 }
@@ -3323,8 +3395,8 @@ fn handle_tool_input(
                     Tool::Ellipse => state.add_ellipse(x, y, w, h),
                     Tool::Polygon => state.add_polygon(x, y, w, h),
                     Tool::Text    => state.add_text(x, y, "Text"),
-                    Tool::Line    => state.add_line(x, y, w, h.max(2.0)),
-                    Tool::Arrow   => state.add_arrow(x, y, w, h.max(2.0)),
+                    Tool::Line    => state.add_line(ox, oy, wx - ox, wy - oy),
+                    Tool::Arrow   => state.add_arrow(ox, oy, wx - ox, wy - oy),
                     Tool::Star    => state.add_star(x, y, w, h),
                     _ => { state.drag.active = false; return; }
                 };
