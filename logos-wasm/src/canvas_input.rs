@@ -1069,7 +1069,10 @@ pub(crate) fn handle_tool_input(
                 let w = (wx - ox).abs().max(4.0);
                 let h = (wy - oy).abs().max(4.0);
                 let id = match state.tool {
-                    Tool::Frame   => state.add_frame("Frame", x, y, w, h),
+                    Tool::Frame   => match state.frame_mode {
+                        crate::state::FrameMode::Section => state.add_section("Section", x, y, w, h),
+                        _ => state.add_frame("Frame", x, y, w, h),
+                    },
                     Tool::Rect    => state.add_rect_layer("Rectangle", x, y, w, h, [0.94, 0.35, 0.35, 1.0]),
                     Tool::Ellipse => state.add_ellipse(x, y, w, h),
                     Tool::Polygon => state.add_polygon(x, y, w, h),
@@ -1150,7 +1153,10 @@ pub(crate) fn handle_tool_input(
                         Tool::Line    => state.add_line(cx, cy, ds, 2.0),
                         Tool::Arrow   => state.add_arrow(cx, cy, ds, 2.0),
                         Tool::Star    => state.add_star(cx, cy, ds, ds),
-                        Tool::Frame   => state.add_frame("Frame", cx, cy, 300.0, 200.0),
+                        Tool::Frame   => match state.frame_mode {
+                            crate::state::FrameMode::Section => state.add_section("Section", cx, cy, 300.0, 200.0),
+                            _ => state.add_frame("Frame", cx, cy, 300.0, 200.0),
+                        },
                         Tool::Text    => state.add_text(cx, cy, "Text"),
                         _             => { return; }
                     };
@@ -1212,7 +1218,10 @@ pub(crate) fn handle_tool_input(
                                 Tool::Line    => state.add_line(cx, cy, ds, 2.0),
                                 Tool::Arrow   => state.add_arrow(cx, cy, ds, 2.0),
                                 Tool::Star    => state.add_star(cx, cy, ds, ds),
-                                Tool::Frame   => state.add_frame("Frame", cx, cy, 300.0, 200.0),
+                                Tool::Frame   => match state.frame_mode {
+                                    crate::state::FrameMode::Section => state.add_section("Section", cx, cy, 300.0, 200.0),
+                                    _ => state.add_frame("Frame", cx, cy, 300.0, 200.0),
+                                },
                                 _             => { state.clear_selection(); return; }
                             };
                             state.auto_reparent_new_layer(new_id);
