@@ -469,25 +469,111 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         Color32::WHITE,
                     );
 
-                    // Render children (unclipped)
+                    // ── Section members: no coordinate space — children store section-local
+                    // coords, so add the Section's world origin, same as Frame but unclipped.
                     let child_ids: Vec<Uuid> = state.frame_children(id);
+                    let section_wx = rec.x;
+                    let section_wy = rec.y;
                     let child_painter = painter.with_clip_rect(painter.clip_rect());
                     for &cid in &child_ids {
                         let crec = match state.layers.get(&cid) {
-                            Some(r) => r.clone(),
-                            None    => continue,
+                            Some(r) if r.visible => r.clone(),
+                            _ => continue,
                         };
-                        if !crec.visible { continue; }
-                        let csx = crec.x * state.zoom;
-                        let csy = crec.y * state.zoom;
+                        let (csx, csy) = state.world_to_screen(
+                            section_wx + crec.x, section_wy + crec.y);
                         let csw = crec.width  * state.zoom;
                         let csh = crec.height * state.zoom;
-                        // For a Section, children are in world coords already (no clip offset needed)
                         let crect = Rect::from_min_size(
                             pos2(origin.x + csx, origin.y + csy),
                             vec2(csw, csh),
                         );
-                        let _ = (crec, crect, &child_painter); // rendered in main pass
+                        let cfill = Color32::from_rgba_unmultiplied(
+                            (crec.fill[0] * 255.0) as u8, (crec.fill[1] * 255.0) as u8,
+                            (crec.fill[2] * 255.0) as u8,
+                            (crec.fill[3] * crec.opacity * 255.0) as u8,
+                        );
+                        let cstroke = if crec.stroke_width > 0.0 {
+                            Stroke::new(crec.stroke_width * state.zoom,
+                                Color32::from_rgba_unmultiplied(
+                                    (crec.stroke_color[0] * 255.0) as u8,
+                                    (crec.stroke_color[1] * 255.0) as u8,
+                                    (crec.stroke_color[2] * 255.0) as u8,
+                                    (crec.stroke_color[3] * 255.0) as u8,
+                                ))
+                        } else { Stroke::NONE };
+                        let cr = crec.corner_radii;
+                        let z  = state.zoom;
+                        let crounding = Rounding { nw: cr[0]*z, ne: cr[1]*z, se: cr[2]*z, sw: cr[3]*z };
+                        match &crec.layer_type {
+                            LayerType::Ellipse { arc_start, arc_end, inner_ratio } => {
+                                child_painter.add(ellipse_arc_path(
+                                    crect, *arc_start, *arc_end, *inner_ratio, cfill, cstroke));
+                            }
+                            LayerType::Text(content) => {
+                                let content = content.clone();
+                                child_painter.rect(crect, crounding, Color32::TRANSPARENT, cstroke);
+                                child_painter.text(crect.min + vec2(4.0, 4.0), Align2::LEFT_TOP,
+                                    &content,
+                                    FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)),
+                                    cfill);
+                            }
+                            LayerType::Line => {
+                                let lw  = (crec.stroke_width * state.zoom).max(2.0);
+                                let col = if cstroke.width > 0.0 { cstroke.color } else { cfill };
+                                let (cex, cey) = state.world_to_screen(
+                                    section_wx + crec.x + crec.width,
+                                    section_wy + crec.y + crec.height);
+                                child_painter.line_segment(
+                                    [pos2(origin.x + csx, origin.y + csy),
+                                     pos2(origin.x + cex, origin.y + cey)],
+                                    Stroke::new(lw, col));
+                            }
+                            LayerType::Arrow { head_size } => {
+                                let hs  = head_size * state.zoom;
+                                let lw  = (crec.stroke_width * state.zoom).max(2.0);
+                                let col = if cstroke.width > 0.0 { cstroke.color } else { cfill };
+                                let (cex, cey) = state.world_to_screen(
+                                    section_wx + crec.x + crec.width,
+                                    section_wy + crec.y + crec.height);
+                                let csp = pos2(origin.x + csx, origin.y + csy);
+                                let cep = pos2(origin.x + cex, origin.y + cey);
+                                if csp.distance(cep) < hs * 0.5 { continue; }
+                                let dir  = (cep - csp).normalized();
+                                let perp = vec2(-dir.y, dir.x);
+                                let tip  = cep;
+                                let p1   = tip - dir * hs + perp * (hs * 0.45);
+                                let p2   = tip - dir * hs - perp * (hs * 0.45);
+                                child_painter.line_segment([csp, tip - dir * (hs * 0.85)], Stroke::new(lw, col));
+                                child_painter.add(Shape::Path(epaint::PathShape {
+                                    points: vec![tip, p1, p2], closed: true, fill: col,
+                                    stroke: epaint::PathStroke::NONE,
+                                }));
+                            }
+                            LayerType::Star { points, inner_ratio } => {
+                                paint_star(&child_painter, crect, *points, *inner_ratio, 0.0, cfill, cstroke);
+                            }
+                            LayerType::Polygon { sides, corner_radius } => {
+                                let pts = polygon_screen_points(crect, *sides, *corner_radius);
+                                child_painter.add(Shape::Path(epaint::PathShape {
+                                    points: pts, closed: true, fill: cfill,
+                                    stroke: cstroke.into() }));
+                            }
+                            _ => {
+                                child_painter.rect_filled(crect, crounding, cfill);
+                                if crec.stroke_width > 0.0 {
+                                    child_painter.rect_stroke(crect, crounding, cstroke);
+                                }
+                            }
+                        }
+                        // Selection / hover ring
+                        if state.is_selected(cid) {
+                            child_painter.rect_stroke(crect, crounding,
+                                Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
+                        } else if state.hovered_layer == Some(cid) {
+                            child_painter.rect_stroke(crect, crounding,
+                                Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
+                        }
                     }
                 }
                 LayerType::Frame | LayerType::Component | LayerType::ComponentInstance { .. } => {

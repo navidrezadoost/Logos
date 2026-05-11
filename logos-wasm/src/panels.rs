@@ -1252,6 +1252,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
 
     let mut needs_history = false;
 
+    // Semantic type flags — used to gate property panels.
+    // A Section is a metadata/organizational node: it has no render surface,
+    // no layout engine, no coordinate space and no prototype context.
+    let is_section = state.layers.get(&id)
+        .map(|r| matches!(r.layer_type, LayerType::Section { .. }))
+        .unwrap_or(false);
+
     // ════════════════════════════════════════════════════════════════════
     // COMPONENT INSTANCE banner (only shown when a ComponentInstance is selected)
     // ════════════════════════════════════════════════════════════════════
@@ -1888,7 +1895,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             .map(|p| p.auto_layout.is_some())
             .unwrap_or(false);
 
-        if parent_has_al {
+        if parent_has_al && !is_section {
             if section_header(ui, "sec_layout_sizing", "Layout Sizing", true) {
                 ui.add_space(6.0);
                 if let Some(&sel_id) = state.selection.first() {
@@ -2150,9 +2157,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // APPEARANCE  (opacity + corner radius)
+    // APPEARANCE  (opacity + corner radius)  — not applicable to Sections
     // ════════════════════════════════════════════════════════════════════
-    if section_header(ui, "sec_appearance", "Appearance", true) {
+    if !is_section && section_header(ui, "sec_appearance", "Appearance", true) {
         {
             let ovr_op = state.layers.get(&id)
                 .map(|r| r.overrides.opacity.is_some() || r.overrides.corner_radii.is_some())
@@ -2309,9 +2316,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // FILL
+    // FILL  — Sections have no render surface; fill panel is suppressed
     // ════════════════════════════════════════════════════════════════════
-    if section_header(ui, "sec_fill", "Fill", true) {
+    if !is_section && section_header(ui, "sec_fill", "Fill", true) {
         // Override indicator (only when a ComponentInstance is selected)
         {
             let ovr_fill = state.layers.get(&id)
@@ -2365,9 +2372,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // STROKE
+    // STROKE  — not applicable to Sections
     // ════════════════════════════════════════════════════════════════════
-    if section_header(ui, "sec_stroke", "Stroke", false) {
+    if !is_section && section_header(ui, "sec_stroke", "Stroke", false) {
         // Override indicator
         {
             let ovr_stroke = state.layers.get(&id)
@@ -2452,9 +2459,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
         ui.add_space(8.0);
     }
 
-    // EFFECTS  (layer blend mode + individual effects)
+    // EFFECTS  (layer blend mode + individual effects)  — not applicable to Sections
     // ════════════════════════════════════════════════════════════════════
-    if section_header(ui, "sec_effects", "Effects", false) {
+    if !is_section && section_header(ui, "sec_effects", "Effects", false) {
         {
             let ovr_eff = state.layers.get(&id)
                 .map(|r| r.overrides.effects.is_some() || r.overrides.blend_mode.is_some())
@@ -2744,9 +2751,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // EXPORT
+    // EXPORT  — Sections are not exportable surfaces
     // ════════════════════════════════════════════════════════════════════
-    if section_header(ui, "sec_export", "Export", false) {
+    if !is_section && section_header(ui, "sec_export", "Export", false) {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);
