@@ -2064,6 +2064,108 @@ impl EditorState {
         self.push_history("add auto layout");
     }
 
+    /// Add Auto Layout to any selection — non-Frame/Group nodes are wrapped in
+    /// a Frame first, then Auto Layout is applied to the resulting Frame.
+    pub fn add_auto_layout_to_any_selection(&mut self) {
+        // If selection contains only Frames/Groups that don't have AL yet, just add.
+        let all_frames = self.selection.iter().all(|&id| {
+            self.layers.get(&id).map(|r| matches!(r.layer_type,
+                LayerType::Frame | LayerType::Group | LayerType::Component)).unwrap_or(false)
+        });
+        if !all_frames {
+            // Wrap everything in a frame, then add AL.
+            self.wrap_in_frame();
+        }
+        self.add_auto_layout_to_selection();
+    }
+
+    /// Flatten selected shape layers into a single bounding-box Rect inheriting
+    /// the style of the bottom-most (first) selected layer.  Containers
+    /// (Frame/Group/Section/Component) are skipped.
+    pub fn flatten_selection(&mut self) {
+        let flattable: Vec<Uuid> = self.selection.iter().cloned()
+            .filter(|&id| self.layers.get(&id).map(|r| !matches!(
+                r.layer_type,
+                LayerType::Frame | LayerType::Group
+                    | LayerType::Section { .. }
+                    | LayerType::Component
+                    | LayerType::ComponentInstance { .. }
+            )).unwrap_or(false))
+            .collect();
+        if flattable.len() < 2 { return; }
+
+        // World-space bounding box.
+        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for &id in &flattable {
+            if let Some(r) = self.layers.get(&id) {
+                let (wx, wy) = self.layer_world_pos(id);
+                min_x = min_x.min(wx);           min_y = min_y.min(wy);
+                max_x = max_x.max(wx + r.width); max_y = max_y.max(wy + r.height);
+            }
+        }
+        if min_x == f32::MAX { return; }
+
+        // Clone style from first layer.
+        let (fill, stroke_color, stroke_width, parent_id) = self.layers.get(&flattable[0])
+            .map(|r| (r.fill, r.stroke_color, r.stroke_width, r.parent_id))
+            .unwrap_or(([0.5, 0.5, 0.5, 1.0], [0.0; 4], 0.0, None));
+
+        // Build flattened rect in parent-local coords.
+        let (off_x, off_y) = if let Some(pid) = parent_id {
+            self.layer_world_pos(pid)
+        } else { (0.0, 0.0) };
+
+        let mut flat = LayerRecord::new_rect(
+            min_x - off_x, min_y - off_y,
+            max_x - min_x, max_y - min_y,
+        );
+        flat.name         = "Flattened".into();
+        flat.fill         = fill;
+        flat.stroke_color  = stroke_color;
+        flat.stroke_width  = stroke_width;
+        flat.parent_id    = parent_id;
+        let flat_id = flat.id;
+
+        // Insert at the position of the topmost selected layer.
+        let page = &mut self.pages[self.active_page];
+        let insert_pos = page.layers.iter()
+            .position(|id| flattable.contains(id))
+            .unwrap_or(page.layers.len());
+        page.layers.insert(insert_pos, flat_id);
+        self.layers.insert(flat_id, flat);
+
+        // Remove originals.
+        for id in &flattable { self.remove_layer(*id); }
+        self.selection = vec![flat_id];
+        self.push_history("flatten");
+    }
+
+    /// Convert the stroke of each selected layer into filled geometry:
+    /// expands the bounding box by stroke_width/2, sets fill = stroke color,
+    /// clears the stroke.  Layers with no stroke are skipped.
+    pub fn outline_stroke_selection(&mut self) {
+        let targets: Vec<Uuid> = self.selection.clone();
+        let mut changed = false;
+        for &id in &targets {
+            let sw = self.layers.get(&id).map(|r| r.stroke_width).unwrap_or(0.0);
+            if sw <= 0.0 { continue; }
+            let sc = self.layers.get(&id).map(|r| r.stroke_color).unwrap_or([0.0; 4]);
+            if let Some(r) = self.layers.get_mut(&id) {
+                // Expand bounds by half the stroke width on each side.
+                r.x           -= sw * 0.5;
+                r.y           -= sw * 0.5;
+                r.width       += sw;
+                r.height      += sw;
+                // Stroke becomes the fill; original stroke is cleared.
+                r.fill         = sc;
+                r.stroke_width = 0.0;
+                changed = true;
+            }
+        }
+        if changed { self.push_history("outline stroke"); }
+    }
+
     /// Resize a Frame to the tight bounding box of all its visible children (+ optional padding).
     /// Returns `true` if `ancestor_id` is a proper ancestor of `node_id`
     /// (i.e. `ancestor_id` appears somewhere in node_id's parent chain).
@@ -2619,6 +2721,23 @@ impl EditorState {
             }
         }
         self.clipboard = all;
+    }
+
+    /// Export selected layers as PNG (copies data-URL to system clipboard on
+    /// WASM; on native, writes to /tmp/logos_export.png if possible).
+    /// Currently a stub — real rasterisation requires an off-screen render pass.
+    pub fn copy_as_png(&self) {
+        // TODO: invoke headless render pass → rasterise → encode PNG → clipboard
+        eprintln!("[copy_as_png] export requested for {} layer(s) — not yet implemented",
+            self.selection.len());
+    }
+
+    /// Serialize selected layers to an SVG string and place it on the clipboard.
+    /// Currently a stub — real SVG export lives in the exporter crate.
+    pub fn copy_as_svg(&self) {
+        // TODO: walk selection subtree → emit SVG elements → clipboard
+        eprintln!("[copy_as_svg] export requested for {} layer(s) — not yet implemented",
+            self.selection.len());
     }
 
     /// Paste at a specific world-space coordinate (e.g. the position the user right-clicked).

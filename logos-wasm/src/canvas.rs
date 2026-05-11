@@ -1607,10 +1607,22 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
 
             // ── Clipboard ──
             if ui.button("Copy                 Ctrl+C").clicked() {
-                state.select_only(id);
+                if n_sel <= 1 { state.select_only(id); }
                 state.copy_selected();
                 ui.close_menu();
             }
+            ui.menu_button("Copy as ▶", |ui| {
+                if ui.button("Copy as PNG").clicked() {
+                    if n_sel <= 1 { state.select_only(id); }
+                    state.copy_as_png();
+                    ui.close_menu();
+                }
+                if ui.button("Copy as SVG").clicked() {
+                    if n_sel <= 1 { state.select_only(id); }
+                    state.copy_as_svg();
+                    ui.close_menu();
+                }
+            });
             if ui.button("Paste Here").clicked() {
                 let (wx, wy) = state.right_click_world_pos;
                 state.paste_here(wx, wy);
@@ -1663,20 +1675,67 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 }
             }
             if ui.button("Group Selection      Ctrl+G").clicked() {
-                state.select_only(id);
+                if n_sel <= 1 { state.select_only(id); }
                 state.wrap_in_group();
                 ui.close_menu();
             }
             if ui.button("Frame Selection   Ctrl+Alt+G").clicked() {
-                state.select_only(id);
+                if n_sel <= 1 { state.select_only(id); }
                 state.wrap_in_frame();
                 ui.close_menu();
+            }
+            // Flatten: merge selected shapes into single bounding-box layer
+            {
+                let can_flatten = n_sel >= 2 || {
+                    state.layers.get(&id).map(|r| !matches!(
+                        r.layer_type,
+                        crate::state::LayerType::Frame
+                            | crate::state::LayerType::Group
+                            | crate::state::LayerType::Section { .. }
+                            | crate::state::LayerType::Component
+                            | crate::state::LayerType::ComponentInstance { .. }
+                    )).unwrap_or(false)
+                };
+                let btn = Button::new("Flatten          Alt+Shift+F");
+                if ui.add_enabled(can_flatten, btn).clicked() {
+                    if n_sel <= 1 { state.select_only(id); }
+                    state.flatten_selection();
+                    *ctx_menu_layer = None;
+                    ui.close_menu();
+                }
+            }
+            // Outline Stroke: promote stroke geometry to filled shape
+            {
+                let has_stroke = state.layers.get(&id)
+                    .map(|r| r.stroke_width > 0.0).unwrap_or(false);
+                let btn = Button::new("Outline Stroke   Ctrl+Alt+O");
+                if ui.add_enabled(has_stroke || n_sel > 1, btn).clicked() {
+                    if n_sel <= 1 { state.select_only(id); }
+                    state.outline_stroke_selection();
+                    ui.close_menu();
+                }
             }
             if can_ungroup {
                 if ui.button("Ungroup         Ctrl+Shift+G").clicked() {
                     state.ungroup_frame(id);
                     *ctx_menu_layer = None;
                     ui.close_menu();
+                }
+            }
+            ui.separator();
+
+            // ── Create Component ──
+            {
+                let is_component = state.layers.get(&id)
+                    .map(|r| matches!(r.layer_type, crate::state::LayerType::Component
+                        | crate::state::LayerType::ComponentInstance { .. }))
+                    .unwrap_or(false);
+                if !is_component {
+                    if ui.button("Create Component  Ctrl+Alt+K").clicked() {
+                        if n_sel <= 1 { state.select_only(id); }
+                        state.create_component();
+                        ui.close_menu();
+                    }
                 }
             }
             ui.separator();
@@ -1690,29 +1749,29 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
             }
             ui.separator();
 
-            // ── Auto Layout (Frame only) ──
-            if is_frame {
-                if !has_al {
-                    if ui.button("Add Auto Layout        Shift+A").clicked() {
-                        state.select_only(id);
-                        state.add_auto_layout_to_selection();
-                        ui.close_menu();
-                    }
-                } else {
-                    if ui.button("Remove Auto Layout").clicked() {
-                        if let Some(r) = state.layers.get_mut(&id) {
-                            r.auto_layout = None;
-                        }
-                        state.push_history("remove auto layout");
-                        ui.close_menu();
-                    }
+            // ── Auto Layout (any node — wraps in Frame if needed) ──
+            if !has_al {
+                if ui.button("Add Auto Layout        Shift+A").clicked() {
+                    if n_sel <= 1 { state.select_only(id); }
+                    state.add_auto_layout_to_any_selection();
+                    ui.close_menu();
                 }
+            } else {
+                if ui.button("Remove Auto Layout").clicked() {
+                    if let Some(r) = state.layers.get_mut(&id) {
+                        r.auto_layout = None;
+                    }
+                    state.push_history("remove auto layout");
+                    ui.close_menu();
+                }
+            }
+            if is_frame {
                 if ui.button("Resize to Fit").clicked() {
                     state.resize_frame_to_fit(id, 16.0);
                     ui.close_menu();
                 }
-                ui.separator();
             }
+            ui.separator();
 
             // ── Visibility & Lock ──
             let vis_label = if is_visible { "Hide         Ctrl+Shift+H" } else { "Show         Ctrl+Shift+H" };
@@ -1731,12 +1790,12 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
 
             // ── Transform ──
             if ui.button("Flip Horizontal       Shift+H").clicked() {
-                state.select_only(id);
+                if n_sel <= 1 { state.select_only(id); }
                 state.flip_horizontal();
                 ui.close_menu();
             }
             if ui.button("Flip Vertical         Shift+V").clicked() {
-                state.select_only(id);
+                if n_sel <= 1 { state.select_only(id); }
                 state.flip_vertical();
                 ui.close_menu();
             }
