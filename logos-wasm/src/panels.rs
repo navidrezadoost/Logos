@@ -2231,9 +2231,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // APPEARANCE  (opacity + corner radius)  — not applicable to Sections
+    // APPEARANCE  (opacity + corner radius)
     // ════════════════════════════════════════════════════════════════════
-    if !is_section && section_header(ui, "sec_appearance", "Appearance", true) {
+    if section_header(ui, "sec_appearance", "Appearance", true) {
         {
             let ovr_op = state.layers.get(&id)
                 .map(|r| r.overrides.opacity.is_some() || r.overrides.corner_radii.is_some())
@@ -2270,7 +2270,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                 if r.changed()      { rec.opacity = pct / 100.0; }
                 if r.drag_stopped() { needs_history = true; }
 
-                if matches!(rec.layer_type, LayerType::Rect | LayerType::Frame) {
+                if matches!(rec.layer_type, LayerType::Rect | LayerType::Frame | LayerType::Section { .. }) {
                     ui.label("");
                     ui.label(RichText::new("RADIUS").size(10.0).color(C_MUTED));
                     let mut v = rec.corner_radii[0];
@@ -2285,7 +2285,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
         });
 
         // Per-corner radii (if unlinked)
-        if matches!(rec.layer_type, LayerType::Rect | LayerType::Frame) && !rec.corner_radii_linked {
+        if matches!(rec.layer_type, LayerType::Rect | LayerType::Frame | LayerType::Section { .. }) && !rec.corner_radii_linked {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.add_space(12.0);
@@ -2390,9 +2390,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // FILL  — Sections have no render surface; fill panel is suppressed
+    // FILL
     // ════════════════════════════════════════════════════════════════════
-    if !is_section && section_header(ui, "sec_fill", "Fill", true) {
+    if section_header(ui, "sec_fill", "Fill", true) {
         // Override indicator (only when a ComponentInstance is selected)
         {
             let ovr_fill = state.layers.get(&id)
@@ -2446,9 +2446,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // STROKE  — not applicable to Sections
+    // STROKE
     // ════════════════════════════════════════════════════════════════════
-    if !is_section && section_header(ui, "sec_stroke", "Stroke", false) {
+    if section_header(ui, "sec_stroke", "Stroke", false) {
         // Override indicator
         {
             let ovr_stroke = state.layers.get(&id)
@@ -2825,9 +2825,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     }
 
     // ════════════════════════════════════════════════════════════════════
-    // EXPORT  — Sections are not exportable surfaces
+    // EXPORT
     // ════════════════════════════════════════════════════════════════════
-    if !is_section && section_header(ui, "sec_export", "Export", false) {
+    if section_header(ui, "sec_export", "Export", false) {
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.add_space(12.0);

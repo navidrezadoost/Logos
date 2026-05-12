@@ -444,20 +444,43 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
                 }
                 LayerType::Section { color } => {
-                    // ── Section: organisational overlay (no render surface) ──
-                    let base_col = color.map(|c| Color32::from_rgba_unmultiplied(
-                        (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 20
-                    )).unwrap_or(Color32::from_rgba_unmultiplied(80, 100, 200, 18));
-                    let border_col = color.map(|c| Color32::from_rgba_unmultiplied(
-                        (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 160
-                    )).unwrap_or(Color32::from_rgba_unmultiplied(80, 100, 200, 160));
+                    // ── Section: draw body using rec.fill + rec.stroke; header uses section color ──
+                    let header_accent = color.map(|c| Color32::from_rgba_unmultiplied(
+                        (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 255
+                    )).unwrap_or(Color32::from_rgb(80, 100, 200));
+
+                    // Body fill: use rec.fill if non-transparent, else faint accent tint
+                    let body_fill = if rec.fill[3] > 0.001 {
+                        Color32::from_rgba_unmultiplied(
+                            (rec.fill[0]*255.0) as u8, (rec.fill[1]*255.0) as u8,
+                            (rec.fill[2]*255.0) as u8, (rec.fill[3]*255.0) as u8)
+                    } else {
+                        Color32::from_rgba_unmultiplied(
+                            header_accent.r(), header_accent.g(), header_accent.b(), 18)
+                    };
+                    // Body border: use rec.stroke if width > 0, else derive from accent
+                    let body_stroke = if rec.stroke_width > 0.0 {
+                        Stroke::new(rec.stroke_width * state.zoom,
+                            Color32::from_rgba_unmultiplied(
+                                (rec.stroke_color[0]*255.0) as u8, (rec.stroke_color[1]*255.0) as u8,
+                                (rec.stroke_color[2]*255.0) as u8, (rec.stroke_color[3]*255.0) as u8))
+                    } else {
+                        Stroke::new(1.5, Color32::from_rgba_unmultiplied(
+                            header_accent.r(), header_accent.g(), header_accent.b(), 160))
+                    };
+                    let cr = rec.corner_radii;
+                    let rounding = Rounding { nw: cr[0], ne: cr[1], sw: cr[3], se: cr[2] };
+                    // Scale rounding by zoom
+                    let s = state.zoom;
+                    let rounding = Rounding { nw: rounding.nw*s, ne: rounding.ne*s,
+                        sw: rounding.sw*s, se: rounding.se*s };
 
                     let collapsed = rec.section_collapsed;
 
                     // Body region — only draw full region when expanded
                     if !collapsed {
-                        painter.rect_filled(rect, 4.0, base_col);
-                        painter.rect_stroke(rect, 4.0, Stroke::new(1.5, border_col));
+                        painter.rect_filled(rect, rounding, body_fill);
+                        painter.rect_stroke(rect, rounding, body_stroke);
                     }
 
                     // Header band (top portion)
@@ -470,7 +493,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     } else {
                         Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 }
                     };
-                    painter.rect_filled(header_rect, header_rounding, border_col);
+                    painter.rect_filled(header_rect, header_rounding, header_accent);
                     // Dashed border when collapsed to indicate hidden content
                     if collapsed {
                         painter.rect_stroke(header_rect, header_rounding, Stroke::new(1.0,
