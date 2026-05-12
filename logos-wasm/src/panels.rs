@@ -3009,6 +3009,160 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
                                 }
                             });
                     });
+
+                    // ── Condition ("Only if…") ──────────────────────────────
+                    ui.add_space(3.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Only if").size(10.0).color(C_MUTED));
+                        ui.add_space(4.0);
+
+                        let has_cond = ia.condition.is_some();
+                        // Toggle: add / remove condition
+                        let toggle_lbl = if has_cond { "✕ Clear" } else { "+ Condition" };
+                        if ui.small_button(toggle_lbl).clicked() {
+                            if let Some(r) = state.layers.get_mut(&id) {
+                                if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia.id) {
+                                    if has_cond {
+                                        entry.condition = None;
+                                    } else {
+                                        // Default to first variable, IsTrue; or Boolean stub
+                                        let first_var = state.variables.first().map(|v| v.id);
+                                        entry.condition = first_var.map(|vid| crate::state::Condition {
+                                            variable_id: vid,
+                                            op:  crate::state::ConditionOp::IsTrue,
+                                            rhs: None,
+                                        });
+                                    }
+                                }
+                            }
+                            state.push_history("toggle condition");
+                        }
+                    });
+
+                    // If a condition exists, show variable / op / rhs pickers
+                    if let Some(ref cond) = ia.condition {
+                        let cond = cond.clone();
+                        let ia_id = ia.id;
+
+                        // Variable picker
+                        let var_name = state.variables.iter()
+                            .find(|v| v.id == cond.variable_id)
+                            .map(|v| v.name.clone())
+                            .unwrap_or_else(|| "— pick —".to_owned());
+                        ui.horizontal(|ui| {
+                            ui.add_space(12.0);
+                            ComboBox::new(format!("cond_var_{}", ia_id), "")
+                                .selected_text(RichText::new(&var_name).size(10.5))
+                                .show_ui(ui, |ui| {
+                                    let vars: Vec<_> = state.variables.iter()
+                                        .map(|v| (v.id, v.name.clone())).collect();
+                                    for (vid, vname) in vars {
+                                        if ui.selectable_label(vid == cond.variable_id, &vname).clicked() {
+                                            if let Some(r) = state.layers.get_mut(&id) {
+                                                if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia_id) {
+                                                    if let Some(c) = entry.condition.as_mut() {
+                                                        c.variable_id = vid;
+                                                        c.op  = crate::state::ConditionOp::IsTrue;
+                                                        c.rhs = None;
+                                                    }
+                                                }
+                                            }
+                                            state.push_history("edit condition variable");
+                                        }
+                                    }
+                                });
+
+                            // Operator picker (depends on variable type)
+                            let cur_val = state.variable_value(cond.variable_id)
+                                .unwrap_or(crate::state::VariableValue::Boolean(false));
+                            let ops = crate::state::ConditionOp::for_value(&cur_val);
+                            let op_lbl = cond.op.label();
+                            ComboBox::new(format!("cond_op_{}", ia_id), "")
+                                .selected_text(RichText::new(op_lbl).size(10.5))
+                                .show_ui(ui, |ui| {
+                                    for op in ops {
+                                        if ui.selectable_label(op.label() == op_lbl, op.label()).clicked() {
+                                            if let Some(r) = state.layers.get_mut(&id) {
+                                                if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia_id) {
+                                                    if let Some(c) = entry.condition.as_mut() {
+                                                        c.op = op.clone();
+                                                        if !op.needs_rhs() { c.rhs = None; }
+                                                    }
+                                                }
+                                            }
+                                            state.push_history("edit condition op");
+                                        }
+                                    }
+                                });
+                        });
+
+                        // RHS value input (only when op needs it)
+                        if cond.op.needs_rhs() {
+                            ui.horizontal(|ui| {
+                                ui.add_space(12.0);
+                                // Show a numeric or text field based on variable type
+                                let cur_val = state.variable_value(cond.variable_id)
+                                    .unwrap_or(crate::state::VariableValue::Boolean(false));
+                                match cur_val {
+                                    crate::state::VariableValue::Number(_) => {
+                                        let mut num_str = cond.rhs.as_ref()
+                                            .and_then(|v| if let crate::state::VariableValue::Number(n) = v { Some(n.to_string()) } else { None })
+                                            .unwrap_or_else(|| "0".to_owned());
+                                        if ui.add(TextEdit::singleline(&mut num_str)
+                                            .desired_width(60.0)
+                                            .font(TextStyle::Small)).changed()
+                                        {
+                                            if let Ok(n) = num_str.parse::<f64>() {
+                                                if let Some(r) = state.layers.get_mut(&id) {
+                                                    if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia_id) {
+                                                        if let Some(c) = entry.condition.as_mut() {
+                                                            c.rhs = Some(crate::state::VariableValue::Number(n));
+                                                        }
+                                                    }
+                                                }
+                                                state.push_history("edit condition rhs");
+                                            }
+                                        }
+                                    }
+                                    crate::state::VariableValue::Boolean(_) => {
+                                        let mut b = cond.rhs.as_ref()
+                                            .and_then(|v| if let crate::state::VariableValue::Boolean(b) = v { Some(*b) } else { None })
+                                            .unwrap_or(true);
+                                        if ui.checkbox(&mut b, "").changed() {
+                                            if let Some(r) = state.layers.get_mut(&id) {
+                                                if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia_id) {
+                                                    if let Some(c) = entry.condition.as_mut() {
+                                                        c.rhs = Some(crate::state::VariableValue::Boolean(b));
+                                                    }
+                                                }
+                                            }
+                                            state.push_history("edit condition rhs");
+                                        }
+                                    }
+                                    crate::state::VariableValue::Text(_) => {
+                                        let mut txt = cond.rhs.as_ref()
+                                            .and_then(|v| if let crate::state::VariableValue::Text(s) = v { Some(s.clone()) } else { None })
+                                            .unwrap_or_default();
+                                        if ui.add(TextEdit::singleline(&mut txt)
+                                            .desired_width(80.0)
+                                            .font(TextStyle::Small)).changed()
+                                        {
+                                            if let Some(r) = state.layers.get_mut(&id) {
+                                                if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia_id) {
+                                                    if let Some(c) = entry.condition.as_mut() {
+                                                        c.rhs = Some(crate::state::VariableValue::Text(txt));
+                                                    }
+                                                }
+                                            }
+                                            state.push_history("edit condition rhs");
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    // ── End Condition ──────────────────────────────────────
                 });
             }
 
@@ -3040,6 +3194,166 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             });
             ui.add_space(8.0);
         }
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // VARIABLES  — shown whenever proto_mode is active
+    // ════════════════════════════════════════════════════════════════════
+    if state.proto_mode || state.preview_mode {
+        ui.add_space(4.0);
+        // Section header
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.label(RichText::new("🔢 Variables").size(11.5)
+                .color(Color32::from_rgb(200, 160, 255)).strong());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(12.0);
+                if ui.small_button("+ Var").on_hover_text("Add variable").clicked() {
+                    state.variables.push(crate::state::Variable::new(
+                        format!("var{}", state.variables.len() + 1),
+                        crate::state::VariableValue::Boolean(false),
+                    ));
+                    state.push_history("add variable");
+                }
+            });
+        });
+        ui.add_space(2.0);
+
+        let mut to_delete_var: Option<uuid::Uuid> = None;
+        let vars_snap: Vec<crate::state::Variable> = state.variables.clone();
+
+        for var in &vars_snap {
+            let vid = var.id;
+            Frame::none()
+                .fill(Color32::from_rgba_unmultiplied(25, 18, 45, 90))
+                .inner_margin(Margin::symmetric(8.0, 3.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        // Name field
+                        let mut name_buf = var.name.clone();
+                        if ui.add(TextEdit::singleline(&mut name_buf)
+                            .desired_width(80.0)
+                            .font(TextStyle::Small)).changed()
+                        {
+                            if let Some(v) = state.variables.iter_mut().find(|v| v.id == vid) {
+                                v.name = name_buf;
+                            }
+                            state.push_history("rename variable");
+                        }
+
+                        // Type selector
+                        let type_lbl = var.value.type_label();
+                        ComboBox::new(format!("var_type_{}", vid), "")
+                            .selected_text(RichText::new(type_lbl).size(10.0))
+                            .width(72.0)
+                            .show_ui(ui, |ui| {
+                                for t in ["Boolean", "Number", "Text"] {
+                                    if ui.selectable_label(type_lbl == t, t).clicked() {
+                                        if let Some(v) = state.variables.iter_mut().find(|v| v.id == vid) {
+                                            v.value = crate::state::VariableValue::default_for_type(t);
+                                        }
+                                        // Clear any runtime override
+                                        state.variable_runtime.remove(&vid);
+                                        state.push_history("change variable type");
+                                    }
+                                }
+                            });
+
+                        // Delete
+                        if ui.small_button("×").clicked() {
+                            to_delete_var = Some(vid);
+                        }
+                    });
+
+                    // Value editor (design-time default)
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        // In preview mode also show runtime value
+                        let rt_val = if state.preview_mode {
+                            state.variable_runtime.get(&vid).cloned()
+                        } else { None };
+                        let show_rt = rt_val.is_some();
+
+                        match &var.value {
+                            crate::state::VariableValue::Boolean(b) => {
+                                let mut bv = rt_val.as_ref()
+                                    .and_then(|v| if let crate::state::VariableValue::Boolean(x) = v { Some(*x) } else { None })
+                                    .unwrap_or(*b);
+                                let lbl = if bv { "true" } else { "false" };
+                                let color = if show_rt { Color32::from_rgb(80, 220, 130) } else { C_MUTED };
+                                if ui.selectable_label(false,
+                                    RichText::new(lbl).size(10.5).color(color)).clicked()
+                                {
+                                    bv = !bv;
+                                    if state.preview_mode {
+                                        state.variable_runtime.insert(vid, crate::state::VariableValue::Boolean(bv));
+                                    } else if let Some(v) = state.variables.iter_mut().find(|v| v.id == vid) {
+                                        v.value = crate::state::VariableValue::Boolean(bv);
+                                        state.push_history("edit variable value");
+                                    }
+                                }
+                            }
+                            crate::state::VariableValue::Number(n) => {
+                                let display_n = rt_val.as_ref()
+                                    .and_then(|v| if let crate::state::VariableValue::Number(x) = v { Some(*x) } else { None })
+                                    .unwrap_or(*n);
+                                let mut num_s = display_n.to_string();
+                                let color = if show_rt { Color32::from_rgb(80, 220, 130) } else { C_MUTED };
+                                let resp = ui.add(TextEdit::singleline(&mut num_s)
+                                    .desired_width(60.0)
+                                    .font(TextStyle::Small)
+                                    .text_color(color));
+                                if resp.changed() {
+                                    if let Ok(nv) = num_s.parse::<f64>() {
+                                        if state.preview_mode {
+                                            state.variable_runtime.insert(vid, crate::state::VariableValue::Number(nv));
+                                        } else if let Some(v) = state.variables.iter_mut().find(|v| v.id == vid) {
+                                            v.value = crate::state::VariableValue::Number(nv);
+                                            state.push_history("edit variable value");
+                                        }
+                                    }
+                                }
+                            }
+                            crate::state::VariableValue::Text(s) => {
+                                let display_s = rt_val.as_ref()
+                                    .and_then(|v| if let crate::state::VariableValue::Text(x) = v { Some(x.clone()) } else { None })
+                                    .unwrap_or_else(|| s.clone());
+                                let mut ts = display_s;
+                                let color = if show_rt { Color32::from_rgb(80, 220, 130) } else { C_MUTED };
+                                let resp = ui.add(TextEdit::singleline(&mut ts)
+                                    .desired_width(100.0)
+                                    .font(TextStyle::Small)
+                                    .text_color(color));
+                                if resp.changed() {
+                                    if state.preview_mode {
+                                        state.variable_runtime.insert(vid, crate::state::VariableValue::Text(ts));
+                                    } else if let Some(v) = state.variables.iter_mut().find(|v| v.id == vid) {
+                                        v.value = crate::state::VariableValue::Text(ts);
+                                        state.push_history("edit variable value");
+                                    }
+                                }
+                            }
+                        }
+                        if show_rt {
+                            ui.label(RichText::new("● live").size(9.0).color(Color32::from_rgb(80, 220, 130)));
+                        }
+                    });
+                });
+        }
+
+        if let Some(dvid) = to_delete_var {
+            state.variables.retain(|v| v.id != dvid);
+            state.variable_runtime.remove(&dvid);
+            state.push_history("delete variable");
+        }
+
+        if vars_snap.is_empty() {
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(RichText::new("No variables — use + Var to add one").size(10.0).color(C_MUTED));
+            });
+        }
+        ui.add_space(6.0);
     }
 
     // ════════════════════════════════════════════════════════════════════

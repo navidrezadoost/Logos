@@ -149,7 +149,9 @@ pub(crate) fn handle_tool_input(
                             .map(|r| r.interactions.clone())
                             .unwrap_or_default();
                         for ia in &interactions {
-                            if ia.trigger == crate::state::Trigger::OnClick {
+                            if ia.trigger == crate::state::Trigger::OnClick
+                                && state.evaluate_condition(&ia.condition)
+                            {
                                 match &ia.action {
                                     crate::state::InteractionAction::NavigateTo { target_frame } => {
                                         let tid = *target_frame;

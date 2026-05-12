@@ -109,6 +109,7 @@ impl eframe::App for LogosEditor {
                 if i.key_pressed(Key::Escape) {
                     if state.preview_mode {
                         state.preview_mode = false;
+                        state.reset_variable_runtime();
                         state.tool = Tool::Select;
                     } else if state.editing_master_id.is_some() {
                         state.exit_master_edit_mode();
@@ -218,6 +219,9 @@ impl eframe::App for LogosEditor {
             if !typing && i.modifiers.ctrl && !i.modifiers.alt {
                 if i.key_pressed(Key::Enter) {
                     state.preview_mode = !state.preview_mode;
+                    if !state.preview_mode {
+                        state.reset_variable_runtime();
+                    }
                     if state.preview_mode && state.preview_current_frame.is_none() {
                         // Auto-set to first selected frame, or first frame on page
                         let candidate = state.selection.iter()

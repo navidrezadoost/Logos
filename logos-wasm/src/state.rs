@@ -518,6 +518,8 @@ pub struct Interaction {
     pub direction:   AnimDirection,
     pub duration_ms: u32,
     pub easing:      Easing,
+    /// Optional guard — interaction only fires when this condition is true.
+    pub condition:   Option<Condition>,
 }
 impl Interaction {
     pub fn new_navigate(target: Uuid) -> Self {
@@ -529,6 +531,7 @@ impl Interaction {
             direction:   AnimDirection::Left,
             duration_ms: 300,
             easing:      Easing::EaseOut,
+            condition:   None,
         }
     }
     pub fn new_empty() -> Self {
@@ -540,6 +543,7 @@ impl Interaction {
             direction:   AnimDirection::Left,
             duration_ms: 300,
             easing:      Easing::EaseOut,
+            condition:   None,
         }
     }
 }
@@ -821,6 +825,13 @@ pub struct EditorState {
     pub preview_current_frame: Option<Uuid>,
     /// Live connection being drawn (Some while user drag-creates a connection).
     pub proto_drag: Option<ProtoDrag>,
+
+    // ── Variables ────────────────────────────────────────────────────
+    /// Named variables defined by the designer; keyed by Uuid for O(1) lookup.
+    pub variables: Vec<Variable>,
+    /// Runtime overrides active during preview mode (reset on preview exit).
+    /// Key = variable Uuid, value = current runtime value.
+    pub variable_runtime: HashMap<Uuid, VariableValue>,
 }
 
 /// In-progress prototype connection being drawn by the user.
@@ -831,6 +842,92 @@ pub struct ProtoDrag {
     pub from_screen: egui::Pos2,
     /// Current cursor screen-space position (tip of the noodle).
     pub to_screen:   egui::Pos2,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Variables + Conditional Logic
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// The typed value stored in / compared against a variable.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VariableValue {
+    Boolean(bool),
+    Number(f64),
+    Text(String),
+}
+impl VariableValue {
+    pub fn type_label(&self) -> &'static str {
+        match self {
+            Self::Boolean(_) => "Boolean",
+            Self::Number(_)  => "Number",
+            Self::Text(_)    => "Text",
+        }
+    }
+    pub fn default_for_type(label: &str) -> Self {
+        match label {
+            "Boolean" => Self::Boolean(false),
+            "Number"  => Self::Number(0.0),
+            _         => Self::Text(String::new()),
+        }
+    }
+}
+
+/// A named, typed variable that can be read / written during prototype play.
+#[derive(Clone, Debug)]
+pub struct Variable {
+    pub id:    Uuid,
+    pub name:  String,
+    pub value: VariableValue,   // design-time default
+}
+impl Variable {
+    pub fn new(name: impl Into<String>, value: VariableValue) -> Self {
+        Self { id: Uuid::new_v4(), name: name.into(), value }
+    }
+}
+
+/// Comparison operator for a condition.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConditionOp {
+    Equals,
+    NotEquals,
+    GreaterThan,
+    LessThan,
+    IsTrue,
+    IsFalse,
+}
+impl ConditionOp {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Equals      => "=",
+            Self::NotEquals   => "≠",
+            Self::GreaterThan => ">",
+            Self::LessThan    => "<",
+            Self::IsTrue      => "is true",
+            Self::IsFalse     => "is false",
+        }
+    }
+    /// Operators valid for a given value type (to populate the picker).
+    pub fn for_value(v: &VariableValue) -> &'static [ConditionOp] {
+        match v {
+            VariableValue::Boolean(_) => &[Self::IsTrue, Self::IsFalse, Self::Equals, Self::NotEquals],
+            VariableValue::Number(_)  => &[Self::Equals, Self::NotEquals, Self::GreaterThan, Self::LessThan],
+            VariableValue::Text(_)    => &[Self::Equals, Self::NotEquals],
+        }
+    }
+    /// True when the operator needs a right-hand comparison value.
+    pub fn needs_rhs(&self) -> bool {
+        !matches!(self, Self::IsTrue | Self::IsFalse)
+    }
+}
+
+/// A single guard condition on an `Interaction`.
+/// If present the interaction only fires when the condition evaluates to true.
+#[derive(Clone, Debug)]
+pub struct Condition {
+    pub variable_id: Uuid,
+    pub op:          ConditionOp,
+    /// Right-hand side value (None when op is IsTrue/IsFalse).
+    pub rhs:         Option<VariableValue>,
 }
 
 /// Which shape-specific handle is being dragged.
@@ -934,6 +1031,8 @@ impl EditorState {
             preview_mode: false,
             preview_current_frame: None,
             proto_drag: None,
+            variables: Vec::new(),
+            variable_runtime: HashMap::new(),
         };
         // Demo scene
         state.add_frame("Desktop - 1", 100.0, 80.0, 1280.0, 720.0);
@@ -3088,6 +3187,59 @@ impl EditorState {
 
     /// Snapshot the current state AFTER a mutation so it can be undone.
     /// `history_idx` always points to the current snapshot in `history`.
+    // ── Variable helpers ──────────────────────────────────────────────
+
+    /// Evaluate a condition against the current runtime variable values.
+    /// Returns `true` if the condition holds (or if `cond` is `None`).
+    pub fn evaluate_condition(&self, cond: &Option<Condition>) -> bool {
+        let cond = match cond { Some(c) => c, None => return true };
+        // Resolve variable: runtime override first, then design-time default.
+        let var = self.variables.iter().find(|v| v.id == cond.variable_id);
+        let val: VariableValue = if let Some(rt) = self.variable_runtime.get(&cond.variable_id) {
+            rt.clone()
+        } else if let Some(v) = var {
+            v.value.clone()
+        } else {
+            return false; // unknown variable → block
+        };
+
+        match &cond.op {
+            ConditionOp::IsTrue  => matches!(val, VariableValue::Boolean(true)),
+            ConditionOp::IsFalse => matches!(val, VariableValue::Boolean(false)),
+            ConditionOp::Equals => {
+                if let Some(rhs) = &cond.rhs { &val == rhs } else { false }
+            }
+            ConditionOp::NotEquals => {
+                if let Some(rhs) = &cond.rhs { &val != rhs } else { false }
+            }
+            ConditionOp::GreaterThan => {
+                match (&val, cond.rhs.as_ref()) {
+                    (VariableValue::Number(a), Some(VariableValue::Number(b))) => a > b,
+                    _ => false,
+                }
+            }
+            ConditionOp::LessThan => {
+                match (&val, cond.rhs.as_ref()) {
+                    (VariableValue::Number(a), Some(VariableValue::Number(b))) => a < b,
+                    _ => false,
+                }
+            }
+        }
+    }
+
+    /// Look up the current runtime value of a variable (design-time default if no override).
+    pub fn variable_value(&self, id: Uuid) -> Option<VariableValue> {
+        if let Some(rt) = self.variable_runtime.get(&id) {
+            return Some(rt.clone());
+        }
+        self.variables.iter().find(|v| v.id == id).map(|v| v.value.clone())
+    }
+
+    /// Reset all runtime overrides (call when leaving preview mode).
+    pub fn reset_variable_runtime(&mut self) {
+        self.variable_runtime.clear();
+    }
+
     pub fn push_history(&mut self, label: impl Into<String>) {
         if let Some(master_id) = self.editing_master_id.filter(|id| self.layers.contains_key(id)) {
             let instance_ids = self.component_instances_of(master_id);

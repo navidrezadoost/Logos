@@ -1927,6 +1927,41 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 let bg = Rect::from_center_size(lp, vec2(label.len() as f32 * 6.5 + 8.0, 14.0));
                 painter.rect_filled(bg, 3.0, Color32::from_rgba_unmultiplied(60, 30, 100, 200));
                 painter.text(lp, Align2::CENTER_CENTER, label, FontId::proportional(9.5), Color32::from_rgb(220, 190, 255));
+
+                // Condition badge: amber diamond at noodle midpoint when a condition is set
+                if let Some(ref cond) = ia.condition {
+                    let mid = {
+                        let t = 0.5_f32;
+                        let mt = 1.0 - t;
+                        pos2(
+                            mt*mt*mt*p0.x + 3.0*mt*mt*t*(p0.x+(p3.x-p0.x).abs().max(60.0)*0.5) + 3.0*mt*t*t*(p3.x-(p3.x-p0.x).abs().max(60.0)*0.5) + t*t*t*p3.x,
+                            mt*mt*mt*p0.y + 3.0*mt*mt*t*p0.y + 3.0*mt*t*t*p3.y + t*t*t*p3.y,
+                        )
+                    };
+                    // Small amber diamond
+                    let d = 7.0_f32;
+                    let pts = vec![
+                        pos2(mid.x, mid.y - d),
+                        pos2(mid.x + d, mid.y),
+                        pos2(mid.x, mid.y + d),
+                        pos2(mid.x - d, mid.y),
+                        pos2(mid.x, mid.y - d),
+                    ];
+                    let amber = Color32::from_rgb(255, 190, 60);
+                    for w in pts.windows(2) {
+                        painter.line_segment([w[0], w[1]], Stroke::new(2.0, amber));
+                    }
+                    // Tiny "if" label
+                    let var_name = state.variables.iter()
+                        .find(|v| v.id == cond.variable_id)
+                        .map(|v| v.name.clone())
+                        .unwrap_or_else(|| "?".to_owned());
+                    let cond_txt = format!("if {}", var_name);
+                    let clp = pos2(mid.x, mid.y + d + 9.0);
+                    let cbg = Rect::from_center_size(clp, vec2(cond_txt.len() as f32 * 5.5 + 8.0, 13.0));
+                    painter.rect_filled(cbg, 3.0, Color32::from_rgba_unmultiplied(80, 50, 0, 200));
+                    painter.text(clp, Align2::CENTER_CENTER, &cond_txt, FontId::proportional(9.0), amber);
+                }
             }
         }
 
