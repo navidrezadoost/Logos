@@ -306,6 +306,37 @@ pub(crate) fn handle_tool_input(
                 state.tool = Tool::Select;
                 return;
             }
+            // Double-click in vector edit mode → insert point on segment
+            if state.tool == Tool::Select {
+                if let Some(vid) = state.vector_edit_layer {
+                    // Check if cursor is near a segment
+                    let seg_r2 = (10.0_f32 / state.zoom).powi(2);
+                    let pts_closed: Option<(Vec<crate::state::BezierPoint>, bool)> = state.layers.get(&vid)
+                        .and_then(|r| if let crate::state::LayerType::Path { ref points, closed } = r.layer_type
+                            { Some((points.clone(), closed)) } else { None });
+                    if let Some((pts, closed)) = pts_closed {
+                        let n_segs = if closed { pts.len() } else { pts.len().saturating_sub(1) };
+                        let mut found = None;
+                        for i in 0..n_segs {
+                            let next = (i + 1) % pts.len();
+                            let (t, d2) = crate::state::BezierPoint::closest_t(&pts[i], &pts[next], [wx, wy]);
+                            if d2 < seg_r2 {
+                                found = Some((i, t));
+                                break;
+                            }
+                        }
+                        if let Some((seg_idx, t)) = found {
+                            let new_idx = state.insert_point_on_segment(vid, seg_idx, t);
+                            if let Some(ni) = new_idx {
+                                state.selected_anchors.clear();
+                                state.selected_anchors.insert(ni);
+                                state.push_history("insert bezier point");
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
             // Double-click on a Path layer → enter vector edit mode
             if state.tool == Tool::Select {
                 if let Some(id) = state.hit_test(wx, wy) {
@@ -313,6 +344,7 @@ pub(crate) fn handle_tool_input(
                         Some(crate::state::LayerType::Path { .. }))
                     {
                         state.vector_edit_layer = Some(id);
+                        state.selected_anchors.clear();
                         state.select_only(id);
                         return;
                     }
@@ -410,10 +442,11 @@ pub(crate) fn handle_tool_input(
             if let (Some(vid), Tool::Select) = (state.vector_edit_layer, state.tool) {
                 let hr2 = (10.0_f32 * state.zoom.max(0.5)).powi(2);  // hit radius² in world space
                 let mut best: Option<(usize, crate::state::VectorHandleKind, f32)> = None;
-                let pts_snap: Option<Vec<crate::state::BezierPoint>> = state.layers.get(&vid)
-                    .and_then(|r| if let crate::state::LayerType::Path { ref points, .. } = r.layer_type
-                        { Some(points.clone()) } else { None });
-                if let Some(pts) = pts_snap {
+                let pts_snap: Option<(Vec<crate::state::BezierPoint>, bool)> = state.layers.get(&vid)
+                    .and_then(|r| if let crate::state::LayerType::Path { ref points, closed } = r.layer_type
+                        { Some((points.clone(), closed)) } else { None });
+                let mut hit_segment: Option<(usize, f32)> = None; // (seg_idx, t)
+                if let Some((ref pts, closed)) = pts_snap {
                     for (i, bp) in pts.iter().enumerate() {
                         let check = |px: f32, py: f32, hk: crate::state::VectorHandleKind| {
                             let d = (px - wx).powi(2) + (py - wy).powi(2);
@@ -430,13 +463,47 @@ pub(crate) fn handle_tool_input(
                             }
                         }
                     }
+                    // If no handle hit, check for segment hit (for insert-on-double-click)
+                    if best.is_none() {
+                        let seg_r2 = (8.0_f32 / state.zoom).powi(2);
+                        let n_segs = if closed { pts.len() } else { pts.len().saturating_sub(1) };
+                        for i in 0..n_segs {
+                            let next = (i + 1) % pts.len();
+                            let (t, d2) = crate::state::BezierPoint::closest_t(&pts[i], &pts[next], [wx, wy]);
+                            if d2 < seg_r2 {
+                                hit_segment = Some((i, t));
+                                break;
+                            }
+                        }
+                    }
                 }
                 if let Some((pidx, hkind, _)) = best {
+                    // Update selection: shift keeps multi-select, plain click selects just this anchor
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    if hkind == crate::state::VectorHandleKind::Anchor {
+                        if shift {
+                            if state.selected_anchors.contains(&pidx) {
+                                state.selected_anchors.remove(&pidx);
+                            } else {
+                                state.selected_anchors.insert(pidx);
+                            }
+                        } else if !state.selected_anchors.contains(&pidx) {
+                            state.selected_anchors.clear();
+                            state.selected_anchors.insert(pidx);
+                        }
+                    }
                     state.vector_drag = Some((pidx, hkind));
                     return;
+                } else if hit_segment.is_some() {
+                    // Segment hit but not double-click — do nothing, let double-click handle insert
+                    // Just clear selection if shift not held
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    if !shift { state.selected_anchors.clear(); }
+                    return;
                 } else {
-                    // Clicked away from handles → exit vector edit
+                    // Clicked away from handles/segments → exit vector edit
                     state.vector_edit_layer = None;
+                    state.selected_anchors.clear();
                 }
             }
 
@@ -1380,6 +1447,31 @@ pub(crate) fn handle_tool_input(
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
             state.right_click_world_pos = (wx, wy);
+
+            // In vector edit mode, find nearest anchor for context menu
+            if let (Some(vid), Tool::Select) = (state.vector_edit_layer, state.tool) {
+                let hr2 = (12.0_f32 / state.zoom).powi(2);
+                let anchor_idx = state.layers.get(&vid)
+                    .and_then(|r| if let crate::state::LayerType::Path { ref points, .. } = r.layer_type
+                        { Some(points.clone()) } else { None })
+                    .and_then(|pts| {
+                        pts.iter().enumerate().find_map(|(i, bp)| {
+                            let d = (bp.pos[0]-wx).powi(2) + (bp.pos[1]-wy).powi(2);
+                            if d < hr2 { Some(i) } else { None }
+                        })
+                    });
+                if let Some(idx) = anchor_idx {
+                    let (sx, sy) = mp.into();
+                    state.vector_ctx_menu = Some((sx, sy, idx));
+                    // Also select the anchor
+                    if !state.selected_anchors.contains(&idx) {
+                        state.selected_anchors.clear();
+                        state.selected_anchors.insert(idx);
+                    }
+                    return;
+                }
+            }
+
             *ctx_menu_layer = state.hit_test(wx, wy);
             if let Some(id) = *ctx_menu_layer {
                 if !state.is_selected(id) { state.select_only(id); }

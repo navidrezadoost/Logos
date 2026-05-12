@@ -370,6 +370,17 @@ pub enum PenMode {
 // ── Bezier Pen Tool Types ───────────────────────────────────────────────────
 
 /// A single anchor point in a bezier path with two control handles.
+/// How the two handles of an anchor point relate to each other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnchorKind {
+    /// Both handles sit at the anchor — sharp corner.
+    Corner,
+    /// c_in is the mirror of c_out through pos (equal length + direction).
+    Smooth,
+    /// Independent handles: direction locked to mirror but length can differ.
+    Mirrored,
+}
+
 /// All coordinates are in absolute *world* space.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BezierPoint {
@@ -379,20 +390,50 @@ pub struct BezierPoint {
     pub c_in:   [f32; 2],
     /// Outgoing control handle (toward next segment).
     pub c_out:  [f32; 2],
-    /// When true, c_in is always the mirror of c_out through pos.
+    /// Handle constraint mode.
+    pub kind: AnchorKind,
+    /// Back-compat accessor — true when kind != Corner.
     pub smooth: bool,
 }
 
 impl BezierPoint {
     /// Sharp corner — both handles sit at the anchor.
     pub fn sharp(pos: [f32; 2]) -> Self {
-        Self { pos, c_in: pos, c_out: pos, smooth: false }
+        Self { pos, c_in: pos, c_out: pos, kind: AnchorKind::Corner, smooth: false }
     }
     /// Smooth point: c_out = drag_end, c_in = mirror through pos.
     pub fn smooth_from_drag(pos: [f32; 2], drag_end: [f32; 2]) -> Self {
         let c_out = drag_end;
         let c_in  = [2.0 * pos[0] - drag_end[0], 2.0 * pos[1] - drag_end[1]];
-        Self { pos, c_in, c_out, smooth: true }
+        Self { pos, c_in, c_out, kind: AnchorKind::Smooth, smooth: true }
+    }
+    /// Convert anchor type; adjusts handles appropriately.
+    pub fn convert_to(&mut self, new_kind: AnchorKind) {
+        match new_kind {
+            AnchorKind::Corner => {
+                self.c_in  = self.pos;
+                self.c_out = self.pos;
+            }
+            AnchorKind::Smooth => {
+                // Mirror c_out through pos to get equal + opposite c_in
+                self.c_in = [2.0*self.pos[0]-self.c_out[0], 2.0*self.pos[1]-self.c_out[1]];
+            }
+            AnchorKind::Mirrored => {
+                // Set direction of c_in to mirror c_out, keep existing length
+                let dx = self.c_out[0] - self.pos[0];
+                let dy = self.c_out[1] - self.pos[1];
+                let len_in = {
+                    let ex = self.c_in[0] - self.pos[0];
+                    let ey = self.c_in[1] - self.pos[1];
+                    (ex*ex + ey*ey).sqrt().max(0.001)
+                };
+                let len_out = (dx*dx + dy*dy).sqrt().max(0.001);
+                let scale = len_in / len_out;
+                self.c_in = [self.pos[0] - dx*scale, self.pos[1] - dy*scale];
+            }
+        }
+        self.kind   = new_kind;
+        self.smooth = new_kind != AnchorKind::Corner;
     }
     /// Move this anchor by a world-space delta (also moves handles).
     pub fn translate(&mut self, dx: f32, dy: f32) {
@@ -413,6 +454,27 @@ impl BezierPoint {
             pts.push([x, y]);
         }
         pts
+    }
+    /// Sample the bezier at parameter t (used for segment hit-testing).
+    pub fn sample_at(a: &BezierPoint, b: &BezierPoint, t: f32) -> [f32; 2] {
+        let u = 1.0 - t;
+        let x = u*u*u*a.pos[0] + 3.0*u*u*t*a.c_out[0]
+              + 3.0*u*t*t*b.c_in[0] + t*t*t*b.pos[0];
+        let y = u*u*u*a.pos[1] + 3.0*u*u*t*a.c_out[1]
+              + 3.0*u*t*t*b.c_in[1] + t*t*t*b.pos[1];
+        [x, y]
+    }
+    /// Find the point on segment a→b closest to `pt` (returns t ∈ [0,1] and dist²)
+    pub fn closest_t(a: &BezierPoint, b: &BezierPoint, pt: [f32; 2]) -> (f32, f32) {
+        let n = 32;
+        let (mut best_t, mut best_d) = (0.0_f32, f32::MAX);
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            let p = Self::sample_at(a, b, t);
+            let d = (p[0]-pt[0]).powi(2) + (p[1]-pt[1]).powi(2);
+            if d < best_d { best_d = d; best_t = t; }
+        }
+        (best_t, best_d)
     }
 }
 
@@ -864,6 +926,10 @@ pub struct EditorState {
     pub vector_edit_layer: Option<Uuid>,
     /// Which anchor/handle is being dragged in vector edit (layer_id, point_idx, HandleKind).
     pub vector_drag: Option<(usize, VectorHandleKind)>,
+    /// Set of selected anchor indices in vector edit mode.
+    pub selected_anchors: std::collections::HashSet<usize>,
+    /// If Some, a context menu is pending at this screen position for vector edit.
+    pub vector_ctx_menu: Option<(f32, f32, usize)>,  // (sx, sy, anchor_idx)
 
     // ── Reinforcement-learning measurement affinity ────────────────────
     // Q-value table: (selected_id, other_id) → affinity score.
@@ -1232,6 +1298,8 @@ impl EditorState {
             pen_bezier: None,
             vector_edit_layer: None,
             vector_drag: None,
+            selected_anchors: std::collections::HashSet::new(),
+            vector_ctx_menu: None,
             measure_affinity: std::collections::HashMap::new(),
             blend_preview: None,
             proto_mode: false,
@@ -2111,6 +2179,89 @@ impl EditorState {
         self.pages[self.active_page].layers.push(id);
         self.layers.insert(id, rec);
         Some(id)
+    }
+
+    /// Insert a new anchor into the path at the given segment position `t`.
+    /// `seg_idx` is the index of the start anchor of the segment (0-based).
+    /// Returns the index of the newly inserted point.
+    pub fn insert_point_on_segment(&mut self, vid: Uuid, seg_idx: usize, t: f32) -> Option<usize> {
+        let r = self.layers.get_mut(&vid)?;
+        if let LayerType::Path { ref mut points, .. } = r.layer_type {
+            let n = points.len();
+            if seg_idx >= n { return None; }
+            let next_idx = (seg_idx + 1) % n;
+            let a = points[seg_idx].clone();
+            let b = points[next_idx].clone();
+
+            // De Casteljau subdivision at t
+            let lerp = |x: [f32;2], y: [f32;2], t: f32| -> [f32;2] {
+                [x[0]+(y[0]-x[0])*t, x[1]+(y[1]-x[1])*t]
+            };
+            // Level 1
+            let p10 = lerp(a.pos,   a.c_out, t);
+            let p11 = lerp(a.c_out, b.c_in,  t);
+            let p12 = lerp(b.c_in,  b.pos,   t);
+            // Level 2
+            let p20 = lerp(p10, p11, t);
+            let p21 = lerp(p11, p12, t);
+            // Level 3 — the new point position
+            let new_pos = lerp(p20, p21, t);
+
+            // New point with smooth handles
+            let new_bp = BezierPoint { pos: new_pos, c_in: p20, c_out: p21,
+                kind: AnchorKind::Smooth, smooth: true };
+
+            // Update handles of surrounding points
+            points[seg_idx].c_out = p10;
+            points[next_idx].c_in  = p12;
+
+            // Insert after seg_idx
+            let insert_at = seg_idx + 1;
+            points.insert(insert_at, new_bp);
+            Some(insert_at)
+        } else {
+            None
+        }
+    }
+
+    /// Delete all anchors whose indices are in `to_delete` from `vid`.
+    /// Keeps path if at least 2 points remain; removes the layer if fewer.
+    pub fn delete_anchors(&mut self, vid: Uuid, to_delete: &std::collections::HashSet<usize>) {
+        let min_pts = 2;
+        let (new_pts, closed) = if let Some(r) = self.layers.get(&vid) {
+            if let LayerType::Path { ref points, closed } = r.layer_type {
+                let remaining: Vec<BezierPoint> = points.iter().enumerate()
+                    .filter(|(i, _)| !to_delete.contains(i))
+                    .map(|(_, p)| p.clone())
+                    .collect();
+                (remaining, closed)
+            } else { return; }
+        } else { return; };
+
+        if new_pts.len() < min_pts {
+            // Remove entire layer
+            self.remove_layer(vid);
+            self.vector_edit_layer = None;
+            self.selected_anchors.clear();
+        } else {
+            if let Some(r) = self.layers.get_mut(&vid) {
+                if let LayerType::Path { ref mut points, .. } = r.layer_type {
+                    *points = new_pts;
+                }
+            }
+            self.selected_anchors.clear();
+        }
+    }
+
+    /// Convert the anchor type of a point in vector-edit mode.
+    pub fn convert_anchor(&mut self, vid: Uuid, idx: usize, kind: AnchorKind) {
+        if let Some(r) = self.layers.get_mut(&vid) {
+            if let LayerType::Path { ref mut points, .. } = r.layer_type {
+                if let Some(bp) = points.get_mut(idx) {
+                    bp.convert_to(kind);
+                }
+            }
+        }
     }
 
     pub fn remove_layer(&mut self, id: Uuid) {

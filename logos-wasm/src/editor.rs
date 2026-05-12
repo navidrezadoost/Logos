@@ -103,6 +103,73 @@ impl eframe::App for LogosEditor {
 
             // ── Edit shortcuts (always guarded, never interfere with text) ──
             if !typing {
+                // ── Vector edit mode shortcuts ──────────────────────────────
+                if state.vector_edit_layer.is_some() {
+                    // Delete selected anchors
+                    if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
+                        if !state.selected_anchors.is_empty() {
+                            if let Some(vid) = state.vector_edit_layer {
+                                let to_del = state.selected_anchors.clone();
+                                state.delete_anchors(vid, &to_del);
+                                state.push_history("delete anchors");
+                            }
+                            return; // consumed
+                        }
+                    }
+                    // Tab / Shift+Tab → cycle selected anchor forward/backward
+                    if i.key_pressed(Key::Tab) {
+                        let shift = i.modifiers.shift;
+                        if let Some(vid) = state.vector_edit_layer {
+                            let n = state.layers.get(&vid)
+                                .and_then(|r| if let crate::state::LayerType::Path { ref points, .. } = r.layer_type
+                                    { Some(points.len()) } else { None })
+                                .unwrap_or(0);
+                            if n > 0 {
+                                let cur = state.selected_anchors.iter().next().copied().unwrap_or(0);
+                                let next = if shift {
+                                    if cur == 0 { n - 1 } else { cur - 1 }
+                                } else {
+                                    (cur + 1) % n
+                                };
+                                state.selected_anchors.clear();
+                                state.selected_anchors.insert(next);
+                            }
+                        }
+                        return;
+                    }
+                    // Escape → exit vector edit mode (don't switch tool)
+                    if i.key_pressed(Key::Escape) {
+                        state.vector_edit_layer = None;
+                        state.vector_drag = None;
+                        state.selected_anchors.clear();
+                        return;
+                    }
+                    // Arrow keys → nudge selected anchors
+                    let nudge = if i.modifiers.shift { 10.0_f32 } else { 1.0 };
+                    let mut dx = 0.0_f32;
+                    let mut dy = 0.0_f32;
+                    if i.key_pressed(Key::ArrowLeft)  { dx = -nudge; }
+                    if i.key_pressed(Key::ArrowRight) { dx =  nudge; }
+                    if i.key_pressed(Key::ArrowUp)    { dy = -nudge; }
+                    if i.key_pressed(Key::ArrowDown)  { dy =  nudge; }
+                    if (dx != 0.0 || dy != 0.0) && !state.selected_anchors.is_empty() {
+                        if let Some(vid) = state.vector_edit_layer {
+                            let selected: Vec<usize> = state.selected_anchors.iter().copied().collect();
+                            if let Some(r) = state.layers.get_mut(&vid) {
+                                if let crate::state::LayerType::Path { ref mut points, .. } = r.layer_type {
+                                    for &idx in &selected {
+                                        if let Some(bp) = points.get_mut(idx) {
+                                            bp.translate(dx, dy);
+                                        }
+                                    }
+                                }
+                            }
+                            state.push_history("nudge anchors");
+                        }
+                        return;
+                    }
+                }
+
                 if i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace) {
                     state.delete_selected();
                 }
@@ -120,6 +187,7 @@ impl eframe::App for LogosEditor {
                     state.pen_bezier = None;
                     state.vector_edit_layer = None;
                     state.vector_drag = None;
+                    state.selected_anchors.clear();
                     state.proto_drag = None;
                     state.tool = Tool::Select;
                 }

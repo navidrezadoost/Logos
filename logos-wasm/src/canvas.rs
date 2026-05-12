@@ -2354,14 +2354,19 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 let (ax, ay) = state.world_to_screen(bp.pos[0], bp.pos[1]);
                 let asp = pos2(origin.x + ax, origin.y + ay);
 
+                let is_selected = state.selected_anchors.contains(&i);
+
                 // Draw c_in and c_out handles
                 let show_handles = in_vector;
                 if show_handles {
+                    // Handle line opacity: stronger for selected anchor
+                    let h_alpha = if is_selected { 200u8 } else { 100u8 };
+                    let h_line_col = Color32::from_rgba_unmultiplied(60, 210, 200, h_alpha);
                     let draw_handle = |wp: [f32; 2]| {
                         let (hx, hy) = state.world_to_screen(wp[0], wp[1]);
                         let hp = pos2(origin.x + hx, origin.y + hy);
                         painter.line_segment([asp, hp],
-                            Stroke::new(1.0, handle_line));
+                            Stroke::new(1.0, h_line_col));
                         painter.circle_filled(hp, 5.0, handle_col);
                         painter.circle_stroke(hp, 5.0, Stroke::new(1.0, Color32::WHITE));
                     };
@@ -2373,11 +2378,37 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     }
                 }
 
-                // Anchor square
+                // Anchor shape: square = Corner, circle = Smooth/Mirrored
                 let ar = if in_vector { 7.0 } else { 5.0 };
-                let r = Rect::from_center_size(asp, vec2(ar * 2.0, ar * 2.0));
-                painter.rect_filled(r, 1.0, anchor_col);
-                painter.rect_stroke(r, 1.0, Stroke::new(1.5, anchor_strk));
+                let border_col = if is_selected {
+                    Color32::from_rgb(255, 200, 50)  // gold for selected
+                } else {
+                    anchor_strk
+                };
+                let fill_col = if is_selected {
+                    Color32::from_rgb(255, 235, 140)
+                } else {
+                    anchor_col
+                };
+                match bp.kind {
+                    crate::state::AnchorKind::Corner => {
+                        let r = Rect::from_center_size(asp, vec2(ar * 2.0, ar * 2.0));
+                        painter.rect_filled(r, 1.0, fill_col);
+                        painter.rect_stroke(r, 1.0, Stroke::new(1.5, border_col));
+                    }
+                    _ => {
+                        // Smooth / Mirrored → diamond (rotated square) for distinction
+                        let pts_diamond = [
+                            asp + vec2(0.0, -ar),
+                            asp + vec2(ar, 0.0),
+                            asp + vec2(0.0, ar),
+                            asp + vec2(-ar, 0.0),
+                        ];
+                        painter.add(Shape::convex_polygon(
+                            pts_diamond.to_vec(), fill_col,
+                            Stroke::new(1.5, border_col)));
+                    }
+                }
 
                 // Label index in vector edit mode
                 if in_vector {
@@ -2386,6 +2417,100 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         Color32::from_rgba_unmultiplied(180, 160, 255, 200));
                 }
             }
+
+            // ── Segment hover highlight: show + indicator when cursor is near a segment
+            if in_vector {
+                if let Some(cur) = ui.input(|i| i.pointer.hover_pos()) {
+                    let (cwx, cwy) = {
+                        let lx = cur.x - origin.x;
+                        let ly = cur.y - origin.y;
+                        state.screen_to_world(lx, ly)
+                    };
+                    let n_pts = pts.len();
+                    let is_closed = state.layers.get(&pid)
+                        .and_then(|r| if let crate::state::LayerType::Path { closed, .. } = r.layer_type
+                            { Some(closed) } else { None })
+                        .unwrap_or(false);
+                    let n_segs = if is_closed { n_pts } else { n_pts.saturating_sub(1) };
+                    let seg_r2 = (10.0_f32 / state.zoom).powi(2);
+                    for si in 0..n_segs {
+                        let ni = (si + 1) % n_pts;
+                        let (t, d2) = crate::state::BezierPoint::closest_t(&pts[si], &pts[ni], [cwx, cwy]);
+                        if d2 < seg_r2 {
+                            // Draw "+" indicator at the closest point on segment
+                            let ins_pos = crate::state::BezierPoint::sample_at(&pts[si], &pts[ni], t);
+                            let (isx, isy) = state.world_to_screen(ins_pos[0], ins_pos[1]);
+                            let isp = pos2(origin.x + isx, origin.y + isy);
+                            painter.circle_stroke(isp, 7.0,
+                                Stroke::new(1.5, Color32::from_rgb(80, 230, 160)));
+                            painter.line_segment(
+                                [isp - vec2(5.0, 0.0), isp + vec2(5.0, 0.0)],
+                                Stroke::new(1.5, Color32::from_rgb(80, 230, 160)));
+                            painter.line_segment(
+                                [isp - vec2(0.0, 5.0), isp + vec2(0.0, 5.0)],
+                                Stroke::new(1.5, Color32::from_rgb(80, 230, 160)));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Vector edit context menu ──────────────────────────────────────────
+    if let Some((sx, sy, anchor_idx)) = state.vector_ctx_menu {
+        let menu_pos = pos2(sx, sy);
+        let vid_opt = state.vector_edit_layer;
+        let mut close_menu = false;
+        let menu_rect = Rect::from_min_size(menu_pos, vec2(180.0, 120.0));
+        painter.rect_filled(menu_rect, 6.0, Color32::from_rgba_unmultiplied(25, 20, 40, 245));
+        painter.rect_stroke(menu_rect, 6.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(80, 60, 140, 200)));
+
+        let items: &[(&str, &str)] = &[
+            ("corner",   "\u{25a0} Corner"),
+            ("smooth",   "\u{25c6} Smooth"),
+            ("mirrored", "\u{25c7} Mirrored"),
+            ("delete",   "\u{2715} Delete Anchor"),
+        ];
+        let mut yoff = 8.0_f32;
+        for (action, label) in items {
+            let item_rect = Rect::from_min_size(menu_pos + vec2(6.0, yoff), vec2(168.0, 24.0));
+            let hovered = ui.input(|i| i.pointer.hover_pos())
+                .map(|p| item_rect.contains(p)).unwrap_or(false);
+            if hovered {
+                painter.rect_filled(item_rect, 4.0, Color32::from_rgba_unmultiplied(80, 60, 160, 180));
+            }
+            painter.text(item_rect.left_center() + vec2(8.0, 0.0),
+                Align2::LEFT_CENTER, label,
+                FontId::proportional(12.0),
+                Color32::from_rgb(220, 210, 255));
+            if hovered && ui.input(|i| i.pointer.any_released()) {
+                if let Some(vid) = vid_opt {
+                    match *action {
+                        "corner"   => { state.convert_anchor(vid, anchor_idx, crate::state::AnchorKind::Corner);   state.push_history("convert anchor"); }
+                        "smooth"   => { state.convert_anchor(vid, anchor_idx, crate::state::AnchorKind::Smooth);   state.push_history("convert anchor"); }
+                        "mirrored" => { state.convert_anchor(vid, anchor_idx, crate::state::AnchorKind::Mirrored); state.push_history("convert anchor"); }
+                        "delete"   => {
+                            let mut del = std::collections::HashSet::new();
+                            del.insert(anchor_idx);
+                            state.delete_anchors(vid, &del);
+                            state.push_history("delete anchor");
+                        }
+                        _ => {}
+                    }
+                }
+                close_menu = true;
+            }
+            yoff += 26.0;
+        }
+        // Close on click outside
+        if ui.input(|i| i.pointer.any_released()) &&
+            !menu_rect.contains(ui.input(|i| i.pointer.interact_pos().unwrap_or(pos2(-1., -1.))))
+        {
+            close_menu = true;
+        }
+        if close_menu {
+            state.vector_ctx_menu = None;
         }
     }
 
