@@ -137,6 +137,8 @@ pub(crate) fn handle_tool_input(
 
     // ── Preview mode input: click fires prototype interactions ───────────────
     if state.preview_mode {
+        // Block all input while a transition is mid-flight.
+        if state.proto_transition.is_some() { return; }
         if resp.clicked_by(PointerButton::Primary) {
             if let Some(mp) = pointer.interact_pos() {
                 let (wx, wy) = to_world(mp, state);
@@ -156,7 +158,25 @@ pub(crate) fn handle_tool_input(
                                     crate::state::InteractionAction::NavigateTo { target_frame } => {
                                         let tid = *target_frame;
                                         if state.layers.contains_key(&tid) {
-                                            state.preview_current_frame = Some(tid);
+                                            // Get transition params from the interaction
+                                            let anim = ia.animation.clone();
+                                            let dir  = ia.direction.clone();
+                                            let dur  = ia.duration_ms;
+                                            let ease = ia.easing.clone();
+                                            let from_id = state.preview_current_frame
+                                                .or_else(|| state.pages[state.active_page].layers.iter()
+                                                    .find(|&&id| state.layers.get(&id)
+                                                        .map(|r| matches!(r.layer_type,
+                                                            crate::state::LayerType::Frame
+                                                            | crate::state::LayerType::Component))
+                                                        .unwrap_or(false))
+                                                    .copied());
+                                            let now = ui.input(|i| i.time);
+                                            if let Some(fid) = from_id {
+                                                state.start_transition(fid, tid, &anim, &dir, dur, ease, now);
+                                            } else {
+                                                state.preview_current_frame = Some(tid);
+                                            }
                                         }
                                         break 'outer;
                                     }

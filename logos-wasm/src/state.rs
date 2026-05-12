@@ -832,6 +832,10 @@ pub struct EditorState {
     /// Runtime overrides active during preview mode (reset on preview exit).
     /// Key = variable Uuid, value = current runtime value.
     pub variable_runtime: HashMap<Uuid, VariableValue>,
+
+    // ── Smart Animate / Transitions ──────────────────────────────────
+    /// An in-flight prototype transition (Some while animation is playing).
+    pub proto_transition: Option<ProtoTransition>,
 }
 
 /// In-progress prototype connection being drawn by the user.
@@ -842,6 +846,133 @@ pub struct ProtoDrag {
     pub from_screen: egui::Pos2,
     /// Current cursor screen-space position (tip of the noodle).
     pub to_screen:   egui::Pos2,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Smart Animate — Transition playback system
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A frozen positional / visual snapshot of one layer at transition start/end.
+#[derive(Clone, Debug)]
+pub struct LayerSnapshot {
+    pub id:      Uuid,
+    pub name:    String,
+    pub x:       f32,
+    pub y:       f32,
+    pub width:   f32,
+    pub height:  f32,
+    pub rotation:f32,
+    pub opacity: f32,
+    pub fill:    [f32; 4],
+    pub color:   [f32; 4],
+}
+
+impl LayerSnapshot {
+    pub fn from_record(r: &LayerRecord) -> Self {
+        Self {
+            id:       r.id,
+            name:     r.name.clone(),
+            x:        r.x,
+            y:        r.y,
+            width:    r.width,
+            height:   r.height,
+            rotation: r.rotation,
+            opacity:  r.opacity,
+            fill:     r.fill,
+            color:    r.color,
+        }
+    }
+    /// Linearly interpolate toward `other` by factor t ∈ [0, 1].
+    pub fn lerp(&self, other: &LayerSnapshot, t: f32) -> LayerSnapshot {
+        let u = 1.0 - t;
+        LayerSnapshot {
+            id:       self.id,
+            name:     self.name.clone(),
+            x:        self.x * u + other.x * t,
+            y:        self.y * u + other.y * t,
+            width:    self.width  * u + other.width  * t,
+            height:   self.height * u + other.height * t,
+            rotation: self.rotation * u + other.rotation * t,
+            opacity:  self.opacity * u + other.opacity * t,
+            fill:     [
+                self.fill[0] * u + other.fill[0] * t,
+                self.fill[1] * u + other.fill[1] * t,
+                self.fill[2] * u + other.fill[2] * t,
+                self.fill[3] * u + other.fill[3] * t,
+            ],
+            color:    [
+                self.color[0] * u + other.color[0] * t,
+                self.color[1] * u + other.color[1] * t,
+                self.color[2] * u + other.color[2] * t,
+                self.color[3] * u + other.color[3] * t,
+            ],
+        }
+    }
+}
+
+/// A name-matched pair of layers for Smart Animate interpolation.
+#[derive(Clone, Debug)]
+pub struct MatchedPair {
+    pub from: LayerSnapshot,
+    pub to:   LayerSnapshot,
+}
+
+/// What kind of transition is currently playing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TransitionKind {
+    SmartAnimate,
+    Dissolve,
+    SlideIn  { direction: AnimDirection },
+    SlideOut { direction: AnimDirection },
+    Push     { direction: AnimDirection },
+    MoveIn   { direction: AnimDirection },
+}
+
+/// An active in-flight prototype transition.
+#[derive(Clone, Debug)]
+pub struct ProtoTransition {
+    /// Frame being transitioned *from*.
+    pub from_frame:    Uuid,
+    /// Frame being transitioned *to*.
+    pub to_frame:      Uuid,
+    /// Progress 0.0 → 1.0.
+    pub t:             f32,
+    /// Total duration in seconds.
+    pub duration_secs: f32,
+    /// Easing curve to apply.
+    pub easing:        Easing,
+    /// Kind of transition determines the render strategy.
+    pub kind:          TransitionKind,
+    /// Name-matched layer pairs (populated only for SmartAnimate).
+    pub matched:       Vec<MatchedPair>,
+    /// Layers that appear in `from_frame` but NOT `to_frame` (fade out).
+    pub from_only:     Vec<LayerSnapshot>,
+    /// Layers that appear in `to_frame` but NOT `from_frame` (fade in).
+    pub to_only:       Vec<LayerSnapshot>,
+    /// Wall-clock start time (seconds since epoch — use `egui::Context::input` time).
+    pub start_time:    f64,
+}
+
+impl ProtoTransition {
+    /// Apply the chosen easing curve to raw progress `t` ∈ [0, 1].
+    pub fn ease(t: f32, easing: &Easing) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match easing {
+            Easing::Linear     => t,
+            Easing::EaseIn     => t * t,
+            Easing::EaseOut    => 1.0 - (1.0 - t) * (1.0 - t),
+            Easing::EaseInOut  => {
+                if t < 0.5 { 2.0 * t * t }
+                else       { 1.0 - (-2.0 * t + 2.0).powi(2) * 0.5 }
+            }
+            Easing::Spring     => {
+                // Damped spring: overshoot ~8% then settle
+                let omega = std::f32::consts::PI * 2.5;
+                let z    = 0.6_f32;
+                1.0 - (-z * omega * t).exp() * (1.0 - t * 1.08).cos()
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1033,6 +1164,7 @@ impl EditorState {
             proto_drag: None,
             variables: Vec::new(),
             variable_runtime: HashMap::new(),
+            proto_transition: None,
         };
         // Demo scene
         state.add_frame("Desktop - 1", 100.0, 80.0, 1280.0, 720.0);
@@ -3187,6 +3319,80 @@ impl EditorState {
 
     /// Snapshot the current state AFTER a mutation so it can be undone.
     /// `history_idx` always points to the current snapshot in `history`.
+
+    // ── Smart Animate helpers ─────────────────────────────────────────
+
+    /// Begin a prototype transition from `from_id` to `to_id`.
+    /// Builds matched / from-only / to-only layer sets for Smart Animate,
+    /// or records a simple geometry snapshot for other anim types.
+    pub fn start_transition(
+        &mut self,
+        from_id: Uuid,
+        to_id:   Uuid,
+        anim:    &AnimationType,
+        dir:     &AnimDirection,
+        dur_ms:  u32,
+        easing:  Easing,
+        now:     f64,
+    ) {
+        // Build snapshots of all direct children from both frames.
+        let from_snaps: Vec<LayerSnapshot> = self.frame_children(from_id).iter()
+            .filter_map(|&cid| self.layers.get(&cid).map(LayerSnapshot::from_record))
+            .collect();
+        let to_snaps: Vec<LayerSnapshot> = self.frame_children(to_id).iter()
+            .filter_map(|&cid| self.layers.get(&cid).map(LayerSnapshot::from_record))
+            .collect();
+
+        let kind = match anim {
+            AnimationType::SmartAnimate => TransitionKind::SmartAnimate,
+            AnimationType::Dissolve     => TransitionKind::Dissolve,
+            AnimationType::SlideIn      => TransitionKind::SlideIn  { direction: dir.clone() },
+            AnimationType::SlideOut     => TransitionKind::SlideOut { direction: dir.clone() },
+            AnimationType::Push         => TransitionKind::Push     { direction: dir.clone() },
+            AnimationType::MoveIn       => TransitionKind::MoveIn   { direction: dir.clone() },
+            AnimationType::Instant      => {
+                // Instant — just flip the frame, no transition needed.
+                self.preview_current_frame = Some(to_id);
+                return;
+            }
+        };
+
+        // Match layers by name (case-insensitive) for SmartAnimate.
+        let mut matched:   Vec<MatchedPair> = Vec::new();
+        let mut from_only: Vec<LayerSnapshot> = Vec::new();
+        // Build name set of from-frame for to_only filtering.
+        let from_names: std::collections::HashSet<String> =
+            from_snaps.iter().map(|s| s.name.to_lowercase()).collect();
+
+        for fs in &from_snaps {
+            let key = fs.name.to_lowercase();
+            if let Some(ts) = to_snaps.iter().find(|s| s.name.to_lowercase() == key) {
+                matched.push(MatchedPair { from: fs.clone(), to: ts.clone() });
+            } else {
+                from_only.push(fs.clone());
+            }
+        }
+        // to_only = layers in to_frame with no name match in from_frame.
+        let to_only: Vec<LayerSnapshot> = to_snaps.into_iter()
+            .filter(|s| !from_names.contains(&s.name.to_lowercase()))
+            .collect();
+
+        let duration_secs = (dur_ms as f32 / 1000.0).max(0.05);
+
+        self.proto_transition = Some(ProtoTransition {
+            from_frame: from_id,
+            to_frame:   to_id,
+            t:          0.0,
+            duration_secs,
+            easing,
+            kind,
+            matched,
+            from_only,
+            to_only,
+            start_time: now,
+        });
+    }
+
     // ── Variable helpers ──────────────────────────────────────────────
 
     /// Evaluate a condition against the current runtime variable values.

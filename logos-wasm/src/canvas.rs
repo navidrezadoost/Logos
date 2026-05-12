@@ -2009,55 +2009,245 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
 
     // ── Preview mode overlay ──────────────────────────────────────────────────
     if state.preview_mode {
-        // Determine which frame to show.
-        let frame_id = state.preview_current_frame.or_else(|| {
-            state.pages[state.active_page].layers.iter()
-                .find(|&&id| state.layers.get(&id)
-                    .map(|r| matches!(r.layer_type,
-                        crate::state::LayerType::Frame | crate::state::LayerType::Component))
-                    .unwrap_or(false))
-                .copied()
-        });
+        let now = ui.input(|i| i.time);
 
-        // Dim the whole canvas.
-        let canvas_rect = resp.rect;
-        painter.rect_filled(canvas_rect, 0.0, Color32::from_rgba_unmultiplied(10, 8, 20, 180));
+        // ── Tick the active transition ────────────────────────────────────
+        let transition_done = if let Some(ref tr) = state.proto_transition {
+            let elapsed = (now - tr.start_time) as f32;
+            elapsed >= tr.duration_secs
+        } else { false };
 
-        if let Some(fid) = frame_id {
-            if let Some(fr) = state.layers.get(&fid) {
-                let (fsx, fsy) = state.world_to_screen(fr.x, fr.y);
+        if transition_done {
+            // Advance preview_current_frame and clear the transition.
+            let to_id = state.proto_transition.as_ref().unwrap().to_frame;
+            state.preview_current_frame = Some(to_id);
+            state.proto_transition = None;
+        } else if let Some(ref mut tr) = state.proto_transition {
+            let elapsed = (now - tr.start_time) as f32;
+            tr.t = (elapsed / tr.duration_secs).clamp(0.0, 1.0);
+        }
+
+        // ── If a transition is actively playing, render interpolated result ──
+        if let Some(ref tr) = state.proto_transition {
+            let te = crate::state::ProtoTransition::ease(tr.t, &tr.easing);
+            let from_fid = tr.from_frame;
+            let to_fid   = tr.to_frame;
+
+            let canvas_rect = resp.rect;
+            painter.rect_filled(canvas_rect, 0.0, Color32::from_rgba_unmultiplied(10, 8, 20, 220));
+
+            // Helper: get frame world rect
+            let frame_wrect = |fid: Uuid| -> Option<(f32, f32, f32, f32)> {
+                state.layers.get(&fid).map(|r| (r.x, r.y, r.width, r.height))
+            };
+
+            if let (Some((fx, fy, fw, fh)), Some((tx, ty, tw, th))) =
+                (frame_wrect(from_fid), frame_wrect(to_fid))
+            {
+                // Suppress unused warnings; SmartAnimate/Dissolve could interpolate
+                // frame position in future (e.g. when frames are at different canvas coords).
+                let _ = (fx, fy, fw, fh);
+
+                let (sx, sy) = state.world_to_screen(tx, ty);
                 let frame_rect = Rect::from_min_size(
-                    pos2(origin.x + fsx, origin.y + fsy),
-                    vec2(fr.width * state.zoom, fr.height * state.zoom),
+                    pos2(origin.x + sx, origin.y + sy),
+                    vec2(tw * state.zoom, th * state.zoom),
                 );
-                // White frame background (device frame chrome).
+                // Frame chrome
                 painter.rect_filled(frame_rect, 6.0, Color32::WHITE);
                 painter.rect_stroke(frame_rect, 6.0, Stroke::new(2.0, Color32::from_rgb(80, 80, 100)));
-                // Header bar with name + Esc hint.
-                let header = Rect::from_min_size(frame_rect.min - vec2(0.0, 28.0), vec2(frame_rect.width(), 24.0));
-                painter.rect_filled(header, 4.0, Color32::from_rgba_unmultiplied(30, 20, 60, 230));
-                painter.text(header.left_center() + vec2(8.0, 0.0),
-                    Align2::LEFT_CENTER, &fr.name,
-                    FontId::proportional(11.0), Color32::from_rgb(200, 180, 255));
-                painter.text(header.right_center() - vec2(8.0, 0.0),
-                    Align2::RIGHT_CENTER, "Esc to exit",
-                    FontId::proportional(10.0), Color32::from_rgba_unmultiplied(160, 140, 200, 180));
-                // Render interactive-layer hotspot overlays within the frame.
-                let children = state.frame_children(fid);
-                for cid in children {
-                    let has_click = state.layers.get(&cid)
-                        .map(|r| r.interactions.iter().any(|ia|
-                            ia.trigger == crate::state::Trigger::OnClick))
-                        .unwrap_or(false);
-                    if has_click {
-                        if let Some(cr) = state.layers.get(&cid) {
-                            let (csx, csy) = state.world_to_screen(fr.x + cr.x, fr.y + cr.y);
-                            let crect = Rect::from_min_size(
-                                pos2(origin.x + csx, origin.y + csy),
-                                vec2(cr.width * state.zoom, cr.height * state.zoom),
+
+                match &tr.kind {
+                    crate::state::TransitionKind::SmartAnimate => {
+                        // Draw matched layers at interpolated positions.
+                        let matched = tr.matched.clone();
+                        for pair in &matched {
+                            let snap = pair.from.lerp(&pair.to, te);
+                            let lx = frame_rect.min.x + snap.x * state.zoom;
+                            let ly = frame_rect.min.y + snap.y * state.zoom;
+                            let lw = snap.width  * state.zoom;
+                            let lh = snap.height * state.zoom;
+                            let lrect = Rect::from_min_size(pos2(lx, ly), vec2(lw, lh));
+                            let fill = Color32::from_rgba_unmultiplied(
+                                (snap.fill[0] * 255.0) as u8,
+                                (snap.fill[1] * 255.0) as u8,
+                                (snap.fill[2] * 255.0) as u8,
+                                (snap.fill[3] * snap.opacity * 255.0) as u8,
                             );
-                            painter.rect_stroke(crect, 3.0,
-                                Stroke::new(1.5, Color32::from_rgba_unmultiplied(128, 90, 230, 180)));
+                            painter.rect_filled(lrect, 3.0, fill);
+                        }
+                        // from-only: fade out
+                        let from_only = tr.from_only.clone();
+                        for snap in &from_only {
+                            let alpha = ((1.0 - te) * snap.opacity * 255.0) as u8;
+                            let fill = Color32::from_rgba_unmultiplied(
+                                (snap.fill[0] * 255.0) as u8,
+                                (snap.fill[1] * 255.0) as u8,
+                                (snap.fill[2] * 255.0) as u8,
+                                alpha,
+                            );
+                            let lx = frame_rect.min.x + snap.x * state.zoom;
+                            let ly = frame_rect.min.y + snap.y * state.zoom;
+                            let lrect = Rect::from_min_size(pos2(lx, ly),
+                                vec2(snap.width * state.zoom, snap.height * state.zoom));
+                            painter.rect_filled(lrect, 3.0, fill);
+                        }
+                        // to-only: fade in
+                        let to_only = tr.to_only.clone();
+                        for snap in &to_only {
+                            let alpha = (te * snap.opacity * 255.0) as u8;
+                            let fill = Color32::from_rgba_unmultiplied(
+                                (snap.fill[0] * 255.0) as u8,
+                                (snap.fill[1] * 255.0) as u8,
+                                (snap.fill[2] * 255.0) as u8,
+                                alpha,
+                            );
+                            let lx = frame_rect.min.x + snap.x * state.zoom;
+                            let ly = frame_rect.min.y + snap.y * state.zoom;
+                            let lrect = Rect::from_min_size(pos2(lx, ly),
+                                vec2(snap.width * state.zoom, snap.height * state.zoom));
+                            painter.rect_filled(lrect, 3.0, fill);
+                        }
+                    }
+                    crate::state::TransitionKind::Dissolve => {
+                        // Cross-dissolve: draw from_frame at (1-te) opacity,
+                        // then to_frame children at te opacity.
+                        let draw_frame_snaps = |snaps: &Vec<crate::state::LayerSnapshot>, alpha: f32,
+                                                frame_rect: Rect, zoom: f32, painter: &Painter| {
+                            for snap in snaps {
+                                let lx = frame_rect.min.x + snap.x * zoom;
+                                let ly = frame_rect.min.y + snap.y * zoom;
+                                let lrect = Rect::from_min_size(pos2(lx, ly),
+                                    vec2(snap.width * zoom, snap.height * zoom));
+                                let fill = Color32::from_rgba_unmultiplied(
+                                    (snap.fill[0] * 255.0) as u8,
+                                    (snap.fill[1] * 255.0) as u8,
+                                    (snap.fill[2] * 255.0) as u8,
+                                    (alpha * snap.opacity * 255.0) as u8,
+                                );
+                                painter.rect_filled(lrect, 3.0, fill);
+                            }
+                        };
+                        // from children at fading opacity
+                        let from_children: Vec<crate::state::LayerSnapshot> =
+                            state.frame_children(from_fid).iter()
+                                .filter_map(|&cid| state.layers.get(&cid)
+                                    .map(crate::state::LayerSnapshot::from_record))
+                                .collect();
+                        draw_frame_snaps(&from_children, 1.0 - te, frame_rect, state.zoom, &painter);
+                        let to_children: Vec<crate::state::LayerSnapshot> =
+                            state.frame_children(to_fid).iter()
+                                .filter_map(|&cid| state.layers.get(&cid)
+                                    .map(crate::state::LayerSnapshot::from_record))
+                                .collect();
+                        draw_frame_snaps(&to_children, te, frame_rect, state.zoom, &painter);
+                    }
+                    // Slide / Push / MoveIn — slide frame rect in from offscreen
+                    crate::state::TransitionKind::SlideIn { direction }
+                    | crate::state::TransitionKind::Push  { direction }
+                    | crate::state::TransitionKind::MoveIn { direction }
+                    | crate::state::TransitionKind::SlideOut { direction } => {
+                        let dir = direction.clone();
+                        let (off_x, off_y): (f32, f32) = match &dir {
+                            crate::state::AnimDirection::Left  => (tw * (1.0 - te), 0.0),
+                            crate::state::AnimDirection::Right => (-tw * (1.0 - te), 0.0),
+                            crate::state::AnimDirection::Up    => (0.0, th * (1.0 - te)),
+                            crate::state::AnimDirection::Down  => (0.0, -th * (1.0 - te)),
+                        };
+                        let slide_rect = frame_rect.translate(vec2(off_x * state.zoom, off_y * state.zoom));
+                        painter.rect_filled(slide_rect, 6.0, Color32::WHITE);
+                        let to_children: Vec<crate::state::LayerSnapshot> =
+                            state.frame_children(to_fid).iter()
+                                .filter_map(|&cid| state.layers.get(&cid)
+                                    .map(crate::state::LayerSnapshot::from_record))
+                                .collect();
+                        for snap in &to_children {
+                            let lx = slide_rect.min.x + snap.x * state.zoom;
+                            let ly = slide_rect.min.y + snap.y * state.zoom;
+                            let lrect = Rect::from_min_size(pos2(lx, ly),
+                                vec2(snap.width * state.zoom, snap.height * state.zoom));
+                            let fill = Color32::from_rgba_unmultiplied(
+                                (snap.fill[0] * 255.0) as u8,
+                                (snap.fill[1] * 255.0) as u8,
+                                (snap.fill[2] * 255.0) as u8,
+                                (snap.opacity * 255.0) as u8,
+                            );
+                            painter.rect_filled(lrect, 3.0, fill);
+                        }
+                    }
+                }
+
+                // Transition progress bar (thin purple line at frame bottom)
+                let pbar_h = 3.0;
+                let pbar_bg = Rect::from_min_size(
+                    pos2(frame_rect.min.x, frame_rect.max.y + 6.0),
+                    vec2(frame_rect.width(), pbar_h),
+                );
+                painter.rect_filled(pbar_bg, 0.0, Color32::from_rgba_unmultiplied(40, 20, 80, 160));
+                painter.rect_filled(
+                    Rect::from_min_size(pbar_bg.min, vec2(pbar_bg.width() * te, pbar_h)),
+                    0.0, Color32::from_rgb(128, 90, 230),
+                );
+                // Easing label
+                let ease_lbl = format!("{:?} {:.0}%", tr.easing, te * 100.0);
+                painter.text(pbar_bg.right_bottom() + vec2(0.0, 2.0),
+                    Align2::RIGHT_TOP, &ease_lbl,
+                    FontId::proportional(9.5), Color32::from_rgba_unmultiplied(160, 130, 220, 180));
+            }
+            // Request continuous repaint while animating
+            ui.ctx().request_repaint();
+
+        } else {
+            // ── Static preview (no active transition) ──────────────────────
+            let frame_id = state.preview_current_frame.or_else(|| {
+                state.pages[state.active_page].layers.iter()
+                    .find(|&&id| state.layers.get(&id)
+                        .map(|r| matches!(r.layer_type,
+                            crate::state::LayerType::Frame | crate::state::LayerType::Component))
+                        .unwrap_or(false))
+                    .copied()
+            });
+
+            // Dim the whole canvas.
+            let canvas_rect = resp.rect;
+            painter.rect_filled(canvas_rect, 0.0, Color32::from_rgba_unmultiplied(10, 8, 20, 180));
+
+            if let Some(fid) = frame_id {
+                if let Some(fr) = state.layers.get(&fid) {
+                    let (fsx, fsy) = state.world_to_screen(fr.x, fr.y);
+                    let frame_rect = Rect::from_min_size(
+                        pos2(origin.x + fsx, origin.y + fsy),
+                        vec2(fr.width * state.zoom, fr.height * state.zoom),
+                    );
+                    // White frame background (device frame chrome).
+                    painter.rect_filled(frame_rect, 6.0, Color32::WHITE);
+                    painter.rect_stroke(frame_rect, 6.0, Stroke::new(2.0, Color32::from_rgb(80, 80, 100)));
+                    // Header bar with name + Esc hint.
+                    let header = Rect::from_min_size(frame_rect.min - vec2(0.0, 28.0), vec2(frame_rect.width(), 24.0));
+                    painter.rect_filled(header, 4.0, Color32::from_rgba_unmultiplied(30, 20, 60, 230));
+                    painter.text(header.left_center() + vec2(8.0, 0.0),
+                        Align2::LEFT_CENTER, &fr.name,
+                        FontId::proportional(11.0), Color32::from_rgb(200, 180, 255));
+                    painter.text(header.right_center() - vec2(8.0, 0.0),
+                        Align2::RIGHT_CENTER, "Esc to exit",
+                        FontId::proportional(10.0), Color32::from_rgba_unmultiplied(160, 140, 200, 180));
+                    // Render interactive-layer hotspot overlays within the frame.
+                    let children = state.frame_children(fid);
+                    for cid in children {
+                        let has_click = state.layers.get(&cid)
+                            .map(|r| r.interactions.iter().any(|ia|
+                                ia.trigger == crate::state::Trigger::OnClick))
+                            .unwrap_or(false);
+                        if has_click {
+                            if let Some(cr) = state.layers.get(&cid) {
+                                let (csx, csy) = state.world_to_screen(fr.x + cr.x, fr.y + cr.y);
+                                let crect = Rect::from_min_size(
+                                    pos2(origin.x + csx, origin.y + csy),
+                                    vec2(cr.width * state.zoom, cr.height * state.zoom),
+                                );
+                                painter.rect_stroke(crect, 3.0,
+                                    Stroke::new(1.5, Color32::from_rgba_unmultiplied(128, 90, 230, 180)));
+                            }
                         }
                     }
                 }
