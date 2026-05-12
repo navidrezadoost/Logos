@@ -2387,19 +2387,81 @@ impl EditorState {
         let frame_wy = fr.y;
         let is_horiz = al.direction == AutoLayoutDirection::Horizontal;
         let children = self.frame_children(frame_id);
-        for (i, &cid) in children.iter().enumerate() {
-            if let Some(crec) = self.layers.get(&cid) {
-                // Children store positions in frame-local space.
-                let child_cx = frame_wx + crec.x + crec.width  * 0.5;
-                let child_cy = frame_wy + crec.y + crec.height * 0.5;
-                if is_horiz {
-                    if cursor_wx < child_cx { return i; }
-                } else if cursor_wy < child_cy {
-                    return i;
+        let n = children.len();
+        if n == 0 { return 0; }
+        // Boundary between slot i and slot i+1 is the midpoint of the GAP
+        // between the trailing edge of child[i] and the leading edge of child[i+1].
+        // This matches Figma's snap behaviour more precisely than using child centres.
+        for i in 0..n {
+            let crec = match self.layers.get(&children[i]) { Some(r) => r, None => continue };
+            if is_horiz {
+                let leading = frame_wx + crec.x;          // left edge in world
+                let trailing = leading + crec.width;       // right edge in world
+                if i == 0 && cursor_wx < leading { return 0; }
+                // Boundary to next slot: midpoint of gap between this child's right
+                // edge and next child's left edge.
+                if i + 1 < n {
+                    if let Some(nrec) = self.layers.get(&children[i + 1]) {
+                        let next_leading = frame_wx + nrec.x;
+                        let boundary = (trailing + next_leading) * 0.5;
+                        if cursor_wx < boundary { return i + 1; }
+                    }
+                }
+            } else {
+                let top    = frame_wy + crec.y;
+                let bottom = top + crec.height;
+                if i == 0 && cursor_wy < top { return 0; }
+                if i + 1 < n {
+                    if let Some(nrec) = self.layers.get(&children[i + 1]) {
+                        let next_top = frame_wy + nrec.y;
+                        let boundary = (bottom + next_top) * 0.5;
+                        if cursor_wy < boundary { return i + 1; }
+                    }
                 }
             }
         }
-        children.len()
+        n
+    }
+
+    /// Returns all N+1 slot world-space positions along the primary axis for
+    /// an AL frame — used to render the ghost hairlines for every possible slot.
+    /// Result: Vec of (primary_axis_world, is_between_children).
+    pub fn al_all_slot_positions(&self, frame_id: Uuid) -> Vec<(f32, bool)> {
+        let al = match self.layers.get(&frame_id).and_then(|r| r.auto_layout.as_ref()) {
+            Some(al) => al.clone(),
+            None => return vec![],
+        };
+        let fr = match self.layers.get(&frame_id) { Some(r) => r, None => return vec![] };
+        let is_horiz = al.direction == AutoLayoutDirection::Horizontal;
+        let pad_lead = if is_horiz { al.padding.left } else { al.padding.top };
+        let pad_trail = if is_horiz { al.padding.right } else { al.padding.bottom };
+        let fr_lead = if is_horiz { fr.x } else { fr.y };
+        let fr_size = if is_horiz { fr.width } else { fr.height };
+        let children = self.frame_children(frame_id);
+        let n = children.len();
+        let mut result = Vec::with_capacity(n + 1);
+        if n == 0 {
+            result.push((fr_lead + pad_lead, false));
+            return result;
+        }
+        // Slot 0: before first child
+        let c0 = match self.layers.get(&children[0]) { Some(r) => r, None => return vec![] };
+        let c0_lead = fr_lead + if is_horiz { c0.x } else { c0.y };
+        result.push((c0_lead - al.gap * 0.5, false));
+        // Slots between children
+        for i in 0..n - 1 {
+            let ca = match self.layers.get(&children[i])     { Some(r) => r, None => continue };
+            let cb = match self.layers.get(&children[i + 1]) { Some(r) => r, None => continue };
+            let ca_trail = fr_lead + if is_horiz { ca.x + ca.width } else { ca.y + ca.height };
+            let cb_lead  = fr_lead + if is_horiz { cb.x          } else { cb.y        };
+            result.push(((ca_trail + cb_lead) * 0.5, true));
+        }
+        // Slot N: after last child
+        let cn = match self.layers.get(&children[n - 1]) { Some(r) => r, None => return result };
+        let cn_trail = fr_lead + if is_horiz { cn.x + cn.width } else { cn.y + cn.height };
+        result.push((cn_trail + al.gap * 0.5, false));
+        let _ = (fr_size, pad_trail); // suppress unused warnings
+        result
     }
 
     pub fn resize_frame_to_fit(&mut self, frame_id: Uuid, padding: f32) {

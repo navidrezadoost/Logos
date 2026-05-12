@@ -1158,8 +1158,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     vec2(sw, sh),
                 );
                 // Dashed blue border to indicate "will become child of this frame"
-                let color  = Color32::from_rgba_unmultiplied(80, 160, 255, 220);
-                let stroke = Stroke::new(2.0, color);
+                let border_color = Color32::from_rgba_unmultiplied(80, 160, 255, 220);
+                let stroke = Stroke::new(2.0, border_color);
                 let dash = 8.0f32;
                 let gap  = 5.0f32;
                 for (p1, p2) in [
@@ -1184,109 +1184,125 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         t += dash + gap;
                     }
                 }
-                // Label: "→ Frame name"
+                // Subtle blue fill tint over the AL frame (drawn after children
+                // so it overlays with transparency, confirming the drop zone).
+                let has_al = fr.auto_layout.is_some();
+                if has_al {
+                    painter.rect_filled(
+                        rect,
+                        4.0,
+                        Color32::from_rgba_unmultiplied(50, 130, 255, 22),
+                    );
+                }
+                // Label: "→ Frame name  [AL]"
+                let al_badge = if has_al { "  ⊞ AL" } else { "" };
                 painter.text(
                     rect.left_top() + vec2(4.0, -16.0),
                     Align2::LEFT_BOTTOM,
-                    format!("→ {}", fr.name),
+                    format!("→ {}{}", fr.name, al_badge),
                     FontId::proportional(11.0),
-                    color,
+                    border_color,
                 );
 
-                // ── Auto Layout insertion line (blue bar + index badge) ──────
+                // ── Auto Layout insertion line (blue bar + all-slot hairlines) ──
                 if let Some(al_idx) = state.drag.al_insertion_index {
-                    let al = fr.auto_layout.as_ref().map(|a| a.clone());
+                    let al = fr.auto_layout.as_ref().cloned();
                     if let Some(al) = al {
                         let is_horiz = al.direction == crate::state::AutoLayoutDirection::Horizontal;
-                        let children = state.frame_children(hpid);
-                        let n = children.len();
-                        let fr_x  = fr.x;
-                        let fr_y  = fr.y;
-                        let fr_w  = fr.width;
-                        let fr_h  = fr.height;
-                        let pad   = al.padding.clone();
-                        let gap   = al.gap;
-
-                        // Compute the screen-space coordinate of the insertion line.
-                        // Slot 0 = before first child; slot n = after last child.
-                        let line_world: f32 = if is_horiz {
-                            if n == 0 {
-                                fr_x + pad.left
-                            } else if al_idx == 0 {
-                                // Before first child
-                                let c0 = children[0];
-                                state.layers.get(&c0).map(|r| fr_x + r.x).unwrap_or(fr_x + pad.left) - gap * 0.5
-                            } else if al_idx >= n {
-                                // After last child
-                                let cn = children[n - 1];
-                                state.layers.get(&cn).map(|r| fr_x + r.x + r.width).unwrap_or(fr_x + fr_w - pad.right) + gap * 0.5
-                            } else {
-                                // Between slot al_idx-1 and al_idx
-                                let ca = children[al_idx - 1];
-                                let cb = children[al_idx];
-                                let xa = state.layers.get(&ca).map(|r| fr_x + r.x + r.width).unwrap_or(fr_x);
-                                let xb = state.layers.get(&cb).map(|r| fr_x + r.x).unwrap_or(fr_x);
-                                (xa + xb) * 0.5
-                            }
-                        } else {
-                            if n == 0 {
-                                fr_y + pad.top
-                            } else if al_idx == 0 {
-                                let c0 = children[0];
-                                state.layers.get(&c0).map(|r| fr_y + r.y).unwrap_or(fr_y + pad.top) - gap * 0.5
-                            } else if al_idx >= n {
-                                let cn = children[n - 1];
-                                state.layers.get(&cn).map(|r| fr_y + r.y + r.height).unwrap_or(fr_y + fr_h - pad.bottom) + gap * 0.5
-                            } else {
-                                let ca = children[al_idx - 1];
-                                let cb = children[al_idx];
-                                let ya = state.layers.get(&ca).map(|r| fr_y + r.y + r.height).unwrap_or(fr_y);
-                                let yb = state.layers.get(&cb).map(|r| fr_y + r.y).unwrap_or(fr_y);
-                                (ya + yb) * 0.5
-                            }
-                        };
-
-                        let ins_color = Color32::from_rgb(50, 155, 255);
-                        let ins_stroke = Stroke::new(2.5, ins_color);
+                        let fr_x = fr.x;
+                        let fr_y = fr.y;
                         let margin = 4.0f32;
+                        let ins_color   = Color32::from_rgb(50, 155, 255);
+                        let ghost_color = Color32::from_rgba_unmultiplied(120, 180, 255, 70);
 
-                        if is_horiz {
-                            let (lsx, _) = state.world_to_screen(line_world, fr_y);
-                            let lx = origin.x + lsx;
-                            // Vertical line spanning the frame height
-                            let top_y    = rect.min.y + margin;
-                            let bottom_y = rect.max.y - margin;
-                            painter.line_segment([pos2(lx, top_y), pos2(lx, bottom_y)], ins_stroke);
-                            // Caps
-                            painter.circle_filled(pos2(lx, top_y),    3.5, ins_color);
-                            painter.circle_filled(pos2(lx, bottom_y), 3.5, ins_color);
-                            // Index badge
-                            let badge_r = Rect::from_center_size(
-                                pos2(lx, rect.center().y),
-                                vec2(22.0, 18.0),
-                            );
-                            painter.rect_filled(badge_r, 4.0, ins_color);
-                            painter.text(badge_r.center(), Align2::CENTER_CENTER,
-                                format!("{al_idx}"),
-                                FontId::proportional(10.0),
-                                Color32::WHITE);
-                        } else {
-                            let (_, lsy) = state.world_to_screen(fr_x, line_world);
-                            let ly = origin.y + lsy;
-                            let left_x  = rect.min.x + margin;
-                            let right_x = rect.max.x - margin;
-                            painter.line_segment([pos2(left_x, ly), pos2(right_x, ly)], ins_stroke);
-                            painter.circle_filled(pos2(left_x,  ly), 3.5, ins_color);
-                            painter.circle_filled(pos2(right_x, ly), 3.5, ins_color);
-                            let badge_r = Rect::from_center_size(
-                                pos2(rect.center().x, ly),
-                                vec2(22.0, 18.0),
-                            );
-                            painter.rect_filled(badge_r, 4.0, ins_color);
-                            painter.text(badge_r.center(), Align2::CENTER_CENTER,
-                                format!("{al_idx}"),
-                                FontId::proportional(10.0),
-                                Color32::WHITE);
+                        // ── Ghost hairlines at ALL possible slots ──
+                        let all_slots = state.al_all_slot_positions(hpid);
+                        for (slot_idx, &(slot_world, _between)) in all_slots.iter().enumerate() {
+                            let is_active = slot_idx == al_idx;
+                            if is_active { continue; } // drawn bright below
+                            if is_horiz {
+                                let (lsx, _) = state.world_to_screen(slot_world, fr_y);
+                                let lx = origin.x + lsx;
+                                painter.line_segment(
+                                    [pos2(lx, rect.min.y + margin), pos2(lx, rect.max.y - margin)],
+                                    Stroke::new(1.0, ghost_color),
+                                );
+                            } else {
+                                let (_, lsy) = state.world_to_screen(fr_x, slot_world);
+                                let ly = origin.y + lsy;
+                                painter.line_segment(
+                                    [pos2(rect.min.x + margin, ly), pos2(rect.max.x - margin, ly)],
+                                    Stroke::new(1.0, ghost_color),
+                                );
+                            }
+                        }
+
+                        // ── Gap value pills between each pair of children ──
+                        if al.gap > 0.0 {
+                            let children = state.frame_children(hpid);
+                            let n = children.len();
+                            for i in 0..n.saturating_sub(1) {
+                                let ca = match state.layers.get(&children[i])     { Some(r) => r, None => continue };
+                                let cb = match state.layers.get(&children[i + 1]) { Some(r) => r, None => continue };
+                                let (trail, lead) = if is_horiz {
+                                    (fr_x + ca.x + ca.width, fr_x + cb.x)
+                                } else {
+                                    (fr_y + ca.y + ca.height, fr_y + cb.y)
+                                };
+                                let mid_world = (trail + lead) * 0.5;
+                                let (pill_sx, pill_sy) = if is_horiz {
+                                    let (sx, _) = state.world_to_screen(mid_world, fr_y);
+                                    (origin.x + sx, rect.center().y)
+                                } else {
+                                    let (_, sy) = state.world_to_screen(fr_x, mid_world);
+                                    (rect.center().x, origin.y + sy)
+                                };
+                                let gap_px = (lead - trail) * state.zoom;
+                                let label  = if gap_px < 8.0 { String::new() } else { format!("{:.0}", al.gap) };
+                                if !label.is_empty() {
+                                    let pr = Rect::from_center_size(
+                                        pos2(pill_sx, pill_sy),
+                                        vec2(26.0, 14.0),
+                                    );
+                                    painter.rect_filled(pr, 3.0,
+                                        Color32::from_rgba_unmultiplied(30, 90, 180, 140));
+                                    painter.text(pr.center(), Align2::CENTER_CENTER,
+                                        label, FontId::proportional(9.0), Color32::WHITE);
+                                }
+                            }
+                        }
+
+                        // ── Active slot: bright blue line ──
+                        let active_world = all_slots.get(al_idx).map(|s| s.0);
+                        let ins_stroke = Stroke::new(2.5, ins_color);
+                        if let Some(line_world) = active_world {
+                            if is_horiz {
+                                let (lsx, _) = state.world_to_screen(line_world, fr_y);
+                                let lx = origin.x + lsx;
+                                let top_y    = rect.min.y + margin;
+                                let bottom_y = rect.max.y - margin;
+                                painter.line_segment([pos2(lx, top_y), pos2(lx, bottom_y)], ins_stroke);
+                                painter.circle_filled(pos2(lx, top_y),    3.5, ins_color);
+                                painter.circle_filled(pos2(lx, bottom_y), 3.5, ins_color);
+                                let badge_r = Rect::from_center_size(
+                                    pos2(lx, rect.center().y), vec2(26.0, 18.0));
+                                painter.rect_filled(badge_r, 5.0, ins_color);
+                                painter.text(badge_r.center(), Align2::CENTER_CENTER,
+                                    format!("{al_idx}"), FontId::proportional(10.0), Color32::WHITE);
+                            } else {
+                                let (_, lsy) = state.world_to_screen(fr_x, line_world);
+                                let ly = origin.y + lsy;
+                                let left_x  = rect.min.x + margin;
+                                let right_x = rect.max.x - margin;
+                                painter.line_segment([pos2(left_x, ly), pos2(right_x, ly)], ins_stroke);
+                                painter.circle_filled(pos2(left_x,  ly), 3.5, ins_color);
+                                painter.circle_filled(pos2(right_x, ly), 3.5, ins_color);
+                                let badge_r = Rect::from_center_size(
+                                    pos2(rect.center().x, ly), vec2(26.0, 18.0));
+                                painter.rect_filled(badge_r, 5.0, ins_color);
+                                painter.text(badge_r.center(), Align2::CENTER_CENTER,
+                                    format!("{al_idx}"), FontId::proportional(10.0), Color32::WHITE);
+                            }
                         }
                     }
                 }
