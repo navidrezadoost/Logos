@@ -117,13 +117,25 @@ impl eframe::App for LogosEditor {
                         state.clear_selection();
                     }
                     state.pen_in_progress = None;
+                    state.pen_bezier = None;
+                    state.vector_edit_layer = None;
+                    state.vector_drag = None;
                     state.proto_drag = None;
                     state.tool = Tool::Select;
                 }
                 if i.key_pressed(Key::Enter) {
                     // Commit an in-progress Pen path
                     if state.tool == Tool::Pen {
-                        if let Some(pts) = state.pen_in_progress.take() {
+                        if state.pen_mode == crate::state::PenMode::Pen {
+                            if let Some(pb) = state.pen_bezier.take() {
+                                if pb.points.len() >= 2 {
+                                    if let Some(id) = state.add_bezier_path(pb.points, pb.closed) {
+                                        state.select_only(id);
+                                        state.push_history("draw path");
+                                    }
+                                }
+                            }
+                        } else if let Some(pts) = state.pen_in_progress.take() {
                             if let Some(id) = state.add_pen_path(pts) {
                                 state.select_only(id);
                                 state.push_history("draw path");

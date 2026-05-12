@@ -367,6 +367,73 @@ pub enum PenMode {
     Pencil,
 }
 
+// ── Bezier Pen Tool Types ───────────────────────────────────────────────────
+
+/// A single anchor point in a bezier path with two control handles.
+/// All coordinates are in absolute *world* space.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BezierPoint {
+    /// The anchor position.
+    pub pos:    [f32; 2],
+    /// Incoming control handle (from previous segment).
+    pub c_in:   [f32; 2],
+    /// Outgoing control handle (toward next segment).
+    pub c_out:  [f32; 2],
+    /// When true, c_in is always the mirror of c_out through pos.
+    pub smooth: bool,
+}
+
+impl BezierPoint {
+    /// Sharp corner — both handles sit at the anchor.
+    pub fn sharp(pos: [f32; 2]) -> Self {
+        Self { pos, c_in: pos, c_out: pos, smooth: false }
+    }
+    /// Smooth point: c_out = drag_end, c_in = mirror through pos.
+    pub fn smooth_from_drag(pos: [f32; 2], drag_end: [f32; 2]) -> Self {
+        let c_out = drag_end;
+        let c_in  = [2.0 * pos[0] - drag_end[0], 2.0 * pos[1] - drag_end[1]];
+        Self { pos, c_in, c_out, smooth: true }
+    }
+    /// Move this anchor by a world-space delta (also moves handles).
+    pub fn translate(&mut self, dx: f32, dy: f32) {
+        self.pos[0]   += dx; self.pos[1]   += dy;
+        self.c_in[0]  += dx; self.c_in[1]  += dy;
+        self.c_out[0] += dx; self.c_out[1] += dy;
+    }
+    /// Tessellate the cubic bezier segment from `self` to `next` into screen points.
+    pub fn tessellate_to(a: &BezierPoint, b: &BezierPoint, n: usize) -> Vec<[f32; 2]> {
+        let mut pts = Vec::with_capacity(n + 1);
+        for i in 0..=n {
+            let t = i as f32 / n as f32;
+            let u = 1.0 - t;
+            let x = u*u*u*a.pos[0] + 3.0*u*u*t*a.c_out[0]
+                  + 3.0*u*t*t*b.c_in[0] + t*t*t*b.pos[0];
+            let y = u*u*u*a.pos[1] + 3.0*u*u*t*a.c_out[1]
+                  + 3.0*u*t*t*b.c_in[1] + t*t*t*b.pos[1];
+            pts.push([x, y]);
+        }
+        pts
+    }
+}
+
+/// State of an in-progress bezier pen path currently being drawn.
+#[derive(Clone, Debug)]
+pub struct PenBezier {
+    pub points: Vec<BezierPoint>,
+    pub closed: bool,
+    /// While the user is holding the mouse button on the most-recently added
+    /// anchor: stores the current drag world position (becomes c_out).
+    pub drag_handle: Option<[f32; 2]>,
+}
+
+/// Which part of a bezier point is being dragged in vector-edit mode.
+#[derive(Clone, Debug, PartialEq)]
+pub enum VectorHandleKind {
+    Anchor,
+    CIn,
+    COut,
+}
+
 // ── Property Override Model ─────────────────────────────────────────────────
 
 /// Property-level overrides stored on a ComponentInstance root layer.
@@ -574,7 +641,7 @@ pub enum LayerType {
     /// inner_ratio 0 = full disc / pie sector,  0 < r < 1 = ring/donut.
     Ellipse { arc_start: f32, arc_end: f32, inner_ratio: f32 },
     /// Freehand / pen polyline; points are in absolute *world* coordinates.
-    Path { points: Vec<[f32; 2]> },
+    Path { points: Vec<BezierPoint>, closed: bool },
     Group,
     /// Regular N-sided polygon inscribed in the bounding rect.
     /// corner_radius is a fraction of the shortest edge (0 .. 0.45).
@@ -789,8 +856,14 @@ pub struct EditorState {
     pub frame_mode: FrameMode,
     pub text_mode:  TextMode,
     pub pen_mode:   PenMode,
-    /// In-progress pen/pencil path points (world coords). None = not drawing.
+    /// In-progress pencil freehand points (world coords). None = not drawing.
     pub pen_in_progress: Option<Vec<[f32; 2]>>,
+    /// In-progress bezier pen path. Used by PenMode::Pen (not Pencil).
+    pub pen_bezier: Option<PenBezier>,
+    /// Layer currently being vertex-edited (double-click a Path to enter).
+    pub vector_edit_layer: Option<Uuid>,
+    /// Which anchor/handle is being dragged in vector edit (layer_id, point_idx, HandleKind).
+    pub vector_drag: Option<(usize, VectorHandleKind)>,
 
     // ── Reinforcement-learning measurement affinity ────────────────────
     // Q-value table: (selected_id, other_id) → affinity score.
@@ -1156,6 +1229,9 @@ impl EditorState {
             text_mode:  TextMode::Normal,
             pen_mode:   PenMode::Pen,
             pen_in_progress: None,
+            pen_bezier: None,
+            vector_edit_layer: None,
+            vector_drag: None,
             measure_affinity: std::collections::HashMap::new(),
             blend_preview: None,
             proto_mode: false,
@@ -2000,25 +2076,37 @@ impl EditorState {
         id
     }
 
-    /// Commit a completed pen/pencil stroke as a new Path layer.
-    /// `points` must be in world coordinates.  Returns `None` if fewer than 2 points.
-    pub fn add_pen_path(&mut self, points: Vec<[f32; 2]>) -> Option<Uuid> {
+    /// Commit a completed pencil freehand stroke as a new Path layer.
+    /// Each point becomes a sharp corner BezierPoint. Returns `None` if < 2 points.
+    pub fn add_pen_path(&mut self, flat_points: Vec<[f32; 2]>) -> Option<Uuid> {
+        if flat_points.len() < 2 { return None; }
+        let bezier_pts = flat_points.iter().map(|&p| BezierPoint::sharp(p)).collect();
+        self.add_bezier_path(bezier_pts, false)
+    }
+
+    /// Commit a bezier path with full control handles. Returns `None` if < 2 points.
+    pub fn add_bezier_path(&mut self, points: Vec<BezierPoint>, closed: bool) -> Option<Uuid> {
         if points.len() < 2 { return None; }
-        // Compute bounding box for the layer rect.
+        // Compute bounding box from anchor positions.
         let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
         let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
-        for [px, py] in &points {
-            min_x = min_x.min(*px); min_y = min_y.min(*py);
-            max_x = max_x.max(*px); max_y = max_y.max(*py);
+        for bp in &points {
+            min_x = min_x.min(bp.pos[0]); min_y = min_y.min(bp.pos[1]);
+            max_x = max_x.max(bp.pos[0]); max_y = max_y.max(bp.pos[1]);
+            // Also include handles in the bounding box
+            for h in [bp.c_in, bp.c_out] {
+                min_x = min_x.min(h[0]); min_y = min_y.min(h[1]);
+                max_x = max_x.max(h[0]); max_y = max_y.max(h[1]);
+            }
         }
         let w = (max_x - min_x).max(2.0);
         let h = (max_y - min_y).max(2.0);
         let mut rec = LayerRecord::new_rect(min_x, min_y, w, h);
         rec.name         = "Path".into();
-        rec.fill         = [0.0, 0.0, 0.0, 0.0];
+        rec.fill         = if closed { [0.2, 0.5, 0.9, 0.15] } else { [0.0, 0.0, 0.0, 0.0] };
         rec.stroke_color = [0.2, 0.6, 1.0, 1.0];
         rec.stroke_width = 2.0;
-        rec.layer_type   = LayerType::Path { points };
+        rec.layer_type   = LayerType::Path { points, closed };
         let id = rec.id;
         self.pages[self.active_page].layers.push(id);
         self.layers.insert(id, rec);

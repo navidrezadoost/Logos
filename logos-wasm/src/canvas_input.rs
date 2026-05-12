@@ -271,8 +271,20 @@ pub(crate) fn handle_tool_input(
     if resp.double_clicked_by(PointerButton::Primary) {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
-            // Pen tool: double-click commits the in-progress path
-            if state.tool == Tool::Pen {
+            // Pen tool: double-click commits the in-progress bezier path
+            if state.tool == Tool::Pen && state.pen_mode == crate::state::PenMode::Pen {
+                if let Some(pb) = state.pen_bezier.take() {
+                    if pb.points.len() >= 2 {
+                        if let Some(id) = state.add_bezier_path(pb.points, pb.closed) {
+                            state.select_only(id);
+                            state.push_history("draw path");
+                        }
+                    }
+                }
+                state.tool = Tool::Select;
+                return;
+            }
+            if state.tool == Tool::Pen && state.pen_mode == crate::state::PenMode::Pencil {
                 if let Some(pts) = state.pen_in_progress.take() {
                     if let Some(id) = state.add_pen_path(pts) {
                         state.select_only(id);
@@ -293,6 +305,18 @@ pub(crate) fn handle_tool_input(
                 }
                 state.tool = Tool::Select;
                 return;
+            }
+            // Double-click on a Path layer → enter vector edit mode
+            if state.tool == Tool::Select {
+                if let Some(id) = state.hit_test(wx, wy) {
+                    if matches!(state.layers.get(&id).map(|r| &r.layer_type),
+                        Some(crate::state::LayerType::Path { .. }))
+                    {
+                        state.vector_edit_layer = Some(id);
+                        state.select_only(id);
+                        return;
+                    }
+                }
             }
 
             // ── Double-click on a Section header → toggle collapse ────────────
@@ -379,6 +403,40 @@ pub(crate) fn handle_tool_input(
                         state.exit_master_edit_mode();
                         return;
                     }
+                }
+            }
+
+            // ── Vector edit mode: detect and start handle drag ──────────────
+            if let (Some(vid), Tool::Select) = (state.vector_edit_layer, state.tool) {
+                let hr2 = (10.0_f32 * state.zoom.max(0.5)).powi(2);  // hit radius² in world space
+                let mut best: Option<(usize, crate::state::VectorHandleKind, f32)> = None;
+                let pts_snap: Option<Vec<crate::state::BezierPoint>> = state.layers.get(&vid)
+                    .and_then(|r| if let crate::state::LayerType::Path { ref points, .. } = r.layer_type
+                        { Some(points.clone()) } else { None });
+                if let Some(pts) = pts_snap {
+                    for (i, bp) in pts.iter().enumerate() {
+                        let check = |px: f32, py: f32, hk: crate::state::VectorHandleKind| {
+                            let d = (px - wx).powi(2) + (py - wy).powi(2);
+                            if d < hr2 { Some((i, hk, d)) } else { None }
+                        };
+                        let candidates = [
+                            check(bp.pos[0], bp.pos[1], crate::state::VectorHandleKind::Anchor),
+                            check(bp.c_out[0], bp.c_out[1], crate::state::VectorHandleKind::COut),
+                            check(bp.c_in[0],  bp.c_in[1],  crate::state::VectorHandleKind::CIn),
+                        ];
+                        for c in candidates.into_iter().flatten() {
+                            if best.as_ref().map(|(_, _, bd)| c.2 < *bd).unwrap_or(true) {
+                                best = Some(c);
+                            }
+                        }
+                    }
+                }
+                if let Some((pidx, hkind, _)) = best {
+                    state.vector_drag = Some((pidx, hkind));
+                    return;
+                } else {
+                    // Clicked away from handles → exit vector edit
+                    state.vector_edit_layer = None;
                 }
             }
 
@@ -628,12 +686,72 @@ pub(crate) fn handle_tool_input(
                     state.drag.origin = pos2(wx, wy);
                     state.drag.layer_id = None;
                 }
+                // Bezier pen: drag_started = add anchor + begin handle drag
+                Tool::Pen if state.pen_mode == crate::state::PenMode::Pen => {
+                    let pb = state.pen_bezier.get_or_insert_with(|| crate::state::PenBezier {
+                        points: Vec::new(), closed: false, drag_handle: None,
+                    });
+                    pb.points.push(crate::state::BezierPoint::sharp([wx, wy]));
+                    pb.drag_handle = Some([wx, wy]);
+                }
                 _ => {}
             }
         }
     }
 
     // ── Drag in progress ──────────────────────────────────────────────────
+    // Bezier pen: update handle drag
+    if resp.dragged_by(PointerButton::Primary)
+        && state.tool == Tool::Pen
+        && state.pen_mode == crate::state::PenMode::Pen
+    {
+        if let Some(mp) = pointer.hover_pos() {
+            let (wx, wy) = to_world(mp, state);
+            if let Some(pb) = state.pen_bezier.as_mut() {
+                pb.drag_handle = Some([wx, wy]);
+            }
+        }
+    }
+    // Vector edit: drag anchor or handle
+    if resp.dragged_by(PointerButton::Primary)
+        && state.vector_edit_layer.is_some()
+        && state.tool == Tool::Select
+    {
+        if let Some(mp) = pointer.hover_pos() {
+            let (wx, wy) = to_world(mp, state);
+            if let (Some(vid), Some((pidx, ref hkind))) =
+                (state.vector_edit_layer, state.vector_drag.as_ref())
+            {
+                let pidx = *pidx;
+                let hkind = hkind.clone();
+                if let Some(r) = state.layers.get_mut(&vid) {
+                    if let crate::state::LayerType::Path { ref mut points, .. } = r.layer_type {
+                        if let Some(bp) = points.get_mut(pidx) {
+                            match hkind {
+                                crate::state::VectorHandleKind::Anchor => {
+                                    let dx = wx - bp.pos[0];
+                                    let dy = wy - bp.pos[1];
+                                    bp.translate(dx, dy);
+                                }
+                                crate::state::VectorHandleKind::COut => {
+                                    bp.c_out = [wx, wy];
+                                    if bp.smooth {
+                                        bp.c_in = [2.0*bp.pos[0]-wx, 2.0*bp.pos[1]-wy];
+                                    }
+                                }
+                                crate::state::VectorHandleKind::CIn => {
+                                    bp.c_in = [wx, wy];
+                                    if bp.smooth {
+                                        bp.c_out = [2.0*bp.pos[0]-wx, 2.0*bp.pos[1]-wy];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     // Pencil: collect points while mouse is dragged (independent of drag.active layer move)
     if resp.dragged_by(PointerButton::Primary)
         && state.tool == Tool::Pen
@@ -1044,6 +1162,31 @@ pub(crate) fn handle_tool_input(
             state.drag.active = false;
             return;
         }
+        // Bezier pen: finalize the handle that was being dragged
+        if state.tool == Tool::Pen && state.pen_mode == crate::state::PenMode::Pen {
+            if let Some(pb) = state.pen_bezier.as_mut() {
+                if let Some(dh) = pb.drag_handle.take() {
+                    if let Some(last) = pb.points.last_mut() {
+                        let anchor = last.pos;
+                        let dist_sq = (dh[0] - anchor[0]).powi(2) + (dh[1] - anchor[1]).powi(2);
+                        let thresh = (6.0 / state.zoom).powi(2);
+                        if dist_sq > thresh {
+                            // Large drag → smooth point
+                            *last = crate::state::BezierPoint::smooth_from_drag(anchor, dh);
+                        }
+                        // Small drag → stays as sharp corner
+                    }
+                }
+            }
+            return;
+        }
+        // Vector edit: commit handle drag to history
+        if state.vector_edit_layer.is_some() && state.tool == Tool::Select {
+            if state.vector_drag.take().is_some() {
+                state.push_history("edit path handle");
+            }
+            return;
+        }
         // Rubber-band marquee: commit selection
         if let Some((rx0, ry0, rx1, ry1)) = state.drag.rubber_band.take() {
             let multi = ui.input(|i| i.modifiers.shift || i.modifiers.ctrl);
@@ -1267,10 +1410,44 @@ pub(crate) fn handle_tool_input(
                 Tool::Line | Tool::Arrow | Tool::Star | Tool::Frame |
                 Tool::Text | Tool::Pen);
             if is_draw_tool {
-                // Pen (click-to-add-anchor mode): add a point to the in-progress path
+                // Bezier pen (PenMode::Pen): handle close-path detection and sharp anchor add
                 if state.tool == Tool::Pen && state.pen_mode == crate::state::PenMode::Pen {
-                    let pts = state.pen_in_progress.get_or_insert_with(Vec::new);
-                    pts.push([wx, wy]);
+                    // Ensure pen_bezier exists.
+                    if state.pen_bezier.is_none() {
+                        state.pen_bezier = Some(crate::state::PenBezier {
+                            points: Vec::new(), closed: false, drag_handle: None,
+                        });
+                    }
+                    // Close-path: click near first anchor when we have ≥3 points
+                    let close_path = {
+                        let pb = state.pen_bezier.as_ref().unwrap();
+                        if pb.points.len() >= 3 {
+                            pb.points.first().map(|p| p.pos).map(|fpos| {
+                                let (fx, fy) = state.world_to_screen(fpos[0], fpos[1]);
+                                let (cx, cy) = state.world_to_screen(wx, wy);
+                                (fx - cx).powi(2) + (fy - cy).powi(2) < 14.0_f32.powi(2)
+                            }).unwrap_or(false)
+                        } else { false }
+                    };
+                    if close_path {
+                        let pts = state.pen_bezier.as_ref().unwrap().points.clone();
+                        state.pen_bezier = None;
+                        if let Some(id) = state.add_bezier_path(pts, true) {
+                            state.select_only(id);
+                            state.push_history("draw closed path");
+                        }
+                        state.tool = Tool::Select;
+                        return;
+                    }
+                    // Regular click: add sharp anchor.
+                    // Note: drag_started_by handles the case where the click becomes a drag.
+                    // Here we only arrive when there was a pure click (no drag_started fired).
+                    state.pen_bezier.as_mut().unwrap().points.push(
+                        crate::state::BezierPoint::sharp([wx, wy]));
+                    return;
+                }
+                // Pencil freehand: no click action (handled by drag)
+                if state.tool == Tool::Pen && state.pen_mode == crate::state::PenMode::Pencil {
                     return;
                 }
                 let shift = ui.input(|i| i.modifiers.shift);

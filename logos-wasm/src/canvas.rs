@@ -358,18 +358,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     painter.text(rect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &content,
                         FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
                 }
-                LayerType::Path { points } => {
-                    let lw  = (rec.stroke_width * state.zoom).max(1.5);
-                    let col = if stroke.width > 0.0 { stroke.color }
-                              else if fill.a() > 0 { fill }
-                              else { Color32::from_rgb(51, 153, 255) };
-                    let spts: Vec<Pos2> = points.iter().map(|[px, py]| {
-                        let (sx, sy) = state.world_to_screen(*px, *py);
-                        pos2(origin.x + sx, origin.y + sy)
-                    }).collect();
-                    for i in 0..spts.len().saturating_sub(1) {
-                        painter.line_segment([spts[i], spts[i + 1]], Stroke::new(lw, col));
-                    }
+                LayerType::Path { points, closed } => {
+                    render_bezier_path(&painter, state, origin, points, *closed, rec);
                 }
                 LayerType::Rect | LayerType::Frame => {
                     // Draw rounded rectangle correctly even when rotated.
@@ -829,18 +819,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         }
                     }
                 }
-                LayerType::Path { points } => {
-                    let lw  = (rec.stroke_width * state.zoom).max(1.5);
-                    let col = if stroke.width > 0.0 { stroke.color }
-                              else if fill.a() > 0 { fill }
-                              else { Color32::from_rgb(51, 153, 255) };
-                    let spts: Vec<Pos2> = points.iter().map(|[px, py]| {
-                        let (sx, sy) = state.world_to_screen(*px, *py);
-                        pos2(origin.x + sx, origin.y + sy)
-                    }).collect();
-                    for i in 0..spts.len().saturating_sub(1) {
-                        painter.line_segment([spts[i], spts[i + 1]], Stroke::new(lw, col));
-                    }
+                LayerType::Path { points, closed } => {
+                    render_bezier_path(&painter, state, origin, points, *closed, rec);
                 }
                 _ => {
                     // Separate fill + stroke so stroke position (inside/outside/center) works.
@@ -2255,6 +2235,160 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
         }
     }
 
+    // ── Pen tool: in-progress path preview ──────────────────────────────────
+    if state.tool == crate::tools::Tool::Pen
+        && state.pen_mode == crate::state::PenMode::Pen
+    {
+        if let Some(ref pb) = state.pen_bezier {
+            if pb.points.len() >= 1 {
+                let pt_col   = Color32::from_rgb(80, 190, 255);
+                let line_col = Color32::from_rgba_unmultiplied(80, 190, 255, 200);
+                let dot_r    = 5.0_f32;
+
+                // Draw committed segments
+                for i in 0..pb.points.len().saturating_sub(1) {
+                    let segs = crate::state::BezierPoint::tessellate_to(
+                        &pb.points[i], &pb.points[i + 1], 16);
+                    let spts: Vec<Pos2> = segs.iter().map(|&[wx, wy]| {
+                        let (sx, sy) = state.world_to_screen(wx, wy);
+                        pos2(origin.x + sx, origin.y + sy)
+                    }).collect();
+                    for w in spts.windows(2) {
+                        painter.line_segment([w[0], w[1]], Stroke::new(1.5, line_col));
+                    }
+                }
+
+                // Anchor dots
+                for (i, bp) in pb.points.iter().enumerate() {
+                    let (sx, sy) = state.world_to_screen(bp.pos[0], bp.pos[1]);
+                    let sp = pos2(origin.x + sx, origin.y + sy);
+                    let is_first = i == 0;
+                    // Draw handle lines for smooth points
+                    if bp.smooth || pb.drag_handle.is_some() && i == pb.points.len() - 1 {
+                        let c_out = if i == pb.points.len() - 1 && pb.drag_handle.is_some() {
+                            pb.drag_handle.unwrap()
+                        } else { bp.c_out };
+                        let (hsx, hsy) = state.world_to_screen(c_out[0], c_out[1]);
+                        let hp = pos2(origin.x + hsx, origin.y + hsy);
+                        painter.line_segment([sp, hp], Stroke::new(1.0, Color32::from_rgba_unmultiplied(80, 190, 255, 120)));
+                        painter.circle_filled(hp, 4.0, Color32::from_rgb(80, 190, 255));
+                        // c_in mirror
+                        let (hsx2, hsy2) = state.world_to_screen(bp.c_in[0], bp.c_in[1]);
+                        let hp2 = pos2(origin.x + hsx2, origin.y + hsy2);
+                        if bp.smooth {
+                            painter.line_segment([sp, hp2], Stroke::new(1.0, Color32::from_rgba_unmultiplied(80, 190, 255, 120)));
+                            painter.circle_filled(hp2, 4.0, Color32::from_rgb(80, 190, 255));
+                        }
+                    }
+                    let r = Rect::from_center_size(sp, vec2(8.0, 8.0));
+                    painter.rect_filled(r, 1.0, Color32::WHITE);
+                    painter.rect_stroke(r, 1.0, Stroke::new(1.5, pt_col));
+                    // First point: check if cursor is near for close indicator
+                    if is_first && pb.points.len() >= 3 {
+                        if let Some(cur) = ui.input(|i| i.pointer.hover_pos()) {
+                            let d = sp.distance(cur);
+                            if d < 14.0 {
+                                painter.circle_stroke(sp, 10.0, Stroke::new(2.0, Color32::from_rgb(80, 255, 120)));
+                            }
+                        }
+                    }
+                }
+
+                // Live preview segment: last anchor → cursor (accounts for drag handle)
+                if let Some(cursor_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                    let last = pb.points.last().unwrap();
+                    let (lsx, lsy) = state.world_to_screen(last.pos[0], last.pos[1]);
+                    let lp = pos2(origin.x + lsx, origin.y + lsy);
+
+                    let c_out_screen = if let Some(dh) = pb.drag_handle {
+                        let (hsx, hsy) = state.world_to_screen(dh[0], dh[1]);
+                        pos2(origin.x + hsx, origin.y + hsy)
+                    } else { lp };
+
+                    let cx_world = cursor_pos.x - origin.x;
+                    let cy_world = cursor_pos.y - origin.y;
+                    let (cw_x, cw_y) = state.screen_to_world(cx_world, cy_world);
+                    let cursor_node  = crate::state::BezierPoint::sharp([cw_x, cw_y]);
+                    let last_c_out   = if pb.drag_handle.is_some() {
+                        let dh = pb.drag_handle.unwrap();
+                        let mut lc = last.clone();
+                        lc.c_out = dh; lc
+                    } else { last.clone() };
+
+                    let preview_pts = crate::state::BezierPoint::tessellate_to(
+                        &last_c_out, &cursor_node, 16);
+                    let preview_screen: Vec<Pos2> = preview_pts.iter().map(|&[wx, wy]| {
+                        let (sx, sy) = state.world_to_screen(wx, wy);
+                        pos2(origin.x + sx, origin.y + sy)
+                    }).collect();
+                    for w in preview_screen.windows(2) {
+                        painter.line_segment([w[0], w[1]], Stroke::new(1.0,
+                            Color32::from_rgba_unmultiplied(80, 190, 255, 100)));
+                    }
+                    // Cursor dot
+                    painter.circle_filled(cursor_pos, 4.0,
+                        Color32::from_rgba_unmultiplied(80, 190, 255, 180));
+                }
+            }
+        }
+    }
+
+    // ── Handle overlays: selected path (and vector edit mode) ────────────────
+    let overlay_id = state.vector_edit_layer.or_else(|| {
+        state.selection.first().copied().filter(|&id|
+            matches!(state.layers.get(&id).map(|r| &r.layer_type),
+                Some(crate::state::LayerType::Path { .. })))
+    });
+    if let Some(pid) = overlay_id {
+        let pts_snap: Option<(Vec<crate::state::BezierPoint>, bool)> = state.layers.get(&pid)
+            .and_then(|r| if let crate::state::LayerType::Path { ref points, closed } = r.layer_type
+                { Some((points.clone(), closed)) } else { None });
+        if let Some((pts, _closed)) = pts_snap {
+            let anchor_col  = Color32::from_rgb(255, 255, 255);
+            let anchor_strk = Color32::from_rgb(100, 91, 255);
+            let handle_col  = Color32::from_rgb(60, 210, 200);
+            let handle_line = Color32::from_rgba_unmultiplied(60, 210, 200, 140);
+            let in_vector = state.vector_edit_layer.is_some();
+
+            for (i, bp) in pts.iter().enumerate() {
+                let (ax, ay) = state.world_to_screen(bp.pos[0], bp.pos[1]);
+                let asp = pos2(origin.x + ax, origin.y + ay);
+
+                // Draw c_in and c_out handles
+                let show_handles = in_vector;
+                if show_handles {
+                    let draw_handle = |wp: [f32; 2]| {
+                        let (hx, hy) = state.world_to_screen(wp[0], wp[1]);
+                        let hp = pos2(origin.x + hx, origin.y + hy);
+                        painter.line_segment([asp, hp],
+                            Stroke::new(1.0, handle_line));
+                        painter.circle_filled(hp, 5.0, handle_col);
+                        painter.circle_stroke(hp, 5.0, Stroke::new(1.0, Color32::WHITE));
+                    };
+                    if bp.c_in != bp.pos {
+                        draw_handle(bp.c_in);
+                    }
+                    if bp.c_out != bp.pos {
+                        draw_handle(bp.c_out);
+                    }
+                }
+
+                // Anchor square
+                let ar = if in_vector { 7.0 } else { 5.0 };
+                let r = Rect::from_center_size(asp, vec2(ar * 2.0, ar * 2.0));
+                painter.rect_filled(r, 1.0, anchor_col);
+                painter.rect_stroke(r, 1.0, Stroke::new(1.5, anchor_strk));
+
+                // Label index in vector edit mode
+                if in_vector {
+                    painter.text(asp + vec2(8.0, -10.0), Align2::LEFT_BOTTOM,
+                        &i.to_string(), FontId::proportional(9.5),
+                        Color32::from_rgba_unmultiplied(180, 160, 255, 200));
+                }
+            }
+        }
+    }
+
     // ── Status bar overlay ────────────────────────────────────────────────
     if let Some(mp) = ui.input(|i| i.pointer.hover_pos()) {
         let lx = mp.x - origin.x;
@@ -2275,4 +2409,73 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
         );
     }
 }
+
+// ── Bezier path render helper ─────────────────────────────────────────────────
+
+fn render_bezier_path(
+    painter:  &Painter,
+    state:    &EditorState,
+    origin:   Pos2,
+    points:   &[crate::state::BezierPoint],
+    closed:   bool,
+    rec:      &crate::state::LayerRecord,
+) {
+    if points.len() < 2 { return; }
+
+    let lw  = (rec.stroke_width * state.zoom).max(1.5);
+    let fill_col: Color32 = {
+        let f = rec.fill;
+        Color32::from_rgba_unmultiplied(
+            (f[0]*255.0) as u8, (f[1]*255.0) as u8,
+            (f[2]*255.0) as u8, (f[3]*rec.opacity*255.0) as u8)
+    };
+    let stroke_col: Color32 = {
+        let s = rec.stroke_color;
+        Color32::from_rgba_unmultiplied(
+            (s[0]*255.0) as u8, (s[1]*255.0) as u8,
+            (s[2]*255.0) as u8, (s[3]*rec.opacity*255.0) as u8)
+    };
+    let draw_col = if rec.stroke_width > 0.0 { stroke_col }
+                   else if fill_col.a() > 0   { fill_col }
+                   else { Color32::from_rgb(51, 153, 255) };
+
+    let n = 16usize;  // tessellation steps per segment
+
+    // Collect all screen-space tessellation points.
+    let mut all_screen: Vec<Pos2> = Vec::new();
+    for i in 0..points.len() - 1 {
+        let seg = crate::state::BezierPoint::tessellate_to(&points[i], &points[i + 1], n);
+        for [wx, wy] in seg {
+            let (sx, sy) = state.world_to_screen(wx, wy);
+            all_screen.push(pos2(origin.x + sx, origin.y + sy));
+        }
+    }
+    // Closing segment
+    if closed {
+        let seg = crate::state::BezierPoint::tessellate_to(
+            points.last().unwrap(), &points[0], n);
+        for [wx, wy] in seg {
+            let (sx, sy) = state.world_to_screen(wx, wy);
+            all_screen.push(pos2(origin.x + sx, origin.y + sy));
+        }
+    }
+
+    // Filled closed shape
+    if closed && fill_col.a() > 0 {
+        painter.add(Shape::Path(epaint::PathShape {
+            points: all_screen.clone(),
+            closed: true,
+            fill:   fill_col,
+            stroke: epaint::PathStroke::NONE,
+        }));
+    }
+
+    // Stroked outline
+    if rec.stroke_width > 0.0 || !closed {
+        for w in all_screen.windows(2) {
+            painter.line_segment([w[0], w[1]], Stroke::new(lw, draw_col));
+        }
+    }
+}
+
 
