@@ -1866,6 +1866,170 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
         }
     });
 
+    // ── Prototype noodles & port hotspots ────────────────────────────────────
+    let is_proto = state.tool == crate::tools::Tool::Proto;
+    if is_proto || state.proto_mode {
+        let noodle_color = Color32::from_rgb(128, 90, 230);     // purple
+        let port_color   = Color32::from_rgb(160, 110, 255);
+        let port_hover   = Color32::from_rgb(220, 180, 255);
+        let port_r       = 6.0f32;
+
+        // Draw all committed connections as cubic bezier noodles.
+        let layer_ids: Vec<uuid::Uuid> = state.layers.keys().cloned().collect();
+        for src_id in &layer_ids {
+            let interactions = state.layers.get(src_id)
+                .map(|r| r.interactions.clone())
+                .unwrap_or_default();
+            for ia in &interactions {
+                let target = match &ia.action {
+                    crate::state::InteractionAction::NavigateTo { target_frame } => target_frame.clone(),
+                    _ => continue,
+                };
+                let (src_r, tgt_r) = match (state.layers.get(src_id), state.layers.get(&target)) {
+                    (Some(s), Some(t)) => (s.clone(), t.clone()),
+                    _ => continue,
+                };
+                let (s_sx, s_sy) = state.world_to_screen(src_r.x + src_r.width, src_r.y + src_r.height * 0.5);
+                let (t_sx, t_sy) = state.world_to_screen(tgt_r.x, tgt_r.y + tgt_r.height * 0.5);
+                let p0 = pos2(origin.x + s_sx, origin.y + s_sy);
+                let p3 = pos2(origin.x + t_sx, origin.y + t_sy);
+                let dx = (p3.x - p0.x).abs().max(80.0) * 0.5;
+                let p1 = pos2(p0.x + dx, p0.y);
+                let p2 = pos2(p3.x - dx, p3.y);
+                // Draw cubic bezier as polyline segments
+                const N: usize = 32;
+                let mut pts: Vec<Pos2> = Vec::with_capacity(N + 1);
+                for i in 0..=N {
+                    let t = i as f32 / N as f32;
+                    let u = 1.0 - t;
+                    let bx = u*u*u*p0.x + 3.0*u*u*t*p1.x + 3.0*u*t*t*p2.x + t*t*t*p3.x;
+                    let by = u*u*u*p0.y + 3.0*u*u*t*p1.y + 3.0*u*t*t*p2.y + t*t*t*p3.y;
+                    pts.push(pos2(bx, by));
+                }
+                for w in pts.windows(2) {
+                    painter.line_segment([w[0], w[1]], Stroke::new(2.0, noodle_color));
+                }
+                // Arrow head at target
+                let last = pts[N];
+                let prev = pts[N - 2];
+                let dx_a = last.x - prev.x;
+                let dy_a = last.y - prev.y;
+                let len_a = (dx_a * dx_a + dy_a * dy_a).sqrt().max(0.001);
+                let (nx, ny) = (dx_a / len_a, dy_a / len_a);
+                let head = 10.0f32;
+                painter.line_segment([last, pos2(last.x - nx * head - ny * head * 0.5, last.y - ny * head + nx * head * 0.5)], Stroke::new(2.0, noodle_color));
+                painter.line_segment([last, pos2(last.x - nx * head + ny * head * 0.5, last.y - ny * head - nx * head * 0.5)], Stroke::new(2.0, noodle_color));
+                // Source dot
+                painter.circle_filled(p0, 5.0, noodle_color);
+                // Trigger label badge
+                let label = ia.trigger.label();
+                let lp = pos2(p0.x + 8.0, p0.y - 12.0);
+                let bg = Rect::from_center_size(lp, vec2(label.len() as f32 * 6.5 + 8.0, 14.0));
+                painter.rect_filled(bg, 3.0, Color32::from_rgba_unmultiplied(60, 30, 100, 200));
+                painter.text(lp, Align2::CENTER_CENTER, label, FontId::proportional(9.5), Color32::from_rgb(220, 190, 255));
+            }
+        }
+
+        // Draw proto port hotspots on frames (right-centre) when in connect mode.
+        if is_proto {
+            let page_ids = state.pages[state.active_page].layers.clone();
+            for pid in &page_ids {
+                if let Some(r) = state.layers.get(pid) {
+                    let (sx, sy) = state.world_to_screen(r.x + r.width, r.y + r.height * 0.5);
+                    let sp = pos2(origin.x + sx, origin.y + sy);
+                    let is_hovered = ui.input(|i| i.pointer.hover_pos())
+                        .map(|mp| sp.distance(mp) < 12.0)
+                        .unwrap_or(false);
+                    let col = if is_hovered { port_hover } else { port_color };
+                    painter.circle_stroke(sp, port_r, Stroke::new(2.0, col));
+                    painter.circle_filled(sp, port_r - 2.5, col);
+                }
+            }
+        }
+
+        // Draw live connection drag line (in-progress noodle).
+        if let Some(ref pd) = state.proto_drag {
+            let p0 = pd.from_screen;
+            let p3 = pd.to_screen;
+            let dx = (p3.x - p0.x).abs().max(60.0) * 0.5;
+            let p1 = pos2(p0.x + dx, p0.y);
+            let p2 = pos2(p3.x - dx, p3.y);
+            const N: usize = 24;
+            let mut pts: Vec<Pos2> = Vec::with_capacity(N + 1);
+            for i in 0..=N {
+                let t = i as f32 / N as f32;
+                let u = 1.0 - t;
+                let bx = u*u*u*p0.x + 3.0*u*u*t*p1.x + 3.0*u*t*t*p2.x + t*t*t*p3.x;
+                let by = u*u*u*p0.y + 3.0*u*u*t*p1.y + 3.0*u*t*t*p2.y + t*t*t*p3.y;
+                pts.push(pos2(bx, by));
+            }
+            let live_color = Color32::from_rgba_unmultiplied(180, 130, 255, 220);
+            for w in pts.windows(2) {
+                painter.line_segment([w[0], w[1]], Stroke::new(2.5, live_color));
+            }
+            painter.circle_filled(p0, 5.0, live_color);
+            painter.circle_filled(p3, 5.0, live_color);
+        }
+    }
+
+    // ── Preview mode overlay ──────────────────────────────────────────────────
+    if state.preview_mode {
+        // Determine which frame to show.
+        let frame_id = state.preview_current_frame.or_else(|| {
+            state.pages[state.active_page].layers.iter()
+                .find(|&&id| state.layers.get(&id)
+                    .map(|r| matches!(r.layer_type,
+                        crate::state::LayerType::Frame | crate::state::LayerType::Component))
+                    .unwrap_or(false))
+                .copied()
+        });
+
+        // Dim the whole canvas.
+        let canvas_rect = resp.rect;
+        painter.rect_filled(canvas_rect, 0.0, Color32::from_rgba_unmultiplied(10, 8, 20, 180));
+
+        if let Some(fid) = frame_id {
+            if let Some(fr) = state.layers.get(&fid) {
+                let (fsx, fsy) = state.world_to_screen(fr.x, fr.y);
+                let frame_rect = Rect::from_min_size(
+                    pos2(origin.x + fsx, origin.y + fsy),
+                    vec2(fr.width * state.zoom, fr.height * state.zoom),
+                );
+                // White frame background (device frame chrome).
+                painter.rect_filled(frame_rect, 6.0, Color32::WHITE);
+                painter.rect_stroke(frame_rect, 6.0, Stroke::new(2.0, Color32::from_rgb(80, 80, 100)));
+                // Header bar with name + Esc hint.
+                let header = Rect::from_min_size(frame_rect.min - vec2(0.0, 28.0), vec2(frame_rect.width(), 24.0));
+                painter.rect_filled(header, 4.0, Color32::from_rgba_unmultiplied(30, 20, 60, 230));
+                painter.text(header.left_center() + vec2(8.0, 0.0),
+                    Align2::LEFT_CENTER, &fr.name,
+                    FontId::proportional(11.0), Color32::from_rgb(200, 180, 255));
+                painter.text(header.right_center() - vec2(8.0, 0.0),
+                    Align2::RIGHT_CENTER, "Esc to exit",
+                    FontId::proportional(10.0), Color32::from_rgba_unmultiplied(160, 140, 200, 180));
+                // Render interactive-layer hotspot overlays within the frame.
+                let children = state.frame_children(fid);
+                for cid in children {
+                    let has_click = state.layers.get(&cid)
+                        .map(|r| r.interactions.iter().any(|ia|
+                            ia.trigger == crate::state::Trigger::OnClick))
+                        .unwrap_or(false);
+                    if has_click {
+                        if let Some(cr) = state.layers.get(&cid) {
+                            let (csx, csy) = state.world_to_screen(fr.x + cr.x, fr.y + cr.y);
+                            let crect = Rect::from_min_size(
+                                pos2(origin.x + csx, origin.y + csy),
+                                vec2(cr.width * state.zoom, cr.height * state.zoom),
+                            );
+                            painter.rect_stroke(crect, 3.0,
+                                Stroke::new(1.5, Color32::from_rgba_unmultiplied(128, 90, 230, 180)));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ── Status bar overlay ────────────────────────────────────────────────
     if let Some(mp) = ui.input(|i| i.pointer.hover_pos()) {
         let lx = mp.x - origin.x;

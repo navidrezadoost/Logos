@@ -15,6 +15,8 @@ pub enum Tool {
     Line,
     Arrow,
     Star,
+    /// Prototype connection / interact tool.
+    Proto,
 }
 
 impl Tool {
@@ -32,6 +34,7 @@ impl Tool {
             Tool::Line    => "╱",
             Tool::Arrow   => "→",
             Tool::Star    => "★",
+            Tool::Proto   => "⚡",
         }
     }
 
@@ -49,6 +52,7 @@ impl Tool {
             Tool::Line    => "Line",
             Tool::Arrow   => "Arrow",
             Tool::Star    => "Star",
+            Tool::Proto   => "Connect",
         }
     }
 
@@ -67,6 +71,7 @@ impl Tool {
             Tool::Line    => "L",
             Tool::Arrow   => "",
             Tool::Star    => "",
+            Tool::Proto   => "C",
         }
     }
 

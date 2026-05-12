@@ -135,7 +135,117 @@ pub(crate) fn handle_tool_input(
         })
     };
 
-    // ── Double-click: enter the selected frame to select its child ─────────────
+    // ── Preview mode input: click fires prototype interactions ───────────────
+    if state.preview_mode {
+        if resp.clicked_by(PointerButton::Primary) {
+            if let Some(mp) = pointer.interact_pos() {
+                let (wx, wy) = to_world(mp, state);
+                let clicked_id = state.hit_test(wx, wy);
+                // Walk up to find a layer with an OnClick → NavigateTo interaction.
+                'outer: {
+                    let mut check_id = clicked_id;
+                    while let Some(cid) = check_id {
+                        let interactions: Vec<_> = state.layers.get(&cid)
+                            .map(|r| r.interactions.clone())
+                            .unwrap_or_default();
+                        for ia in &interactions {
+                            if ia.trigger == crate::state::Trigger::OnClick {
+                                match &ia.action {
+                                    crate::state::InteractionAction::NavigateTo { target_frame } => {
+                                        let tid = *target_frame;
+                                        if state.layers.contains_key(&tid) {
+                                            state.preview_current_frame = Some(tid);
+                                        }
+                                        break 'outer;
+                                    }
+                                    crate::state::InteractionAction::Back => {
+                                        // For now: navigate to first frame on Back
+                                        let first = state.pages[state.active_page].layers.iter()
+                                            .find(|&&id| state.layers.get(&id)
+                                                .map(|r| matches!(r.layer_type,
+                                                    crate::state::LayerType::Frame
+                                                    | crate::state::LayerType::Component))
+                                                .unwrap_or(false))
+                                            .copied();
+                                        state.preview_current_frame = first;
+                                        break 'outer;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        check_id = state.layers.get(&cid).and_then(|r| r.parent_id);
+                    }
+                }
+            }
+        }
+        return; // All other input handled by preview overlay
+    }
+
+    // ── Proto / Connect tool input ────────────────────────────────────────────
+    if state.tool == crate::tools::Tool::Proto {
+        if resp.drag_started_by(PointerButton::Primary) {
+            if let Some(mp) = pointer.interact_pos() {
+                let (wx, wy) = to_world(mp, state);
+                if let Some(hit_id) = state.hit_test(wx, wy) {
+                    let port_screen = {
+                        let r = state.layers.get(&hit_id).unwrap();
+                        let (sx, sy) = state.world_to_screen(r.x + r.width, r.y + r.height * 0.5);
+                        pos2(origin.x + sx, origin.y + sy)
+                    };
+                    state.proto_drag = Some(crate::state::ProtoDrag {
+                        source_id: hit_id,
+                        from_screen: port_screen,
+                        to_screen: mp,
+                    });
+                    state.select_only(hit_id);
+                }
+            }
+        }
+        if resp.dragged_by(PointerButton::Primary) {
+            if let Some(mp) = pointer.hover_pos() {
+                if let Some(ref mut pd) = state.proto_drag {
+                    pd.to_screen = mp;
+                }
+            }
+        }
+        if resp.drag_stopped_by(PointerButton::Primary) {
+            if let (Some(pd), Some(mp)) = (state.proto_drag.take(), pointer.interact_pos()) {
+                let (wx, wy) = to_world(mp, state);
+                if let Some(target_id) = state.hit_test(wx, wy) {
+                    if target_id != pd.source_id {
+                        // Only connect to top-level frames / components
+                        let is_valid = state.layers.get(&target_id).map(|r| matches!(
+                            r.layer_type,
+                            crate::state::LayerType::Frame
+                            | crate::state::LayerType::Component
+                        )).unwrap_or(false);
+                        if is_valid {
+                            let ia = crate::state::Interaction::new_navigate(target_id);
+                            if let Some(src) = state.layers.get_mut(&pd.source_id) {
+                                src.interactions.push(ia);
+                            }
+                            state.push_history("add interaction");
+                        }
+                    }
+                }
+            }
+        }
+        // Click on canvas (not on a layer): clear selection
+        if resp.clicked_by(PointerButton::Primary) {
+            if let Some(mp) = pointer.interact_pos() {
+                let (wx, wy) = to_world(mp, state);
+                if state.hit_test(wx, wy).is_none() {
+                    state.clear_selection();
+                } else if let Some(id) = state.hit_test(wx, wy) {
+                    state.select_only(id);
+                }
+            }
+        }
+        return;
+    }
+
+    // ── Double-click: enter the selected frame to select its child ────────────
     if resp.double_clicked_by(PointerButton::Primary) {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);

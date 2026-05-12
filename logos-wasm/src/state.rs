@@ -240,6 +240,8 @@ pub struct LayerRecord {
     pub is_editing_master: bool,
     /// Human-readable component name shown in banners and instance labels.
     pub component_name: String,
+    /// Prototype interactions attached to this layer.
+    pub interactions: Vec<Interaction>,
 }
 
 // ── Constraints ───────────────────────────────────────────────────────────────
@@ -416,6 +418,149 @@ impl Overrides {
     }
 }
 
+// ── Prototyping system ──────────────────────────────────────────────────────
+
+/// Event that fires a prototype interaction.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Trigger {
+    OnClick,
+    OnHover,
+    OnMouseEnter,
+    OnMouseLeave,
+    /// Auto-advance after `ms` milliseconds.
+    AfterDelay(u32),
+    OnDrag,
+}
+impl Trigger {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::OnClick      => "On Click",
+            Self::OnHover      => "While Hovering",
+            Self::OnMouseEnter => "Mouse Enter",
+            Self::OnMouseLeave => "Mouse Leave",
+            Self::AfterDelay(_)=> "After Delay",
+            Self::OnDrag       => "On Drag",
+        }
+    }
+    pub fn all() -> &'static [Trigger] {
+        &[Self::OnClick, Self::OnHover, Self::OnMouseEnter,
+          Self::OnMouseLeave, Self::AfterDelay(1000), Self::OnDrag]
+    }
+}
+
+/// What happens when a prototype interaction fires.
+#[derive(Clone, Debug, PartialEq)]
+pub enum InteractionAction {
+    NavigateTo { target_frame: Uuid },
+    Back,
+    ScrollToTop,
+    OpenLink(String),
+    None,
+}
+impl InteractionAction {
+    pub fn type_label(&self) -> &'static str {
+        match self {
+            Self::NavigateTo { .. } => "Navigate To",
+            Self::Back              => "Back",
+            Self::ScrollToTop       => "Scroll to Top",
+            Self::OpenLink(_)       => "Open Link",
+            Self::None              => "None",
+        }
+    }
+}
+
+/// Animation style for a prototype transition.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum AnimationType {
+    #[default]
+    Instant,
+    Dissolve,
+    SmartAnimate,
+    SlideIn,
+    SlideOut,
+    Push,
+    MoveIn,
+}
+impl AnimationType {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Instant      => "Instant",
+            Self::Dissolve     => "Dissolve",
+            Self::SmartAnimate => "Smart Animate",
+            Self::SlideIn      => "Slide In",
+            Self::SlideOut     => "Slide Out",
+            Self::Push         => "Push",
+            Self::MoveIn       => "Move In",
+        }
+    }
+    pub fn all() -> &'static [AnimationType] {
+        &[Self::Instant, Self::Dissolve, Self::SmartAnimate,
+          Self::SlideIn, Self::SlideOut, Self::Push, Self::MoveIn]
+    }
+}
+
+/// Direction modifier for slide/push animation types.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum AnimDirection { #[default] Left, Right, Up, Down }
+impl AnimDirection {
+    pub fn label(&self) -> &'static str {
+        match self { Self::Left => "←", Self::Right => "→", Self::Up => "↑", Self::Down => "↓" }
+    }
+}
+
+/// A single prototype interaction attached to a layer.
+#[derive(Clone, Debug)]
+pub struct Interaction {
+    pub id:          Uuid,
+    pub trigger:     Trigger,
+    pub action:      InteractionAction,
+    pub animation:   AnimationType,
+    pub direction:   AnimDirection,
+    pub duration_ms: u32,
+    pub easing:      Easing,
+}
+impl Interaction {
+    pub fn new_navigate(target: Uuid) -> Self {
+        Self {
+            id:          Uuid::new_v4(),
+            trigger:     Trigger::OnClick,
+            action:      InteractionAction::NavigateTo { target_frame: target },
+            animation:   AnimationType::Instant,
+            direction:   AnimDirection::Left,
+            duration_ms: 300,
+            easing:      Easing::EaseOut,
+        }
+    }
+    pub fn new_empty() -> Self {
+        Self {
+            id:          Uuid::new_v4(),
+            trigger:     Trigger::OnClick,
+            action:      InteractionAction::None,
+            animation:   AnimationType::Instant,
+            direction:   AnimDirection::Left,
+            duration_ms: 300,
+            easing:      Easing::EaseOut,
+        }
+    }
+}
+
+/// Easing curve for prototype transitions.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum Easing {
+    #[default] Linear, EaseIn, EaseOut, EaseInOut, Spring,
+}
+impl Easing {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Linear    => "Linear",
+            Self::EaseIn    => "Ease In",
+            Self::EaseOut   => "Ease Out",
+            Self::EaseInOut => "Ease In & Out",
+            Self::Spring    => "Spring",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum LayerType {
     Rect,
@@ -483,6 +628,7 @@ impl LayerRecord {
             variant_values: std::collections::HashMap::new(),
             is_editing_master: false,
             component_name: String::new(),
+            interactions: Vec::new(),
         }
     }
 
@@ -665,6 +811,26 @@ pub struct EditorState {
     //   key == usize::MAX  → layer-level blend
     //   key == 0,1,…      → effect index
     pub blend_preview: Option<(Uuid, usize, BlendMode)>,
+
+    // ── Prototyping ───────────────────────────────────────────────────
+    /// Whether the editor is in prototype-connection mode (Connect tool active).
+    pub proto_mode: bool,
+    /// Whether preview mode is active (simulates interactions on click).
+    pub preview_mode: bool,
+    /// The frame currently shown in preview mode (None = use first top-level frame).
+    pub preview_current_frame: Option<Uuid>,
+    /// Live connection being drawn (Some while user drag-creates a connection).
+    pub proto_drag: Option<ProtoDrag>,
+}
+
+/// In-progress prototype connection being drawn by the user.
+pub struct ProtoDrag {
+    /// Layer the connection originates from.
+    pub source_id:  Uuid,
+    /// Screen-space position of the source port (right-centre of the layer).
+    pub from_screen: egui::Pos2,
+    /// Current cursor screen-space position (tip of the noodle).
+    pub to_screen:   egui::Pos2,
 }
 
 /// Which shape-specific handle is being dragged.
@@ -764,6 +930,10 @@ impl EditorState {
             pen_in_progress: None,
             measure_affinity: std::collections::HashMap::new(),
             blend_preview: None,
+            proto_mode: false,
+            preview_mode: false,
+            preview_current_frame: None,
+            proto_drag: None,
         };
         // Demo scene
         state.add_frame("Desktop - 1", 100.0, 80.0, 1280.0, 720.0);

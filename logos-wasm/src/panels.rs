@@ -424,10 +424,32 @@ pub fn top_toolbar(ui: &mut Ui, state: &mut EditorState) {
             }
         }
 
+        // ── Connect (Proto) tool ────────────────────────────────────
         ui.add_space(4.0);
-        // Fit
+        // Fit canvas
         if tb_btn(ui, "[ ]", "Fit canvas", false) {
             state.zoom = 1.0; state.pan_x = -60.0; state.pan_y = -60.0;
+        }
+        ui.add_space(4.0);
+        let proto_active = state.tool == crate::tools::Tool::Proto;
+        if tb_btn(ui, "⚡", "Connect (prototype)  [C]", proto_active) {
+            state.tool = crate::tools::Tool::Proto;
+            state.proto_mode = !proto_active;
+            if !proto_active { state.proto_mode = true; }
+        }
+        let preview_icon = if state.preview_mode { "■" } else { "▶" };
+        let preview_label = if state.preview_mode { "Exit preview  [Esc]" } else { "Preview  [Ctrl+Enter]" };
+        if tb_btn(ui, preview_icon, preview_label, state.preview_mode) {
+            state.preview_mode = !state.preview_mode;
+            if state.preview_mode && state.preview_current_frame.is_none() {
+                state.preview_current_frame = state.pages[state.active_page].layers.iter()
+                    .find(|&&id| state.layers.get(&id).map(|r|
+                        matches!(r.layer_type,
+                            crate::state::LayerType::Frame
+                            | crate::state::LayerType::Component))
+                        .unwrap_or(false))
+                    .copied();
+            }
         }
     });
 }
@@ -2825,6 +2847,199 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             }
         });
         ui.add_space(8.0);
+    }
+
+    // ════════════════════════════════════════════════════════════════════
+    // PROTOTYPE — Interactions inspector
+    // ════════════════════════════════════════════════════════════════════
+    if state.proto_mode || state.tool == crate::tools::Tool::Proto {
+        if section_header(ui, "sec_prototype", "Prototype", true) {
+            ui.add_space(6.0);
+            // Get current interactions (clone to allow mutation later)
+            let interactions: Vec<crate::state::Interaction> = state.layers
+                .get(&id).map(|r| r.interactions.clone()).unwrap_or_default();
+            let mut to_delete: Option<uuid::Uuid> = None;
+
+            if interactions.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("No interactions").size(11.0).color(C_MUTED));
+                });
+            }
+
+            for (idx, ia) in interactions.iter().enumerate() {
+                ui.add_space(4.0);
+                let row_bg = if idx % 2 == 0 {
+                    Color32::from_rgba_unmultiplied(30, 20, 50, 80)
+                } else {
+                    Color32::TRANSPARENT
+                };
+                Frame::none().fill(row_bg).inner_margin(Margin::symmetric(8.0, 4.0)).show(ui, |ui| {
+                    // Row header: trigger label + delete button
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("\u{26a1} {}", ia.trigger.label()))
+                            .size(11.0).color(Color32::from_rgb(160, 110, 255)));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui.small_button("×").on_hover_text("Remove interaction").clicked() {
+                                to_delete = Some(ia.id);
+                            }
+                        });
+                    });
+                    // Trigger selector
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Trigger").size(10.0).color(C_MUTED));
+                        ui.add_space(4.0);
+                        let trig_label = ia.trigger.label();
+                        ComboBox::new(format!("trigger_{}", ia.id), "")
+                            .selected_text(RichText::new(trig_label).size(10.5))
+                            .show_ui(ui, |ui| {
+                                for trig in crate::state::Trigger::all() {
+                                    let lbl = trig.label();
+                                    let selected = lbl == trig_label;
+                                    if ui.selectable_label(selected, lbl).clicked() {
+                                        if let Some(r) = state.layers.get_mut(&id) {
+                                            if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia.id) {
+                                                entry.trigger = trig.clone();
+                                            }
+                                        }
+                                        state.push_history("edit trigger");
+                                    }
+                                }
+                            });
+                    });
+                    // Action type + target
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Action").size(10.0).color(C_MUTED));
+                        ui.add_space(4.0);
+                        let act_label = ia.action.type_label();
+                        ComboBox::new(format!("action_{}", ia.id), "")
+                            .selected_text(RichText::new(act_label).size(10.5))
+                            .show_ui(ui, |ui| {
+                                for lbl in ["Navigate To", "Back", "Scroll to Top", "Open Link"] {
+                                    if ui.selectable_label(act_label == lbl, lbl).clicked() {
+                                        let new_action = match lbl {
+                                            "Back"          => crate::state::InteractionAction::Back,
+                                            "Scroll to Top" => crate::state::InteractionAction::ScrollToTop,
+                                            "Open Link"     => crate::state::InteractionAction::OpenLink(String::new()),
+                                            _               => {
+                                                // Keep existing target or set to first frame
+                                                let existing = if let crate::state::InteractionAction::NavigateTo { target_frame } = &ia.action {
+                                                    *target_frame
+                                                } else {
+                                                    state.pages[state.active_page].layers.iter()
+                                                        .find(|&&lid| state.layers.get(&lid).map(|r|
+                                                            matches!(r.layer_type,
+                                                                crate::state::LayerType::Frame
+                                                                | crate::state::LayerType::Component))
+                                                            .unwrap_or(false))
+                                                        .copied()
+                                                        .unwrap_or(id)
+                                                };
+                                                crate::state::InteractionAction::NavigateTo { target_frame: existing }
+                                            }
+                                        };
+                                        if let Some(r) = state.layers.get_mut(&id) {
+                                            if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia.id) {
+                                                entry.action = new_action;
+                                            }
+                                        }
+                                        state.push_history("edit action");
+                                    }
+                                }
+                            });
+                    });
+                    // Target frame picker (only for NavigateTo)
+                    if let crate::state::InteractionAction::NavigateTo { target_frame } = &ia.action {
+                        let cur_target = *target_frame;
+                        let target_name = state.layers.get(&cur_target)
+                            .map(|r| r.name.clone()).unwrap_or_else(|| "Unknown".to_owned());
+                        ui.horizontal(|ui| {
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("To").size(10.0).color(C_MUTED));
+                            ui.add_space(4.0);
+                            // Collect all frame IDs + names
+                            let frames: Vec<(uuid::Uuid, String)> = state.pages[state.active_page].layers.iter()
+                                .filter_map(|&fid| {
+                                    if fid == id { return None; }
+                                    state.layers.get(&fid).filter(|r|
+                                        matches!(r.layer_type,
+                                            crate::state::LayerType::Frame
+                                            | crate::state::LayerType::Component))
+                                        .map(|r| (fid, r.name.clone()))
+                                }).collect();
+                            ComboBox::new(format!("target_{}", ia.id), "")
+                                .selected_text(RichText::new(&target_name).size(10.5))
+                                .show_ui(ui, |ui| {
+                                    for (fid, fname) in &frames {
+                                        let sel = *fid == cur_target;
+                                        if ui.selectable_label(sel, fname).clicked() {
+                                            let new_fid = *fid;
+                                            if let Some(r) = state.layers.get_mut(&id) {
+                                                if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia.id) {
+                                                    entry.action = crate::state::InteractionAction::NavigateTo { target_frame: new_fid };
+                                                }
+                                            }
+                                            state.push_history("edit interaction target");
+                                        }
+                                    }
+                                });
+                        });
+                    }
+                    // Animation type
+                    ui.horizontal(|ui| {
+                        ui.add_space(4.0);
+                        ui.label(RichText::new("Anim").size(10.0).color(C_MUTED));
+                        ui.add_space(4.0);
+                        let anim_lbl = ia.animation.label();
+                        ComboBox::new(format!("anim_{}", ia.id), "")
+                            .selected_text(RichText::new(anim_lbl).size(10.5))
+                            .show_ui(ui, |ui| {
+                                for anim in crate::state::AnimationType::all() {
+                                    let lbl = anim.label();
+                                    if ui.selectable_label(lbl == anim_lbl, lbl).clicked() {
+                                        if let Some(r) = state.layers.get_mut(&id) {
+                                            if let Some(entry) = r.interactions.iter_mut().find(|x| x.id == ia.id) {
+                                                entry.animation = anim.clone();
+                                            }
+                                        }
+                                        state.push_history("edit animation");
+                                    }
+                                }
+                            });
+                    });
+                });
+            }
+
+            // Apply deletion
+            if let Some(del_id) = to_delete {
+                if let Some(r) = state.layers.get_mut(&id) {
+                    r.interactions.retain(|ia| ia.id != del_id);
+                }
+                state.push_history("remove interaction");
+            }
+
+            // Add interaction button
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                if ui.add(
+                    Button::new(RichText::new("+ Add Interaction").size(11.0).color(Color32::from_rgb(160, 110, 255)))
+                        .fill(Color32::from_rgba_unmultiplied(50, 20, 90, 120))
+                        .stroke(Stroke::new(1.0, Color32::from_rgb(100, 60, 180)))
+                        .min_size(vec2(160.0, 26.0))
+                        .rounding(4.0),
+                ).clicked() {
+                    let ia = crate::state::Interaction::new_empty();
+                    if let Some(r) = state.layers.get_mut(&id) {
+                        r.interactions.push(ia);
+                    }
+                    state.push_history("add interaction");
+                }
+            });
+            ui.add_space(8.0);
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════

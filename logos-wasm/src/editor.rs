@@ -107,12 +107,16 @@ impl eframe::App for LogosEditor {
                     state.delete_selected();
                 }
                 if i.key_pressed(Key::Escape) {
-                    if state.editing_master_id.is_some() {
+                    if state.preview_mode {
+                        state.preview_mode = false;
+                        state.tool = Tool::Select;
+                    } else if state.editing_master_id.is_some() {
                         state.exit_master_edit_mode();
                     } else {
                         state.clear_selection();
                     }
-                    state.pen_in_progress = None;  // cancel any in-progress pen path
+                    state.pen_in_progress = None;
+                    state.proto_drag = None;
                     state.tool = Tool::Select;
                 }
                 if i.key_pressed(Key::Enter) {
@@ -204,9 +208,37 @@ impl eframe::App for LogosEditor {
                 if i.key_pressed(Key::P) { state.tool = Tool::Pen; }
                 if i.key_pressed(Key::H) { state.tool = Tool::Pan; }
                 if i.key_pressed(Key::L) { state.tool = Tool::Line; }
+                if i.key_pressed(Key::C) {
+                    state.tool = crate::tools::Tool::Proto;
+                    state.proto_mode = true;
+                }
                 if i.key_pressed(Key::G) { state.show_grid = !state.show_grid; }
             }
-            // ── Shift shortcuts (no Ctrl) ────────────────────────────────
+            // Ctrl shortcut for preview mode
+            if !typing && i.modifiers.ctrl && !i.modifiers.alt {
+                if i.key_pressed(Key::Enter) {
+                    state.preview_mode = !state.preview_mode;
+                    if state.preview_mode && state.preview_current_frame.is_none() {
+                        // Auto-set to first selected frame, or first frame on page
+                        let candidate = state.selection.iter()
+                            .find(|&&id| state.layers.get(&id).map(|r|
+                                matches!(r.layer_type,
+                                    crate::state::LayerType::Frame
+                                    | crate::state::LayerType::Component)
+                            ).unwrap_or(false))
+                            .copied()
+                            .or_else(|| state.pages[state.active_page].layers.iter()
+                                .find(|&&id| state.layers.get(&id).map(|r|
+                                    matches!(r.layer_type,
+                                        crate::state::LayerType::Frame
+                                        | crate::state::LayerType::Component))
+                                    .unwrap_or(false))
+                                .copied());
+                        state.preview_current_frame = candidate;
+                    }
+                }
+            }
+            // ── Shift shortcuts (no Ctrl) ────────────────────────────────────
             if !typing && !i.modifiers.ctrl && i.modifiers.shift {
                 // Shift+A — Add Auto Layout to selected Frames
                 if i.key_pressed(Key::A) {
