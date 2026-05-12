@@ -103,6 +103,30 @@ pub(crate) fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f3
     }
 }
 
+/// Section-specific selection: 4 corner handles only, no mid-edge, no rotation arcs.
+/// Uses Figma blue (`#0078FF`) to match the Figma Section selection style.
+pub(crate) fn draw_section_corner_handles(painter: &Painter, rect: Rect, zoom: f32) {
+    use crate::state::ResizeHandle;
+    let size   = (6.0_f32 * zoom.sqrt()).clamp(4.0, 10.0);
+    let col    = Color32::WHITE;
+    let border = Stroke::new(1.5, Color32::from_rgb(0, 120, 255)); // Figma blue
+
+    let handles = rotated_handle_positions(rect, 0.0); // Sections aren't rotatable
+    // Corner handles only: TopLeft(0), TopRight(2), BottomLeft(5), BottomRight(7)
+    for idx in [0usize, 2, 5, 7] {
+        let (handle, pt) = handles[idx];
+        // Redundant guard — just to be explicit
+        if matches!(handle, ResizeHandle::TopLeft | ResizeHandle::TopRight
+                           | ResizeHandle::BottomLeft | ResizeHandle::BottomRight)
+        {
+            painter.rect(
+                Rect::from_center_size(pt, vec2(size, size)),
+                Rounding::ZERO, col, border,
+            );
+        }
+    }
+}
+
 pub(crate) fn handle_tool_input(
     ui: &mut Ui,
     resp: &Response,

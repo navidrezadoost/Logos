@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::state::{EditorState, LayerType, StrokePosition, EffectKind};
 use crate::tools::Tool;
 use crate::draw_utils::*;
-use crate::canvas_input::{draw_grid, draw_selection_handles, handle_tool_input};
+use crate::canvas_input::{draw_grid, draw_selection_handles, draw_section_corner_handles, handle_tool_input};
 
 
 // ── Canvas panel ─────────────────────────────────────────────────────────────
@@ -920,8 +920,35 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
 
         // Selection highlight
         if is_selected {
+            let is_section = matches!(rec.layer_type, LayerType::Section { .. });
             let is_line_shape = matches!(rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
-            if is_line_shape {
+
+            if is_section {
+                // ── Figma-style Section selection ──────────────────────────────
+                // Thin solid blue border
+                painter.rect_stroke(rect, Rounding::ZERO,
+                    Stroke::new(2.0, Color32::from_rgb(0, 120, 255)));
+                // 4 corner handles only (no mid-edge, no rotation arcs)
+                draw_section_corner_handles(&painter, rect, state.zoom);
+                // Dimension label at bottom-center (Figma style)
+                {
+                    let dim = format!("{:.0} × {:.0}", rec.width, rec.height);
+                    let dim_col = Color32::from_rgb(0, 120, 255);
+                    let dim_bg  = Color32::from_rgba_unmultiplied(0, 10, 30, 210);
+                    let galley  = painter.layout_no_wrap(
+                        dim.clone(), FontId::proportional(11.0), dim_col);
+                    let gsz = galley.size() + vec2(8.0, 4.0);
+                    let dim_painter = painter.with_clip_rect(painter.clip_rect().expand(32.0));
+                    let dim_pos = rect.center_bottom() + vec2(-gsz.x * 0.5 + 3.0, 6.0);
+                    dim_painter.rect(
+                        Rect::from_min_size(dim_pos - vec2(3.0, 1.0), gsz),
+                        Rounding::same(3.0), dim_bg,
+                        Stroke::new(1.0, Color32::from_rgba_unmultiplied(0, 120, 255, 120)),
+                    );
+                    dim_painter.galley(dim_pos + vec2(1.0, 0.0), galley, dim_col);
+                }
+                // Skip rest of selection rendering for sections (no name badge — header pill has name)
+            } else if is_line_shape {
                 // For lines/arrows: draw a colored line along the true start→end direction
                 let (ex, ey) = state.world_to_screen(rec.x + rec.width, rec.y + rec.height);
                 let sp = pos2(origin.x + sx, origin.y + sy);
@@ -938,7 +965,9 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
             } else {
                 painter.rect_stroke(rect, rounding, Stroke::new(2.0, Color32::from_rgb(133, 96, 255)));
             }
-            draw_selection_handles(&painter, rect, rotation, state.zoom, is_line_shape);
+            if !is_section {
+                draw_selection_handles(&painter, rect, rotation, state.zoom, is_line_shape);
+            }
 
             // ── Shape-specific handles ──────────────────────────────────────────
             {
@@ -1023,9 +1052,11 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 }
             }
 
-            // Show Name  WxH label — above the shape if there's room, else inside top edge
-            // Double-click the badge to initiate a rename (same target as layers panel inline rename)
+            // Show Name  WxH badge — above the shape if there's room, else inside top edge
+            // Skip for Sections: the header pill already shows the name; dim label drawn above.
             let rec = state.layers.get(&id).unwrap();
+            let is_section2 = matches!(rec.layer_type, LayerType::Section { .. });
+            if is_section2 { /* handled above */ } else {
             let name_text = rec.name.clone();
             let dim_text = format!("{}   {:.0} × {:.0}", name_text, rec.width, rec.height);
             let bg   = Color32::from_rgba_unmultiplied(20, 20, 32, 220);
@@ -1048,6 +1079,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 state.rename_target = Some(id);
                 state.rename_buf = rec2.name.clone();
             }
+            } // end !is_section2 name badge block
 
             // x/y position label intentionally omitted
         }
