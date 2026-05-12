@@ -848,6 +848,24 @@ impl LayerRecord {
             LayerType::ComponentInstance { .. } => "◇",  // hollow diamond
         }
     }
+
+    pub fn layer_type_label(&self) -> &'static str {
+        match &self.layer_type {
+            LayerType::Rect     => "Rectangle",
+            LayerType::Frame    => "Frame",
+            LayerType::Text(_)  => "Text",
+            LayerType::Ellipse { .. } => "Ellipse",
+            LayerType::Path { .. } => "Path",
+            LayerType::Group    => "Group",
+            LayerType::Polygon { .. } => "Polygon",
+            LayerType::Line     => "Line",
+            LayerType::Arrow { .. } => "Arrow",
+            LayerType::Star { .. }  => "Star",
+            LayerType::Section { .. } => "Section",
+            LayerType::Component            => "Component",
+            LayerType::ComponentInstance { .. } => "Instance",
+        }
+    }
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────

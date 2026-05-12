@@ -1023,9 +1023,11 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 }
             }
 
-            // Show WxH px label — above the shape if there's room, else inside top edge
+            // Show Name  WxH label — above the shape if there's room, else inside top edge
+            // Double-click the badge to initiate a rename (same target as layers panel inline rename)
             let rec = state.layers.get(&id).unwrap();
-            let dim_text = format!("{:.0} x {:.0} px", rec.width, rec.height);
+            let name_text = rec.name.clone();
+            let dim_text = format!("{}   {:.0} × {:.0}", name_text, rec.width, rec.height);
             let bg   = Color32::from_rgba_unmultiplied(20, 20, 32, 220);
             let galley = painter.layout_no_wrap(dim_text, FontId::proportional(12.0), Color32::from_rgb(160, 120, 255));
             let lsize  = galley.size() + vec2(8.0, 4.0);
@@ -1036,8 +1038,16 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
             } else {
                 rect.left_top() + vec2(4.0, 4.0)    // fallback: draw inside top-left
             };
-            label_painter.rect(Rect::from_min_size(lpos - vec2(3.0, 2.0), lsize), Rounding::same(4.0), bg, Stroke::new(1.0, Color32::from_rgb(133, 96, 255)));
+            let badge_rect = Rect::from_min_size(lpos - vec2(3.0, 2.0), lsize);
+            label_painter.rect(badge_rect, Rounding::same(4.0), bg, Stroke::new(1.0, Color32::from_rgb(133, 96, 255)));
             label_painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(160, 120, 255));
+            // Interactive: double-click badge → trigger rename
+            let badge_resp = ui.allocate_rect(badge_rect, Sense::click());
+            if badge_resp.double_clicked() {
+                let rec2 = state.layers.get(&id).unwrap();
+                state.rename_target = Some(id);
+                state.rename_buf = rec2.name.clone();
+            }
 
             // x/y position label intentionally omitted
         }

@@ -1442,7 +1442,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
     // HEADER  — layer name  +  visibility / lock buttons
     // ════════════════════════════════════════════════════════════════════
     {
-        let panel_w = ui.available_width();
         let rec = state.layers.get_mut(&id).unwrap();
         let (vis, lck) = (rec.visible, rec.locked);
 
@@ -1463,15 +1462,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             );
             ui.add_space(8.0);
 
-            // Name text-edit — stretches to fill
-            let name_w = panel_w - 22.0 - 8.0 - 32.0 - 32.0 - 20.0;
-            ui.add_sized(
-                [name_w, 28.0],
-                TextEdit::singleline(&mut rec.name)
-                    .font(FontId::proportional(13.0))
-                    .frame(false),
+            // Layer type label (read-only; name lives in the canvas badge and layers panel)
+            let type_label = rec.layer_type_label();
+            ui.label(
+                RichText::new(type_label)
+                    .size(12.0)
+                    .color(C_MUTED),
             );
-            // history pushed on next interaction
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.add_space(10.0);
