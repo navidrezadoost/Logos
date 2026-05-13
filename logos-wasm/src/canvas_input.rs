@@ -735,6 +735,12 @@ pub(crate) fn handle_tool_input(
                             state.drag.active        = true;
                             state.drag.rotating      = false;
                             state.drag.layer_id      = Some(id);
+                            // For layers that live inside a Section (parent_id is a Section),
+                            // the layer's r.x / r.y are section-local coords while wx/wy are
+                            // world coords — but the scale is 1:1 so world-delta == local-delta.
+                            // Store the press point in world space; the move handler adds the
+                            // world delta to layer_start (local) which gives the correct new
+                            // local position.
                             state.drag.origin        = pos2(wx, wy);
                             state.drag.layer_start   = pos2(rec.x, rec.y);
                             state.drag.layer_size    = vec2(rec.width, rec.height);

@@ -101,17 +101,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
         state.apply_auto_layout(fid);
     }
 
-    // ── Section bounds-sync pre-pass: auto-fit each Section to its children ──
-    // This keeps hit-testing, marquee-select and viewport culling consistent.
-    let section_ids: Vec<Uuid> = layer_ids.iter()
-        .filter(|&&sid| state.layers.get(&sid)
-            .map(|r| matches!(r.layer_type, crate::state::LayerType::Section { .. }))
-            .unwrap_or(false))
-        .cloned()
-        .collect();
-    for sid in section_ids {
-        state.sync_section_bounds(sid);
-    }
+    // Sections have a fixed user-drawn size (like Figma) — no per-frame auto-resize.
+    // sync_section_bounds() is only called at explicit resize operations.
 
     for &id in &layer_ids {
         let rec = match state.layers.get(&id) {
