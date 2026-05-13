@@ -1424,37 +1424,53 @@ impl EditorState {
     pub fn sync_section_bounds(&mut self, section_id: Uuid) {
         let children: Vec<Uuid> = self.frame_children(section_id);
         if children.is_empty() { return; }
-        let sec = match self.layers.get(&section_id) {
-            Some(r) if matches!(r.layer_type, LayerType::Section { .. }) => r,
+        let (sx, sy) = match self.layers.get(&section_id) {
+            Some(r) if matches!(r.layer_type, LayerType::Section { .. }) => (r.x, r.y),
             _ => return,
         };
-        let sx = sec.x;
-        let sy = sec.y;
-        // Children are stored in Section-local coords
+
+        // Compute children's bounding box in Section-local coords.
         let pad = 24.0_f32;
-        let mut min_x = f32::MAX;
-        let mut min_y = f32::MAX;
-        let mut max_x = f32::MIN;
-        let mut max_y = f32::MIN;
+        let header_pad = 32.0_f32;
+        let mut min_lx = f32::MAX;
+        let mut min_ly = f32::MAX;
+        let mut max_lx = f32::MIN;
+        let mut max_ly = f32::MIN;
         for &cid in &children {
             if let Some(cr) = self.layers.get(&cid) {
-                min_x = min_x.min(sx + cr.x);
-                min_y = min_y.min(sy + cr.y);
-                max_x = max_x.max(sx + cr.x + cr.width);
-                max_y = max_y.max(sy + cr.y + cr.height);
+                min_lx = min_lx.min(cr.x);
+                min_ly = min_ly.min(cr.y);
+                max_lx = max_lx.max(cr.x + cr.width);
+                max_ly = max_ly.max(cr.y + cr.height);
             }
         }
-        // Apply tight bounds + padding
-        let new_x = min_x - pad;
-        let new_y = min_y - pad;
-        let new_w = (max_x - min_x + pad * 2.0).max(64.0);
-        // Extra top padding to leave room for the header band
-        let header_pad = 32.0;
-        let new_full_y = new_y - header_pad;
-        let new_h = (max_y - min_y + pad * 2.0 + header_pad).max(64.0);
+
+        // Desired section origin (world) so that the tightest child bbox sits
+        // pad inside the section, with extra header_pad room above.
+        // Children's local coords are relative to the section origin, so if we
+        // move the origin we must shift all children by the inverse delta so
+        // they remain at the same world position.
+        let new_x      = sx + min_lx - pad;
+        let new_y      = sy + min_ly - pad - header_pad;
+        let new_w      = (max_lx - min_lx + pad * 2.0).max(64.0);
+        let new_h      = (max_ly - min_ly + pad * 2.0 + header_pad).max(64.0);
+
+        let dx = new_x - sx;
+        let dy = new_y - sy;
+
+        // Shift children by -delta so their world positions don't change.
+        if dx != 0.0 || dy != 0.0 {
+            for &cid in &children {
+                if let Some(cr) = self.layers.get_mut(&cid) {
+                    cr.x -= dx;
+                    cr.y -= dy;
+                }
+            }
+        }
+
         if let Some(sec) = self.layers.get_mut(&section_id) {
-            sec.x = new_x;
-            sec.y = new_full_y;
+            sec.x      = new_x;
+            sec.y      = new_y;
             sec.width  = new_w;
             sec.height = new_h;
         }
