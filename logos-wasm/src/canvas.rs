@@ -818,8 +818,78 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                             // cropped by the frame's clip rect (clip_content=true).
                             painter.rect_stroke(crect, crounding, Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
                             draw_selection_handles(&painter, crect, crec.rotation, state.zoom, is_line_child);
+                            // Dimension pill / resize rail below the child
+                            if !is_line_child {
+                                let is_resizing_child = state.drag.active
+                                    && state.drag.resize_handle.is_some()
+                                    && state.drag.layer_id == Some(cid);
+                                let cp = painter.with_clip_rect(painter.clip_rect().expand(40.0));
+                                if is_resizing_child {
+                                    let rail_col    = Color32::from_rgb(133, 96, 255);
+                                    let rail_stroke = Stroke::new(1.5, rail_col);
+                                    let tick = 6.0_f32;
+                                    let gap  = 12.0_f32;
+                                    let dash_col = Color32::from_rgba_unmultiplied(133, 96, 255, 80);
+                                    // Width rail
+                                    let hy = crect.bottom() + gap;
+                                    let hl = pos2(crect.left(),  hy);
+                                    let hr = pos2(crect.right(), hy);
+                                    cp.line_segment([hl, hr], rail_stroke);
+                                    cp.line_segment([hl + vec2(0.0, -tick), hl + vec2(0.0, tick)], rail_stroke);
+                                    cp.line_segment([hr + vec2(0.0, -tick), hr + vec2(0.0, tick)], rail_stroke);
+                                    cp.line_segment([pos2(crect.left(),  crect.bottom()), hl], Stroke::new(1.0, dash_col));
+                                    cp.line_segment([pos2(crect.right(), crect.bottom()), hr], Stroke::new(1.0, dash_col));
+                                    let wg    = cp.layout_no_wrap(format!("{:.0}", crec.width),  FontId::proportional(11.0), rail_col);
+                                    let wgsz  = wg.size() + vec2(6.0, 3.0);
+                                    let wpos  = pos2(crect.center().x - wgsz.x * 0.5 + 2.0, hy - wgsz.y - 2.0);
+                                    cp.rect(Rect::from_min_size(wpos - vec2(2.0,1.0), wgsz), Rounding::same(3.0),
+                                        Color32::from_rgba_unmultiplied(20,10,40,230),
+                                        Stroke::new(1.0, Color32::from_rgba_unmultiplied(133,96,255,160)));
+                                    cp.galley(wpos + vec2(1.0, 0.0), wg, rail_col);
+                                    // Height rail
+                                    let vx = crect.right() + gap;
+                                    let vt = pos2(vx, crect.top());
+                                    let vb = pos2(vx, crect.bottom());
+                                    cp.line_segment([vt, vb], rail_stroke);
+                                    cp.line_segment([vt + vec2(-tick, 0.0), vt + vec2(tick, 0.0)], rail_stroke);
+                                    cp.line_segment([vb + vec2(-tick, 0.0), vb + vec2(tick, 0.0)], rail_stroke);
+                                    cp.line_segment([pos2(crect.right(), crect.top()),    vt], Stroke::new(1.0, dash_col));
+                                    cp.line_segment([pos2(crect.right(), crect.bottom()), vb], Stroke::new(1.0, dash_col));
+                                    let hg    = cp.layout_no_wrap(format!("{:.0}", crec.height), FontId::proportional(11.0), rail_col);
+                                    let hgsz  = hg.size() + vec2(6.0, 3.0);
+                                    let hpos  = pos2(vx + 4.0, crect.center().y - hgsz.y * 0.5);
+                                    cp.rect(Rect::from_min_size(hpos - vec2(2.0,1.0), hgsz), Rounding::same(3.0),
+                                        Color32::from_rgba_unmultiplied(20,10,40,230),
+                                        Stroke::new(1.0, Color32::from_rgba_unmultiplied(133,96,255,160)));
+                                    cp.galley(hpos + vec2(1.0, 0.0), hg, rail_col);
+                                } else {
+                                    let dim_text = format!("{:.0} × {:.0}", crec.width, crec.height);
+                                    let dim_col  = Color32::from_rgb(133, 96, 255);
+                                    let dim_bg   = Color32::from_rgba_unmultiplied(20, 10, 40, 220);
+                                    let dgalley  = cp.layout_no_wrap(dim_text, FontId::proportional(11.0), dim_col);
+                                    let dgsz     = dgalley.size() + vec2(8.0, 4.0);
+                                    let dpos     = crect.center_bottom() + vec2(-dgsz.x * 0.5 + 3.0, 6.0);
+                                    cp.rect(Rect::from_min_size(dpos - vec2(3.0,1.0), dgsz), Rounding::same(3.0),
+                                        dim_bg, Stroke::new(1.0, Color32::from_rgba_unmultiplied(133,96,255,140)));
+                                    cp.galley(dpos + vec2(1.0, 0.0), dgalley, dim_col);
+                                }
+                            }
                         } else if state.hovered_layer == Some(cid) {
                             child_painter.rect_stroke(crect, crounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
+                            // Dim pill below child on hover
+                            let is_line_child2 = matches!(crec.layer_type, LayerType::Line | LayerType::Arrow { .. });
+                            if !is_line_child2 {
+                                let hp = painter.with_clip_rect(painter.clip_rect().expand(40.0));
+                                let dim_text = format!("{:.0} × {:.0}", crec.width, crec.height);
+                                let dim_col  = Color32::from_rgb(30, 180, 255);
+                                let dim_bg   = Color32::from_rgba_unmultiplied(10, 20, 40, 220);
+                                let dgalley  = hp.layout_no_wrap(dim_text, FontId::proportional(11.0), dim_col);
+                                let dgsz     = dgalley.size() + vec2(8.0, 4.0);
+                                let dpos     = crect.center_bottom() + vec2(-dgsz.x * 0.5 + 3.0, 6.0);
+                                hp.rect(Rect::from_min_size(dpos - vec2(3.0,1.0), dgsz), Rounding::same(3.0),
+                                    dim_bg, Stroke::new(1.0, Color32::from_rgba_unmultiplied(30,180,255,120)));
+                                hp.galley(dpos + vec2(1.0, 0.0), dgalley, dim_col);
+                            }
                         }
                     }
                 }
@@ -860,7 +930,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 painter.rect_stroke(rect, rounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
             }
             if !is_section_hover {
-                // Show only element name on hover (dimensions shown in toolbar & right panel)
+                // Show element name above
                 let rec = state.layers.get(&id).unwrap();
                 let label = rec.name.clone();
                 let bg = Color32::from_rgba_unmultiplied(20, 20, 32, 230);
@@ -874,6 +944,20 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 };
                 hover_painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(3.0), bg, Stroke::NONE);
                 hover_painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(30, 180, 255));
+
+                // Dimension pill below the shape on hover
+                let dim_text = format!("{:.0} × {:.0}", rec.width, rec.height);
+                let dim_col  = Color32::from_rgb(30, 180, 255);
+                let dim_bg   = Color32::from_rgba_unmultiplied(10, 20, 40, 220);
+                let dgalley  = hover_painter.layout_no_wrap(dim_text, FontId::proportional(11.0), dim_col);
+                let dgsz     = dgalley.size() + vec2(8.0, 4.0);
+                let dpos     = rect.center_bottom() + vec2(-dgsz.x * 0.5 + 3.0, 6.0);
+                hover_painter.rect(
+                    Rect::from_min_size(dpos - vec2(3.0, 1.0), dgsz),
+                    Rounding::same(3.0), dim_bg,
+                    Stroke::new(1.0, Color32::from_rgba_unmultiplied(30, 180, 255, 120)),
+                );
+                hover_painter.galley(dpos + vec2(1.0, 0.0), dgalley, dim_col);
             }
         }
 
@@ -1035,6 +1119,86 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                             FontId::proportional(11.0), Color32::from_rgb(160, 120, 255));
                     }
                     _ => {}
+                }
+            }
+
+            // ── Dimension label / resize rail BELOW the shape ─────────────────────
+            // Skip for Sections (handled in their own arm) and Lines (no area).
+            {
+                let rec = state.layers.get(&id).unwrap();
+                let skip = matches!(rec.layer_type,
+                    LayerType::Section { .. } | LayerType::Line | LayerType::Arrow { .. });
+                if !skip {
+                    let is_resizing = state.drag.active
+                        && state.drag.resize_handle.is_some()
+                        && state.drag.layer_id == Some(id);
+                    let rail_painter = painter.with_clip_rect(painter.clip_rect().expand(40.0));
+                    if is_resizing {
+                        // ── Resize rail: tick lines spanning each edge + W/H labels ──
+                        let rail_col    = Color32::from_rgb(133, 96, 255);
+                        let rail_stroke = Stroke::new(1.5, rail_col);
+                        let tick        = 6.0_f32;
+                        let gap         = 12.0_f32;
+                        // Width rail — horizontal, just below the shape
+                        let hy = rect.bottom() + gap;
+                        let hl = pos2(rect.left(),  hy);
+                        let hr = pos2(rect.right(), hy);
+                        rail_painter.line_segment([hl, hr], rail_stroke);
+                        rail_painter.line_segment([hl + vec2(0.0, -tick), hl + vec2(0.0, tick)], rail_stroke);
+                        rail_painter.line_segment([hr + vec2(0.0, -tick), hr + vec2(0.0, tick)], rail_stroke);
+                        // Connect bottom edge to rail with thin dashed lines
+                        let dash_col = Color32::from_rgba_unmultiplied(133, 96, 255, 80);
+                        rail_painter.line_segment([pos2(rect.left(),  rect.bottom()), hl], Stroke::new(1.0, dash_col));
+                        rail_painter.line_segment([pos2(rect.right(), rect.bottom()), hr], Stroke::new(1.0, dash_col));
+                        // W label centred on the rail
+                        let w_txt = format!("{:.0}", rec.width);
+                        let wg = rail_painter.layout_no_wrap(w_txt, FontId::proportional(11.0), rail_col);
+                        let wgsz = wg.size() + vec2(6.0, 3.0);
+                        let wpos = pos2(rect.center().x - wgsz.x * 0.5 + 2.0, hy - wgsz.y - 2.0);
+                        rail_painter.rect(
+                            Rect::from_min_size(wpos - vec2(2.0, 1.0), wgsz),
+                            Rounding::same(3.0),
+                            Color32::from_rgba_unmultiplied(20, 10, 40, 230),
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(133, 96, 255, 160)),
+                        );
+                        rail_painter.galley(wpos + vec2(1.0, 0.0), wg, rail_col);
+                        // Height rail — vertical, just to the right of the shape
+                        let vx = rect.right() + gap;
+                        let vt = pos2(vx, rect.top());
+                        let vb = pos2(vx, rect.bottom());
+                        rail_painter.line_segment([vt, vb], rail_stroke);
+                        rail_painter.line_segment([vt + vec2(-tick, 0.0), vt + vec2(tick, 0.0)], rail_stroke);
+                        rail_painter.line_segment([vb + vec2(-tick, 0.0), vb + vec2(tick, 0.0)], rail_stroke);
+                        // Connect right edge to rail
+                        rail_painter.line_segment([pos2(rect.right(), rect.top()),    vt], Stroke::new(1.0, dash_col));
+                        rail_painter.line_segment([pos2(rect.right(), rect.bottom()), vb], Stroke::new(1.0, dash_col));
+                        // H label on the rail
+                        let h_txt = format!("{:.0}", rec.height);
+                        let hg = rail_painter.layout_no_wrap(h_txt, FontId::proportional(11.0), rail_col);
+                        let hgsz = hg.size() + vec2(6.0, 3.0);
+                        let hpos = pos2(vx + 4.0, rect.center().y - hgsz.y * 0.5);
+                        rail_painter.rect(
+                            Rect::from_min_size(hpos - vec2(2.0, 1.0), hgsz),
+                            Rounding::same(3.0),
+                            Color32::from_rgba_unmultiplied(20, 10, 40, 230),
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(133, 96, 255, 160)),
+                        );
+                        rail_painter.galley(hpos + vec2(1.0, 0.0), hg, rail_col);
+                    } else {
+                        // ── Static dim pill — purple, below the shape ──
+                        let dim_text = format!("{:.0} × {:.0}", rec.width, rec.height);
+                        let dim_col  = Color32::from_rgb(133, 96, 255);
+                        let dim_bg   = Color32::from_rgba_unmultiplied(20, 10, 40, 220);
+                        let dgalley  = rail_painter.layout_no_wrap(dim_text, FontId::proportional(11.0), dim_col);
+                        let dgsz     = dgalley.size() + vec2(8.0, 4.0);
+                        let dpos     = rect.center_bottom() + vec2(-dgsz.x * 0.5 + 3.0, 6.0);
+                        rail_painter.rect(
+                            Rect::from_min_size(dpos - vec2(3.0, 1.0), dgsz),
+                            Rounding::same(3.0), dim_bg,
+                            Stroke::new(1.0, Color32::from_rgba_unmultiplied(133, 96, 255, 140)),
+                        );
+                        rail_painter.galley(dpos + vec2(1.0, 0.0), dgalley, dim_col);
+                    }
                 }
             }
 
