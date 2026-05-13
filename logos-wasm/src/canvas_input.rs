@@ -375,30 +375,6 @@ pub(crate) fn handle_tool_input(
                 }
             }
 
-            // ── Double-click on a Section header → toggle collapse ────────────
-            if let Some(id) = state.hit_test(wx, wy) {
-                if matches!(state.layers.get(&id).map(|r| &r.layer_type),
-                    Some(LayerType::Section { .. }))
-                {
-                    // Compute approximate header rect in world space so we only
-                    // toggle when the click is on the header band, not the body.
-                    let in_header = state.layers.get(&id).map(|r| {
-                        // header_h ≈ 20 world units (unzoomed)
-                        let header_h_world = 20.0;
-                        wy >= r.y && wy <= r.y + header_h_world
-                            && wx >= r.x && wx <= r.x + r.width
-                    }).unwrap_or(false);
-                    if in_header {
-                        if let Some(rec) = state.layers.get_mut(&id) {
-                            rec.section_collapsed = !rec.section_collapsed;
-                        }
-                        state.select_only(id);
-                        state.push_history("toggle section collapse");
-                        return;
-                    }
-                }
-            }
-
             if let Some(id) = state.hit_test(wx, wy) {
                 if let Some(mid) = state.find_master(id) {
                     state.enter_master_edit_mode(mid, Some(id));
@@ -1507,6 +1483,31 @@ pub(crate) fn handle_tool_input(
     if resp.clicked_by(PointerButton::Primary) && !resp.drag_stopped() && !space_held && state.tool != Tool::Pan {
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
+
+            // ── Click on a Section name pill (above the body rect) → toggle collapse ──
+            // The pill sits roughly (font_sz+8)/zoom world units above rec.y.
+            {
+                let section_ids: Vec<uuid::Uuid> = state.layers.values()
+                    .filter(|r| r.visible && matches!(r.layer_type, LayerType::Section { .. }))
+                    .map(|r| r.id)
+                    .collect();
+                for sid in section_ids {
+                    if let Some(r) = state.layers.get(&sid) {
+                        let pill_world_h = 24.0 / state.zoom.max(0.1);
+                        if wy >= r.y - pill_world_h && wy < r.y
+                            && wx >= r.x && wx <= r.x + r.width
+                        {
+                            let was_collapsed = r.section_collapsed;
+                            if let Some(rec) = state.layers.get_mut(&sid) {
+                                rec.section_collapsed = !was_collapsed;
+                            }
+                            state.select_only(sid);
+                            state.push_history("toggle section collapse");
+                            return;
+                        }
+                    }
+                }
+            }
 
             // ── If editing a master, clicking strictly outside it exits the mode ──
             if let Some(master_id) = state.editing_master_id {

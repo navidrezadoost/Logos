@@ -443,94 +443,76 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     painter.text(rect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &content,
                         FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), fill);
                 }
-                LayerType::Section { color } => {
-                    // ── Section: draw body using rec.fill + rec.stroke; header uses section color ──
-                    let header_accent = color.map(|c| Color32::from_rgba_unmultiplied(
-                        (c[0]*255.0) as u8, (c[1]*255.0) as u8, (c[2]*255.0) as u8, 255
-                    )).unwrap_or(Color32::from_rgb(80, 100, 200));
+                LayerType::Section { color: _ } => {
+                    // ── Figma-style Section ──────────────────────────────────────────────────
+                    // Layout:
+                    //   • Name pill ABOVE the body rect (outside, like a frame label)
+                    //   • Body: thin 1px neutral border + very light fill
+                    //   • Collapsed: body height collapses to 0; only name pill is visible
+                    // ────────────────────────────────────────────────────────────────────────
 
-                    // Body fill: use rec.fill if non-transparent, else faint accent tint
+                    let collapsed = rec.section_collapsed;
+                    let z = state.zoom;
+
+                    // ── Body fill & border ───────────────────────────────────────────────
+                    // If the user set a custom fill use it; otherwise transparent.
                     let body_fill = if rec.fill[3] > 0.001 {
                         Color32::from_rgba_unmultiplied(
                             (rec.fill[0]*255.0) as u8, (rec.fill[1]*255.0) as u8,
                             (rec.fill[2]*255.0) as u8, (rec.fill[3]*255.0) as u8)
                     } else {
+                        // Figma default: very faint off-white tint
+                        Color32::from_rgba_unmultiplied(240, 240, 245, 22)
+                    };
+                    let border_col = if rec.stroke_width > 0.0 {
                         Color32::from_rgba_unmultiplied(
-                            header_accent.r(), header_accent.g(), header_accent.b(), 18)
-                    };
-                    // Body border: use rec.stroke if width > 0, else derive from accent
-                    let body_stroke = if rec.stroke_width > 0.0 {
-                        Stroke::new(rec.stroke_width * state.zoom,
-                            Color32::from_rgba_unmultiplied(
-                                (rec.stroke_color[0]*255.0) as u8, (rec.stroke_color[1]*255.0) as u8,
-                                (rec.stroke_color[2]*255.0) as u8, (rec.stroke_color[3]*255.0) as u8))
+                            (rec.stroke_color[0]*255.0) as u8, (rec.stroke_color[1]*255.0) as u8,
+                            (rec.stroke_color[2]*255.0) as u8, (rec.stroke_color[3]*255.0) as u8)
                     } else {
-                        Stroke::new(1.5, Color32::from_rgba_unmultiplied(
-                            header_accent.r(), header_accent.g(), header_accent.b(), 160))
+                        Color32::from_rgba_unmultiplied(160, 160, 170, 200) // neutral gray
                     };
-                    let cr = rec.corner_radii;
-                    let rounding = Rounding { nw: cr[0], ne: cr[1], sw: cr[3], se: cr[2] };
-                    // Scale rounding by zoom
-                    let s = state.zoom;
-                    let rounding = Rounding { nw: rounding.nw*s, ne: rounding.ne*s,
-                        sw: rounding.sw*s, se: rounding.se*s };
+                    let border_w = if rec.stroke_width > 0.0 { rec.stroke_width * z } else { 1.0 };
 
-                    let collapsed = rec.section_collapsed;
-
-                    // Body region — only draw full region when expanded
+                    // Draw body (skip when collapsed — just show the label pill)
                     if !collapsed {
-                        painter.rect_filled(rect, rounding, body_fill);
-                        painter.rect_stroke(rect, rounding, body_stroke);
+                        painter.rect_filled(rect, Rounding::ZERO, body_fill);
+                        painter.rect_stroke(rect, Rounding::ZERO,
+                            Stroke::new(border_w, border_col));
                     }
 
-                    // Header band (top portion)
-                    let header_h = (20.0_f32 * state.zoom).clamp(14.0, 28.0);
-                    let header_rect = Rect::from_min_size(rect.left_top(), vec2(rect.width(), header_h));
-                    // When collapsed the header represents the whole visible region
-                    let _visible_rect = if collapsed { header_rect } else { rect };
-                    let header_rounding = if collapsed {
-                        Rounding::same(4.0)
-                    } else {
-                        Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 }
-                    };
-                    painter.rect_filled(header_rect, header_rounding, header_accent);
-                    // Dashed border when collapsed to indicate hidden content
-                    if collapsed {
-                        painter.rect_stroke(header_rect, header_rounding, Stroke::new(1.0,
-                            Color32::from_rgba_unmultiplied(200, 210, 255, 110)));
-                    }
+                    // ── Name pill above the rect ─────────────────────────────────────────
+                    // Floats outside the top-left, just like Figma frame labels.
+                    let font_sz  = (11.0_f32 * z).clamp(9.0, 18.0);
+                    let chevron  = if collapsed { "▶" } else { "▼" };
+                    let sec_name = rec.name.clone();
+                    let pill_txt = format!("{} {}", chevron, sec_name);
+                    let pill_col = Color32::from_gray(200);
+                    let pill_bg  = Color32::from_rgba_unmultiplied(30, 30, 36, 230);
 
-                    // Collapse chevron ▶ / ▼
-                    let chevron = if collapsed { "▶" } else { "▼" };
-                    let label_painter = painter.with_clip_rect(painter.clip_rect().expand(40.0));
-                    label_painter.text(
-                        pos2(rect.left() + 6.0, header_rect.center().y),
-                        Align2::LEFT_CENTER,
-                        chevron,
-                        FontId::proportional((9.0 * state.zoom).clamp(7.0, 14.0)),
-                        Color32::from_rgba_unmultiplied(255, 255, 255, 180),
-                    );
-                    // Name label
-                    label_painter.text(
-                        pos2(rect.left() + 6.0 + (14.0 * state.zoom).clamp(10.0, 18.0),
-                             header_rect.center().y),
-                        Align2::LEFT_CENTER,
-                        &rec.name.clone(),
-                        FontId::proportional((10.0 * state.zoom).clamp(8.0, 16.0)),
-                        Color32::WHITE,
-                    );
+                    let label_painter = painter.with_clip_rect(painter.clip_rect().expand(48.0));
+                    let galley = label_painter.layout_no_wrap(
+                        pill_txt, FontId::proportional(font_sz), pill_col);
+                    let gsz   = galley.size();
+                    // Position above the rect, hugging the left edge
+                    let pill_h    = gsz.y + 4.0;
+                    let pill_gap  = 4.0;
+                    let pill_tl   = rect.left_top() + vec2(0.0, -(pill_h + pill_gap));
+                    let pill_rect = Rect::from_min_size(pill_tl, vec2(gsz.x + 10.0, pill_h));
+                    label_painter.rect_filled(pill_rect, Rounding::same(4.0), pill_bg);
+                    label_painter.galley(pill_tl + vec2(5.0, 2.0), galley, pill_col);
 
-                    // Child count badge when collapsed
+                    // Child count badge when collapsed (appended after name)
                     if collapsed {
                         let child_count = state.frame_children(id).len();
                         if child_count > 0 {
-                            let badge_str = format!("{child_count}");
+                            let cnt_txt = format!(" ({child_count})");
+                            let cnt_col = Color32::from_gray(140);
                             label_painter.text(
-                                pos2(rect.right() - 8.0, header_rect.center().y),
-                                Align2::RIGHT_CENTER,
-                                &badge_str,
-                                FontId::proportional((9.0 * state.zoom).clamp(7.0, 13.0)),
-                                Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                                pill_rect.right_center() + vec2(5.0, 0.0),
+                                Align2::LEFT_CENTER,
+                                &cnt_txt,
+                                FontId::proportional(font_sz * 0.85),
+                                cnt_col,
                             );
                         }
                     }
