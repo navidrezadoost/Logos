@@ -623,7 +623,11 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                             .desired_width(f32::INFINITY)
                             .frame(true),
                     );
-                    te.request_focus();
+                    // Only request focus on the very first frame (not yet focused, not losing it).
+                    // Calling request_focus every frame fights with lost_focus detection.
+                    if !te.has_focus() && !te.lost_focus() {
+                        te.request_focus();
+                    }
                     let enter   = ui.input(|i| i.key_pressed(Key::Enter));
                     let escaped = ui.input(|i| i.key_pressed(Key::Escape));
                     if te.lost_focus() || enter {

@@ -847,6 +847,9 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
         let is_hovered  = state.hovered_layer == Some(id);
         let is_selected = state.is_selected(id);
         if is_hovered && !is_selected {
+            // Sections always show their name as a fixed pill above the body;
+            // skip the hover name label to avoid duplication.
+            let is_section_hover = matches!(rec.layer_type, LayerType::Section { .. });
             if rotation.abs() > 0.001 {
                 let pts = rotated_corners(rect, rotation);
                 let mut cl = pts.clone(); cl.push(pts[0]);
@@ -857,20 +860,22 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
             } else {
                 painter.rect_stroke(rect, rounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
             }
-            // Show only element name on hover (dimensions shown in toolbar & right panel)
-            let rec = state.layers.get(&id).unwrap();
-            let label = rec.name.clone();
-            let bg = Color32::from_rgba_unmultiplied(20, 20, 32, 230);
-            let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::from_rgb(30, 180, 255));
-            let lsize  = galley.size() + vec2(6.0, 2.0);
-            let hover_painter = painter.with_clip_rect(painter.clip_rect().expand(32.0));
-            let lpos = if rect.top() >= origin.y + 24.0 {
-                rect.left_top() + vec2(0.0, -20.0)
-            } else {
-                rect.left_top() + vec2(4.0, 4.0)
-            };
-            hover_painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(3.0), bg, Stroke::NONE);
-            hover_painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(30, 180, 255));
+            if !is_section_hover {
+                // Show only element name on hover (dimensions shown in toolbar & right panel)
+                let rec = state.layers.get(&id).unwrap();
+                let label = rec.name.clone();
+                let bg = Color32::from_rgba_unmultiplied(20, 20, 32, 230);
+                let galley = painter.layout_no_wrap(label, FontId::proportional(11.0), Color32::from_rgb(30, 180, 255));
+                let lsize  = galley.size() + vec2(6.0, 2.0);
+                let hover_painter = painter.with_clip_rect(painter.clip_rect().expand(32.0));
+                let lpos = if rect.top() >= origin.y + 24.0 {
+                    rect.left_top() + vec2(0.0, -20.0)
+                } else {
+                    rect.left_top() + vec2(4.0, 4.0)
+                };
+                hover_painter.rect(Rect::from_min_size(lpos - vec2(2.0, 0.0), lsize), Rounding::same(3.0), bg, Stroke::NONE);
+                hover_painter.galley(lpos + vec2(1.0, 0.0), galley, Color32::from_rgb(30, 180, 255));
+            }
         }
 
         // Mask indicator — dashed magenta border + "M" badge
@@ -1592,6 +1597,52 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
     }
 
     // ── Tool interactions ─────────────────────────────────────────────────
+    // Canvas inline rename for Section name pill
+    // (shown as a floating TextEdit above the pill when rename_target is a section)
+    {
+        let rename_data: Option<(Uuid, Pos2, f32)> = state.rename_target
+            .and_then(|rid| state.layers.get(&rid)
+                .filter(|r| matches!(r.layer_type, LayerType::Section { .. }))
+                .map(|r| {
+                    let z = state.zoom;
+                    let font_sz = (11.0_f32 * z).clamp(9.0, 18.0);
+                    let (sx, sy) = state.world_to_screen(r.x, r.y);
+                    let pill_h = font_sz + 4.0;
+                    let pill_gap = 4.0;
+                    let pill_tl = pos2(origin.x + sx, origin.y + sy)
+                        + vec2(0.0, -(pill_h + pill_gap));
+                    (r.id, pill_tl, font_sz)
+                }));
+        if let Some((rename_id, pill_tl, font_sz)) = rename_data {
+            Area::new(Id::new("sec_rename_canvas"))
+                .fixed_pos(pill_tl)
+                .order(Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    let te = ui.add(
+                        TextEdit::singleline(&mut state.rename_buf)
+                            .font(FontId::proportional(font_sz))
+                            .min_size(vec2(140.0, font_sz + 8.0))
+                            .frame(true),
+                    );
+                    if !te.has_focus() && !te.lost_focus() { te.request_focus(); }
+                    let enter  = ui.input(|i| i.key_pressed(Key::Enter));
+                    let escape = ui.input(|i| i.key_pressed(Key::Escape));
+                    if te.lost_focus() || enter {
+                        let name = state.rename_buf.trim().to_owned();
+                        if !name.is_empty() {
+                            if let Some(r) = state.layers.get_mut(&rename_id) {
+                                r.name = name;
+                            }
+                            state.push_history("rename section");
+                        }
+                        state.rename_target = None;
+                    } else if escape {
+                        state.rename_target = None;
+                    }
+                });
+        }
+    }
+
     handle_tool_input(ui, &resp, &painter, origin, state, ctx_menu_layer);
 
     // ── In-progress pen / pencil path preview ─────────────────────────────
