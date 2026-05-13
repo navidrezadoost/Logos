@@ -3865,6 +3865,7 @@ impl EditorState {
             if let Some(rec) = self.layers.get(&id) {
                 if !rec.visible { continue; }
                 if matches!(rec.layer_type, LayerType::Frame
+                    | LayerType::Section { .. }
                     | LayerType::Component
                     | LayerType::ComponentInstance { .. }) { continue; }
                 let (lx, ly) = self.layer_world_pos(id);

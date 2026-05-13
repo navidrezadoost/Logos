@@ -422,13 +422,15 @@ pub(crate) fn handle_tool_input(
                 }).unwrap_or(false);
 
                 if inside_sel_frame {
-                    // Enter the frame: select the child content layer
-                    if let Some(cid) = state.hit_test_content(wx, wy) {
+                    // Enter the container: prefer deepest content, fall back to child frame
+                    let child = state.hit_test_content(wx, wy)
+                        .or_else(|| state.frame_at(wx, wy).filter(|&fid| fid != sel_frame_id));
+                    if let Some(cid) = child {
                         state.select_only(cid);
                     }
-                    // If no content child, stay on the frame
+                    // If no child found, stay on the container
                 } else {
-                    // Double-clicking outside the selected frame: select whatever is there
+                    // Double-clicking outside the selected container: select whatever is there
                     if let Some(id) = state.hit_test(wx, wy) {
                         state.select_only(id);
                     } else {
@@ -436,7 +438,7 @@ pub(crate) fn handle_tool_input(
                     }
                 }
             } else {
-                // No frame selected: double-click selects topmost layer
+                // No frame/section selected: double-click selects topmost layer
                 if let Some(id) = state.hit_test(wx, wy) {
                     state.select_only(id);
                 } else {
