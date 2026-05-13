@@ -1196,7 +1196,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut EditorState) {
             let rect = Rect::from_min_size(banner_rect.min, vec2(banner_rect.width(), h));
             ui.painter().rect_filled(rect, 6.0, Color32::from_rgba_unmultiplied(139, 92, 246, 28));
             ui.painter().rect_stroke(rect, 6.0, Stroke::new(1.0, Color32::from_rgba_unmultiplied(167, 118, 255, 110)));
-            ui.allocate_ui_at_rect(rect.shrink2(vec2(10.0, 8.0)), |ui| {
+            ui.allocate_new_ui(UiBuilder::new().max_rect(rect.shrink2(vec2(10.0, 8.0))), |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("◆").size(13.0).color(Color32::from_rgb(167, 118, 255)).strong());
                     ui.vertical(|ui| {
