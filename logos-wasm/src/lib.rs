@@ -109,7 +109,10 @@ pub fn run_app() -> Result<(), JsValue> {
         .and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok())
         .ok_or_else(|| JsValue::from_str("Could not find #logos-canvas"))?;
 
-    let web_options = eframe::WebOptions::default();
+    let web_options = eframe::WebOptions {
+        persist_egui_memory: true, // saves panel widths etc. to localStorage
+        ..Default::default()
+    };
     wasm_bindgen_futures::spawn_local(async move {
         let result = eframe::WebRunner::new()
             .start(

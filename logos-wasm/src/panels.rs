@@ -611,141 +611,169 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     to_toggle_vis = Some(id);
                 }
 
-                // Icon + name (with mask badge)
+                // Icon + name (with mask badge) — or inline rename TextEdit
                 let mask_tag = if is_mask { " [M]" } else { "" };
                 let label = format!("{icon}  {name}{mask_tag}");
-                let label_color = if is_mask && selected {
-                    Color32::from_rgb(255, 100, 220)
-                } else if is_mask {
-                    Color32::from_rgb(255, 60, 200)
-                } else if selected {
-                    Color32::from_rgb(133, 96, 255)
-                } else if !visible {
-                    Color32::GRAY
-                } else {
-                    Color32::WHITE
-                };
-                // Section rows get a blue tint; component/instance rows get purple
-                let label_color = if is_component && !selected {
-                    Color32::from_rgb(167, 118, 255)
-                } else if is_instance && !selected {
-                    Color32::from_rgb(120, 80, 220)
-                } else if is_section && !selected {
-                    Color32::from_rgb(120, 160, 255)
-                } else {
-                    label_color
-                };
-                let base = RichText::new(label)
-                    .color(label_color)
-                    .size(if depth > 0 { 12.0 } else { 13.0 });
-                let text = if selected || is_mask || is_section || is_component || is_instance { base.strong() } else { base };
 
-                let resp = ui.add(Label::new(text).sense(Sense::click_and_drag()))
-                    .on_hover_text("Click to select • Double-click to rename • Drag to reorder");
-
-                // Mark as drag source
-                resp.dnd_set_drag_payload(id);
-
-                // Drop INTO a frame when dragging onto it
-                if is_frame {
-                    if resp.dnd_hover_payload::<uuid::Uuid>().is_some() {
-                        ui.painter().rect_stroke(
-                            resp.rect.expand(2.0),
-                            2.0,
-                            Stroke::new(1.5, Color32::from_rgb(100, 180, 255)),
-                        );
-                    }
-                    if let Some(payload) = resp.dnd_release_payload::<uuid::Uuid>() {
-                        if *payload != id {
-                            // Drop into frame: append as last child
-                            to_move = Some((*payload, Some(id), None));
+                if state.rename_target == Some(id) {
+                    // ── Inline rename: render a TextEdit in place of the label ──
+                    let te = ui.add(
+                        TextEdit::singleline(&mut state.rename_buf)
+                            .font(FontId::proportional(if depth > 0 { 12.0 } else { 13.0 }))
+                            .desired_width(f32::INFINITY)
+                            .frame(true),
+                    );
+                    te.request_focus();
+                    let enter   = ui.input(|i| i.key_pressed(Key::Enter));
+                    let escaped = ui.input(|i| i.key_pressed(Key::Escape));
+                    if te.lost_focus() || enter {
+                        let new_name = state.rename_buf.trim().to_owned();
+                        if !new_name.is_empty() {
+                            if let Some(r) = state.layers.get_mut(&id) { r.name = new_name; }
+                            state.push_history("rename");
                         }
+                        state.rename_target = None;
+                    } else if escaped {
+                        state.rename_target = None;
                     }
-                }
+                } else {
+                    // ── Normal label ──────────────────────────────────────────
+                    let label_color = if is_mask && selected {
+                        Color32::from_rgb(255, 100, 220)
+                    } else if is_mask {
+                        Color32::from_rgb(255, 60, 200)
+                    } else if selected {
+                        Color32::from_rgb(133, 96, 255)
+                    } else if !visible {
+                        Color32::GRAY
+                    } else {
+                        Color32::WHITE
+                    };
+                    let label_color = if is_component && !selected {
+                        Color32::from_rgb(167, 118, 255)
+                    } else if is_instance && !selected {
+                        Color32::from_rgb(120, 80, 220)
+                    } else if is_section && !selected {
+                        Color32::from_rgb(120, 160, 255)
+                    } else {
+                        label_color
+                    };
+                    let base = RichText::new(label)
+                        .color(label_color)
+                        .size(if depth > 0 { 12.0 } else { 13.0 });
+                    let text = if selected || is_mask || is_section || is_component || is_instance {
+                        base.strong()
+                    } else {
+                        base
+                    };
 
-                if resp.clicked() { to_select = Some(id); }
-                if resp.double_clicked() { to_rename = Some((id, name.clone())); }
-                resp.context_menu(|ui| {
-                    if ui.button("Rename").clicked() {
-                        to_rename = Some((id, name.clone()));
-                        ui.close_menu();
-                    }
-                    if ui.button("Duplicate").clicked() {
-                        state.select_only(id);
-                        state.duplicate_selected();
-                        ui.close_menu();
-                    }
-                    if ui.button("Delete").clicked() {
-                        to_delete = Some(id);
-                        ui.close_menu();
-                    }
+                    let resp = ui.add(Label::new(text).sense(Sense::click_and_drag()))
+                        .on_hover_text("Click to select • Double-click to rename • Drag to reorder");
+
+                    // Mark as drag source
+                    resp.dnd_set_drag_payload(id);
+
+                    // Drop INTO a frame when dragging onto it
                     if is_frame {
-                        ui.separator();
-                        if !is_section && !is_component && !is_instance {
-                            if ui.button("Convert to Section").clicked() {
-                                state.convert_to_section(id);
-                                ui.close_menu();
-                            }
-                            if ui.button("Create Component  Ctrl+Alt+K").clicked() {
-                                state.select_only(id);
-                                state.create_component();
-                                ui.close_menu();
-                            }
+                        if resp.dnd_hover_payload::<uuid::Uuid>().is_some() {
+                            ui.painter().rect_stroke(
+                                resp.rect.expand(2.0),
+                                2.0,
+                                Stroke::new(1.5, Color32::from_rgb(100, 180, 255)),
+                            );
                         }
-                        if is_section {
-                            if ui.button("Convert to Frame").clicked() {
-                                if let Some(r) = state.layers.get_mut(&id) {
-                                    r.layer_type   = LayerType::Frame;
-                                    r.clip_content = false;
-                                }
-                                state.push_history("convert to frame");
-                                ui.close_menu();
-                            }
-                        }
-                        if is_component {
-                            if ui.button("Instantiate Component").clicked() {
-                                state.instantiate_component(id);
-                                ui.close_menu();
-                            }
-                        }
-                        if is_instance {
-                            ui.separator();
-                            if ui.button("Go to Master").clicked() {
-                                if let Some(mid) = state.layers.get(&id).and_then(|r| r.master_id) {
-                                    state.select_only(mid);
-                                }
-                                ui.close_menu();
-                            }
-                            if ui.button("Reset Overrides").clicked() {
-                                state.reset_overrides(id);
-                                ui.close_menu();
-                            }
-                            if ui.button("Push to Master").clicked() {
-                                state.push_to_master(id);
-                                ui.close_menu();
-                            }
-                            if ui.button("Detach Instance").clicked() {
-                                state.detach_instance(id);
-                                ui.close_menu();
-                            }
-                        }
-                        if !is_component && !is_instance {
-                            if ui.button("Unwrap Frame  (Shift+Ctrl+G)").clicked() {
-                                state.ungroup_frame(id);
-                                ui.close_menu();
-                            }
-                            if ui.button("Resize to Fit Contents").clicked() {
-                                state.resize_frame_to_fit(id, 16.0);
-                                ui.close_menu();
-                            }
-                            if ui.button("Wrap in Frame  (Ctrl+Alt+G)").clicked() {
-                                state.select_only(id);
-                                state.wrap_in_frame();
-                                ui.close_menu();
+                        if let Some(payload) = resp.dnd_release_payload::<uuid::Uuid>() {
+                            if *payload != id {
+                                to_move = Some((*payload, Some(id), None));
                             }
                         }
                     }
-                });
+
+                    if resp.clicked() { to_select = Some(id); }
+                    if resp.double_clicked() { to_rename = Some((id, name.clone())); }
+
+                    resp.context_menu(|ui| {
+                        if ui.button("Rename").clicked() {
+                            to_rename = Some((id, name.clone()));
+                            ui.close_menu();
+                        }
+                        if ui.button("Duplicate").clicked() {
+                            state.select_only(id);
+                            state.duplicate_selected();
+                            ui.close_menu();
+                        }
+                        if ui.button("Delete").clicked() {
+                            to_delete = Some(id);
+                            ui.close_menu();
+                        }
+                        if is_frame {
+                            ui.separator();
+                            if !is_section && !is_component && !is_instance {
+                                if ui.button("Convert to Section").clicked() {
+                                    state.convert_to_section(id);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Create Component  Ctrl+Alt+K").clicked() {
+                                    state.select_only(id);
+                                    state.create_component();
+                                    ui.close_menu();
+                                }
+                            }
+                            if is_section {
+                                if ui.button("Convert to Frame").clicked() {
+                                    if let Some(r) = state.layers.get_mut(&id) {
+                                        r.layer_type   = LayerType::Frame;
+                                        r.clip_content = false;
+                                    }
+                                    state.push_history("convert to frame");
+                                    ui.close_menu();
+                                }
+                            }
+                            if is_component {
+                                if ui.button("Instantiate Component").clicked() {
+                                    state.instantiate_component(id);
+                                    ui.close_menu();
+                                }
+                            }
+                            if is_instance {
+                                ui.separator();
+                                if ui.button("Go to Master").clicked() {
+                                    if let Some(mid) = state.layers.get(&id).and_then(|r| r.master_id) {
+                                        state.select_only(mid);
+                                    }
+                                    ui.close_menu();
+                                }
+                                if ui.button("Reset Overrides").clicked() {
+                                    state.reset_overrides(id);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Push to Master").clicked() {
+                                    state.push_to_master(id);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Detach Instance").clicked() {
+                                    state.detach_instance(id);
+                                    ui.close_menu();
+                                }
+                            }
+                            if !is_component && !is_instance {
+                                if ui.button("Unwrap Frame  (Shift+Ctrl+G)").clicked() {
+                                    state.ungroup_frame(id);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Resize to Fit Contents").clicked() {
+                                    state.resize_frame_to_fit(id, 16.0);
+                                    ui.close_menu();
+                                }
+                                if ui.button("Wrap in Frame  (Ctrl+Alt+G)").clicked() {
+                                    state.select_only(id);
+                                    state.wrap_in_frame();
+                                    ui.close_menu();
+                                }
+                            }
+                        }
+                    });
+                } // end else (non-rename branch)
             });
         }
 
@@ -820,23 +848,8 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
         ui.add_space(4.0);
     }
 
-    // Inline rename field
-    if let Some(target) = state.rename_target {
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label("Name:");
-            let resp = ui.text_edit_singleline(&mut state.rename_buf);
-            if resp.lost_focus() || ui.input(|i| i.key_pressed(Key::Enter)) {
-                let name = state.rename_buf.trim().to_owned();
-                if !name.is_empty() {
-                    if let Some(r) = state.layers.get_mut(&target) { r.name = name; }
-                    state.push_history("rename");
-                }
-                state.rename_target = None;
-            }
-            if ui.small_button("✕").clicked() { state.rename_target = None; }
-        });
-    }
+    // Inline rename field is now rendered directly in the row above
+    // (state.rename_target drives the TextEdit inline in the layer list)
 }
 
 // ── Right panel (properties) ─────────────────────────────────────────────────

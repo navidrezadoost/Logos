@@ -296,7 +296,7 @@ pub(crate) fn handle_tool_input(
         if let Some(mp) = pointer.interact_pos() {
             let (wx, wy) = to_world(mp, state);
 
-            // ── Double-click on Section pill name zone → rename ───────────────
+            // ── Double-click on Section pill → rename ──────────────────────────
             {
                 let section_ids: Vec<uuid::Uuid> = state.layers.values()
                     .filter(|r| r.visible && matches!(r.layer_type, LayerType::Section { .. }))
@@ -308,15 +308,11 @@ pub(crate) fn handle_tool_input(
                         if wy >= r.y - pill_world_h && wy < r.y
                             && wx >= r.x && wx <= r.x + r.width
                         {
-                            let chevron_world_w = 16.0 / state.zoom.max(0.1);
-                            // Only trigger rename when clicking the name part (not chevron)
-                            if wx > r.x + chevron_world_w {
-                                let name = r.name.clone();
-                                state.rename_target = Some(sid);
-                                state.rename_buf = name;
-                                state.select_only(sid);
-                                return;
-                            }
+                            let name = r.name.clone();
+                            state.rename_target = Some(sid);
+                            state.rename_buf = name;
+                            state.select_only(sid);
+                            return;
                         }
                     }
                 }
@@ -1512,10 +1508,8 @@ pub(crate) fn handle_tool_input(
             let (wx, wy) = to_world(mp, state);
 
             // ── Click on a Section name pill (above the body rect) ──────────────
-            // Pill layout (world space):
-            //   [chevron ~14px/zoom wide] [name …rest of pill width]
-            // • Click on chevron zone → toggle collapse
-            // • Click on name zone   → select section (no collapse)
+            // Clicking anywhere on the pill just SELECTS the section.
+            // Collapse is toggled only via the ▸/▾ button in the layers panel.
             {
                 let section_ids: Vec<uuid::Uuid> = state.layers.values()
                     .filter(|r| r.visible && matches!(r.layer_type, LayerType::Section { .. }))
@@ -1527,17 +1521,6 @@ pub(crate) fn handle_tool_input(
                         if wy >= r.y - pill_world_h && wy < r.y
                             && wx >= r.x && wx <= r.x + r.width
                         {
-                            // Chevron occupies roughly the first 14 screen-px
-                            let chevron_world_w = 16.0 / state.zoom.max(0.1);
-                            let in_chevron = wx <= r.x + chevron_world_w;
-                            if in_chevron {
-                                let was = r.section_collapsed;
-                                if let Some(rec) = state.layers.get_mut(&sid) {
-                                    rec.section_collapsed = !was;
-                                }
-                                state.push_history("toggle section collapse");
-                            }
-                            // Either way, select the section
                             state.select_only(sid);
                             return;
                         }
