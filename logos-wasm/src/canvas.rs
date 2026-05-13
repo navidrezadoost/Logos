@@ -109,30 +109,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
             .unwrap_or(false))
         .cloned()
         .collect();
-    for sid in &section_ids {
-        let sname = state.layers.get(sid).map(|r| r.name.clone()).unwrap_or_default();
-        let (sx, sy, sw, sh) = state.layers.get(sid)
-            .map(|r| (r.x, r.y, r.width, r.height)).unwrap_or_default();
-        let child_count = state.frame_children(*sid).len();
-        web_sys::console::log_1(&format!(
-            "[PREPASS] '{sname}' BEFORE sync sec_world=({sx:.1},{sy:.1}) size=({sw:.1}x{sh:.1}) children={child_count}"
-        ).into());
-    }
     for sid in section_ids {
         state.sync_section_bounds(sid);
-    }
-    for sid in state.layers.keys()
-        .filter(|&&sid| state.layers.get(&sid)
-            .map(|r| matches!(r.layer_type, crate::state::LayerType::Section { .. }))
-            .unwrap_or(false))
-        .cloned().collect::<Vec<_>>()
-    {
-        let sname = state.layers.get(&sid).map(|r| r.name.clone()).unwrap_or_default();
-        let (sx, sy, sw, sh) = state.layers.get(&sid)
-            .map(|r| (r.x, r.y, r.width, r.height)).unwrap_or_default();
-        web_sys::console::log_1(&format!(
-            "[PREPASS] '{sname}' AFTER  sync sec_world=({sx:.1},{sy:.1}) size=({sw:.1}x{sh:.1})"
-        ).into());
     }
 
     for &id in &layer_ids {
