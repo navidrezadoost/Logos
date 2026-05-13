@@ -1548,8 +1548,47 @@ pub(crate) fn handle_tool_input(
                             }
                         }
                     } // end containment block
-                }
-            }
+                }  // end for &mid in &moved_ids
+
+                // ── Auto-group: if a single moved non-frame shape lands fully inside
+                // a sibling non-frame shape (same parent), wrap both into a Group.
+                if moved_ids.len() == 1 {
+                    let mid = moved_ids[0];
+                    let is_container = state.layers.get(&mid).map(|r| matches!(r.layer_type,
+                        LayerType::Frame | LayerType::Section { .. }
+                        | LayerType::Component | LayerType::ComponentInstance { .. }
+                    )).unwrap_or(true);
+                    if !is_container {
+                        let (mx, my) = state.layer_world_pos(mid);
+                        let (mw, mh) = state.layers.get(&mid)
+                            .map(|r| (r.width, r.height)).unwrap_or((0.0, 0.0));
+                        let mid_parent = state.layers.get(&mid).and_then(|r| r.parent_id);
+                        let page_ids: Vec<Uuid> = state.pages[state.active_page].layers.clone();
+                        let mut group_partner: Option<Uuid> = None;
+                        for &sib in &page_ids {
+                            if sib == mid { continue; }
+                            if state.layers.get(&sib).and_then(|r| r.parent_id) != mid_parent { continue; }
+                            let sib_is_container = state.layers.get(&sib).map(|r| matches!(r.layer_type,
+                                LayerType::Frame | LayerType::Section { .. }
+                                | LayerType::Component | LayerType::ComponentInstance { .. }
+                            )).unwrap_or(true);
+                            if sib_is_container { continue; }
+                            let (sx, sy) = state.layer_world_pos(sib);
+                            let (sw, sh) = state.layers.get(&sib)
+                                .map(|r| (r.width, r.height)).unwrap_or((0.0, 0.0));
+                            // Fully contained — mid is completely inside sib
+                            if mx >= sx && my >= sy && mx + mw <= sx + sw && my + mh <= sy + sh {
+                                group_partner = Some(sib);
+                                break;
+                            }
+                        }
+                        if let Some(partner) = group_partner {
+                            state.selection = vec![mid, partner];
+                            state.wrap_in_group();
+                        }
+                    }
+                } // end if moved_ids.len() == 1
+            } // end if label == "move"
 
             // ── If dropped into an AL frame, reorder per the insertion index ─
             if let (Some(al_parent), Some(al_idx)) =

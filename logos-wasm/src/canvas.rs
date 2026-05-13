@@ -599,6 +599,143 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                     points: pts, closed: true, fill: cfill,
                                     stroke: cstroke.into() }));
                             }
+                            // ── Sub-frame inside a Section: render fill + border + all grandchildren.
+                            // Without this arm the frame falls through to `_ =>` which only draws
+                            // an opaque rect, hiding every shape inside the sub-frame.
+                            LayerType::Frame
+                            | LayerType::Component
+                            | LayerType::ComponentInstance { .. } => {
+                                let is_sub_comp = matches!(crec.layer_type, LayerType::Component);
+                                child_painter.rect_filled(crect, crounding, cfill);
+                                let sub_border_col = if is_sub_comp {
+                                    Color32::from_rgba_unmultiplied(139, 92, 246, 180)
+                                } else {
+                                    Color32::from_gray(80)
+                                };
+                                child_painter.rect_stroke(crect, crounding,
+                                    Stroke::new(if is_sub_comp { 1.5 } else { 1.0 }, sub_border_col));
+                                // Name label above sub-frame
+                                {
+                                    let lp = child_painter.with_clip_rect(child_painter.clip_rect().expand(40.0));
+                                    lp.text(
+                                        pos2(crect.left(), crect.top() - 4.0), Align2::LEFT_BOTTOM,
+                                        &crec.name,
+                                        FontId::proportional((10.0 * state.zoom).clamp(8.0, 16.0)),
+                                        Color32::from_gray(150),
+                                    );
+                                }
+                                // World origin of this sub-frame
+                                let fw = section_wx + crec.x;
+                                let fwy = section_wy + crec.y;
+                                let gc_clip = if crec.clip_content {
+                                    child_painter.with_clip_rect(crect)
+                                } else {
+                                    child_painter.with_clip_rect(child_painter.clip_rect())
+                                };
+                                let gcids: Vec<Uuid> = state.frame_children(cid);
+                                for &gcid in &gcids {
+                                    let grec = match state.layers.get(&gcid) {
+                                        Some(r) if r.visible => r.clone(),
+                                        _ => continue,
+                                    };
+                                    let (gsx, gsy) = state.world_to_screen(fw + grec.x, fwy + grec.y);
+                                    let gsw = grec.width * state.zoom;
+                                    let gsh = grec.height * state.zoom;
+                                    let grect = Rect::from_min_size(
+                                        pos2(origin.x + gsx, origin.y + gsy), vec2(gsw, gsh));
+                                    let gfill = Color32::from_rgba_unmultiplied(
+                                        (grec.fill[0]*255.0) as u8, (grec.fill[1]*255.0) as u8,
+                                        (grec.fill[2]*255.0) as u8,
+                                        (grec.fill[3]*grec.opacity*255.0) as u8);
+                                    let gstroke = if grec.stroke_width > 0.0 {
+                                        Stroke::new(grec.stroke_width * state.zoom,
+                                            Color32::from_rgba_unmultiplied(
+                                                (grec.stroke_color[0]*255.0) as u8,
+                                                (grec.stroke_color[1]*255.0) as u8,
+                                                (grec.stroke_color[2]*255.0) as u8,
+                                                (grec.stroke_color[3]*255.0) as u8))
+                                    } else { Stroke::NONE };
+                                    let gr  = grec.corner_radii;
+                                    let z2  = state.zoom;
+                                    let grnd = Rounding { nw: gr[0]*z2, ne: gr[1]*z2, se: gr[2]*z2, sw: gr[3]*z2 };
+                                    match &grec.layer_type {
+                                        LayerType::Ellipse { arc_start, arc_end, inner_ratio } => {
+                                            gc_clip.add(ellipse_arc_path(grect, *arc_start, *arc_end, *inner_ratio, gfill, gstroke));
+                                        }
+                                        LayerType::Text(content) => {
+                                            let c2 = content.clone();
+                                            gc_clip.rect(grect, grnd, Color32::TRANSPARENT, gstroke);
+                                            gc_clip.text(grect.min + vec2(4.0, 4.0), Align2::LEFT_TOP, &c2,
+                                                FontId::proportional((14.0 * state.zoom).clamp(8.0, 64.0)), gfill);
+                                        }
+                                        LayerType::Line => {
+                                            let lw = (grec.stroke_width * state.zoom).max(2.0);
+                                            let col = if gstroke.width > 0.0 { gstroke.color } else { gfill };
+                                            let (gex, gey) = state.world_to_screen(
+                                                fw + grec.x + grec.width, fwy + grec.y + grec.height);
+                                            gc_clip.line_segment([
+                                                pos2(origin.x + gsx, origin.y + gsy),
+                                                pos2(origin.x + gex, origin.y + gey)],
+                                                Stroke::new(lw, col));
+                                        }
+                                        LayerType::Arrow { head_size } => {
+                                            let hs  = head_size * state.zoom;
+                                            let lw  = (grec.stroke_width * state.zoom).max(2.0);
+                                            let col = if gstroke.width > 0.0 { gstroke.color } else { gfill };
+                                            let (gex, gey) = state.world_to_screen(
+                                                fw + grec.x + grec.width, fwy + grec.y + grec.height);
+                                            let gsp = pos2(origin.x + gsx, origin.y + gsy);
+                                            let gep = pos2(origin.x + gex, origin.y + gey);
+                                            if gsp.distance(gep) >= hs * 0.5 {
+                                                let dir  = (gep - gsp).normalized();
+                                                let perp = vec2(-dir.y, dir.x);
+                                                let tip  = gep;
+                                                gc_clip.line_segment([gsp, tip - dir*(hs*0.85)], Stroke::new(lw, col));
+                                                gc_clip.add(Shape::Path(epaint::PathShape {
+                                                    points: vec![tip, tip-dir*hs+perp*(hs*0.45), tip-dir*hs-perp*(hs*0.45)],
+                                                    closed: true, fill: col, stroke: epaint::PathStroke::NONE,
+                                                }));
+                                            }
+                                        }
+                                        LayerType::Star { points, inner_ratio } => {
+                                            paint_star(&gc_clip, grect, *points, *inner_ratio, 0.0, gfill, gstroke);
+                                        }
+                                        LayerType::Polygon { sides, corner_radius } => {
+                                            let pts = polygon_screen_points(grect, *sides, *corner_radius);
+                                            gc_clip.add(Shape::Path(epaint::PathShape {
+                                                points: pts, closed: true, fill: gfill, stroke: gstroke.into() }));
+                                        }
+                                        _ => {
+                                            gc_clip.rect_filled(grect, grnd, gfill);
+                                            if grec.stroke_width > 0.0 {
+                                                gc_clip.rect_stroke(grect, grnd, gstroke);
+                                            }
+                                        }
+                                    }
+                                    // Selection / hover for grandchild
+                                    if state.is_selected(gcid) {
+                                        let is_ln = matches!(grec.layer_type, LayerType::Line | LayerType::Arrow { .. });
+                                        painter.rect_stroke(grect, grnd, Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
+                                        draw_selection_handles(&painter, grect, grec.rotation, state.zoom, is_ln);
+                                        if !is_ln {
+                                            let dp = painter.with_clip_rect(painter.clip_rect().expand(40.0));
+                                            let dc = Color32::from_rgb(133, 96, 255);
+                                            let dg = dp.layout_no_wrap(
+                                                format!("{:.0} × {:.0}", grec.width, grec.height),
+                                                FontId::proportional(11.0), dc);
+                                            let ds   = dg.size() + vec2(8.0, 4.0);
+                                            let dpos = grect.center_bottom() + vec2(-ds.x*0.5+3.0, 6.0);
+                                            dp.rect(Rect::from_min_size(dpos-vec2(3.0,1.0), ds),
+                                                Rounding::same(3.0),
+                                                Color32::from_rgba_unmultiplied(20,10,40,220),
+                                                Stroke::new(1.0, Color32::from_rgba_unmultiplied(133,96,255,140)));
+                                            dp.galley(dpos+vec2(1.0,0.0), dg, dc);
+                                        }
+                                    } else if state.hovered_layer == Some(gcid) {
+                                        gc_clip.rect_stroke(grect, grnd, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
+                                    }
+                                }
+                            }
                             _ => {
                                 child_painter.rect_filled(crect, crounding, cfill);
                                 if crec.stroke_width > 0.0 {
