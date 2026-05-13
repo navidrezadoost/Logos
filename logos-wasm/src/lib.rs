@@ -98,6 +98,7 @@ pub fn init() {
 /// Start the Logos design editor.
 ///
 /// Mounts the eframe app into the browser canvas with id `logos-canvas`.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn run_app() -> Result<(), JsValue> {
     use wasm_bindgen::JsCast;

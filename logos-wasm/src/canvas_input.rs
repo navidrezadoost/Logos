@@ -309,8 +309,9 @@ pub(crate) fn handle_tool_input(
                             && wx >= r.x && wx <= r.x + r.width
                         {
                             let name = r.name.clone();
-                            state.rename_target = Some(sid);
-                            state.rename_buf = name;
+                            state.rename_target    = Some(sid);
+                            state.rename_buf       = name;
+                            state.rename_had_focus = false;
                             state.select_only(sid);
                             return;
                         }

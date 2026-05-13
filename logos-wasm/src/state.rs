@@ -914,8 +914,11 @@ pub struct EditorState {
     pub zoom:          f32,
 
     // UI state
-    pub rename_target: Option<Uuid>,
-    pub rename_buf:    String,
+    pub rename_target:    Option<Uuid>,
+    pub rename_buf:       String,
+    /// True once the rename TextEdit has actually received focus this session.
+    /// Guards against spurious lost_focus() on the first frame of creation.
+    pub rename_had_focus: bool,
     /// Text typed in the layers-panel search box (empty = show all).
     pub layer_search:  String,
     pub show_grid:     bool,
@@ -1296,8 +1299,9 @@ impl EditorState {
             pan_x:       0.0,
             pan_y:       0.0,
             zoom:        1.0,
-            rename_target:  None,
-            rename_buf:     String::new(),
+            rename_target:    None,
+            rename_buf:       String::new(),
+            rename_had_focus: false,
             layer_search:   String::new(),
             component_ids:  Vec::new(),
             editing_master_id: None,

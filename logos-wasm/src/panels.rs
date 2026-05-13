@@ -616,6 +616,11 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                 let label = format!("{icon}  {name}{mask_tag}");
 
                 if state.rename_target == Some(id) {
+                    // Sections are renamed via the canvas floating pill TextEdit, not here.
+                    let target_is_section = state.layers.get(&id)
+                        .map(|r| matches!(r.layer_type, crate::state::LayerType::Section { .. }))
+                        .unwrap_or(false);
+                    if !target_is_section {
                     // ── Inline rename: render a TextEdit in place of the label ──
                     let te = ui.add(
                         TextEdit::singleline(&mut state.rename_buf)
@@ -623,23 +628,25 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                             .desired_width(f32::INFINITY)
                             .frame(true),
                     );
-                    // Only request focus on the very first frame (not yet focused, not losing it).
-                    // Calling request_focus every frame fights with lost_focus detection.
-                    if !te.has_focus() && !te.lost_focus() {
-                        te.request_focus();
-                    }
+                    // Track when the TextEdit actually receives focus so we don't
+                    // commit via a spurious lost_focus() on the very first frame.
+                    if te.has_focus() { state.rename_had_focus = true; }
+                    if !te.has_focus() && !te.lost_focus() { te.request_focus(); }
                     let enter   = ui.input(|i| i.key_pressed(Key::Enter));
                     let escaped = ui.input(|i| i.key_pressed(Key::Escape));
-                    if te.lost_focus() || enter {
+                    if (te.lost_focus() && state.rename_had_focus) || enter {
                         let new_name = state.rename_buf.trim().to_owned();
                         if !new_name.is_empty() {
                             if let Some(r) = state.layers.get_mut(&id) { r.name = new_name; }
                             state.push_history("rename");
                         }
-                        state.rename_target = None;
+                        state.rename_target    = None;
+                        state.rename_had_focus = false;
                     } else if escaped {
-                        state.rename_target = None;
+                        state.rename_target    = None;
+                        state.rename_had_focus = false;
                     }
+                    } // end !target_is_section
                 } else {
                     // ── Normal label ──────────────────────────────────────────
                     let label_color = if is_mask && selected {
@@ -804,8 +811,9 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             state.move_layer(src, new_parent, before);
         }
         if let Some((id, name)) = to_rename {
-            state.rename_target = Some(id);
-            state.rename_buf    = name;
+            state.rename_target    = Some(id);
+            state.rename_buf       = name;
+            state.rename_had_focus = false;
         }
     });
 

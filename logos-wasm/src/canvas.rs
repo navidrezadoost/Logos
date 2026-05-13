@@ -1624,10 +1624,11 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                             .min_size(vec2(140.0, font_sz + 8.0))
                             .frame(true),
                     );
+                    if te.has_focus() { state.rename_had_focus = true; }
                     if !te.has_focus() && !te.lost_focus() { te.request_focus(); }
                     let enter  = ui.input(|i| i.key_pressed(Key::Enter));
                     let escape = ui.input(|i| i.key_pressed(Key::Escape));
-                    if te.lost_focus() || enter {
+                    if (te.lost_focus() && state.rename_had_focus) || enter {
                         let name = state.rename_buf.trim().to_owned();
                         if !name.is_empty() {
                             if let Some(r) = state.layers.get_mut(&rename_id) {
@@ -1635,9 +1636,11 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                             }
                             state.push_history("rename section");
                         }
-                        state.rename_target = None;
+                        state.rename_target    = None;
+                        state.rename_had_focus = false;
                     } else if escape {
-                        state.rename_target = None;
+                        state.rename_target    = None;
+                        state.rename_had_focus = false;
                     }
                 });
         }
