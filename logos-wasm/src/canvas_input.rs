@@ -153,7 +153,8 @@ pub(crate) fn handle_tool_input(
 
     let sel_screen_rect = |sel_id: uuid::Uuid, s: &EditorState| -> Option<Rect> {
         s.layers.get(&sel_id).map(|r| {
-            let (sx, sy) = s.world_to_screen(r.x, r.y);
+            let (wx, wy) = s.layer_world_pos(sel_id);
+            let (sx, sy) = s.world_to_screen(wx, wy);
             Rect::from_min_size(pos2(origin.x + sx, origin.y + sy),
                 vec2(r.width * s.zoom, r.height * s.zoom))
         })
