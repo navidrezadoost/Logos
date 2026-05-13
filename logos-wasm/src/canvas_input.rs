@@ -1011,9 +1011,9 @@ pub(crate) fn handle_tool_input(
                                     if state.snap_to_grid { (v / g).round() * g } else { v }
                                 };
                                 let g = state.grid_size;
-                                // ── Shift-axis lock (move only) ──────────────────────────────
+                                // ── Shift-axis lock (move only, not during resize) ───────────
                                 let shift_held_move = ui.input(|i| i.modifiers.shift);
-                                let (dx, dy) = if !shift_held_move {
+                                let (dx, dy) = if !shift_held_move || state.drag.resize_handle.is_some() {
                                     state.drag.shift_axis_lock = None;
                                     (dx, dy)
                                 } else {
@@ -1038,6 +1038,49 @@ pub(crate) fn handle_tool_input(
                                         ResizeHandle::Bottom      => (ox, oy, ow, (oh+dy).max(4.0)),
                                         ResizeHandle::BottomRight => (ox, oy, (ow+dx).max(4.0), (oh+dy).max(4.0)),
                                     };
+
+                                    // ── Shift: proportional resize from center (all sides equally) ──
+                                    // On corner handles: pick the dominant axis delta, expand/shrink
+                                    // both dimensions by the same absolute amount, keeping the shape
+                                    // centred on its original centre point.
+                                    // On edge handles: expand both edges of the moved axis equally
+                                    // (i.e. the opposite edge also moves inward/outward by the same
+                                    // amount, so the centre stays fixed).
+                                    if shift_held_move {
+                                        let cx = ox + ow * 0.5;
+                                        let cy = oy + oh * 0.5;
+                                        match handle {
+                                            ResizeHandle::TopLeft
+                                            | ResizeHandle::TopRight
+                                            | ResizeHandle::BottomLeft
+                                            | ResizeHandle::BottomRight => {
+                                                // Use whichever axis moved more as the driving delta.
+                                                let dw = nw - ow;   // signed size change on width axis
+                                                let dh = nh - oh;   // signed size change on height axis
+                                                let d = if dw.abs() >= dh.abs() { dw } else { dh };
+                                                let new_w = (ow + d).max(4.0);
+                                                let new_h = (oh + d).max(4.0);
+                                                nx = cx - new_w * 0.5;
+                                                ny = cy - new_h * 0.5;
+                                                nw = new_w;
+                                                nh = new_h;
+                                            }
+                                            ResizeHandle::Left | ResizeHandle::Right => {
+                                                let dw = nw - ow;
+                                                nw = (ow + dw).max(4.0);
+                                                nh = (oh + dw).max(4.0);
+                                                nx = cx - nw * 0.5;
+                                                ny = cy - nh * 0.5;
+                                            }
+                                            ResizeHandle::Top | ResizeHandle::Bottom => {
+                                                let dh = nh - oh;
+                                                nw = (ow + dh).max(4.0);
+                                                nh = (oh + dh).max(4.0);
+                                                nx = cx - nw * 0.5;
+                                                ny = cy - nh * 0.5;
+                                            }
+                                        }
+                                    }
                                     // ── Edge snapping during resize ───────────────────────────
                                     let rs_thresh = 8.0 / state.zoom;
                                     let big_r = (800.0 / state.zoom).min(2000.0);
