@@ -811,9 +811,11 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                 child_painter.rect_filled(crect, crounding, cfill);
                             }
                         }
-                        // Selection/hover highlight for children
+                        // Selection/hover highlight for children (Frame arm)
                         if state.is_selected(cid) {
+                            let is_line_child = matches!(crec.layer_type, LayerType::Line | LayerType::Arrow { .. });
                             child_painter.rect_stroke(crect, crounding, Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
+                            draw_selection_handles(&child_painter, crect, crec.rotation, state.zoom, is_line_child);
                         } else if state.hovered_layer == Some(cid) {
                             child_painter.rect_stroke(crect, crounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
                         }
