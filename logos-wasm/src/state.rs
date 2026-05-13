@@ -1428,6 +1428,7 @@ impl EditorState {
             Some(r) if matches!(r.layer_type, LayerType::Section { .. }) => (r.x, r.y),
             _ => return,
         };
+        let sec_name = self.layers.get(&section_id).map(|r| r.name.clone()).unwrap_or_default();
 
         // Compute children's bounding box in Section-local coords.
         let pad = 24.0_f32;
@@ -1438,6 +1439,11 @@ impl EditorState {
         let mut max_ly = f32::MIN;
         for &cid in &children {
             if let Some(cr) = self.layers.get(&cid) {
+                let cname = &cr.name;
+                web_sys::console::log_1(&format!(
+                    "[SYNC-SEC] '{sec_name}' child '{cname}' local=({:.1},{:.1}) size=({:.1}x{:.1}) pid={:?}",
+                    cr.x, cr.y, cr.width, cr.height, cr.parent_id
+                ).into());
                 min_lx = min_lx.min(cr.x);
                 min_ly = min_ly.min(cr.y);
                 max_lx = max_lx.max(cr.x + cr.width);
@@ -1445,11 +1451,6 @@ impl EditorState {
             }
         }
 
-        // Desired section origin (world) so that the tightest child bbox sits
-        // pad inside the section, with extra header_pad room above.
-        // Children's local coords are relative to the section origin, so if we
-        // move the origin we must shift all children by the inverse delta so
-        // they remain at the same world position.
         let new_x      = sx + min_lx - pad;
         let new_y      = sy + min_ly - pad - header_pad;
         let new_w      = (max_lx - min_lx + pad * 2.0).max(64.0);
@@ -1458,12 +1459,23 @@ impl EditorState {
         let dx = new_x - sx;
         let dy = new_y - sy;
 
+        web_sys::console::log_1(&format!(
+            "[SYNC-SEC] '{sec_name}' sec_world=({sx:.1},{sy:.1}) new=({new_x:.1},{new_y:.1}) \
+             min_local=({min_lx:.1},{min_ly:.1}) dx={dx:.1} dy={dy:.1}"
+        ).into());
+
         // Shift children by -delta so their world positions don't change.
         if dx != 0.0 || dy != 0.0 {
             for &cid in &children {
                 if let Some(cr) = self.layers.get_mut(&cid) {
+                    let before_x = cr.x;
+                    let before_y = cr.y;
                     cr.x -= dx;
                     cr.y -= dy;
+                    web_sys::console::log_1(&format!(
+                        "[SYNC-SEC] '{}' child local ({:.1},{:.1}) → ({:.1},{:.1})",
+                        cr.name, before_x, before_y, cr.x, cr.y
+                    ).into());
                 }
             }
         }
@@ -2343,6 +2355,10 @@ impl EditorState {
         let (lx, ly) = self.layer_world_pos(layer_id);
         let (lw, lh) = self.layers.get(&layer_id)
             .map(|r| (r.width, r.height)).unwrap_or((0.0, 0.0));
+        let lname = self.layers.get(&layer_id).map(|r| r.name.clone()).unwrap_or_default();
+        web_sys::console::log_1(&format!(
+            "[REPARENT] '{lname}' world=({lx:.1},{ly:.1}) size=({lw:.1}x{lh:.1})"
+        ).into());
         if lw <= 0.0 || lh <= 0.0 { return; }
 
         let frame_ids: Vec<Uuid> = self.pages[self.active_page].layers.iter()
@@ -2375,14 +2391,27 @@ impl EditorState {
         }
         if let Some(parent_fid) = best {
             let (fx, fy) = self.layer_world_pos(parent_fid);
+            let fname = self.layers.get(&parent_fid).map(|r| r.name.clone()).unwrap_or_default();
+            let lname2 = self.layers.get(&layer_id).map(|r| r.name.clone()).unwrap_or_default();
+            let new_lx = lx - fx;
+            let new_ly = ly - fy;
+            web_sys::console::log_1(&format!(
+                "[REPARENT] '{lname2}' → parent '{fname}' parent_world=({fx:.1},{fy:.1}) \
+                 new_local=({new_lx:.1},{new_ly:.1})"
+            ).into());
             if let Some(r) = self.layers.get_mut(&layer_id) {
-                r.x = lx - fx;
-                r.y = ly - fy;
+                r.x = new_lx;
+                r.y = new_ly;
                 r.parent_id = Some(parent_fid);
             }
             if let Some(r) = self.layers.get_mut(&parent_fid) {
                 r.frame_expanded = true;
             }
+        } else {
+            let lname2 = self.layers.get(&layer_id).map(|r| r.name.clone()).unwrap_or_default();
+            web_sys::console::log_1(&format!(
+                "[REPARENT] '{lname2}' → no parent found (stays top-level)"
+            ).into());
         }
     }
 

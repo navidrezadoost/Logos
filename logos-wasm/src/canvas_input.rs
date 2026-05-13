@@ -1176,7 +1176,22 @@ pub(crate) fn handle_tool_input(
                                     }
 
                                     // Move the primary layer
+                                    let parent_is_section = state.layers.get(&id)
+                                        .and_then(|r| r.parent_id)
+                                        .and_then(|pid| state.layers.get(&pid))
+                                        .map(|pr| matches!(pr.layer_type, LayerType::Section { .. }))
+                                        .unwrap_or(false);
+                                    let pid_name = state.layers.get(&id)
+                                        .and_then(|r| r.parent_id)
+                                        .and_then(|pid| state.layers.get(&pid))
+                                        .map(|pr| pr.name.clone());
+                                    let id_name = state.layers.get(&id).map(|r| r.name.clone()).unwrap_or_default();
                                     if let Some(r) = state.layers.get_mut(&id) {
+                                        clog!("[DRAG-MOVE] '{}' parent={:?} section={} local({:.1},{:.1})→({:.1},{:.1}) drag_origin=({:.1},{:.1}) world_delta=({:.1},{:.1})",
+                                            id_name, pid_name, parent_is_section,
+                                            r.x, r.y, nx, ny,
+                                            state.drag.origin.x, state.drag.origin.y,
+                                            wx - state.drag.origin.x, wy - state.drag.origin.y);
                                         r.x = nx; r.y = ny;
                                     }
                                     // Move every other selected layer by the same snapped delta
@@ -1436,7 +1451,7 @@ pub(crate) fn handle_tool_input(
             state.drag.hovered_parent = None;
             state.push_history(label);
         }
-        if state.drag.layer_id.is_none() {
+                if state.drag.layer_id.is_none() {
             if let Some(mp) = pointer.hover_pos() {
                 let (wx, wy) = to_world(mp, state);
                 let ox = state.drag.origin.x;
@@ -1460,7 +1475,16 @@ pub(crate) fn handle_tool_input(
                     _ => { state.drag.active = false; return; }
                 };
                 // If the new shape is fully inside a frame, make it a true child.
+                clog!("[DRAW-COMMIT] tool={:?} id={} world=({:.1},{:.1}) w={:.1} h={:.1}",
+                    state.tool, id, x, y, w, h);
                 state.auto_reparent_new_layer(id);
+                {
+                    let r = state.layers.get(&id);
+                    let pid = r.and_then(|r| r.parent_id);
+                    let (lx, ly) = r.map(|r| (r.x, r.y)).unwrap_or_default();
+                    clog!("[DRAW-COMMIT] after reparent local=({:.1},{:.1}) parent={:?}", lx, ly,
+                        pid.and_then(|p| state.layers.get(&p)).map(|r| r.name.clone()));
+                }
                 state.select_only(id);
                 state.push_history("draw layer");
                 state.tool = Tool::Select;
