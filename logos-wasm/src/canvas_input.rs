@@ -1051,6 +1051,12 @@ pub(crate) fn handle_tool_input(
                                             })
                                         }).collect()
                                     };
+                                    // Parent world offset: local coords → world for comparison,
+                                    // world snap result → local coords for storage.
+                                    let (rs_parent_wx, rs_parent_wy) = state.layers.get(&id)
+                                        .and_then(|r| r.parent_id)
+                                        .map(|pid| state.layer_world_pos(pid))
+                                        .unwrap_or((0.0, 0.0));
                                     state.drag.snap_guides.clear();
                                     let moves_left   = matches!(handle, ResizeHandle::TopLeft | ResizeHandle::Left | ResizeHandle::BottomLeft);
                                     let moves_right  = matches!(handle, ResizeHandle::TopRight | ResizeHandle::Right | ResizeHandle::BottomRight);
@@ -1058,26 +1064,29 @@ pub(crate) fn handle_tool_input(
                                     let moves_bottom = matches!(handle, ResizeHandle::BottomLeft | ResizeHandle::Bottom | ResizeHandle::BottomRight);
                                     let mut snap_rx = false;
                                     let mut snap_ry = false;
+                                    let w_nx = nx + rs_parent_wx;  // left edge in world
+                                    let w_ny = ny + rs_parent_wy;  // top  edge in world
                                     for (rx2, ry2, rw2, rh2) in &snap_rects {
                                         if !snap_rx {
                                             let cands = [*rx2, rx2 + rw2];
                                             if moves_left {
                                                 for &cx in &cands {
-                                                    if (nx - cx).abs() < rs_thresh {
-                                                        let fixed_right = ox + ow;
-                                                        nx = cx; nw = (fixed_right - nx).max(4.0);
+                                                    if (w_nx - cx).abs() < rs_thresh {
+                                                        let fixed_right_world = ox + ow + rs_parent_wx;
+                                                        nx = cx - rs_parent_wx;
+                                                        nw = (fixed_right_world - cx).max(4.0);
                                                         snap_rx = true;
-                                                        let y0 = ny.min(*ry2) - big_r; let y1 = (ny+nh).max(ry2+rh2) + big_r;
+                                                        let y0 = w_ny.min(*ry2) - big_r; let y1 = (w_ny+nh).max(ry2+rh2) + big_r;
                                                         state.drag.snap_guides.push((cx, y0, cx, y1, false));
                                                         break;
                                                     }
                                                 }
                                             } else if moves_right {
                                                 for &cx in &cands {
-                                                    if ((nx+nw) - cx).abs() < rs_thresh {
-                                                        nw = (cx - nx).max(4.0);
+                                                    if ((w_nx+nw) - cx).abs() < rs_thresh {
+                                                        nw = (cx - w_nx).max(4.0);
                                                         snap_rx = true;
-                                                        let y0 = ny.min(*ry2) - big_r; let y1 = (ny+nh).max(ry2+rh2) + big_r;
+                                                        let y0 = w_ny.min(*ry2) - big_r; let y1 = (w_ny+nh).max(ry2+rh2) + big_r;
                                                         state.drag.snap_guides.push((cx, y0, cx, y1, false));
                                                         break;
                                                     }
@@ -1088,21 +1097,22 @@ pub(crate) fn handle_tool_input(
                                             let cands = [*ry2, ry2 + rh2];
                                             if moves_top {
                                                 for &cy in &cands {
-                                                    if (ny - cy).abs() < rs_thresh {
-                                                        let fixed_bottom = oy + oh;
-                                                        ny = cy; nh = (fixed_bottom - ny).max(4.0);
+                                                    if (w_ny - cy).abs() < rs_thresh {
+                                                        let fixed_bottom_world = oy + oh + rs_parent_wy;
+                                                        ny = cy - rs_parent_wy;
+                                                        nh = (fixed_bottom_world - cy).max(4.0);
                                                         snap_ry = true;
-                                                        let x0 = nx.min(*rx2) - big_r; let x1 = (nx+nw).max(rx2+rw2) + big_r;
+                                                        let x0 = w_nx.min(*rx2) - big_r; let x1 = (w_nx+nw).max(rx2+rw2) + big_r;
                                                         state.drag.snap_guides.push((x0, cy, x1, cy, false));
                                                         break;
                                                     }
                                                 }
                                             } else if moves_bottom {
                                                 for &cy in &cands {
-                                                    if ((ny+nh) - cy).abs() < rs_thresh {
-                                                        nh = (cy - ny).max(4.0);
+                                                    if ((w_ny+nh) - cy).abs() < rs_thresh {
+                                                        nh = (cy - w_ny).max(4.0);
                                                         snap_ry = true;
-                                                        let x0 = nx.min(*rx2) - big_r; let x1 = (nx+nw).max(rx2+rw2) + big_r;
+                                                        let x0 = w_nx.min(*rx2) - big_r; let x1 = (w_nx+nw).max(rx2+rw2) + big_r;
                                                         state.drag.snap_guides.push((x0, cy, x1, cy, false));
                                                         break;
                                                     }
@@ -1123,8 +1133,6 @@ pub(crate) fn handle_tool_input(
                                     let thresh = 8.0 / state.zoom;
                                     let sw = state.drag.layer_size.x;
                                     let sh = state.drag.layer_size.y;
-                                    let sel_cx = nx + sw * 0.5;
-                                    let sel_cy = ny + sh * 0.5;
 
                                     // Collect other layer rects using world positions (section children store section-local coords)
                                     let others: Vec<(f32,f32,f32,f32)> = {
@@ -1138,104 +1146,119 @@ pub(crate) fn handle_tool_input(
                                         }).collect()
                                     };
 
+                                    // Parent world offset: 0 for top-level layers, section origin for section children.
+                                    // All snap comparisons happen in world space; results are converted back to local.
+                                    let (parent_wx, parent_wy) = state.layers.get(&id)
+                                        .and_then(|r| r.parent_id)
+                                        .map(|pid| state.layer_world_pos(pid))
+                                        .unwrap_or((0.0, 0.0));
+
                                     state.drag.snap_guides.clear();
                                     let mut snapped_x = false;
                                     let mut snapped_y = false;
                                     // Guide extent bounded to viewport so GPU never gets huge geometry
                                     let big = (800.0 / state.zoom).min(2000.0);
 
+                                    // Convert layer's current position to world space for comparisons.
+                                    let w_nx = nx + parent_wx;
+                                    let w_ny = ny + parent_wy;
+                                    let mut wsnap_x = w_nx;
+                                    let mut wsnap_y = w_ny;
+
                                     for (ox2, oy2, ow2, oh2) in &others {
                                         let ocx = ox2 + ow2 * 0.5;
                                         let ocy = oy2 + oh2 * 0.5;
 
                                         // ── Center-X alignment ──────────────────────────────
-                                        if !snapped_x && (sel_cx - ocx).abs() < thresh {
-                                            nx = ocx - sw * 0.5;
+                                        if !snapped_x && (wsnap_x + sw * 0.5 - ocx).abs() < thresh {
+                                            wsnap_x = ocx - sw * 0.5;
                                             snapped_x = true;
-                                            // vertical guide through both centers
-                                            let y0 = (ny + sh * 0.5).min(ocy) - big;
-                                            let y1 = (ny + sh * 0.5).max(ocy) + big;
+                                            let y0 = (wsnap_y + sh * 0.5).min(ocy) - big;
+                                            let y1 = (wsnap_y + sh * 0.5).max(ocy) + big;
                                             state.drag.snap_guides.push((ocx, y0, ocx, y1, true));
                                         }
                                         // ── Left-edge alignment ────────────────────────────
-                                        if !snapped_x && (nx - ox2).abs() < thresh {
-                                            nx = *ox2;
+                                        if !snapped_x && (wsnap_x - ox2).abs() < thresh {
+                                            wsnap_x = *ox2;
                                             snapped_x = true;
-                                            let y0 = ny.min(*oy2) - 20.0;
-                                            let y1 = (ny + sh).max(oy2 + oh2) + 20.0;
+                                            let y0 = wsnap_y.min(*oy2) - 20.0;
+                                            let y1 = (wsnap_y + sh).max(oy2 + oh2) + 20.0;
                                             state.drag.snap_guides.push((*ox2, y0, *ox2, y1, false));
                                         }
                                         // ── Right-edge alignment ───────────────────────────
-                                        if !snapped_x && ((nx + sw) - (ox2 + ow2)).abs() < thresh {
-                                            nx = ox2 + ow2 - sw;
+                                        if !snapped_x && ((wsnap_x + sw) - (ox2 + ow2)).abs() < thresh {
+                                            wsnap_x = ox2 + ow2 - sw;
                                             snapped_x = true;
                                             let xe = ox2 + ow2;
-                                            let y0 = ny.min(*oy2) - 20.0;
-                                            let y1 = (ny + sh).max(oy2 + oh2) + 20.0;
+                                            let y0 = wsnap_y.min(*oy2) - 20.0;
+                                            let y1 = (wsnap_y + sh).max(oy2 + oh2) + 20.0;
                                             state.drag.snap_guides.push((xe, y0, xe, y1, false));
                                         }
 
                                         // ── Center-Y alignment ──────────────────────────────
-                                        if !snapped_y && (sel_cy - ocy).abs() < thresh {
-                                            ny = ocy - sh * 0.5;
+                                        if !snapped_y && (wsnap_y + sh * 0.5 - ocy).abs() < thresh {
+                                            wsnap_y = ocy - sh * 0.5;
                                             snapped_y = true;
-                                            // horizontal guide through both centers
-                                            let x0 = (nx + sw * 0.5).min(ocx) - big;
-                                            let x1 = (nx + sw * 0.5).max(ocx) + big;
+                                            let x0 = (wsnap_x + sw * 0.5).min(ocx) - big;
+                                            let x1 = (wsnap_x + sw * 0.5).max(ocx) + big;
                                             state.drag.snap_guides.push((x0, ocy, x1, ocy, true));
                                         }
                                         // ── Top-edge alignment ─────────────────────────────
-                                        if !snapped_y && (ny - oy2).abs() < thresh {
-                                            ny = *oy2;
+                                        if !snapped_y && (wsnap_y - oy2).abs() < thresh {
+                                            wsnap_y = *oy2;
                                             snapped_y = true;
-                                            let x0 = nx.min(*ox2) - 20.0;
-                                            let x1 = (nx + sw).max(ox2 + ow2) + 20.0;
+                                            let x0 = wsnap_x.min(*ox2) - 20.0;
+                                            let x1 = (wsnap_x + sw).max(ox2 + ow2) + 20.0;
                                             state.drag.snap_guides.push((x0, *oy2, x1, *oy2, false));
                                         }
                                         // ── Bottom-edge alignment ──────────────────────────
-                                        if !snapped_y && ((ny + sh) - (oy2 + oh2)).abs() < thresh {
-                                            ny = oy2 + oh2 - sh;
+                                        if !snapped_y && ((wsnap_y + sh) - (oy2 + oh2)).abs() < thresh {
+                                            wsnap_y = oy2 + oh2 - sh;
                                             snapped_y = true;
                                             let ye = oy2 + oh2;
-                                            let x0 = nx.min(*ox2) - 20.0;
-                                            let x1 = (nx + sw).max(ox2 + ow2) + 20.0;
+                                            let x0 = wsnap_x.min(*ox2) - 20.0;
+                                            let x1 = (wsnap_x + sw).max(ox2 + ow2) + 20.0;
                                             state.drag.snap_guides.push((x0, ye, x1, ye, false));
                                         }
                                         // ── Right edge → other left edge (touch alignment) ──
-                                        if !snapped_x && ((nx + sw) - ox2).abs() < thresh {
-                                            nx = ox2 - sw;
+                                        if !snapped_x && ((wsnap_x + sw) - ox2).abs() < thresh {
+                                            wsnap_x = ox2 - sw;
                                             snapped_x = true;
-                                            let y0 = ny.min(*oy2) - 20.0;
-                                            let y1 = (ny + sh).max(oy2 + oh2) + 20.0;
+                                            let y0 = wsnap_y.min(*oy2) - 20.0;
+                                            let y1 = (wsnap_y + sh).max(oy2 + oh2) + 20.0;
                                             state.drag.snap_guides.push((*ox2, y0, *ox2, y1, false));
                                         }
                                         // ── Left edge → other right edge (touch alignment) ──
-                                        if !snapped_x && (nx - (ox2 + ow2)).abs() < thresh {
-                                            nx = ox2 + ow2;
+                                        if !snapped_x && (wsnap_x - (ox2 + ow2)).abs() < thresh {
+                                            wsnap_x = ox2 + ow2;
                                             snapped_x = true;
                                             let xe = ox2 + ow2;
-                                            let y0 = ny.min(*oy2) - 20.0;
-                                            let y1 = (ny + sh).max(oy2 + oh2) + 20.0;
+                                            let y0 = wsnap_y.min(*oy2) - 20.0;
+                                            let y1 = (wsnap_y + sh).max(oy2 + oh2) + 20.0;
                                             state.drag.snap_guides.push((xe, y0, xe, y1, false));
                                         }
                                         // ── Bottom edge → other top edge (touch alignment) ──
-                                        if !snapped_y && ((ny + sh) - oy2).abs() < thresh {
-                                            ny = oy2 - sh;
+                                        if !snapped_y && ((wsnap_y + sh) - oy2).abs() < thresh {
+                                            wsnap_y = oy2 - sh;
                                             snapped_y = true;
-                                            let x0 = nx.min(*ox2) - 20.0;
-                                            let x1 = (nx + sw).max(ox2 + ow2) + 20.0;
+                                            let x0 = wsnap_x.min(*ox2) - 20.0;
+                                            let x1 = (wsnap_x + sw).max(ox2 + ow2) + 20.0;
                                             state.drag.snap_guides.push((x0, *oy2, x1, *oy2, false));
                                         }
                                         // ── Top edge → other bottom edge (touch alignment) ──
-                                        if !snapped_y && (ny - (oy2 + oh2)).abs() < thresh {
-                                            ny = oy2 + oh2;
+                                        if !snapped_y && (wsnap_y - (oy2 + oh2)).abs() < thresh {
+                                            wsnap_y = oy2 + oh2;
                                             snapped_y = true;
                                             let ye = oy2 + oh2;
-                                            let x0 = nx.min(*ox2) - 20.0;
-                                            let x1 = (nx + sw).max(ox2 + ow2) + 20.0;
+                                            let x0 = wsnap_x.min(*ox2) - 20.0;
+                                            let x1 = (wsnap_x + sw).max(ox2 + ow2) + 20.0;
                                             state.drag.snap_guides.push((x0, ye, x1, ye, false));
                                         }
                                     }
+
+                                    // Convert snapped world position back to local.
+                                    nx = wsnap_x - parent_wx;
+                                    ny = wsnap_y - parent_wy;
 
                                     // ── Rotation-parallel edge snap ──────────────────────────────
                                     // When a dragged element's angle is within 15° of another layer's
@@ -1266,8 +1289,8 @@ pub(crate) fn handle_tool_input(
                                             r.rotation = *orot;
                                         }
                                         // Snap edge along the perpendicular-to-rotation axis
-                                        let dcx = nx + sw * 0.5;
-                                        let dcy = ny + sh * 0.5;
+                                        let dcx = (nx + parent_wx) + sw * 0.5;
+                                        let dcy = (ny + parent_wy) + sh * 0.5;
                                         let ocx = ox2 + ow2 * 0.5;
                                         let ocy = oy2 + oh2 * 0.5;
                                         let cos_r = orot.cos();
