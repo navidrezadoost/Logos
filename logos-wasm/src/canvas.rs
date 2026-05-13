@@ -1208,9 +1208,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
             let is_section2 = matches!(rec.layer_type, LayerType::Section { .. });
             if is_section2 { /* handled above */ } else {
             let name_text = rec.name.clone();
-            let dim_text = format!("{}   {:.0} × {:.0}", name_text, rec.width, rec.height);
             let bg   = Color32::from_rgba_unmultiplied(20, 20, 32, 220);
-            let galley = painter.layout_no_wrap(dim_text, FontId::proportional(12.0), Color32::from_rgb(160, 120, 255));
+            let galley = painter.layout_no_wrap(name_text, FontId::proportional(12.0), Color32::from_rgb(160, 120, 255));
             let lsize  = galley.size() + vec2(8.0, 4.0);
             // Use a clip-expanded painter so labels above the top edge are visible
             let label_painter = painter.with_clip_rect(painter.clip_rect().expand(32.0));
