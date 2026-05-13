@@ -740,8 +740,17 @@ pub(crate) fn handle_tool_input(
                             state.drag.layer_size    = vec2(rec.width, rec.height);
                             state.drag.resize_handle = None;
                             state.drag.shift_axis_lock = None;
-                            // Snapshot start position of every selected layer so they all move together
+                            // Snapshot start position of every selected ROOT layer so they all move
+                            // together. Children of other selected layers are excluded — they move
+                            // implicitly via their parent's coordinate update and must not have the
+                            // world-space delta applied twice (section-local + world delta).
                             state.drag.multi_drag_offsets = state.selection.iter()
+                                .filter(|&&sid| {
+                                    state.layers.get(&sid)
+                                        .and_then(|r| r.parent_id)
+                                        .map(|pid| !state.selection.contains(&pid))
+                                        .unwrap_or(true)
+                                })
                                 .filter_map(|&sid| state.layers.get(&sid).map(|r| (sid, r.x, r.y)))
                                 .collect();
                             did_something = true;
@@ -1199,7 +1208,8 @@ pub(crate) fn handle_tool_input(
                                                     if fid == id { return false; }
                                                     if state.is_ancestor_of(id, fid) { return false; }
                                                     state.layers.get(&fid)
-                                                        .map(|r| matches!(r.layer_type, LayerType::Frame))
+                                                        .map(|r| matches!(r.layer_type,
+                                                            LayerType::Frame | LayerType::Section { .. }))
                                                         .unwrap_or(false)
                                                 })
                                                 .collect();
@@ -1308,6 +1318,7 @@ pub(crate) fn handle_tool_input(
                     .filter(|&&fid| {
                         state.layers.get(&fid)
                             .map(|r| matches!(r.layer_type, LayerType::Frame
+                                | LayerType::Section { .. }
                                 | LayerType::Component | LayerType::ComponentInstance { .. }))
                             .unwrap_or(false)
                     })
