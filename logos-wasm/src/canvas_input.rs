@@ -1028,7 +1028,7 @@ pub(crate) fn handle_tool_input(
                                 };
 
                                 if let Some(handle) = state.drag.resize_handle {
-                                    let (nx, ny, nw, nh) = match handle {
+                                    let (mut nx, mut ny, mut nw, mut nh) = match handle {
                                         ResizeHandle::TopLeft     => (snap(ox+dx,g), snap(oy+dy,g), (ow-dx).max(4.0), (oh-dy).max(4.0)),
                                         ResizeHandle::Top         => (ox, snap(oy+dy,g), ow, (oh-dy).max(4.0)),
                                         ResizeHandle::TopRight    => (ox, snap(oy+dy,g), (ow+dx).max(4.0), (oh-dy).max(4.0)),
@@ -1038,6 +1038,79 @@ pub(crate) fn handle_tool_input(
                                         ResizeHandle::Bottom      => (ox, oy, ow, (oh+dy).max(4.0)),
                                         ResizeHandle::BottomRight => (ox, oy, (ow+dx).max(4.0), (oh+dy).max(4.0)),
                                     };
+                                    // ── Edge snapping during resize ───────────────────────────
+                                    let rs_thresh = 8.0 / state.zoom;
+                                    let big_r = (800.0 / state.zoom).min(2000.0);
+                                    let snap_rects: Vec<(f32,f32,f32,f32)> = {
+                                        let page_ids = state.pages[state.active_page].layers.clone();
+                                        page_ids.iter().filter_map(|&oid| {
+                                            if oid == id || state.selection.contains(&oid) { return None; }
+                                            state.layers.get(&oid).map(|r| {
+                                                let (wx, wy) = state.layer_world_pos(oid);
+                                                (wx, wy, r.width, r.height)
+                                            })
+                                        }).collect()
+                                    };
+                                    state.drag.snap_guides.clear();
+                                    let moves_left   = matches!(handle, ResizeHandle::TopLeft | ResizeHandle::Left | ResizeHandle::BottomLeft);
+                                    let moves_right  = matches!(handle, ResizeHandle::TopRight | ResizeHandle::Right | ResizeHandle::BottomRight);
+                                    let moves_top    = matches!(handle, ResizeHandle::TopLeft | ResizeHandle::Top | ResizeHandle::TopRight);
+                                    let moves_bottom = matches!(handle, ResizeHandle::BottomLeft | ResizeHandle::Bottom | ResizeHandle::BottomRight);
+                                    let mut snap_rx = false;
+                                    let mut snap_ry = false;
+                                    for (rx2, ry2, rw2, rh2) in &snap_rects {
+                                        if !snap_rx {
+                                            let cands = [*rx2, rx2 + rw2];
+                                            if moves_left {
+                                                for &cx in &cands {
+                                                    if (nx - cx).abs() < rs_thresh {
+                                                        let fixed_right = ox + ow;
+                                                        nx = cx; nw = (fixed_right - nx).max(4.0);
+                                                        snap_rx = true;
+                                                        let y0 = ny.min(*ry2) - big_r; let y1 = (ny+nh).max(ry2+rh2) + big_r;
+                                                        state.drag.snap_guides.push((cx, y0, cx, y1, false));
+                                                        break;
+                                                    }
+                                                }
+                                            } else if moves_right {
+                                                for &cx in &cands {
+                                                    if ((nx+nw) - cx).abs() < rs_thresh {
+                                                        nw = (cx - nx).max(4.0);
+                                                        snap_rx = true;
+                                                        let y0 = ny.min(*ry2) - big_r; let y1 = (ny+nh).max(ry2+rh2) + big_r;
+                                                        state.drag.snap_guides.push((cx, y0, cx, y1, false));
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !snap_ry {
+                                            let cands = [*ry2, ry2 + rh2];
+                                            if moves_top {
+                                                for &cy in &cands {
+                                                    if (ny - cy).abs() < rs_thresh {
+                                                        let fixed_bottom = oy + oh;
+                                                        ny = cy; nh = (fixed_bottom - ny).max(4.0);
+                                                        snap_ry = true;
+                                                        let x0 = nx.min(*rx2) - big_r; let x1 = (nx+nw).max(rx2+rw2) + big_r;
+                                                        state.drag.snap_guides.push((x0, cy, x1, cy, false));
+                                                        break;
+                                                    }
+                                                }
+                                            } else if moves_bottom {
+                                                for &cy in &cands {
+                                                    if ((ny+nh) - cy).abs() < rs_thresh {
+                                                        nh = (cy - ny).max(4.0);
+                                                        snap_ry = true;
+                                                        let x0 = nx.min(*rx2) - big_r; let x1 = (nx+nw).max(rx2+rw2) + big_r;
+                                                        state.drag.snap_guides.push((x0, cy, x1, cy, false));
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if snap_rx && snap_ry { break; }
+                                    }
                                     if let Some(r) = state.layers.get_mut(&id) {
                                         r.x = nx; r.y = ny; r.width = nw; r.height = nh;
                                     }
@@ -1053,12 +1126,15 @@ pub(crate) fn handle_tool_input(
                                     let sel_cx = nx + sw * 0.5;
                                     let sel_cy = ny + sh * 0.5;
 
-                                    // Collect other layer rects (avoid borrowing state.layers mutably)
+                                    // Collect other layer rects using world positions (section children store section-local coords)
                                     let others: Vec<(f32,f32,f32,f32)> = {
                                         let page_ids = state.pages[state.active_page].layers.clone();
                                         page_ids.iter().filter_map(|&oid| {
-                                            if oid == id { return None; }
-                                            state.layers.get(&oid).map(|r| (r.x, r.y, r.width, r.height))
+                                            if oid == id || state.selection.contains(&oid) { return None; }
+                                            state.layers.get(&oid).map(|r| {
+                                                let (wx, wy) = state.layer_world_pos(oid);
+                                                (wx, wy, r.width, r.height)
+                                            })
                                         }).collect()
                                     };
 
@@ -1125,6 +1201,40 @@ pub(crate) fn handle_tool_input(
                                             let x1 = (nx + sw).max(ox2 + ow2) + 20.0;
                                             state.drag.snap_guides.push((x0, ye, x1, ye, false));
                                         }
+                                        // ── Right edge → other left edge (touch alignment) ──
+                                        if !snapped_x && ((nx + sw) - ox2).abs() < thresh {
+                                            nx = ox2 - sw;
+                                            snapped_x = true;
+                                            let y0 = ny.min(*oy2) - 20.0;
+                                            let y1 = (ny + sh).max(oy2 + oh2) + 20.0;
+                                            state.drag.snap_guides.push((*ox2, y0, *ox2, y1, false));
+                                        }
+                                        // ── Left edge → other right edge (touch alignment) ──
+                                        if !snapped_x && (nx - (ox2 + ow2)).abs() < thresh {
+                                            nx = ox2 + ow2;
+                                            snapped_x = true;
+                                            let xe = ox2 + ow2;
+                                            let y0 = ny.min(*oy2) - 20.0;
+                                            let y1 = (ny + sh).max(oy2 + oh2) + 20.0;
+                                            state.drag.snap_guides.push((xe, y0, xe, y1, false));
+                                        }
+                                        // ── Bottom edge → other top edge (touch alignment) ──
+                                        if !snapped_y && ((ny + sh) - oy2).abs() < thresh {
+                                            ny = oy2 - sh;
+                                            snapped_y = true;
+                                            let x0 = nx.min(*ox2) - 20.0;
+                                            let x1 = (nx + sw).max(ox2 + ow2) + 20.0;
+                                            state.drag.snap_guides.push((x0, *oy2, x1, *oy2, false));
+                                        }
+                                        // ── Top edge → other bottom edge (touch alignment) ──
+                                        if !snapped_y && (ny - (oy2 + oh2)).abs() < thresh {
+                                            ny = oy2 + oh2;
+                                            snapped_y = true;
+                                            let ye = oy2 + oh2;
+                                            let x0 = nx.min(*ox2) - 20.0;
+                                            let x1 = (nx + sw).max(ox2 + ow2) + 20.0;
+                                            state.drag.snap_guides.push((x0, ye, x1, ye, false));
+                                        }
                                     }
 
                                     // ── Rotation-parallel edge snap ──────────────────────────────
@@ -1137,8 +1247,11 @@ pub(crate) fn handle_tool_input(
                                     let others_with_rot: Vec<(f32,f32,f32,f32,f32)> = {
                                         let page_ids2 = state.pages[state.active_page].layers.clone();
                                         page_ids2.iter().filter_map(|&oid| {
-                                            if oid == id { return None; }
-                                            state.layers.get(&oid).map(|r| (r.x, r.y, r.width, r.height, r.rotation))
+                                            if oid == id || state.selection.contains(&oid) { return None; }
+                                            state.layers.get(&oid).map(|r| {
+                                                let (wx, wy) = state.layer_world_pos(oid);
+                                                (wx, wy, r.width, r.height, r.rotation)
+                                            })
                                         }).collect()
                                     };
                                     let sw = state.drag.layer_size.x;
