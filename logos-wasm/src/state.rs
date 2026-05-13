@@ -849,6 +849,25 @@ impl LayerRecord {
         }
     }
 
+    pub fn type_icon_color(&self) -> eframe::egui::Color32 {
+        use eframe::egui::Color32;
+        match &self.layer_type {
+            LayerType::Rect                      => Color32::from_rgb( 74, 158, 255), // sky blue
+            LayerType::Frame                     => Color32::from_rgb(138,  85, 255), // purple
+            LayerType::Text(_)                   => Color32::from_rgb( 68, 200, 136), // mint green
+            LayerType::Ellipse { .. }            => Color32::from_rgb(255, 136,  68), // orange
+            LayerType::Path { .. }               => Color32::from_rgb( 68, 200, 200), // cyan
+            LayerType::Group                     => Color32::from_rgb(140, 140, 180), // gray-purple
+            LayerType::Polygon { .. }            => Color32::from_rgb( 68, 200,  90), // green
+            LayerType::Line                      => Color32::from_rgb(255, 100, 136), // pink
+            LayerType::Arrow { .. }              => Color32::from_rgb(255, 170,  68), // amber
+            LayerType::Star { .. }               => Color32::from_rgb(255, 210,  60), // gold
+            LayerType::Section { .. }            => Color32::from_rgb(100, 140, 255), // blue-purple
+            LayerType::Component                 => Color32::from_rgb( 68, 255, 160), // bright mint
+            LayerType::ComponentInstance { .. }  => Color32::from_rgb(120, 200, 160), // muted mint
+        }
+    }
+
     pub fn layer_type_label(&self) -> &'static str {
         match &self.layer_type {
             LayerType::Rect     => "Rectangle",

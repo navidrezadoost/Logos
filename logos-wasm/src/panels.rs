@@ -591,6 +591,13 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
             }
 
             ui.horizontal(|ui| {
+                // ── Micro-interaction slots: filled after hover/drag is known ─────
+                let bg_idx     = ui.painter().add(Shape::Noop);
+                let accent_idx = ui.painter().add(Shape::Noop);
+                let row_top    = ui.cursor().min.y;
+                let mut row_hovered = false;
+                let mut row_dragged = false;
+
                 // Indent
                 ui.add_space(8.0 + depth as f32 * 16.0);
 
@@ -611,9 +618,30 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                     to_toggle_vis = Some(id);
                 }
 
+                // ── Coloured type-icon chip ──────────────────────────────────────
+                {
+                    let ic = state.layers.get(&id)
+                        .map(|r| r.type_icon_color())
+                        .unwrap_or(Color32::GRAY);
+                    let (chip, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                    // Softly tinted background square
+                    ui.painter().rect_filled(
+                        chip, Rounding::same(3.0),
+                        Color32::from_rgba_unmultiplied(ic.r(), ic.g(), ic.b(), 38));
+                    // Thin coloured border
+                    ui.painter().rect_stroke(
+                        chip, Rounding::same(3.0),
+                        Stroke::new(0.8, Color32::from_rgba_unmultiplied(ic.r(), ic.g(), ic.b(), 90)));
+                    // Icon glyph centred in chip
+                    ui.painter().text(
+                        chip.center(), Align2::CENTER_CENTER, icon,
+                        FontId::proportional(9.5), ic);
+                }
+                ui.add_space(2.0);
+
                 // Icon + name (with mask badge) — or inline rename TextEdit
                 let mask_tag = if is_mask { " [M]" } else { "" };
-                let label = format!("{icon}  {name}{mask_tag}");
+                let label = format!("{name}{mask_tag}");
 
                 if state.rename_target == Some(id) {
                     // Sections are renamed via the canvas floating pill TextEdit, not here.
@@ -680,6 +708,14 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
 
                     let resp = ui.add(Label::new(text).sense(Sense::click_and_drag()))
                         .on_hover_text("Click to select • Double-click to rename • Drag to reorder");
+                    row_hovered = resp.hovered();
+                    row_dragged = resp.dragged() || resp.is_pointer_button_down_on();
+                    if row_hovered && !row_dragged {
+                        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                    }
+                    if row_dragged {
+                        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+                    }
 
                     // Mark as drag source
                     resp.dnd_set_drag_payload(id);
@@ -785,6 +821,59 @@ pub fn left_panel(ui: &mut Ui, state: &mut EditorState) {
                         }
                     });
                 } // end else (non-rename branch)
+
+                // ── Micro-interaction: row background + left accent bar ───────────
+                {
+                    let full_row = Rect::from_x_y_ranges(
+                        ui.clip_rect().x_range(),
+                        row_top..=(row_top + 22.0),
+                    );
+                    // Animate hover and drag brightness
+                    let hover_t = ui.ctx().animate_value_with_time(
+                        Id::new("lrow_hov").with(id),
+                        if row_hovered && !row_dragged { 1.0f32 } else { 0.0 },
+                        0.12,
+                    );
+                    let drag_t = ui.ctx().animate_value_with_time(
+                        Id::new("lrow_drg").with(id),
+                        if row_dragged { 1.0f32 } else { 0.0 },
+                        0.10,
+                    );
+                    // Background fill
+                    let bg_col = if selected {
+                        Color32::from_rgba_unmultiplied(110, 85, 215, 52)
+                    } else if drag_t > 0.01 {
+                        Color32::from_rgba_unmultiplied(90, 60, 200, (drag_t * 60.0) as u8)
+                    } else if hover_t > 0.01 {
+                        Color32::from_rgba_unmultiplied(220, 215, 255, (hover_t * 20.0) as u8)
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+                    ui.painter().set(bg_idx, Shape::rect_filled(full_row, Rounding::same(4.0), bg_col));
+
+                    // Left accent bar (selected = solid purple, dragging = fading purple)
+                    let accent_col = if selected {
+                        Color32::from_rgb(133, 96, 255)
+                    } else {
+                        Color32::from_rgba_unmultiplied(180, 140, 255, (drag_t * 220.0) as u8)
+                    };
+                    if selected || drag_t > 0.01 {
+                        let acc = Rect::from_min_size(
+                            pos2(ui.clip_rect().left(), row_top),
+                            vec2(3.0, 22.0),
+                        );
+                        ui.painter().set(accent_idx, Shape::rect_filled(acc, Rounding::same(1.5), accent_col));
+                    }
+
+                    // Drag outline glow
+                    if row_dragged {
+                        ui.painter().rect_stroke(
+                            full_row.shrink(0.5),
+                            Rounding::same(4.0),
+                            Stroke::new(1.5, Color32::from_rgba_unmultiplied(160, 120, 255, 200)),
+                        );
+                    }
+                }
             });
         }
 
