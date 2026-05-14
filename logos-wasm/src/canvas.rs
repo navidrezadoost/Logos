@@ -1848,55 +1848,83 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
     // ── Cursor icon based on what the pointer is hovering ─────────────────
     if matches!(state.tool, Tool::Select | Tool::Scale) {
         if let Some(mp) = mp_screen {
+            // Helper: given a layer record, set the cursor based on pointer proximity to
+            // its handles / rotation zones / body. Returns true if a non-default cursor
+            // was set so callers can avoid overwriting it.
+            let cursor_for_layer = |rec: &crate::state::LayerRecord, cursor_set: &mut bool| {
+                let (sx, sy) = state.world_to_screen(rec.x, rec.y);
+                let sr = Rect::from_min_size(
+                    pos2(origin.x + sx, origin.y + sy),
+                    vec2(rec.width * state.zoom, rec.height * state.zoom),
+                );
+                let handles = rotated_handle_positions(sr, rec.rotation);
+                let is_line = matches!(&rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
+                use crate::state::ResizeHandle;
+                // 1. Resize handles (8px hit radius)
+                for (h, spt) in &handles {
+                    if is_line && !matches!(h, ResizeHandle::Left | ResizeHandle::Right) {
+                        continue;
+                    }
+                    if spt.distance(mp) <= 8.0 {
+                        ui.ctx().set_cursor_icon(resize_cursor_for_handle(*h, rec.rotation));
+                        *cursor_set = true;
+                        return;
+                    }
+                }
+                // 2. Rotation zones: 10–24px outside corner handles
+                //    Use AllScroll (4-directional arrows) as the rotation indicator.
+                if !is_line {
+                    for idx in [0usize, 2, 5, 7] {
+                        let cp = handles[idx].1;
+                        let d = cp.distance(mp);
+                        if d >= 10.0 && d <= 24.0 {
+                            ui.ctx().set_cursor_icon(CursorIcon::AllScroll);
+                            *cursor_set = true;
+                            return;
+                        }
+                    }
+                }
+                // 3. Body → move cursor (unless locked)
+                if sr.contains(mp) && !rec.locked {
+                    let icon = if alt_held { CursorIcon::Copy } else { CursorIcon::Move };
+                    ui.ctx().set_cursor_icon(icon);
+                    *cursor_set = true;
+                }
+            };
+
+            let mut cursor_set = false;
+
+            // First priority: selected layer(s)
             if let Some(&sel_id) = state.selection.first() {
                 if let Some(rec) = state.layers.get(&sel_id) {
-                    let (sx, sy) = state.world_to_screen(rec.x, rec.y);
-                    let sr = Rect::from_min_size(pos2(origin.x + sx, origin.y + sy),
-                        vec2(rec.width * state.zoom, rec.height * state.zoom));
-                    let handles = rotated_handle_positions(sr, rec.rotation);
-                    let is_line_sel = matches!(&rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
-                    let mut done = false;
-                    // Resize handles (8px hit radius)
-                    for (h, spt) in handles {
-                        // Line/Arrow only allow Left/Right width handles
-                        use crate::state::ResizeHandle;
-                        if is_line_sel && !matches!(h, ResizeHandle::Left | ResizeHandle::Right) {
-                            continue;
-                        }
-                        if spt.distance(mp) <= 8.0 {
-                            ui.ctx().set_cursor_icon(resize_cursor_for_handle(h, rec.rotation));
-                            done = true;
-                            break;
-                        }
-                    }
-                    if !done && !is_line_sel {
-                        // Rotation zones: 10–24px from corner handles
-                        for idx in [0usize, 2, 5, 7] {
-                            let cp = handles[idx].1;
-                            let d = cp.distance(mp);
-                            if d >= 10.0 && d <= 24.0 {
-                                ui.ctx().set_cursor_icon(CursorIcon::Grab);
-                                done = true;
-                                break;
-                            }
-                        }
-                    }
-                    if !done && sr.contains(mp) {
-                        // Inside the selected layer → move cursor (Alt = copy cursor)
-                        if !rec.locked {
-                            let icon = if alt_held { CursorIcon::Copy } else { CursorIcon::Move };
-                            ui.ctx().set_cursor_icon(icon);
-                        }
-                    }
+                    cursor_for_layer(rec, &mut cursor_set);
                     // Alt held over any hovered non-selected layer → copy cursor
                     if alt_held {
                         if let Some(hl) = state.hovered_layer {
                             if !state.layers.get(&hl).map(|r| r.locked).unwrap_or(true) {
                                 ui.ctx().set_cursor_icon(CursorIcon::Copy);
+                                cursor_set = true;
                             }
                         }
                     }
                 }
+            }
+
+            // Second priority: hovered but unselected layer — show resize/move cursors
+            // so every focusable element gives feedback before the user clicks to select.
+            if !cursor_set {
+                if let Some(hl) = state.hovered_layer {
+                    if !state.selection.contains(&hl) {
+                        if let Some(rec) = state.layers.get(&hl) {
+                            cursor_for_layer(rec, &mut cursor_set);
+                        }
+                    }
+                }
+            }
+
+            // If nothing set the cursor explicitly, restore to default arrow.
+            if !cursor_set {
+                ui.ctx().set_cursor_icon(CursorIcon::Default);
             }
         }
     }
