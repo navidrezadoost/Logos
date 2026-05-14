@@ -1914,12 +1914,36 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
             }
 
             // Second priority: hovered but unselected layer — show resize/move cursors
-            // so every focusable element gives feedback before the user clicks to select.
+            // (no rotation zone, since rotation handles only appear on the selected element).
             if !cursor_set {
                 if let Some(hl) = state.hovered_layer {
                     if !state.selection.contains(&hl) {
                         if let Some(rec) = state.layers.get(&hl) {
-                            cursor_for_layer(rec, &mut cursor_set);
+                            let (sx, sy) = state.world_to_screen(rec.x, rec.y);
+                            let sr = Rect::from_min_size(
+                                pos2(origin.x + sx, origin.y + sy),
+                                vec2(rec.width * state.zoom, rec.height * state.zoom),
+                            );
+                            let handles = rotated_handle_positions(sr, rec.rotation);
+                            use crate::state::ResizeHandle;
+                            let is_line = matches!(&rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
+                            let mut found = false;
+                            for (h, spt) in &handles {
+                                if is_line && !matches!(h, ResizeHandle::Left | ResizeHandle::Right) {
+                                    continue;
+                                }
+                                if spt.distance(mp) <= 8.0 {
+                                    ui.ctx().set_cursor_icon(resize_cursor_for_handle(*h, rec.rotation));
+                                    cursor_set = true;
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if !found && sr.contains(mp) && !rec.locked {
+                                let icon = if alt_held { CursorIcon::Copy } else { CursorIcon::Move };
+                                ui.ctx().set_cursor_icon(icon);
+                                cursor_set = true;
+                            }
                         }
                     }
                 }

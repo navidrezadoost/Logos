@@ -628,7 +628,9 @@ pub(crate) fn handle_tool_input(
                                 let d  = cp.distance(mp);
                                 if d >= 10.0 && d <= 24.0 {
                                     let rec = &state.layers[&sel_id];
-                                    let screen_cx = to_screen(rec.x + rec.width * 0.5, rec.y + rec.height * 0.5, state);
+                                    // Use the screen rect centre as pivot — correct for nested
+                                    // layers where rec.x/y are parent-relative, not world.
+                                    let screen_cx = sr.center();
                                     state.drag.active               = true;
                                     state.drag.rotating             = true;
                                     state.drag.layer_id             = Some(sel_id);
