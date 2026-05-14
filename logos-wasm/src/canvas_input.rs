@@ -1040,58 +1040,53 @@ pub(crate) fn handle_tool_input(
                                     };
 
                                     // ── Shift: aspect-ratio lock, opposite corner/edge stays fixed ──
-                                    // The dragged handle moves freely; the opposite anchor is pinned
-                                    // exactly as in normal resize. Shift just clamps the free axis so
-                                    // the W:H ratio matches the original.
+                                    // For corners we project the pointer displacement onto the shape's
+                                    // original diagonal direction (dot product) to get a single smooth
+                                    // scale factor — no axis-dominance check that could flip frames.
+                                    // For edge handles we scale the free axis and clamp the other.
                                     if shift_held_move && ow > 0.0 && oh > 0.0 {
-                                        let ratio = ow / oh; // original aspect ratio
+                                        let ratio  = ow / oh;            // original W:H
+                                        let diag2  = ow * ow + oh * oh;  // |diag|²
                                         match handle {
-                                            // Corner handles: constrain so new_w/new_h == ratio.
-                                            // Use whichever axis changed more as the driver; adjust
-                                            // the other axis to match, anchoring from the fixed corner.
+                                            ResizeHandle::BottomRight => {
+                                                // fixed = (ox, oy); pointer delta from orig dragged corner = (dx, dy)
+                                                let proj = ((ow + dx) * ow + (oh + dy) * oh) / diag2;
+                                                nw = (ow * proj).max(4.0);
+                                                nh = (oh * proj).max(4.0);
+                                                // nx, ny unchanged (top-left pinned)
+                                            }
                                             ResizeHandle::TopLeft => {
-                                                if (nw - ow).abs() >= (nh - oh).abs() {
-                                                    nh = (nw / ratio).max(4.0);
-                                                    ny = (oy + oh) - nh;
-                                                } else {
-                                                    nw = (nh * ratio).max(4.0);
-                                                    nx = (ox + ow) - nw;
-                                                }
+                                                // fixed = (ox+ow, oy+oh); pointer delta from orig = (dx, dy)
+                                                // vector from fixed to dragged: was (-ow,-oh), now (-ow+dx,-oh+dy)
+                                                let proj = ((ow - dx) * ow + (oh - dy) * oh) / diag2;
+                                                nw = (ow * proj).max(4.0);
+                                                nh = (oh * proj).max(4.0);
+                                                nx = (ox + ow) - nw;
+                                                ny = (oy + oh) - nh;
                                             }
                                             ResizeHandle::TopRight => {
-                                                if (nw - ow).abs() >= (nh - oh).abs() {
-                                                    nh = (nw / ratio).max(4.0);
-                                                    ny = (oy + oh) - nh; // bottom stays
-                                                } else {
-                                                    nw = (nh * ratio).max(4.0);
-                                                    // left (nx = ox) stays
-                                                }
+                                                // fixed = (ox, oy+oh); vector was (ow,-oh), now (ow+dx,-oh+dy)
+                                                let proj = ((ow + dx) * ow + (oh - dy) * oh) / diag2;
+                                                nw = (ow * proj).max(4.0);
+                                                nh = (oh * proj).max(4.0);
+                                                ny = (oy + oh) - nh; // bottom stays
+                                                // nx = ox stays
                                             }
                                             ResizeHandle::BottomLeft => {
-                                                if (nw - ow).abs() >= (nh - oh).abs() {
-                                                    nh = (nw / ratio).max(4.0);
-                                                    // top (ny = oy) stays
-                                                } else {
-                                                    nw = (nh * ratio).max(4.0);
-                                                    nx = (ox + ow) - nw; // right stays
-                                                }
+                                                // fixed = (ox+ow, oy); vector was (-ow,oh), now (-ow+dx,oh+dy)
+                                                let proj = ((ow - dx) * ow + (oh + dy) * oh) / diag2;
+                                                nw = (ow * proj).max(4.0);
+                                                nh = (oh * proj).max(4.0);
+                                                nx = (ox + ow) - nw; // right stays
+                                                // ny = oy stays
                                             }
-                                            ResizeHandle::BottomRight => {
-                                                if (nw - ow).abs() >= (nh - oh).abs() {
-                                                    nh = (nw / ratio).max(4.0);
-                                                } else {
-                                                    nw = (nh * ratio).max(4.0);
-                                                }
-                                            }
-                                            // Edge handles: clamp free axis to maintain ratio,
-                                            // opposite edge stays pinned (already set above).
+                                            // Edge handles: clamp the other axis to maintain ratio;
+                                            // the original anchored edge stays exactly as set above.
                                             ResizeHandle::Left | ResizeHandle::Right => {
                                                 nh = (nw / ratio).max(4.0);
-                                                // keep ny = oy (top pinned)
                                             }
                                             ResizeHandle::Top | ResizeHandle::Bottom => {
                                                 nw = (nh * ratio).max(4.0);
-                                                // keep nx = ox (left pinned)
                                             }
                                         }
                                     }

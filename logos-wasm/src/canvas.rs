@@ -777,6 +777,9 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     }
 
                     // ── Frame/Component border ────────────────────────────────
+                    // Skip the plain frame border when selected — the selection ring (drawn
+                    // later) already outlines the frame. Keep it for Components/Instances
+                    // (they always show their tinted brand border) and when a child is selected.
                     let frame_border_col = if is_comp {
                         Color32::from_rgba_unmultiplied(139, 92, 246, 180) // vivid purple
                     } else if is_inst {
@@ -786,7 +789,10 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     } else {
                         Color32::from_gray(80)
                     };
-                    painter.rect_stroke(rect, rounding, Stroke::new(if is_comp { 1.5 } else { 1.0 }, frame_border_col));
+                    let draw_body_border = is_comp || is_inst || has_selected_child || !this_selected;
+                    if draw_body_border {
+                        painter.rect_stroke(rect, rounding, Stroke::new(if is_comp { 1.5 } else { 1.0 }, frame_border_col));
+                    }
 
                     // ── Dashed border when overflow is visible (clip_content=false) ──
                     if !rec.clip_content && !state.frame_children(id).is_empty() {
