@@ -72,7 +72,6 @@ pub(crate) fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f3
     let size    = (6.0_f32 * zoom.sqrt()).clamp(4.0, 10.0);
     let col     = Color32::WHITE;
     let border  = Stroke::new(1.5, Color32::from_rgb(133, 96, 255));
-    let rot_col = Stroke::new(1.5, Color32::from_rgba_unmultiplied(133, 96, 255, 160));
 
     let handles = rotated_handle_positions(rect, rotation);
 
@@ -87,20 +86,8 @@ pub(crate) fn draw_selection_handles(painter: &Painter, rect: Rect, rotation: f3
         );
     }
 
-    // Draw rotation arc indicators outside the four corners — skip for lines.
-    if !line_mode {
-        // Indices 0=TL, 2=TR, 5=BL, 7=BR
-        let rot_radius = size * 1.8;
-        for idx in [0usize, 2, 5, 7] {
-            let (_, cpt) = handles[idx];
-            let outward = (cpt - rect.center()).normalized() * rot_radius;
-            let arc_center = cpt + outward;
-            painter.circle_stroke(arc_center, size * 0.6, rot_col);
-            // Small curved arrow stub — just two tick lines to imply rotation
-            let perp = vec2(-outward.y, outward.x).normalized() * size * 0.5;
-            painter.line_segment([arc_center - perp, arc_center + perp], rot_col);
-        }
-    }
+    // Rotation arc indicators have been removed. The AllScroll cursor that appears
+    // when hovering 10-24px outside corner handles is the only rotation affordance.
 }
 
 /// Section-specific selection: 4 corner handles only, no mid-edge, no rotation arcs.

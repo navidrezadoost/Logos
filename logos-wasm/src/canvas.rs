@@ -628,7 +628,18 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                 let fw = section_wx + crec.x;
                                 let fwy = section_wy + crec.y;
                                 let gc_clip = if crec.clip_content {
-                                    child_painter.with_clip_rect(crect)
+                                    // Use rotated AABB so the clip follows the rotated sub-frame.
+                                    let clip_r = if crec.rotation.abs() > 0.001 {
+                                        let pts = rotated_corners(crect, crec.rotation);
+                                        let mix = pts.iter().map(|p| p.x).fold(f32::INFINITY,     f32::min);
+                                        let miy = pts.iter().map(|p| p.y).fold(f32::INFINITY,     f32::min);
+                                        let mxx = pts.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+                                        let mxy = pts.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+                                        Rect::from_min_max(pos2(mix, miy), pos2(mxx, mxy))
+                                    } else {
+                                        crect
+                                    };
+                                    child_painter.with_clip_rect(clip_r)
                                 } else {
                                     child_painter.with_clip_rect(child_painter.clip_rect())
                                 };
@@ -715,7 +726,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                     // Selection / hover for grandchild
                                     if state.is_selected(gcid) {
                                         let is_ln = matches!(grec.layer_type, LayerType::Line | LayerType::Arrow { .. });
-                                        painter.rect_stroke(grect, grnd, Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
+                                        paint_rect_stroked(&painter, grect, grnd, grec.rotation, Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
                                         draw_selection_handles(&painter, grect, grec.rotation, state.zoom, is_ln);
                                         if !is_ln {
                                             let dp = painter.with_clip_rect(painter.clip_rect().expand(40.0));
@@ -732,7 +743,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                             dp.galley(dpos+vec2(1.0,0.0), dg, dc);
                                         }
                                     } else if state.hovered_layer == Some(gcid) {
-                                        gc_clip.rect_stroke(grect, grnd, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
+                                        paint_rect_stroked(&gc_clip, grect, grnd, grec.rotation, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
                                     }
                                 }
                             }
@@ -745,14 +756,14 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         }
                         // Selection / hover ring
                         if state.is_selected(cid) {
-                            child_painter.rect_stroke(crect, crounding,
+                            paint_rect_stroked(&child_painter, crect, crounding, crec.rotation,
                                 Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
                             let is_line_child = matches!(crec.layer_type,
                                 LayerType::Line | LayerType::Arrow { .. });
                             draw_selection_handles(&child_painter, crect, crec.rotation,
                                 state.zoom, is_line_child);
                         } else if state.hovered_layer == Some(cid) {
-                            child_painter.rect_stroke(crect, crounding,
+                            paint_rect_stroked(&child_painter, crect, crounding, crec.rotation,
                                 Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
                         }
                     }
@@ -863,8 +874,21 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     // local/frame-relative coords) can be correctly transformed.
                     let parent_wx = rec.x;
                     let parent_wy = rec.y;
+                    // When clip_content is true, clip to the rotated frame's AABB so the
+                    // clip rect rotates with the frame. egui only supports axis-aligned
+                    // clip rects, so we use the tight AABB around the rotated corners.
                     let child_painter = if clip_content {
-                        painter.with_clip_rect(rect)
+                        let clip_r = if rotation.abs() > 0.001 {
+                            let pts = rotated_corners(rect, rotation);
+                            let min_x = pts.iter().map(|p| p.x).fold(f32::INFINITY,     f32::min);
+                            let min_y = pts.iter().map(|p| p.y).fold(f32::INFINITY,     f32::min);
+                            let max_x = pts.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+                            let max_y = pts.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
+                            Rect::from_min_max(pos2(min_x, min_y), pos2(max_x, max_y))
+                        } else {
+                            rect
+                        };
+                        painter.with_clip_rect(clip_r)
                     } else {
                         painter.with_clip_rect(painter.clip_rect())
                     };
@@ -962,7 +986,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                             let is_line_child = matches!(crec.layer_type, LayerType::Line | LayerType::Arrow { .. });
                             // Use unclipped `painter` so the selection ring and handles are never
                             // cropped by the frame's clip rect (clip_content=true).
-                            painter.rect_stroke(crect, crounding, Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
+                            paint_rect_stroked(&painter, crect, crounding, crec.rotation,
+                                Stroke::new(2.0, Color32::from_rgb(100, 91, 255)));
                             draw_selection_handles(&painter, crect, crec.rotation, state.zoom, is_line_child);
                             // Dimension pill / resize rail below the child
                             if !is_line_child {
@@ -1021,7 +1046,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                 }
                             }
                         } else if state.hovered_layer == Some(cid) {
-                            child_painter.rect_stroke(crect, crounding, Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
+                            paint_rect_stroked(&painter, crect, crounding, crec.rotation,
+                                Stroke::new(1.0, Color32::from_rgb(30, 180, 255)));
                             // Dim pill below child on hover
                             let is_line_child2 = matches!(crec.layer_type, LayerType::Line | LayerType::Arrow { .. });
                             if !is_line_child2 {
