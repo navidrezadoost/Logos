@@ -1039,45 +1039,59 @@ pub(crate) fn handle_tool_input(
                                         ResizeHandle::BottomRight => (ox, oy, (ow+dx).max(4.0), (oh+dy).max(4.0)),
                                     };
 
-                                    // ── Shift: proportional resize from center (all sides equally) ──
-                                    // On corner handles: pick the dominant axis delta, expand/shrink
-                                    // both dimensions by the same absolute amount, keeping the shape
-                                    // centred on its original centre point.
-                                    // On edge handles: expand both edges of the moved axis equally
-                                    // (i.e. the opposite edge also moves inward/outward by the same
-                                    // amount, so the centre stays fixed).
-                                    if shift_held_move {
-                                        let cx = ox + ow * 0.5;
-                                        let cy = oy + oh * 0.5;
+                                    // ── Shift: aspect-ratio lock, opposite corner/edge stays fixed ──
+                                    // The dragged handle moves freely; the opposite anchor is pinned
+                                    // exactly as in normal resize. Shift just clamps the free axis so
+                                    // the W:H ratio matches the original.
+                                    if shift_held_move && ow > 0.0 && oh > 0.0 {
+                                        let ratio = ow / oh; // original aspect ratio
                                         match handle {
-                                            ResizeHandle::TopLeft
-                                            | ResizeHandle::TopRight
-                                            | ResizeHandle::BottomLeft
-                                            | ResizeHandle::BottomRight => {
-                                                // Use whichever axis moved more as the driving delta.
-                                                let dw = nw - ow;   // signed size change on width axis
-                                                let dh = nh - oh;   // signed size change on height axis
-                                                let d = if dw.abs() >= dh.abs() { dw } else { dh };
-                                                let new_w = (ow + d).max(4.0);
-                                                let new_h = (oh + d).max(4.0);
-                                                nx = cx - new_w * 0.5;
-                                                ny = cy - new_h * 0.5;
-                                                nw = new_w;
-                                                nh = new_h;
+                                            // Corner handles: constrain so new_w/new_h == ratio.
+                                            // Use whichever axis changed more as the driver; adjust
+                                            // the other axis to match, anchoring from the fixed corner.
+                                            ResizeHandle::TopLeft => {
+                                                if (nw - ow).abs() >= (nh - oh).abs() {
+                                                    nh = (nw / ratio).max(4.0);
+                                                    ny = (oy + oh) - nh;
+                                                } else {
+                                                    nw = (nh * ratio).max(4.0);
+                                                    nx = (ox + ow) - nw;
+                                                }
                                             }
+                                            ResizeHandle::TopRight => {
+                                                if (nw - ow).abs() >= (nh - oh).abs() {
+                                                    nh = (nw / ratio).max(4.0);
+                                                    ny = (oy + oh) - nh; // bottom stays
+                                                } else {
+                                                    nw = (nh * ratio).max(4.0);
+                                                    // left (nx = ox) stays
+                                                }
+                                            }
+                                            ResizeHandle::BottomLeft => {
+                                                if (nw - ow).abs() >= (nh - oh).abs() {
+                                                    nh = (nw / ratio).max(4.0);
+                                                    // top (ny = oy) stays
+                                                } else {
+                                                    nw = (nh * ratio).max(4.0);
+                                                    nx = (ox + ow) - nw; // right stays
+                                                }
+                                            }
+                                            ResizeHandle::BottomRight => {
+                                                if (nw - ow).abs() >= (nh - oh).abs() {
+                                                    nh = (nw / ratio).max(4.0);
+                                                } else {
+                                                    nw = (nh * ratio).max(4.0);
+                                                }
+                                            }
+                                            // Edge handles: clamp free axis to maintain ratio,
+                                            // opposite edge stays pinned (already set above).
                                             ResizeHandle::Left | ResizeHandle::Right => {
-                                                let dw = nw - ow;
-                                                nw = (ow + dw).max(4.0);
-                                                nh = (oh + dw).max(4.0);
-                                                nx = cx - nw * 0.5;
-                                                ny = cy - nh * 0.5;
+                                                nh = (nw / ratio).max(4.0);
+                                                // keep ny = oy (top pinned)
                                             }
                                             ResizeHandle::Top | ResizeHandle::Bottom => {
-                                                let dh = nh - oh;
-                                                nw = (ow + dh).max(4.0);
-                                                nh = (oh + dh).max(4.0);
-                                                nx = cx - nw * 0.5;
-                                                ny = cy - nh * 0.5;
+                                                nw = (nh * ratio).max(4.0);
+                                                // keep nx = ox (left pinned)
                                             }
                                         }
                                     }
