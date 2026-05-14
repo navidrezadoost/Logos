@@ -3,6 +3,48 @@
 use eframe::egui::*;
 use crate::state::{EditorState, LayerRecord, BlendMode, ResizeHandle};
 
+// ── Rotation-aware rect painting helpers ─────────────────────────────────────
+
+/// Draw a filled rectangle that is correctly rotated around its own centre.
+/// When `rotation` is near zero the fast `rect_filled` path is used instead.
+pub(crate) fn paint_rect_filled(
+    painter: &Painter,
+    rect: Rect,
+    rounding: Rounding,
+    rotation: f32,
+    color: Color32,
+) {
+    if rotation.abs() < 0.001 {
+        painter.rect_filled(rect, rounding, color);
+    } else {
+        let pts = rotated_corners(rect, rotation);
+        painter.add(Shape::convex_polygon(pts, color, Stroke::NONE));
+    }
+}
+
+/// Draw a stroked (outline-only) rectangle that is correctly rotated around
+/// its own centre.  When `rotation` is near zero the fast `rect_stroke` path
+/// is used so rounding is preserved.
+pub(crate) fn paint_rect_stroked(
+    painter: &Painter,
+    rect: Rect,
+    rounding: Rounding,
+    rotation: f32,
+    stroke: Stroke,
+) {
+    if rotation.abs() < 0.001 {
+        painter.rect_stroke(rect, rounding, stroke);
+    } else {
+        let pts = rotated_corners(rect, rotation);
+        painter.add(Shape::Path(epaint::PathShape {
+            points: pts,
+            closed: true,
+            fill: Color32::TRANSPARENT,
+            stroke: stroke.into(),
+        }));
+    }
+}
+
 // ── Canvas helpers ────────────────────────────────────────────────────────────
 
 /// Generate the outline points of a rounded rectangle with per-corner radii

@@ -466,8 +466,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
 
                     // Draw body (skip when collapsed — just show the label pill)
                     if !collapsed {
-                        painter.rect_filled(rect, Rounding::ZERO, body_fill);
-                        painter.rect_stroke(rect, Rounding::ZERO,
+                        paint_rect_filled(&painter, rect, Rounding::ZERO, rotation, body_fill);
+                        paint_rect_stroked(&painter, rect, Rounding::ZERO, rotation,
                             Stroke::new(border_w, border_col));
                     }
 
@@ -606,13 +606,13 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                             | LayerType::Component
                             | LayerType::ComponentInstance { .. } => {
                                 let is_sub_comp = matches!(crec.layer_type, LayerType::Component);
-                                child_painter.rect_filled(crect, crounding, cfill);
+                                paint_rect_filled(&child_painter, crect, crounding, crec.rotation, cfill);
                                 let sub_border_col = if is_sub_comp {
                                     Color32::from_rgba_unmultiplied(139, 92, 246, 180)
                                 } else {
                                     Color32::from_gray(80)
                                 };
-                                child_painter.rect_stroke(crect, crounding,
+                                paint_rect_stroked(&child_painter, crect, crounding, crec.rotation,
                                     Stroke::new(if is_sub_comp { 1.5 } else { 1.0 }, sub_border_col));
                                 // Name label above sub-frame
                                 {
@@ -706,9 +706,9 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                                 points: pts, closed: true, fill: gfill, stroke: gstroke.into() }));
                                         }
                                         _ => {
-                                            gc_clip.rect_filled(grect, grnd, gfill);
+                                            paint_rect_filled(&gc_clip, grect, grnd, grec.rotation, gfill);
                                             if grec.stroke_width > 0.0 {
-                                                gc_clip.rect_stroke(grect, grnd, gstroke);
+                                                paint_rect_stroked(&gc_clip, grect, grnd, grec.rotation, gstroke);
                                             }
                                         }
                                     }
@@ -737,9 +737,9 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                                 }
                             }
                             _ => {
-                                child_painter.rect_filled(crect, crounding, cfill);
+                                paint_rect_filled(&child_painter, crect, crounding, crec.rotation, cfill);
                                 if crec.stroke_width > 0.0 {
-                                    child_painter.rect_stroke(crect, crounding, cstroke);
+                                    paint_rect_stroked(&child_painter, crect, crounding, crec.rotation, cstroke);
                                 }
                             }
                         }
@@ -767,12 +767,12 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
 
                     // ── Background fill ──────────────────────────────────────
                     // Component: add purple overlay on top of normal fill
-                    painter.rect_filled(rect, rounding, fill);
+                    paint_rect_filled(&painter, rect, rounding, rotation, fill);
                     if is_comp {
-                        painter.rect_filled(rect, rounding,
+                        paint_rect_filled(&painter, rect, rounding, rotation,
                             Color32::from_rgba_unmultiplied(139, 92, 246, 18)); // purple tint
                     } else if is_inst {
-                        painter.rect_filled(rect, rounding,
+                        paint_rect_filled(&painter, rect, rounding, rotation,
                             Color32::from_rgba_unmultiplied(139, 92, 246, 10)); // lighter tint
                     }
 
@@ -791,7 +791,8 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                     };
                     let draw_body_border = is_comp || is_inst || has_selected_child || !this_selected;
                     if draw_body_border {
-                        painter.rect_stroke(rect, rounding, Stroke::new(if is_comp { 1.5 } else { 1.0 }, frame_border_col));
+                        paint_rect_stroked(&painter, rect, rounding, rotation,
+                            Stroke::new(if is_comp { 1.5 } else { 1.0 }, frame_border_col));
                     }
 
                     // ── Dashed border when overflow is visible (clip_content=false) ──
@@ -900,12 +901,14 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                         match &crec.layer_type {
                             LayerType::Rect | LayerType::Frame
                             | LayerType::Component | LayerType::ComponentInstance { .. } => {
-                                child_painter.rect_filled(crect, crounding, cfill);
+                                paint_rect_filled(&child_painter, crect, crounding, crec.rotation, cfill);
                                 if is_comp || matches!(crec.layer_type, LayerType::Component) {
-                                    child_painter.rect_filled(crect, crounding,
+                                    paint_rect_filled(&child_painter, crect, crounding, crec.rotation,
                                         Color32::from_rgba_unmultiplied(139, 92, 246, 14));
                                 }
-                                if crec.stroke_width > 0.0 { child_painter.rect_stroke(crect, crounding, cstroke); }
+                                if crec.stroke_width > 0.0 {
+                                    paint_rect_stroked(&child_painter, crect, crounding, crec.rotation, cstroke);
+                                }
                             }
                             LayerType::Ellipse { arc_start, arc_end, inner_ratio } => {
                                 child_painter.add(ellipse_arc_path(crect, *arc_start, *arc_end, *inner_ratio, cfill, cstroke));
@@ -1041,7 +1044,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                 }
                 _ => {
                     // Separate fill + stroke so stroke position (inside/outside/center) works.
-                    painter.rect_filled(rect, rounding, fill);
+                    paint_rect_filled(&painter, rect, rounding, rotation, fill);
                     if rec.stroke_width > 0.0 {
                         let half_sw = rec.stroke_width * state.zoom * 0.5;
                         let stroke_rect = match rec.stroke_position {
@@ -1049,7 +1052,7 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
                             StrokePosition::Inside  => rect.shrink(half_sw),
                             StrokePosition::Outside => rect.expand(half_sw),
                         };
-                        painter.rect_stroke(stroke_rect, rounding, stroke);
+                        paint_rect_stroked(&painter, stroke_rect, rounding, rotation, stroke);
                     }
                 }
             }
