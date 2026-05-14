@@ -1877,106 +1877,97 @@ pub(crate) fn canvas_panel(ui: &mut Ui, state: &mut EditorState, ctx_menu_layer:
     // ── Cursor icon based on what the pointer is hovering ─────────────────
     if matches!(state.tool, Tool::Select | Tool::Scale) {
         if let Some(mp) = mp_screen {
-            // Helper: given a layer record, set the cursor based on pointer proximity to
-            // its handles / rotation zones / body. Returns true if a non-default cursor
-            // was set so callers can avoid overwriting it.
-            let cursor_for_layer = |rec: &crate::state::LayerRecord, cursor_set: &mut bool| {
-                let (sx, sy) = state.world_to_screen(rec.x, rec.y);
-                let sr = Rect::from_min_size(
-                    pos2(origin.x + sx, origin.y + sy),
-                    vec2(rec.width * state.zoom, rec.height * state.zoom),
-                );
-                let handles = rotated_handle_positions(sr, rec.rotation);
+            // Compute the accurate screen rect for any layer by walking the parent chain.
+            // This is essential for nested layers (Frame/Section children) whose rec.x/y
+            // are parent-relative; we must resolve the true world position first.
+            let layer_sr = |id: uuid::Uuid| -> Option<(Rect, f32)> {
+                state.layers.get(&id).map(|r| {
+                    let (wx, wy) = state.layer_world_pos(id);
+                    let (sx, sy) = state.world_to_screen(wx, wy);
+                    let sr = Rect::from_min_size(
+                        pos2(origin.x + sx, origin.y + sy),
+                        vec2(r.width * state.zoom, r.height * state.zoom),
+                    );
+                    (sr, r.rotation)
+                })
+            };
+
+            // Test one layer: returns the cursor that should be shown, or None if the
+            // pointer is not in any meaningful zone of this layer.
+            //
+            // Zones (in priority order):
+            //   1. Within 8px of any resize handle          → directional resize cursor
+            //   2. 10–24px outside a corner handle          → AllScroll (rotation)
+            //   3. Inside the body and not locked           → Move (or Copy with Alt)
+            //   4. Otherwise                                → None (caller tries next layer)
+            let cursor_for = |id: uuid::Uuid, include_rotation_zone: bool| -> Option<CursorIcon> {
+                let (sr, rotation) = layer_sr(id)?;
+                let rec = state.layers.get(&id)?;
                 let is_line = matches!(&rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
                 use crate::state::ResizeHandle;
-                // 1. Resize handles (8px hit radius)
+                let handles = rotated_handle_positions(sr, rotation);
+
+                // Zone 1 — resize handle (8 px hit radius)
                 for (h, spt) in &handles {
                     if is_line && !matches!(h, ResizeHandle::Left | ResizeHandle::Right) {
                         continue;
                     }
                     if spt.distance(mp) <= 8.0 {
-                        ui.ctx().set_cursor_icon(resize_cursor_for_handle(*h, rec.rotation));
-                        *cursor_set = true;
-                        return;
+                        return Some(resize_cursor_for_handle(*h, rotation));
                     }
                 }
-                // 2. Rotation zones: 10–24px outside corner handles
-                //    Use AllScroll (4-directional arrows) as the rotation indicator.
-                if !is_line {
+
+                // Zone 2 — rotation ring (10–24 px outside each corner handle)
+                if include_rotation_zone && !is_line {
                     for idx in [0usize, 2, 5, 7] {
-                        let cp = handles[idx].1;
-                        let d = cp.distance(mp);
+                        let d = handles[idx].1.distance(mp);
                         if d >= 10.0 && d <= 24.0 {
-                            ui.ctx().set_cursor_icon(CursorIcon::AllScroll);
-                            *cursor_set = true;
-                            return;
+                            return Some(CursorIcon::AllScroll);
                         }
                     }
                 }
-                // 3. Body → move cursor (unless locked)
+
+                // Zone 3 — body (move / copy)
                 if sr.contains(mp) && !rec.locked {
-                    let icon = if alt_held { CursorIcon::Copy } else { CursorIcon::Move };
-                    ui.ctx().set_cursor_icon(icon);
-                    *cursor_set = true;
+                    return Some(if alt_held { CursorIcon::Copy } else { CursorIcon::Move });
                 }
+
+                None
             };
 
-            let mut cursor_set = false;
-
-            // First priority: selected layer(s)
+            // Priority 1: selected element — shows all three zones including rotation.
+            let mut cursor_decided = false;
             if let Some(&sel_id) = state.selection.first() {
-                if let Some(rec) = state.layers.get(&sel_id) {
-                    cursor_for_layer(rec, &mut cursor_set);
-                    // Alt held over any hovered non-selected layer → copy cursor
-                    if alt_held {
-                        if let Some(hl) = state.hovered_layer {
-                            if !state.layers.get(&hl).map(|r| r.locked).unwrap_or(true) {
-                                ui.ctx().set_cursor_icon(CursorIcon::Copy);
-                                cursor_set = true;
-                            }
+                if let Some(icon) = cursor_for(sel_id, true) {
+                    ui.ctx().set_cursor_icon(icon);
+                    cursor_decided = true;
+                } else if alt_held {
+                    // Alt held and pointer is outside selected element → copy hint if
+                    // there is any other hovered layer underneath.
+                    if let Some(hl) = state.hovered_layer {
+                        if hl != sel_id && !state.layers.get(&hl).map(|r| r.locked).unwrap_or(true) {
+                            ui.ctx().set_cursor_icon(CursorIcon::Copy);
+                            cursor_decided = true;
                         }
                     }
                 }
             }
 
-            // Second priority: hovered but unselected layer — show resize/move cursors
-            // (no rotation zone, since rotation handles only appear on the selected element).
-            if !cursor_set {
+            // Priority 2: hovered but unselected element — resize + body zones only
+            // (no rotation zone; rotation handles are only shown for the selected layer).
+            if !cursor_decided {
                 if let Some(hl) = state.hovered_layer {
-                    if !state.selection.contains(&hl) {
-                        if let Some(rec) = state.layers.get(&hl) {
-                            let (sx, sy) = state.world_to_screen(rec.x, rec.y);
-                            let sr = Rect::from_min_size(
-                                pos2(origin.x + sx, origin.y + sy),
-                                vec2(rec.width * state.zoom, rec.height * state.zoom),
-                            );
-                            let handles = rotated_handle_positions(sr, rec.rotation);
-                            use crate::state::ResizeHandle;
-                            let is_line = matches!(&rec.layer_type, LayerType::Line | LayerType::Arrow { .. });
-                            let mut found = false;
-                            for (h, spt) in &handles {
-                                if is_line && !matches!(h, ResizeHandle::Left | ResizeHandle::Right) {
-                                    continue;
-                                }
-                                if spt.distance(mp) <= 8.0 {
-                                    ui.ctx().set_cursor_icon(resize_cursor_for_handle(*h, rec.rotation));
-                                    cursor_set = true;
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if !found && sr.contains(mp) && !rec.locked {
-                                let icon = if alt_held { CursorIcon::Copy } else { CursorIcon::Move };
-                                ui.ctx().set_cursor_icon(icon);
-                                cursor_set = true;
-                            }
+                    if state.selection.first() != Some(&hl) {
+                        if let Some(icon) = cursor_for(hl, false) {
+                            ui.ctx().set_cursor_icon(icon);
+                            cursor_decided = true;
                         }
                     }
                 }
             }
 
-            // If nothing set the cursor explicitly, restore to default arrow.
-            if !cursor_set {
+            // Fallback: pointer is over empty canvas → revert to the tool default cursor.
+            if !cursor_decided {
                 ui.ctx().set_cursor_icon(CursorIcon::Default);
             }
         }
