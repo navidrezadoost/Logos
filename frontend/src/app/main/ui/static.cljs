@@ -50,7 +50,7 @@
      [:button
       {:class (stl/css :exception-header)
        :on-click on-nav-root}
-      [:> raw-svg* {:id "penpot-logo-icon" :class (stl/css :penpot-logo)}]
+      [:img {:src "images/logos-logo.png" :style {:width "80px" :height "auto" :object-fit "contain"} :alt "Logos"}]
       (when profile-id
         [:div {:class (stl/css :go-back-wrapper)}
          [:> icon* {:icon-id i/arrow :class (stl/css :back-arrow)}] [:span (tr "not-found.no-permission.go-dashboard")]])]
@@ -129,7 +129,8 @@
                  :on-click on-nav-root}
         deprecated-icon/close]]
       [:div {:class (stl/css :login)}
-       [:div {:class (stl/css :logo)} deprecated-icon/logo]
+       [:div {:class (stl/css :logo)}
+        [:img {:src "images/logos-logo.png" :style {:width "120px" :height "auto" :object-fit "contain"} :alt "Logos"}]]
 
        (case @current-section
          :login

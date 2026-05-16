@@ -291,7 +291,7 @@
                     :expires expires
                     :value token
                     :comment comment
-                    :same-site (if cors? :none (if strict? :strict :lax))
+                    :same-site (if (and cors? secure?) :none (if strict? :strict :lax))
                     :secure secure?}]
     (update response ::yres/cookies assoc name cookie)))
 

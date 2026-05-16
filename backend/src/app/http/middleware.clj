@@ -214,7 +214,7 @@
       (assoc "access-control-allow-methods" "GET,POST,DELETE,OPTIONS,PUT,HEAD,PATCH")
       (assoc "access-control-allow-credentials" "true")
       (assoc "access-control-expose-headers" "x-requested-with, content-type, cookie")
-      (assoc "access-control-allow-headers" "x-frontend-version, content-type, accept, x-requested-width")))
+      (assoc "access-control-allow-headers" "x-frontend-version, content-type, accept, x-requested-width, x-external-session-id, x-event-origin, x-client")))
 
 (defn wrap-cors
   [handler]

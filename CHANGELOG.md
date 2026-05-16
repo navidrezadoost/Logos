@@ -6,6 +6,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — 2026-05-16
+
+### Logos Branding, Auth & Dev Infrastructure
+
+#### Branding
+- Replaced all Penpot logo references on login and static error pages with the Logos PNG (`frontend/resources/public/images/logos-logo.png`)
+- Updated `auth.cljs` to render `<img src="images/logos-logo.png">` in place of the deprecated SVG icon
+- Added `.logos-logo` CSS class in `auth.scss` for proper image sizing
+- Updated `static.cljs` login modal and error container headers to use the Logos image
+- Updated English translations (`translations/en.po` and pre-compiled `translation.en.js`) — page title, login tagline, not-found strings, and dashboard references now say "Logos" instead of "Penpot"
+
+#### CORS & Session Fixes
+- Added `x-external-session-id`, `x-event-origin`, and `x-client` to `access-control-allow-headers` in `backend/src/app/http/middleware.clj` — eliminates CORS preflight failures from the frontend
+- Fixed session cookie `SameSite` logic in `backend/src/app/http/session.clj`: only set `SameSite=None` when both `cors` flag **and** `secure-session-cookies` flag are active; otherwise falls back to `Lax` — resolves cross-origin cookie rejection in HTTP-only local dev where `SameSite=None` requires `Secure`
+
+#### Rasterizer Fix
+- Patched `frontend/src/app/main/rasterizer.cljs` to HEAD `origin` (pointing to `rasterizer.html`) instead of `cf/rasterizer-uri` root (`/`) which returns 404 under shadow-cljs dev server — eliminates the adblocker-detection false positive and rasterizer fallback loop
+
+#### Local Dev Infrastructure
+- Added `backend/scripts/start-dev-local` — single-command backend launcher using `flatpak-spawn --host` to run Clojure in the host JVM from inside a Flatpak container
+- Added `backend/scripts/_env.local` — local environment overrides: PostgreSQL on `127.0.0.1:5432`, Redis on `127.0.0.1:6379`, filesystem storage (no Minio), correct `PENPOT_PUBLIC_URI`, and `enable-cors` flag with `PENPOT_CORS_ALLOWED_ORIGINS=http://localhost:8888`
+- Added Duotone icon assets (`frontend/resources/images/icons/duotone/`) and supporting ClojureScript component (`duotone_icon.cljs`, `duotone_icon.scss`)
+
+#### User Account Bootstrap
+- Created initial admin account (`admin@logos.app`) via the two-step registration API and activated it directly in PostgreSQL — ready for immediate login at `http://localhost:8888`
+
+---
+
 ## [Unreleased] — 2026-05-10
 
 ### 2026-05-09 — Major Frames & Hierarchy System (d2053a6)

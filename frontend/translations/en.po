@@ -66,7 +66,7 @@ msgstr "Login"
 
 #: src/app/main/ui/auth/login.cljs:274
 msgid "auth.login-tagline"
-msgstr "Penpot is the free open-source design tool for Design and Code collaboration"
+msgstr "Logos is the open-source design platform for teams"
 
 #: src/app/main/ui/auth/login.cljs:231
 msgid "auth.login-with-github-submit"
@@ -3593,7 +3593,7 @@ msgstr "Signup for free"
 
 #: src/app/main/ui/static.cljs:154
 msgid "not-found.login.start-using"
-msgstr "And start using Penpot in seconds!"
+msgstr "And start using Logos in seconds!"
 
 #: src/app/main/ui/static.cljs:70
 msgid "not-found.made-with-love"
@@ -3639,7 +3639,7 @@ msgstr "You don't have access to this file."
 
 #: src/app/main/ui/static.cljs:57, src/app/main/ui/static.cljs:245, src/app/main/ui/static.cljs:251, src/app/main/ui/static.cljs:257, src/app/main/ui/static.cljs:263, src/app/main/ui/static.cljs:272, src/app/main/ui/static.cljs:281
 msgid "not-found.no-permission.go-dashboard"
-msgstr "Go to your Penpot"
+msgstr "Go to your Logos"
 
 #: src/app/main/ui/static.cljs:269, src/app/main/ui/static.cljs:278
 msgid "not-found.no-permission.if-approves"
@@ -3647,7 +3647,7 @@ msgstr "If the owner allows it, you're going to be invited to the team."
 
 #: src/app/main/ui/static.cljs:484, src/app/main/ui/static.cljs:497
 msgid "not-found.no-permission.penpot-file"
-msgstr "Penpot file"
+msgstr "Logos file"
 
 #: src/app/main/ui/static.cljs:244, src/app/main/ui/static.cljs:276
 msgid "not-found.no-permission.project"
@@ -5077,7 +5077,7 @@ msgstr "Shared Libraries - %s - Penpot"
 
 #: src/app/main/ui/auth/verify_token.cljs:70, src/app/main/ui/auth.cljs:34
 msgid "title.default"
-msgstr "Penpot - Design Freedom for Teams"
+msgstr "Logos - Design Freedom for Teams"
 
 #: src/app/main/ui/settings/access_tokens.cljs:278
 msgid "title.settings.access-tokens"

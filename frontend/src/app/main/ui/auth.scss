@@ -77,3 +77,10 @@
     fill: var(--main-icon-foreground);
   }
 }
+
+.logos-logo {
+  width: deprecated.$s-120;
+  height: auto;
+  max-height: deprecated.$s-96;
+  object-fit: contain;
+}

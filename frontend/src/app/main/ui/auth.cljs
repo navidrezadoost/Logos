@@ -41,7 +41,8 @@
                     :auth-section true
                     :register is-register)}
      [:h1 {:class (stl/css :logo-container)}
-      [:a {:href "#/" :title "Penpot" :class (stl/css :logo-btn)} deprecated-icon/logo]]
+      [:a {:href "#/" :title "Logos" :class (stl/css :logo-btn)}
+       [:img {:src "images/logos-logo.png" :class (stl/css :logos-logo) :alt "Logos"}]]]
      [:div {:class (stl/css :login-illustration)}
       [:img {:src "images/registration-illustration.png"}]]
 

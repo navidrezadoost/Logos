@@ -116,7 +116,7 @@
     (dom/set-attribute! iframe "hidden" true)
     (.addEventListener js/window "message" on-message)
     (->> (http/fetch {:method :head
-                      :uri cf/rasterizer-uri
+                      :uri origin
                       :mode :no-cors})
          (rx/map (fn [response]
                    (let [allowed? (not (.-redirected response))]
