@@ -6,8 +6,10 @@
 //! - `positions`: Main/cross axis position assignment
 //! - `modifiers`: Emit geometry modifiers per child
 
+pub mod layout_data;
 pub mod params;
 
+pub use layout_data::{AlignSelf, ChildLayoutData, ChildShape, SizingMode};
 pub use params::{
     AlignContent, AlignItems, FlexContainer, FlexDirection, FlexWrap, JustifyContent,
 };
