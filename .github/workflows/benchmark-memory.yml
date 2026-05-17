@@ -1,0 +1,156 @@
+name: Memory Regression Benchmark
+
+# P1.7 — CI safety net against heap regressions.
+#
+# Scheduled nightly and on manual dispatch. Not triggered on every push to
+# avoid the cost of starting the full Logos stack on each commit — the
+# benchmark runs after nightly integration tests confirm the build is healthy.
+#
+# On failure: the job exits non-zero; GitHub will mark the run as failed and
+# send a notification. Heap snapshots are uploaded as artifacts and can be
+# loaded in Chrome DevTools for inspection.
+#
+# Reference: *Systems Performance* (Brendan Gregg) — "Measure first; optimise
+# second. Without metrics you are flying blind."
+
+on:
+  schedule:
+    # Run at 02:00 UTC nightly (off-peak; long-running benchmark is acceptable)
+    - cron: "0 2 * * *"
+
+  # Allow manual trigger with optional file regeneration
+  workflow_dispatch:
+    inputs:
+      regenerate_file:
+        description: "Regenerate the benchmark .penpot file before testing"
+        required: false
+        default: "false"
+        type: boolean
+
+env:
+  LOGOS_URL:      "http://localhost:3449"
+  LOGOS_EMAIL:    "benchmark@logos.test"
+  LOGOS_PASSWORD: "benchmark123!"
+  BENCHMARK_FILE: "test/benchmarks/fixtures/large-canvas.penpot"
+
+jobs:
+  memory-benchmark:
+    name: Memory Profiling Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Cache Docker layers ────────────────────────────────────────────────
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.docker-cache
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker/**', 'backend/deps.edn', 'frontend/deps.edn') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
+      # ── Start Logos services via Docker Compose ───────────────────────────
+      - name: Start Logos services
+        run: |
+          docker compose -f docker/devenv/docker-compose.yaml up -d \
+            postgres redis minio backend frontend exporter
+        timeout-minutes: 10
+
+      # ── Wait for health ────────────────────────────────────────────────────
+      - name: Wait for backend health
+        run: |
+          echo "Waiting for Logos backend to become healthy …"
+          for i in $(seq 1 60); do
+            if curl -sf "$LOGOS_URL/api/_health" > /dev/null 2>&1; then
+              echo "Backend ready after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "ERROR: Backend did not become healthy within 60s"
+              docker compose -f docker/devenv/docker-compose.yaml logs backend
+              exit 1
+            fi
+            sleep 2
+          done
+
+      # ── Create benchmark user (idempotent) ────────────────────────────────
+      - name: Create benchmark test user
+        run: |
+          curl -sf -X POST "$LOGOS_URL/api/rpc/command/register-profile-request" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"'"$LOGOS_EMAIL"'","name":"Benchmark User"}' \
+            || true
+
+      # ── Set up Java + Clojure for file generator ──────────────────────────
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Install Clojure CLI
+        uses: DeLaGuardo/setup-clojure@12
+        with:
+          cli: latest
+
+      # ── Cache generated benchmark file ────────────────────────────────────
+      - name: Cache benchmark fixture
+        id: cache-fixture
+        uses: actions/cache@v4
+        with:
+          path: test/benchmarks/fixtures
+          key: benchmark-fixture-${{ hashFiles('test/benchmarks/generate_file.clj', 'common/src/app/common/files/builder.cljc') }}
+
+      - name: Generate benchmark file
+        if: steps.cache-fixture.outputs.cache-hit != 'true' || inputs.regenerate_file == 'true'
+        working-directory: test/benchmarks
+        run: |
+          mkdir -p fixtures
+          clojure -M:gen-benchmark --output fixtures/large-canvas.penpot
+          echo "Generated fixture:"
+          ls -lh fixtures/large-canvas.penpot
+
+      # ── Set up Node + Playwright ───────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: test/benchmarks/package.json
+
+      - name: Install Node dependencies
+        working-directory: test/benchmarks
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: test/benchmarks
+        run: npx playwright install chromium --with-deps
+
+      # ── Run the memory benchmark ───────────────────────────────────────────
+      - name: Run memory profiling benchmark
+        working-directory: test/benchmarks
+        run: node memory_profile.js
+        env:
+          LOGOS_URL:      ${{ env.LOGOS_URL }}
+          LOGOS_EMAIL:    ${{ env.LOGOS_EMAIL }}
+          LOGOS_PASSWORD: ${{ env.LOGOS_PASSWORD }}
+          BENCHMARK_FILE: ${{ github.workspace }}/test/benchmarks/fixtures/large-canvas.penpot
+
+      # ── Upload artifacts ───────────────────────────────────────────────────
+      - name: Upload heap snapshots and report
+        uses: actions/upload-artifact@v4
+        if: always()   # upload even on failure for post-mortem inspection
+        with:
+          name: heap-snapshots-${{ github.run_number }}
+          path: |
+            test/benchmarks/snapshots/
+          retention-days: 30
+
+      # ── Tear down services ─────────────────────────────────────────────────
+      - name: Tear down services
+        if: always()
+        run: docker compose -f docker/devenv/docker-compose.yaml down -v

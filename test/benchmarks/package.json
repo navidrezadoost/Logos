@@ -1,0 +1,17 @@
+{
+  "name": "@logos/benchmarks",
+  "version": "1.0.0",
+  "description": "P1.7 memory profiling regression suite for Logos performance CI",
+  "private": true,
+  "scripts": {
+    "generate": "clojure -M:gen-benchmark",
+    "profile": "node memory_profile.js",
+    "profile:headed": "node memory_profile.js --no-headless"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
