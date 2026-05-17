@@ -12,6 +12,7 @@
    [app.common.features :as cfeat]
    [app.common.files.changes :as cpc]
    [app.common.files.migrations :as fmg]
+   [app.common.files.rebase :as rebase]
    [app.common.files.validate :as val]
    [app.common.logging :as l]
    [app.common.schema :as sm]
@@ -225,12 +226,37 @@
           revn
           (get file :revn)
 
+          ;; P2.3 — OT server-side rebase.
+          ;; When the client's base-revn is behind the current file revn, fetch
+          ;; the competing change-sets and rebase the incoming changes on top of
+          ;; them before applying.  When the client is already up-to-date the
+          ;; call is a cheap no-op (returns nil → skip).
+          changes
+          (let [base-revn (:revn params)
+                cur-revn  revn]
+            (if (< base-revn cur-revn)
+              (let [competing (get-competing-change-sets conn (:id file) base-revn cur-revn)]
+                (if (seq competing)
+                  (do
+                    (l/debug :hint "p2.3: rebasing changes"
+                             :file-id (:id file)
+                             :base-revn base-revn
+                             :current-revn cur-revn
+                             :competing-sets (count competing))
+                    (rebase/rebase-change-set changes competing))
+                  changes))
+              changes))
+
           file
           (binding [cfeat/*current*  features
                     cfeat/*previous* (:features file)]
             (update-file-data! cfg file
                                process-changes-and-validate
                                changes skip-validate))
+
+          ;; P2.3: was this change-set rebased server-side?
+          base-revn-param (:revn params)
+          rebased?        (< base-revn-param revn)
 
           deleted-at
           (ct/plus timestamp (ct/duration {:hours 1}))]
@@ -259,6 +285,9 @@
                    :revn (:revn file)
                    :version (:version file)
                    :features (into-array (:features file))
+                   ;; P2.3: record base_revn + rebased flag for audit / debug
+                   :base-revn base-revn-param
+                   :rebased rebased?
                    :changes (blob/encode changes)}
                   {::db/return-keys false})
 
@@ -281,7 +310,9 @@
         (invalidate-caches! cfg file))
 
       ;; Send asynchronous notifications
-      (send-notifications! cfg params file)
+      ;; P2.3: use the rebased changes (if rebase occurred) so that
+      ;; page-scoped listeners receive the correctly rebased payload.
+      (send-notifications! cfg (assoc params :changes changes) file)
 
       (with-meta {:revn revn :lagged (get-lagged-changes conn params)}
         {::audit/replace-props
@@ -448,6 +479,26 @@
           (zero? (mod revn freq))
           (> (inst-ms (ct/diff modified-at (ct/now)))
              (inst-ms timeout))))))
+
+;; P2.3 — fetch committed change-sets in (base-revn, current-revn] that the
+;; client has not yet seen.  Used for server-side OT rebase.
+(def ^:private sql:competing-changes
+  "select s.changes
+     from file_change as s
+    where s.file_id = ?
+      and s.revn > ?
+      and s.revn <= ?
+    order by s.revn asc")
+
+(defn- get-competing-change-sets
+  "Return a seq of decoded change-sets (each is a vector of changes) for
+  revisions in the range (base-revn, current-revn] for the given file.
+  Returns nil when there is nothing to rebase against (fast path)."
+  [conn file-id base-revn current-revn]
+  (when (< base-revn current-revn)
+    (->> (db/exec! conn [sql:competing-changes file-id base-revn current-revn])
+         (filter :changes)
+         (mapv (comp :changes blob/decode :changes)))))
 
 (def ^:private sql:lagged-changes
   "select s.id, s.revn, s.file_id,

@@ -20,6 +20,7 @@
    [app.main.data.websocket :as dws]
    [app.main.data.workspace :as-alias dw]
    [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.collab :as collab]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.layout :as dwly]
    [app.main.data.workspace.libraries :as dwl]
@@ -260,7 +261,7 @@
   (sm/check-fn schema:handle-file-change))
 
 (defn handle-file-change
-  [{:keys [file-id changes revn vern] :as msg}]
+  [{:keys [file-id changes revn vern session-id] :as msg}]
 
   (dm/assert!
    "expected valid parameters"
@@ -271,18 +272,22 @@
     (-deref [_] {:changes changes})
 
     ptk/WatchEvent
-    (watch [_ _ _]
+    (watch [_ state _]
       ;; The commit event is responsible to apply the data localy
       ;; and update the persistence internal state with the updated
       ;; file-revn
-
-      (rx/of (dch/commit {:file-id file-id
-                          :file-revn revn
-                          :file-vern vern
-                          :save-undo? false
-                          :source :remote
-                          :redo-changes (vec changes)
-                          :undo-changes []})))))
+      (let [own-session (:session-id state)
+            integrate?  (not= session-id own-session)]
+        (cond-> (rx/of
+                 (dch/commit {:file-id file-id
+                              :file-revn revn
+                              :file-vern vern
+                              :save-undo? false
+                              :source :remote
+                              :redo-changes (vec changes)
+                              :undo-changes []}))
+          integrate?
+          (rx/concat (rx/of (collab/integrate-remote-changes changes session-id))))))))
 
 (defn handle-file-deleted
   [{:keys [file-id] :as msg}]
