@@ -98,7 +98,13 @@
   (let [location        (.-location js/document)
         [base-path qs]  (str/split path "?")
         location-path   (dm/str (.-origin location) (.-pathname location))
-        valid-location? (= location-path (dm/str cf/public-uri))
+        ;; Check we are on the right server: either the URL starts with
+        ;; the configured public-uri (production, same origin), or we
+        ;; are running locally in a split-port dev setup (frontend at
+        ;; localhost:8888, backend at localhost:3449).
+        valid-location? (or (str/starts-with? location-path (dm/str cf/public-uri))
+                            (str/starts-with? (.-origin location) "http://localhost")
+                            (str/starts-with? (.-origin location) "http://127.0.0.1"))
         match           (rt/match router path)
         empty-path?     (or (= base-path "") (= base-path "/"))
         query-params    (u/query-string->map qs)]
