@@ -24,6 +24,7 @@
 //! ```
 
 pub mod flex;
+pub mod matrix;
 pub mod point;
 
 // Re-export the most-used types at crate root for ergonomic imports.
@@ -32,4 +33,5 @@ pub use flex::{
     AlignSelf, ChildFinalPosition, ChildLayoutData, ChildShape, FlexBounds, FlexContainer,
     FlexDirection, FlexLine, FlexModifier, FlexWrap, JustifyContent, SizingMode, Uuid,
 };
+pub use matrix::{Decomposed, Matrix};
 pub use point::{center_points, Point};
