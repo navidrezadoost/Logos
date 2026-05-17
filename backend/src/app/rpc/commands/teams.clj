@@ -672,8 +672,10 @@
   {::doc/added "1.17"
    ::sm/params schema:leave-team
    ::db/transaction true}
-  [{:keys [::db/conn] :as cfg} {:keys [::rpc/profile-id] :as params}]
-  (leave-team conn (assoc params :profile-id profile-id)))
+  [{:keys [::db/conn] :as cfg} {:keys [::rpc/profile-id id] :as params}]
+  (leave-team conn (assoc params :profile-id profile-id))
+  ;; P1.5: Membership change — evict cached team so member lists are fresh.
+  (rsc/cache-del cfg (rsc/team-key id)))
 
 ;; --- Mutation: Delete Team
 
@@ -784,8 +786,10 @@
 (sv/defmethod ::update-team-member-role
   {::doc/added "1.17"
    ::sm/params schema:update-team-member-role}
-  [cfg {:keys [::rpc/profile-id] :as params}]
-  (db/tx-run! cfg update-team-member-role (assoc params :profile-id profile-id)))
+  [cfg {:keys [::rpc/profile-id team-id] :as params}]
+  (db/tx-run! cfg update-team-member-role (assoc params :profile-id profile-id))
+  ;; P1.5: Role change mutates permissions stored in the cached team map.
+  (rsc/cache-del cfg (rsc/team-key team-id)))
 
 ;; --- Mutation: Delete Team Member
 
@@ -819,6 +823,8 @@
                          :team-id team-id
                          :team-name (:name team)})
 
+    ;; P1.5: Member removed — invalidate cached team so remaining members are correct.
+    (rsc/cache-del cfg (rsc/team-key team-id))
     nil))
 
 ;; --- Mutation: Update Team Photo
@@ -856,5 +862,8 @@
     (db/update! pool :team
                 {:photo-id (:id photo)}
                 {:id team-id})
+
+    ;; P1.5: Photo change mutates team metadata — evict cache.
+    (rsc/cache-del cfg (rsc/team-key team-id))
 
     (assoc team :photo-id (:id photo))))
