@@ -6,6 +6,71 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — 2026-05-17
+
+### Rust Geometry & Layout Foundation (Phase 3.0)
+
+**Context**: Rust pivot — porting geometry and layout primitives from ClojureScript/Clojure to Rust for zero-copy WASM interop with the Skia renderer.
+
+**Branches**: `rust/r1-matrix`, `rust/r2-flex`
+
+#### R1 — Matrix Engine (`56be234`)
+- **`rust/logos-layout/src/matrix.rs`** — full 2D affine transform port of `common/src/app/common/geom/matrix.cljc` (430+ lines)
+- **Column-major affine matrix `[a, b, c, d, e, f]`** — matches CSS/SVG `matrix(a,b,c,d,e,f)` convention
+- **Constructors**: `identity()`, `translate_matrix(pt)`, `translate_dist(x, y)`, `translate_neg(pt)`, `scale_matrix(pt)`, `scale_matrix_center(pt, center)`, `rotate_matrix(angle_deg)`, `rotate_matrix_center(angle_deg, cx, cy)`, `skew_matrix(ax, ay)`, `skew_matrix_center(ax, ay, center)`
+- **Builder methods** (chainable `self` → `Self`): `.translate()`, `.scale()`, `.scale_center()`, `.rotate()`, `.rotate_center()`, `.skew()`, `.transform_in(center)`
+- **`Mul` trait** — full matrix multiply using standard column-major formula
+- **`inverse(&self) -> Option<Matrix>`** — determinant-based inversion (`det = a·d - c·b`); returns `None` for singular matrices
+- **`decompose(&self) -> Decomposed`** — CSS polar decomposition recovers translation, rotation (degrees), scale, skew_x from any affine matrix
+- **`transform_point(p: Point) -> Point`** — apply affine transform to a point
+- **`transform_point_center(p: Point, center: Point) -> Point`** — transform relative to a pivot point
+- **Predicates**: `is_identity()`, `is_translate_only()`, `close_to(other, epsilon)`, `determinant()`, `round(decimals)`
+- **C-ABI exports** (JNI interop): `logos_matrix_inverse(a..f, out: *mut [f64;6]) -> bool`, `logos_matrix_multiply(..., out)`, `logos_matrix_transform_point(..., out_x, out_y)`
+- **35 unit tests + 1 doc-test** — translate-invert, rotate-360, scale-double-half, decompose-round-trip
+- **Total suite**: 78 unit tests + 2 doc-tests = **80/80 green**
+
+#### R2 — Flex Layout Params (`18f3a4a`)
+- **`rust/logos-layout/src/flex/params.rs`** — flex container property parser (498 lines)
+- **Input gate for flex layout pipeline**: parses shape properties into typed Rust enums, no tree traversal, zero allocation beyond the struct itself
+- **`FlexDirection` enum**: `Row`, `RowReverse`, `Column`, `ColumnReverse` (default: `Row`)
+  - Methods: `is_row()`, `is_column()`, `is_reversed()`
+- **`FlexWrap` enum**: `NoWrap`, `Wrap`, `WrapReverse` (default: `NoWrap`)
+- **`AlignItems` enum**: `Start`, `End`, `Center`, `Stretch` (default: `Start`)
+  - Cross-axis item alignment
+- **`AlignContent` enum**: `Start`, `End`, `Center`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`, `Stretch` (default: `Stretch`)
+  - Multi-line cross-axis alignment when wrapping
+- **`JustifyContent` enum**: `Start`, `End`, `Center`, `SpaceBetween`, `SpaceAround`, `SpaceEvenly`, `Stretch` (default: `Stretch`)
+  - Main-axis content alignment
+- **`FlexContainer` struct**: packages `direction`, `wrap`, `align_items`, `align_content`, `justify_content`, `gap: (f64, f64)` (row, column), `padding: (f64, f64, f64, f64)` (top, right, bottom, left)
+  - `from_options()` constructor: accepts 11 optional parameters (`Option<&str>` for enums, `Option<f64>` for dimensions)
+  - All defaults match CSS flexbox spec and Logos serializer conventions (`frontend/src/app/render_wasm/serializers.cljs`)
+- **14 unit tests + 4 doc-tests** — parsing, defaults, full/partial option sets
+- **Total suite**: 58 unit tests + 5 doc-tests = **63/63 green**
+
+#### Architecture
+- **Rust workspace** at `rust/Cargo.toml` with three members:
+  - `logos-layout`: geometry & layout primitives (cdylib + rlib)
+  - `logos-rebase`: OT rebase engine (placeholder)
+  - `logos-ws`: WebSocket binary protocol (placeholder)
+- **Dual compilation targets**:
+  - **Native** (`x86_64`, `aarch64`): JNI exports for JVM backend hot-path layout
+  - **WASM** (`wasm32-unknown-unknown`): `wasm-pack` output consumed by frontend renderer, zero serialization overhead when paired with Phase 1.1 binary buffer
+- **Makefile targets**: `make build-rust`, `make build-wasm`, `make test`, `make fmt`, `make lint`, `make clean`
+- **Module structure**: `lib.rs` → `point.rs` (R0, prior session), `matrix.rs` (R1), `flex/mod.rs` + `flex/params.rs` (R2)
+
+#### Why This Matters
+- **Every shape in Logos stores a 3×3 affine matrix** — mouse drag, resize, rotation, layout computation all hit this code
+- **Moving transforms to Rust** means stack-allocated struct operations with no GC pressure
+- **WASM compilation pairs with the Phase 1.1 binary serialization buffer** — entire transform pipeline runs in the same memory space as the Skia renderer; no ClojureScript→JS→WASM boundary crossings, no JSON serialization
+- **Flex layout params are the input gate** for the full flexbox engine (Phase 3.1); next steps: `layout_data.rs` (child sizing: min/max, fill, auto), `positions.rs` (main/cross axis), `modifiers.rs` (emit geometry)
+
+#### Testing
+- **R1**: 80/80 green (78 unit + 2 doc-tests) — matrix multiply, inverse, decompose, transform_point
+- **R2**: 63/63 green (58 unit + 5 doc-tests) — enum parsing, defaults, container construction
+- **Zero test regressions** across both work packages
+
+---
+
 ## [Unreleased] — 2026-05-16
 
 ### Logos Branding, Auth & Dev Infrastructure

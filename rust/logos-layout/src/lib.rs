@@ -23,8 +23,13 @@
 //! wasm-pack build rust/logos-layout --target web --out-dir ../../frontend/pkg/logos-layout
 //! ```
 
+pub mod flex;
 pub mod point;
 
 // Re-export the most-used types at crate root for ergonomic imports.
-pub use point::Point;
-pub use point::center_points;
+pub use flex::{
+    compute_bounds, compute_positions, modifiers_from_positions, AlignContent, AlignItems,
+    AlignSelf, ChildFinalPosition, ChildLayoutData, ChildShape, FlexBounds, FlexContainer,
+    FlexDirection, FlexLine, FlexModifier, FlexWrap, JustifyContent, SizingMode, Uuid,
+};
+pub use point::{center_points, Point};
