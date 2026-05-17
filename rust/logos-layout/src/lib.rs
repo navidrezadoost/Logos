@@ -23,8 +23,9 @@
 //! wasm-pack build rust/logos-layout --target web --out-dir ../../frontend/pkg/logos-layout
 //! ```
 
+pub mod matrix;
 pub mod point;
 
 // Re-export the most-used types at crate root for ergonomic imports.
-pub use point::Point;
-pub use point::center_points;
+pub use matrix::{Decomposed, Matrix};
+pub use point::{center_points, Point};
