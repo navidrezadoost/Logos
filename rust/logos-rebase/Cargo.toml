@@ -1,0 +1,13 @@
+[package]
+name        = "logos-rebase"
+version     = "0.1.0"
+edition     = "2021"
+description = "OT rebase engine for Logos (Rust port of common/files/rebase.cljc)"
+license-file = "../../LICENSE"
+repository  = "https://github.com/navidrezadoost/Logos"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+logos-layout = { path = "../logos-layout" }

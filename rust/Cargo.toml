@@ -1,0 +1,39 @@
+# Logos Rust workspace
+#
+# Sub-workspace for the Logos Rust crates that live under rust/.
+# Keeping this separate from the root workspace (render-wasm) lets each
+# sub-system be built, tested, and fuzzed in isolation.
+#
+# Members
+# ───────
+#  logos-layout  — 2D geometry / layout engine (seed: Point arithmetic)
+#  logos-rebase  — OT rebase engine (mirrors common/files/rebase.cljc)
+#  logos-ws      — WebSocket fan-out primitives (Phase 3)
+#
+# Build
+# ─────
+#  cargo build  (native)
+#  cargo test
+#  wasm-pack build logos-layout --target web   (WASM)
+#  make build                                   (all targets via root Makefile)
+
+[workspace]
+members = [
+    "logos-layout",
+    "logos-rebase",
+    "logos-ws",
+]
+resolver = "2"
+
+[profile.release]
+lto        = "fat"
+opt-level  = 3
+codegen-units = 1
+panic      = "abort"
+
+[profile.dev]
+opt-level  = 1          # keep debug fast enough for geometry tests
+
+[profile.wasm-release]
+inherits   = "release"
+opt-level  = "z"        # minimise WASM binary size

@@ -1,0 +1,24 @@
+[package]
+name        = "logos-layout"
+version     = "0.1.0"
+edition     = "2021"
+description = "2D geometry and layout primitives for Logos"
+license-file = "../../LICENSE"
+repository  = "https://github.com/navidrezadoost/Logos"
+
+# WASM target: enable with `cargo build --target wasm32-unknown-unknown`
+# or `wasm-pack build --target web`
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default    = []
+wasm       = ["wasm-bindgen"]
+
+[dependencies]
+# Optional wasm-bindgen — only pulled in when the "wasm" feature is enabled
+wasm-bindgen = { version = "0.2", optional = true }
+
+[dev-dependencies]
+# approx: floating-point assertion helpers (ulp / absolute epsilon)
+approx = "0.5"

@@ -1,0 +1,14 @@
+[package]
+name        = "logos-ws"
+version     = "0.1.0"
+edition     = "2021"
+description = "WebSocket fan-out primitives for Logos (Phase 3 / P2.4 successor)"
+license-file = "../../LICENSE"
+repository  = "https://github.com/navidrezadoost/Logos"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+logos-layout = { path = "../logos-layout" }
+logos-rebase = { path = "../logos-rebase" }
