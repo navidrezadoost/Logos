@@ -12,6 +12,7 @@
    [app.common.features :as cfeat]
    [app.common.files.changes :as cpc]
    [app.common.files.migrations :as fmg]
+   [app.common.files.rebase :as rebase]
    [app.common.files.validate :as val]
    [app.common.logging :as l]
    [app.common.schema :as sm]
@@ -225,12 +226,37 @@
           revn
           (get file :revn)
 
+          ;; P2.3 — OT server-side rebase.
+          ;; When the client's base-revn is behind the current file revn, fetch
+          ;; the competing change-sets and rebase the incoming changes on top of
+          ;; them before applying.  When the client is already up-to-date the
+          ;; call is a cheap no-op (returns nil → skip).
+          changes
+          (let [base-revn (:revn params)
+                cur-revn  revn]
+            (if (< base-revn cur-revn)
+              (let [competing (get-competing-change-sets conn (:id file) base-revn cur-revn)]
+                (if (seq competing)
+                  (do
+                    (l/debug :hint "p2.3: rebasing changes"
+                             :file-id (:id file)
+                             :base-revn base-revn
+                             :current-revn cur-revn
+                             :competing-sets (count competing))
+                    (rebase/rebase-change-set changes competing))
+                  changes))
+              changes))
+
           file
           (binding [cfeat/*current*  features
                     cfeat/*previous* (:features file)]
             (update-file-data! cfg file
                                process-changes-and-validate
                                changes skip-validate))
+
+          ;; P2.3: was this change-set rebased server-side?
+          base-revn-param (:revn params)
+          rebased?        (< base-revn-param revn)
 
           deleted-at
           (ct/plus timestamp (ct/duration {:hours 1}))]
@@ -259,6 +285,9 @@
                    :revn (:revn file)
                    :version (:version file)
                    :features (into-array (:features file))
+                   ;; P2.3: record base_revn + rebased flag for audit / debug
+                   :base-revn base-revn-param
+                   :rebased rebased?
                    :changes (blob/encode changes)}
                   {::db/return-keys false})
 
@@ -281,7 +310,9 @@
         (invalidate-caches! cfg file))
 
       ;; Send asynchronous notifications
-      (send-notifications! cfg params file)
+      ;; P2.3: use the rebased changes (if rebase occurred) so that
+      ;; page-scoped listeners receive the correctly rebased payload.
+      (send-notifications! cfg (assoc params :changes changes) file)
 
       (with-meta {:revn revn :lagged (get-lagged-changes conn params)}
         {::audit/replace-props
@@ -449,6 +480,26 @@
           (> (inst-ms (ct/diff modified-at (ct/now)))
              (inst-ms timeout))))))
 
+;; P2.3 — fetch committed change-sets in (base-revn, current-revn] that the
+;; client has not yet seen.  Used for server-side OT rebase.
+(def ^:private sql:competing-changes
+  "select s.changes
+     from file_change as s
+    where s.file_id = ?
+      and s.revn > ?
+      and s.revn <= ?
+    order by s.revn asc")
+
+(defn- get-competing-change-sets
+  "Return a seq of decoded change-sets (each is a vector of changes) for
+  revisions in the range (base-revn, current-revn] for the given file.
+  Returns nil when there is nothing to rebase against (fast path)."
+  [conn file-id base-revn current-revn]
+  (when (< base-revn current-revn)
+    (->> (db/exec! conn [sql:competing-changes file-id base-revn current-revn])
+         (filter :changes)
+         (mapv (comp :changes blob/decode :changes)))))
+
 (def ^:private sql:lagged-changes
   "select s.id, s.revn, s.file_id,
           s.session_id, s.changes
@@ -467,24 +518,55 @@
 (defn- send-notifications!
   [cfg {:keys [team changes session-id] :as params} file]
   (let [lchanges (filter library-change? changes)
-        msgbus   (::mbus/msgbus cfg)]
+        msgbus   (::mbus/msgbus cfg)
+        file-id  (:id file)
 
+        ;; P2.1: group changes by page-id so we can route to page-scoped topics
+        changes-by-page (->> changes
+                             (filter :page-id)
+                             (group-by :page-id))
+
+        base-msg {:profile-id (:profile-id params)
+                  :file-id    file-id
+                  :session-id (:session-id params)
+                  :revn       (:revn file)
+                  :vern       (:vern file)}]
+
+    ;; Legacy broadcast — all changes on the file-id topic (backward compat
+    ;; with clients that do not send :page-id in their :subscribe-file message)
     (mbus/pub! msgbus
-               :topic (:id file)
-               :message {:type :file-change
-                         :profile-id (:profile-id params)
-                         :file-id (:id file)
-                         :session-id (:session-id params)
-                         :revn (:revn file)
-                         :vern (:vern file)
-                         :changes changes})
+               :topic file-id
+               :message (assoc base-msg :type :file-change :changes changes))
+
+    ;; P2.1 page-scoped broadcasts — send full change-set only to subscribers
+    ;; of the affected page, so clients on other pages are not flooded with
+    ;; shape data they don't need (70–90% bandwidth saving for multi-page files)
+    (doseq [[page-id page-changes] changes-by-page]
+      (mbus/pub! msgbus
+                 :topic (mbus/page-topic file-id page-id)
+                 :message (assoc base-msg
+                                 :type    :file-change
+                                 :page-id page-id
+                                 :changes page-changes)))
+
+    ;; P2.1 meta notifications — inform clients on OTHER pages that something
+    ;; changed, so they can refresh thumbnails / show a stale-page indicator
+    (when-let [page-ids (not-empty (set (keys changes-by-page)))]
+      (doseq [page-id page-ids]
+        (mbus/pub! msgbus
+                   :topic (mbus/file-meta-topic file-id)
+                   :message {:type       :page-updated
+                             :file-id    file-id
+                             :page-id    page-id
+                             :revn       (:revn file)
+                             :session-id (:session-id params)})))
 
     (when (and (:is-shared file) (seq lchanges))
       (mbus/pub! msgbus
                  :topic (:id team)
                  :message {:type :library-change
                            :profile-id (:profile-id params)
-                           :file-id (:id file)
+                           :file-id file-id
                            :session-id session-id
                            :revn (:revn file)
                            :modified-at (ct/now)

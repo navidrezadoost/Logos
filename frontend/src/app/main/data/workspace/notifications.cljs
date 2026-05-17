@@ -20,6 +20,7 @@
    [app.main.data.websocket :as dws]
    [app.main.data.workspace :as-alias dw]
    [app.main.data.workspace.common :as dwc]
+   [app.main.data.workspace.collab :as collab]
    [app.main.data.workspace.edition :as dwe]
    [app.main.data.workspace.layout :as dwly]
    [app.main.data.workspace.libraries :as dwl]
@@ -37,6 +38,7 @@
 
 (declare process-message)
 (declare handle-presence)
+(declare ^:private handle-page-updated)
 (declare handle-pointer-update)
 (declare handle-file-change)
 (declare handle-file-deleted)
@@ -52,9 +54,14 @@
     (watch [_ state stream]
       (let [stopper     (rx/filter (ptk/type? ::finalize) stream)
             profile-id (:profile-id state)
+            ;; P2.1: include the current page-id so the server routes only same-page
+            ;; change-sets to this client.  On page navigation the event loop calls
+            ;; finalize + initialize again, so the subscription is always current.
+            page-id    (:current-page-id state)
 
             initmsg    [{:type :subscribe-file
                          :file-id file-id
+                         :page-id page-id
                          :version (obj/get global "logosVersion")}
                         {:type :subscribe-team
                          :team-id team-id}]
@@ -67,7 +74,10 @@
                              (->> (rx/from initmsg)
                                   (rx/map dws/send))
 
-                             ;; Subscribe to notifications of the subscription
+                             ;; Subscribe to notifications
+                             ;; The filter passes:
+                             ;;  a) messages with explicit :topic (profile/team/system)
+                             ;;  b) messages scoped to this file by :file-id (P2.1 fix)
                              (->> stream
                                   (rx/filter (ptk/type? ::dws/message))
                                   (rx/map deref)
@@ -75,7 +85,10 @@
                                                (or (= topic uuid/zero)
                                                    (= topic profile-id)
                                                    (= topic team-id)
-                                                   (= topic file-id))))
+                                                   (= topic file-id)
+                                                   ;; P2.1: pass file-scoped messages that
+                                                   ;; carry :file-id but not :topic
+                                                   (= (:file-id msg) file-id))))
                                   (rx/map process-message))
 
                              ;; On reconnect, send again the subscription messages
@@ -137,6 +150,9 @@
     :notification           (dc/handle-notification msg)
     :team-role-change       (handle-change-team-role msg)
     :team-membership-change (dc/team-membership-change msg)
+    ;; P2.1: lightweight notification that a page we're NOT viewing has changed.
+    ;; Mark its thumbnail as stale so the page panel shows a refresh indicator.
+    :page-updated           (handle-page-updated msg)
     nil))
 
 (defn- handle-pointer-send
@@ -245,7 +261,7 @@
   (sm/check-fn schema:handle-file-change))
 
 (defn handle-file-change
-  [{:keys [file-id changes revn vern] :as msg}]
+  [{:keys [file-id changes revn vern session-id] :as msg}]
 
   (dm/assert!
    "expected valid parameters"
@@ -256,18 +272,22 @@
     (-deref [_] {:changes changes})
 
     ptk/WatchEvent
-    (watch [_ _ _]
+    (watch [_ state _]
       ;; The commit event is responsible to apply the data localy
       ;; and update the persistence internal state with the updated
       ;; file-revn
-
-      (rx/of (dch/commit {:file-id file-id
-                          :file-revn revn
-                          :file-vern vern
-                          :save-undo? false
-                          :source :remote
-                          :redo-changes (vec changes)
-                          :undo-changes []})))))
+      (let [own-session (:session-id state)
+            integrate?  (not= session-id own-session)]
+        (cond-> (rx/of
+                 (dch/commit {:file-id file-id
+                              :file-revn revn
+                              :file-vern vern
+                              :save-undo? false
+                              :source :remote
+                              :redo-changes (vec changes)
+                              :undo-changes []}))
+          integrate?
+          (rx/concat (rx/of (collab/integrate-remote-changes changes session-id))))))))
 
 (defn handle-file-deleted
   [{:keys [file-id] :as msg}]
@@ -332,3 +352,22 @@
       (when (contains? (:files state) file-id)
         (rx/of (dwl/ext-library-changed file-id modified-at revn changes)
                (dwl/notify-sync-file))))))
+
+;; --- Handle: Page Updated (P2.1)
+
+(defn- handle-page-updated
+  "Handle a lightweight :page-updated notification emitted by the server for
+  pages that the current client is NOT viewing.  Marks the page as stale in
+  the workspace-local state so the pages panel can display a refresh indicator
+  and the next navigation to that page will trigger a thumbnail regeneration."
+  [{:keys [file-id page-id revn] :as _msg}]
+  (ptk/reify ::handle-page-updated
+    ptk/UpdateEvent
+    (update [_ state]
+      (let [current-page-id (:current-page-id state)]
+        ;; Only mark pages that are NOT currently being viewed.
+        ;; Changes to the current page are handled by the normal
+        ;; handle-file-change → process-changes → thumbnails path.
+        (if (and page-id (not= page-id current-page-id))
+          (update-in state [:workspace-local :stale-page-revns page-id] max (or revn 0))
+          state)))))
