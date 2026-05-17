@@ -93,10 +93,62 @@ impl TileViewbox {
     }
 }
 
-pub const TILE_SIZE: f32 = 512.;
+/// Legacy constant kept for reference; actual rendering uses `get_active_tile_size()`.
+// ---------------------------------------------------------------------------
+// Adaptive tile sizing (P1.6 — sub-task 1)
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    /// The current active base tile size in CSS pixels.  Defaults to 512 (standard
+    /// definition).  Updated by `set_active_tile_size` on init and every resize.
+    static ACTIVE_TILE_SIZE: std::cell::Cell<f32> = const { std::cell::Cell::new(512.0) };
+}
+
+/// Return the tile size that gives best GPU occupancy for the given viewport.
+///
+/// | Display          | viewport max_dim | tile size |
+/// |------------------|-----------------|-----------|
+/// | Standard (≤1440) | < 1440          | 512       |
+/// | QHD / 1440p      | 1440–2559       | 768       |
+/// | 4K+              | ≥ 2560          | 1024      |
+///
+/// Reference: *Real-Time Rendering* §14 — larger tiles reduce draw-call overhead
+/// but increase overdraw; 1024 at 4K keeps tile count manageable.
+pub fn tile_size_for_viewport(width: u32, height: u32) -> f32 {
+    let max_dim = width.max(height);
+    if max_dim >= 2560 {
+        1024.0 // 4K+
+    } else if max_dim >= 1440 {
+        768.0 // QHD / 1440p
+    } else {
+        512.0 // standard
+    }
+}
+
+/// Read the currently active tile size.
+#[inline(always)]
+pub fn get_active_tile_size() -> f32 {
+    ACTIVE_TILE_SIZE.with(|c| c.get())
+}
+
+/// Set the active tile size.  Call on init and whenever the viewport resizes.
+/// Returns `true` if the size changed (caller should invalidate all tiles).
+#[inline]
+pub fn set_active_tile_size(size: f32) -> bool {
+    let changed = ACTIVE_TILE_SIZE.with(|c| {
+        let prev = c.get();
+        let changed = (prev - size).abs() > f32::EPSILON;
+        if changed {
+            c.set(size);
+        }
+        changed
+    });
+    changed
+}
 
 pub fn get_tile_dimensions() -> skia::ISize {
-    (TILE_SIZE as i32, TILE_SIZE as i32).into()
+    let ts = get_active_tile_size() as i32;
+    (ts, ts).into()
 }
 
 pub fn get_tiles_for_rect(rect: skia::Rect, tile_size: f32) -> TileRect {
@@ -136,7 +188,7 @@ pub fn get_tile_pos(Tile(x, y): Tile, scale: f32) -> (f32, f32) {
 }
 
 pub fn get_tile_size(scale: f32) -> f32 {
-    1. / scale * TILE_SIZE
+    1. / scale * get_active_tile_size()
 }
 
 pub fn get_tile_rect(tile: Tile, scale: f32) -> skia::Rect {

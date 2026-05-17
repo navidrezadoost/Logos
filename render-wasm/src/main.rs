@@ -2,6 +2,7 @@
 mod emscripten;
 mod math;
 mod mem;
+mod occlusion;
 mod options;
 mod performance;
 mod render;

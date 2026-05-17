@@ -37,6 +37,15 @@ pub use images::*;
 const VIEWPORT_INTEREST_AREA_THRESHOLD: i32 = 2;
 const MAX_BLOCKING_TIME_MS: i32 = 32;
 const NODE_BATCH_THRESHOLD: i32 = 3;
+/// Per-tile frame budget (P1.6 sub-task 2).
+///
+/// If more than this many milliseconds have elapsed since the rAF callback
+/// began, defer any remaining dirty tiles to the next frame rather than
+/// blocking the main thread.  2ms leaves ≥ 14ms for input, layout, and
+/// browser overhead — enough to sustain 60 fps.
+///
+/// Reference: *Game Programming Patterns* ch. 6 — "time budget" pattern.
+const FRAME_BUDGET_TILE_MS: i32 = 2;
 
 type ClipStack = Vec<(Rect, Option<Corners>, Matrix)>;
 
@@ -308,16 +317,18 @@ pub fn get_cache_size(viewbox: Viewbox, scale: f32) -> skia::ISize {
     let dx = if isx.signum() != iex.signum() { 1 } else { 0 };
     let dy = if isy.signum() != iey.signum() { 1 } else { 0 };
 
-    let tile_size = tiles::TILE_SIZE;
+    let tile_size = tiles::get_active_tile_size() as i32;
     (
-        ((iex - isx).abs() + dx) * tile_size as i32,
-        ((iey - isy).abs() + dy) * tile_size as i32,
+        ((iex - isx).abs() + dx) * tile_size,
+        ((iey - isy).abs() + dy) * tile_size,
     )
         .into()
 }
 
 impl RenderState {
     pub fn new(width: i32, height: i32) -> RenderState {
+        // P1.6: Set adaptive tile size based on viewport dimensions.
+        tiles::set_active_tile_size(tiles::tile_size_for_viewport(width as u32, height as u32));
         // This needs to be done once per WebGL context.
         let mut gpu_state = GpuState::new();
         let sampling_options =
@@ -498,6 +509,18 @@ impl RenderState {
             .resize(&mut self.gpu_state, dpr_width, dpr_height);
         self.viewbox.set_wh(width as f32, height as f32);
         self.tile_viewbox.update(self.viewbox, self.get_scale());
+        // P1.6: Update the active tile size whenever the viewport dimensions change.
+        // set_active_tile_size returns true if the size actually changed, in which
+        // case we must discard all cached tiles so the next pass rebuilds them at
+        // the new resolution.
+        let tile_changed =
+            tiles::set_active_tile_size(tiles::tile_size_for_viewport(width as u32, height as u32));
+        if tile_changed {
+            // Invalidate all cached tiles — one full re-render at the new tile size,
+            // then subsequent frames are incremental.
+            self.tiles = tiles::TileHashMap::new();
+            self.pending_tiles = PendingTiles::new_empty();
+        }
     }
 
     pub fn flush_and_submit(&mut self) {
@@ -1106,8 +1129,8 @@ impl RenderState {
                 );
             let offset_x = self.viewbox.area.left * self.cached_viewbox.zoom * self.options.dpr();
             let offset_y = self.viewbox.area.top * self.cached_viewbox.zoom * self.options.dpr();
-            let translate_x = (start_tile_x as f32 * tiles::TILE_SIZE) - offset_x;
-            let translate_y = (start_tile_y as f32 * tiles::TILE_SIZE) - offset_y;
+            let translate_x = (start_tile_x as f32 * tiles::get_active_tile_size()) - offset_x;
+            let translate_y = (start_tile_y as f32 * tiles::get_active_tile_size()) - offset_y;
             let bg_color = self.background_color;
 
             // Setup canvas transform
@@ -1432,10 +1455,10 @@ impl RenderState {
         let offset_x = self.viewbox.area.left * scale;
         let offset_y = self.viewbox.area.top * scale;
         Rect::from_xywh(
-            (tile_x as f32 * tiles::TILE_SIZE) - offset_x,
-            (tile_y as f32 * tiles::TILE_SIZE) - offset_y,
-            tiles::TILE_SIZE,
-            tiles::TILE_SIZE,
+            (tile_x as f32 * tiles::get_active_tile_size()) - offset_x,
+            (tile_y as f32 * tiles::get_active_tile_size()) - offset_y,
+            tiles::get_active_tile_size(),
+            tiles::get_active_tile_size(),
         )
     }
 
@@ -1464,15 +1487,15 @@ impl RenderState {
 
     pub fn get_aligned_tile_bounds(&mut self, tile: tiles::Tile) -> Rect {
         let scale = self.get_scale();
-        let start_tile_x =
-            (self.viewbox.area.left * scale / tiles::TILE_SIZE).floor() * tiles::TILE_SIZE;
-        let start_tile_y =
-            (self.viewbox.area.top * scale / tiles::TILE_SIZE).floor() * tiles::TILE_SIZE;
+        let start_tile_x = (self.viewbox.area.left * scale / tiles::get_active_tile_size()).floor()
+            * tiles::get_active_tile_size();
+        let start_tile_y = (self.viewbox.area.top * scale / tiles::get_active_tile_size()).floor()
+            * tiles::get_active_tile_size();
         Rect::from_xywh(
-            (tile.x() as f32 * tiles::TILE_SIZE) - start_tile_x,
-            (tile.y() as f32 * tiles::TILE_SIZE) - start_tile_y,
-            tiles::TILE_SIZE,
-            tiles::TILE_SIZE,
+            (tile.x() as f32 * tiles::get_active_tile_size()) - start_tile_x,
+            (tile.y() as f32 * tiles::get_active_tile_size()) - start_tile_y,
+            tiles::get_active_tile_size(),
+            tiles::get_active_tile_size(),
         )
     }
 
@@ -1481,7 +1504,7 @@ impl RenderState {
     //
     // Unlike `get_current_tile_bounds`, which calculates bounds using the exact
     // scaled offset of the viewbox, this method snaps the origin to the nearest
-    // lower multiple of `TILE_SIZE`. This ensures the tile bounds are aligned
+    // lower multiple of `get_active_tile_size()`. This ensures the tile bounds are aligned
     // with the global tile grid, which is useful for rendering tiles in a
     /// consistent and predictable layout.
     pub fn get_current_aligned_tile_bounds(&mut self) -> Rect {
@@ -2096,6 +2119,11 @@ impl RenderState {
                 .canvas(SurfaceId::Current)
                 .clear(self.background_color);
 
+            // P1.6: Tile-level frame budget — defer remaining tiles after 2ms.
+            if allow_stop && performance::get_time() - timestamp > FRAME_BUDGET_TILE_MS {
+                return Ok(());
+            }
+
             // If we finish processing every node rendering is complete
             // let's check if there are more pending nodes
             if let Some(next_tile) = self.pending_tiles.pop() {
@@ -2110,6 +2138,35 @@ impl RenderState {
                                 valid_ids.push(*root_id);
                             }
                         }
+
+                        // P1.6: Occlusion culling — skip shapes fully hidden behind opaque frames.
+                        //
+                        // A shape qualifies as an occluder only when ALL of:
+                        //   1. It is a frame (bounded rect shape, not a group or path).
+                        //   2. `needs_layer()` is false — rules out opacity < 1.0, non-SrcOver blend
+                        //      modes, blur effects, and masked groups in one call.
+                        //   3. Every fill is a solid color with alpha == 255 — a semi-transparent
+                        //      solid fill (e.g. rgba(r,g,b,0.5)) or a gradient cannot fully occlude.
+                        //      Non-solid fills (gradient, image) are rejected because their per-pixel
+                        //      alpha is unknown at this stage.
+                        let mut coverage = crate::occlusion::OpaqueCoverage::new();
+                        for root_id in valid_ids.iter().rev() {
+                            if let Some(shape) = tree.get(root_id) {
+                                let fills_opaque = shape.fills().all(
+                                    |f| matches!(f, Fill::Solid(SolidColor(c)) if c.a() == 255),
+                                );
+                                if shape.is_frame() && !shape.needs_layer() && fills_opaque {
+                                    coverage.add_opaque_rect(shape.selrect());
+                                }
+                            }
+                        }
+                        let valid_ids: Vec<Uuid> = valid_ids
+                            .into_iter()
+                            .filter(|id| {
+                                tree.get(id)
+                                    .map_or(true, |s| !coverage.is_fully_occluded(&s.selrect()))
+                            })
+                            .collect();
 
                         self.pending_nodes.extend(valid_ids.into_iter().map(|id| {
                             NodeRenderState {
