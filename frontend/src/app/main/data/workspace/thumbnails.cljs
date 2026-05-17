@@ -7,6 +7,7 @@
 (ns app.main.data.workspace.thumbnails
   (:require
    [app.common.data.macros :as dm]
+   [app.common.files.geometry-affecting :as gaf]
    [app.common.files.helpers :as cfh]
    [app.common.logging :as l]
    [app.common.thumbnails :as thc]
@@ -18,10 +19,12 @@
    [app.main.data.persistence :as-alias dps]
    [app.main.data.workspace.notifications :as-alias wnt]
    [app.main.data.workspace.pages :as-alias dwpg]
+   [app.main.data.workspace.thumbnail-debounce :as tbd]
    [app.main.rasterizer :as thr]
    [app.main.refs :as refs]
    [app.main.render :as render]
    [app.main.repo :as rp]
+   [app.main.store :as st]
    [app.util.queue :as q]
    [app.util.timers :as tm]
    [app.util.webapi :as wapi]
@@ -186,6 +189,17 @@
                      (rx/filter (ptk/type? ::clear-thumbnail))
                      (rx/filter #(= (deref %) object-id))))))))))
 
+(defn- extract-frame-changes-v2
+  "Like `extract-frame-changes` but tags each result with whether the commit
+  contained a geometry-affecting operation.  The geometry? flag is commit-level:
+  if any change in the commit touches geometry attributes, every affected frame
+  in that commit is considered geometry-dirty.  This is a conservative
+  approximation that avoids per-operation bookkeeping."
+  [page-id [event [old-data new-data]]]
+  (let [geometry? (gaf/geometry-affecting-changes? (:changes event))
+        frame-ids  (extract-frame-changes page-id [event [old-data new-data]])]
+    (into #{} (map (fn [[tag fid]] {:tag tag :frame-id fid :geometry? geometry?})) frame-ids)))
+
 (defn- extract-frame-changes
   "Process a changes set in a commit to extract the frames that are changing"
   [page-id [event [old-data new-data]]]
@@ -250,8 +264,20 @@
             changes))))
 
 (defn watch-state-changes
-  "Watch the state for changes inside frames. If a change is detected will force a rendering
-  of the frame data so the thumbnail can be updated."
+  "Watch the state for changes inside frames. If a change is detected will force
+  a rendering of the frame data so the thumbnail can be updated.
+
+  Optimised path (P1.4):
+  - Geometry-affecting changes (add/del/mov shapes, geometry attr edits) trigger
+    an immediate `clear-thumbnail` so the sidebar never shows stale content, then
+    schedule a per-frame 2-second debounced re-render.
+  - Style-only changes (colour, shadow, …) skip the immediate clear and only
+    schedule the debounced re-render — the existing thumbnail remains visible
+    until the regeneration fires.
+  - Each frame has its own independent debounce timer; a new change for frame A
+    does not reset the timer for frame B.
+  - On page finalisation all pending timers are cancelled to avoid dispatching
+    events against a dead page."
   [file-id page-id]
   (ptk/reify ::watch-state-changes
     ptk/WatchEvent
@@ -267,42 +293,55 @@
             (->> (rx/concat
                   (rx/of nil)
                   (rx/from-atom refs/workspace-data {:emit-current-value? true}))
-                 ;; We need to keep the old-objects so we can check the frame for the
+                 ;; We need to keep the old-objects so we can check the frame for
                  ;; deleted objects
                  (rx/buffer 2 1)
                  (rx/share))
 
-            ;; All commits stream, indepentendly of the source of the commit
+            ;; All commits stream — emits {:tag, :frame-id, :geometry?} maps
             all-commits-s
             (->> stream
                  (rx/filter dch/commit?)
                  (rx/map deref)
                  (rx/observe-on :async)
                  (rx/with-latest-from workspace-data-s)
-                 (rx/merge-map (partial extract-frame-changes page-id))
-                 (rx/tap #(l/trc :hint "inconming change" :origin "all" :frame-id (dm/str %)))
-                 (rx/share))
-
-            notifier-s
-            (->> stream
-                 (rx/filter (ptk/type? ::dps/commit-persisted))
-                 (rx/debounce 5000)
-                 (rx/tap #(l/trc :hint "buffer initialized")))]
+                 (rx/merge-map (partial extract-frame-changes-v2 page-id))
+                 (rx/tap #(l/trc :hint "incoming change"
+                                 :origin "all"
+                                 :frame-id (dm/str (:frame-id %))
+                                 :geometry? (:geometry? %)))
+                 (rx/share))]
 
         (->> (rx/merge
-              ;; Perform instant thumbnail cleaning of affected frames
-              ;; and interrupt any ongoing update-thumbnail process
-              ;; related to current frame-id
+              ;; 1. Immediate clear for geometry-affecting changes so the sidebar
+              ;;    never shows a stale thumbnail after shapes are moved/deleted.
               (->> all-commits-s
-                   (rx/mapcat (fn [[tag frame-id]]
+                   (rx/filter :geometry?)
+                   (rx/mapcat (fn [{:keys [tag frame-id]}]
                                 (rx/of (clear-thumbnail file-id page-id frame-id tag)))))
 
-              ;; Generate thumbnails in batches, once user becomes
-              ;; inactive for some instant.
+              ;; 2. Per-frame 2-second debounced regeneration for ALL changes
+              ;;    (geometry + style).  Cancels and restarts the timer whenever a
+              ;;    new mutation arrives for the same frame within the window.
               (->> all-commits-s
-                   (rx/buffer-until notifier-s)
-                   (rx/mapcat #(into #{} %))
-                   (rx/map (fn [[tag frame-id]]
-                             (update-thumbnail file-id page-id frame-id tag "watch-state-changes")))))
+                   (rx/tap (fn [{:keys [tag frame-id]}]
+                             (let [job-key [file-id page-id frame-id tag]]
+                               (tbd/schedule-update!
+                                job-key
+                                2000
+                                (fn []
+                                  (tbd/complete-job! job-key)
+                                  (st/emit!
+                                   (update-thumbnail file-id page-id frame-id tag
+                                                     "debounced"))))))))
+                   (rx/ignore))
+
+              ;; 3. Cleanup: cancel all pending debounce timers when the page
+              ;;    is finalised so we don't dispatch against a dead page.
+              (->> stream
+                   (rx/filter (ptk/type? ::dwpg/finalize-page))
+                   (rx/take 1)
+                   (rx/tap (fn [_] (tbd/clear-all!)))
+                   (rx/ignore)))
 
              (rx/take-until stopper-s))))))
