@@ -24,6 +24,7 @@
 //! ```
 
 pub mod flex;
+pub mod grid;
 pub mod matrix;
 pub mod point;
 
