@@ -3,7 +3,7 @@ use crate::shapes::Shape;
 
 use skia_safe::{self as skia, IRect, Paint, RRect};
 
-use super::{gpu_state::GpuState, tiles::Tile, tiles::TileViewbox, tiles::TILE_SIZE};
+use super::{gpu_state::GpuState, tiles, tiles::Tile, tiles::TileViewbox};
 
 use base64::{engine::general_purpose, Engine as _};
 use std::collections::{HashMap, HashSet};
@@ -350,8 +350,8 @@ impl Surfaces {
         self.cache = self.target.new_surface_with_dimensions(cache_dims).unwrap();
         self.cache.canvas().reset_matrix();
         self.cache.canvas().translate((
-            (interest_area_threshold as f32 * TILE_SIZE),
-            (interest_area_threshold as f32 * TILE_SIZE),
+            (interest_area_threshold as f32 * tiles::get_active_tile_size()),
+            (interest_area_threshold as f32 * tiles::get_active_tile_size()),
         ));
     }
 
