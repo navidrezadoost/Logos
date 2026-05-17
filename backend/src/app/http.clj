@@ -167,6 +167,7 @@
   (rr/router
    [["" {:middleware [[mw/server-timing]
                       [sec/sec-fetch-metadata]
+                      [sec/cross-origin-isolation]
                       [mw/params]
                       [mw/format-response]
                       [mw/auth {:bearer (partial session/decode-token cfg)
