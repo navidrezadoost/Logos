@@ -31,6 +31,7 @@
    [app.rpc.quotes :as quotes]
    [app.setup :as-alias setup]
    [app.storage :as sto]
+   [app.util.redis-cache :as rsc]
    [app.util.services :as sv]
    [app.worker :as wrk]
    [clojure.set :as set]))
@@ -234,8 +235,14 @@
 (sv/defmethod ::get-team
   {::doc/added "1.17"
    ::sm/params schema:get-team}
-  [{:keys [::db/pool]} {:keys [::rpc/profile-id id file-id]}]
-  (get-team pool :profile-id profile-id :team-id id :file-id file-id))
+  [{:keys [::db/pool] :as cfg} {:keys [::rpc/profile-id id file-id]}]
+  ;; P1.5: Cache the by-team-id path — the most common call from the file editor.
+  ;; The by-file-id path is left uncached; it is less frequent and requires an
+  ;; extra join to resolve team identity before caching.
+  (if (and id (nil? file-id))
+    (rsc/cache-get cfg (rsc/team-key id) rsc/team-ttl
+                   #(get-team pool :profile-id profile-id :team-id id))
+    (get-team pool :profile-id profile-id :team-id id :file-id file-id)))
 
 (defn get-team
   [conn & {:keys [profile-id team-id project-id file-id] :as params}]
@@ -603,6 +610,8 @@
   (db/update! conn :team
               {:name name}
               {:id id})
+  ;; P1.5: Invalidate cached team so the name change is immediately visible.
+  (rsc/cache-del cfg (rsc/team-key id))
   nil)
 
 
@@ -663,8 +672,10 @@
   {::doc/added "1.17"
    ::sm/params schema:leave-team
    ::db/transaction true}
-  [{:keys [::db/conn] :as cfg} {:keys [::rpc/profile-id] :as params}]
-  (leave-team conn (assoc params :profile-id profile-id)))
+  [{:keys [::db/conn] :as cfg} {:keys [::rpc/profile-id id] :as params}]
+  (leave-team conn (assoc params :profile-id profile-id))
+  ;; P1.5: Membership change — evict cached team so member lists are fresh.
+  (rsc/cache-del cfg (rsc/team-key id)))
 
 ;; --- Mutation: Delete Team
 
@@ -707,6 +718,8 @@
                 :code :only-owner-can-delete-team))
 
     (delete-team conn team)
+    ;; P1.5: Evict cached team entry immediately — deleted teams must not be returned.
+    (rsc/cache-del cfg (rsc/team-key id))
     nil))
 
 ;; --- Mutation: Team Update Role
@@ -773,8 +786,10 @@
 (sv/defmethod ::update-team-member-role
   {::doc/added "1.17"
    ::sm/params schema:update-team-member-role}
-  [cfg {:keys [::rpc/profile-id] :as params}]
-  (db/tx-run! cfg update-team-member-role (assoc params :profile-id profile-id)))
+  [cfg {:keys [::rpc/profile-id team-id] :as params}]
+  (db/tx-run! cfg update-team-member-role (assoc params :profile-id profile-id))
+  ;; P1.5: Role change mutates permissions stored in the cached team map.
+  (rsc/cache-del cfg (rsc/team-key team-id)))
 
 ;; --- Mutation: Delete Team Member
 
@@ -808,6 +823,8 @@
                          :team-id team-id
                          :team-name (:name team)})
 
+    ;; P1.5: Member removed — invalidate cached team so remaining members are correct.
+    (rsc/cache-del cfg (rsc/team-key team-id))
     nil))
 
 ;; --- Mutation: Update Team Photo
@@ -845,5 +862,8 @@
     (db/update! pool :team
                 {:photo-id (:id photo)}
                 {:id team-id})
+
+    ;; P1.5: Photo change mutates team metadata — evict cache.
+    (rsc/cache-del cfg (rsc/team-key team-id))
 
     (assoc team :photo-id (:id photo))))

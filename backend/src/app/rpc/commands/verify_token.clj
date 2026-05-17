@@ -24,6 +24,7 @@
    [app.setup :as-alias setup]
    [app.tokens :as tokens]
    [app.tokens.spec.team-invitation :as-alias spec.team-invitation]
+   [app.util.redis-cache :as rsc]
    [app.util.services :as sv]))
 
 (defmulti process-token (fn [_ _ claims] (:iss claims)))
@@ -120,6 +121,10 @@
     ;; Delete any request
     (db/delete! conn :team-access-request
                 {:team-id team-id :requester-id (:id member)})
+
+    ;; P1.5: New member accepted invitation — evict cached team so online members
+    ;; list is not served stale for up to 10 minutes.
+    (rsc/cache-del cfg (rsc/team-key team-id))
 
     (assoc member :is-active true)))
 
