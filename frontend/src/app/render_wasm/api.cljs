@@ -146,6 +146,117 @@
 (defonce shapes-loading? (atom false))
 (defonce deferred-render? (atom false))
 
+;; ---------------------------------------------------------------------------
+;; P1.1 — Dirty-shape tracking
+;; ---------------------------------------------------------------------------
+;; Holds the last objects map successfully committed to the WASM shape pool.
+;; Clojure persistent maps share structure, so `identical?` on unchanged
+;; values is O(1) — diffing a 10 000-shape page is essentially free.
+(defonce !prev-objects (atom nil))
+
+(defn clear-prev-objects!
+  "Reset the dirty-shape cache.  Must be called when switching pages so the
+  next `sync-objects` call performs a full re-upload."
+  []
+  (reset! !prev-objects nil))
+
+(defn- diff-objects
+  "Return a map {:added [...] :changed [...] :removed [...]} describing
+  the delta between two objects maps.  All three collections hold shape
+  values (for :added/:changed) or shape UUIDs (for :removed)."
+  [prev next]
+  (if (nil? prev)
+    {:added   (vals next)
+     :changed []
+     :removed []}
+    (let [prev-ids (set (keys prev))
+          next-ids (set (keys next))
+          added-ids   (clojure.set/difference next-ids prev-ids)
+          removed-ids (clojure.set/difference prev-ids next-ids)
+          changed     (into []
+                            (keep (fn [id]
+                                    (let [new-shape (get next id)
+                                          old-shape (get prev id)]
+                                      (when-not (identical? old-shape new-shape)
+                                        new-shape))))
+                            (clojure.set/intersection prev-ids next-ids))]
+      {:added   (mapv #(get next %) added-ids)
+       :changed changed
+       :removed (vec removed-ids)})))
+
+(defn- remove-shape-from-wasm!
+  "Notify the WASM pool that a shape has been deleted so it can release
+  its resources.  Falls back to a no-op if the backing function is not
+  yet exported — maintaining forward compatibility during the transition."
+  [shape-id]
+  (when wasm/context-initialized?
+    (let [buffer (uuid/get-u32 shape-id)]
+      (when (exists? (unchecked-get wasm/internal-module "_remove_shape"))
+        (h/call wasm/internal-module "_remove_shape"
+                (aget buffer 0)
+                (aget buffer 1)
+                (aget buffer 2)
+                (aget buffer 3))))))
+
+(defn sync-objects
+  "Incremental WASM synchronisation.  Computes the diff between *objects* and
+  the last committed snapshot, then:
+    • uploads only added / changed shapes  (O(delta) not O(total))
+    • notifies WASM of removed shapes
+    • commits the snapshot for the next diff cycle
+
+  Falls back to a full `set-objects` call when no prior snapshot exists
+  (e.g., initial page load or after a `clear-prev-objects!` call).
+
+  Use this function for incremental workspace change-sets.  Continue to
+  use `set-objects` for the initial page load where a full pool
+  initialisation is required anyway."
+  ([objects]
+   (sync-objects objects nil))
+  ([objects render-callback]
+   (let [prev  @!prev-objects
+         {:keys [added changed removed]} (diff-objects prev objects)]
+     (when (seq removed)
+       (run! remove-shape-from-wasm! removed))
+     (let [to-upload (into added changed)]
+       (if (seq to-upload)
+         (let [total (count to-upload)]
+           (if (< total ASYNC_THRESHOLD)
+             (do
+               (run! (fn [shape]
+                       (set-object shape)
+                       (process-object shape)) to-upload)
+               (reset! !prev-objects objects)
+               (if render-callback
+                 (render-callback)
+                 (request-render "sync-objects")))
+             (do
+               (begin-shapes-loading!)
+               (-> (p/create
+                    (fn [resolve _]
+                      (letfn [(process-chunk [batch rest-shapes]
+                                (run! set-object batch)
+                                (if (seq rest-shapes)
+                                  (-> (yield-to-browser)
+                                      (p/then (fn [_]
+                                                (let [[next-batch more] (split-at SHAPES_CHUNK_SIZE rest-shapes)]
+                                                  (process-chunk next-batch more)))))
+                                  (do
+                                    (reset! !prev-objects objects)
+                                    (end-shapes-loading!)
+                                    (if render-callback
+                                      (render-callback)
+                                      (render-finish))
+                                    (resolve nil))))]
+                        (let [[first-batch rest] (split-at SHAPES_CHUNK_SIZE to-upload)]
+                          (process-chunk first-batch rest)))))
+                   (p/catch (fn [err]
+                              (end-shapes-loading!)
+                              (js/console.error "sync-objects async failed" err))))))
+         ;; Nothing changed — just ensure the render callback fires
+         (do
+           (when render-callback (render-callback))))))))
+
 (defn- register-deferred-render!
   []
   (reset! deferred-render? true))
@@ -1313,16 +1424,27 @@
         (request-render "set-modifiers")))))
 
 (defn initialize-viewport
+  "Full viewport initialisation.  Resets the dirty-shape cache so that the
+  next `sync-objects` call re-uploads only shapes that have changed since this
+  cold start."
   ([base-objects zoom vbox background]
    (initialize-viewport base-objects zoom vbox background nil))
   ([base-objects zoom vbox background callback]
    (let [rgba         (sr-clr/hex->u32argb background 1)
          shapes       (into [] (vals base-objects))
          total-shapes (count shapes)]
+     ;; Reset dirty-shape cache — this is a full re-init so every shape
+     ;; in base-objects will be in the committed snapshot after set-objects.
+     (clear-prev-objects!)
      (h/call wasm/internal-module "_set_canvas_background" rgba)
      (h/call wasm/internal-module "_set_view" zoom (- (:x vbox)) (- (:y vbox)))
      (h/call wasm/internal-module "_init_shapes_pool" total-shapes)
-     (set-objects base-objects callback))))
+     (set-objects base-objects
+                  (fn []
+                    ;; Snapshot the committed objects map so subsequent
+                    ;; sync-objects calls can diff against it.
+                    (reset! !prev-objects base-objects)
+                    (when callback (callback)))))))
 
 (def ^:private default-context-options
   #js {:antialias false
