@@ -11,6 +11,7 @@
    [app.main.data.modal :as modal]
    [app.main.ui.ds.buttons.button :refer [button*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.foundations.assets.duotone-icon :refer [duotone-icon*] :as di]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.ds.foundations.typography :as t]
    [app.main.ui.ds.foundations.typography.heading :refer [heading*]]
@@ -56,7 +57,7 @@
         [:ul {:class (stl/css :rule-list)}
          [:li {:class (stl/css :rule-item)}
           [:div {:class (stl/css :rule-item-icon)}
-           [:> icon* {:icon-id i/text-mixed
+           [:> duotone-icon* {:icon-id di/font-case
                       :size "m"
                       :aria-hidden true}]]
 
@@ -67,7 +68,7 @@
             (tr "workspace.options.component.variants-help-modal.rule1")]]]
          [:li {:class (stl/css :rule-item)}
           [:div {:class (stl/css :rule-item-icon)}
-           [:> icon* {:icon-id i/img
+           [:> duotone-icon* {:icon-id di/image
                       :size "m"
                       :aria-hidden true}]]
 
@@ -78,7 +79,7 @@
 
          [:li {:class (stl/css :rule-item)}
           [:div {:class (stl/css :rule-item-icon)}
-           [:> icon* {:icon-id i/folder
+           [:> duotone-icon* {:icon-id di/folder
                       :size "m"
                       :aria-hidden true}]]
 

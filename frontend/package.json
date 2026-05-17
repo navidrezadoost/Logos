@@ -38,10 +38,11 @@
     "translations": "node ./scripts/translations.js",
     "watch:app:assets": "node ./scripts/watch.js",
     "watch:app:libs": "node ./scripts/build-libs.js --watch",
-    "watch:app:main": "clojure -M:dev:shadow-cljs watch main worker storybook",
+    "watch:app:main": "host-clojure -M:dev:shadow-cljs watch main worker storybook",
     "clear:shadow-cache": "rm -rf .shadow-cljs",
     "watch": "exit 0",
     "watch:app": "pnpm run clear:shadow-cache && pnpm run build:wasm && concurrently --kill-others-on-fail \"pnpm run watch:app:assets\" \"pnpm run watch:app:main\" \"pnpm run watch:app:libs\"",
+    "watch:app:no-wasm": "pnpm run clear:shadow-cache && mkdir -p target && touch target/index.js && concurrently \"pnpm run watch:app:assets\" \"pnpm run watch:app:main\" \"pnpm run watch:app:libs\"",
     "watch:storybook": "pnpm run build:storybook:assets && concurrently --kill-others-on-fail \"storybook dev -p 6006 --no-open\" \"node ./scripts/watch-storybook.js\""
   },
   "devDependencies": {

@@ -20,6 +20,7 @@
    [app.main.refs :as refs]
    [app.main.store :as st]
    [app.main.ui.context :as ctx]
+   [app.main.ui.ds.foundations.assets.duotone-icon :refer [duotone-icon*] :as di]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*]]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.icons :as deprecated-icon]
@@ -32,6 +33,9 @@
    [beicon.v2.core :as rx]
    [okulary.core :as l]
    [rumext.v2 :as mf]))
+
+;;; Shape icons available as duotone — must match duotone_icon.cljs registry.
+(def ^:private duotone-shape-icons #{"text" "mask" "rectangle"})
 
 ;; Coalesce sidebar hover highlights to 1 frame to avoid long tasks
 (defonce ^:private sidebar-hover-queue (atom {:enter #{} :leave #{}}))
@@ -128,16 +132,9 @@
                  :on-double-click on-zoom-to-selected}
            (when absolute?
              [:div {:class (stl/css :absolute)}])
-           [:> icon* {:icon-id icon-shape :size "s" :data-testid (str "icon-" icon-shape)}]]]
-
-         [:div {:class (stl/css :button-content)}
-          (when (not ^boolean filtered?)
-            [:span {:class (stl/css :toggle-content)}])
-          [:div {:class (stl/css :icon-shape)
-                 :on-double-click on-zoom-to-selected}
-           (when ^boolean absolute?
-             [:div {:class (stl/css :absolute)}])
-           [:> icon* {:icon-id icon-shape :size "s" :data-testid (str "icon-" icon-shape)}]]])
+           (if (contains? duotone-shape-icons icon-shape)
+             [:> duotone-icon* {:icon-id icon-shape :size "s" :data-testid (str "icon-" icon-shape)}]
+             [:> icon* {:icon-id icon-shape :size "s" :data-testid (str "icon-" icon-shape)}])]])
 
        [:> layer-name* {:ref name-ref
                         :shape-id id

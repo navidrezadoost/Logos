@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+if [ ! -f /opt/emsdk/emsdk_env.sh ]; then
+    echo "WARNING: EMSDK not found at /opt/emsdk/emsdk_env.sh — skipping WASM build."
+    echo "To build render-wasm, install EMSDK: https://emscripten.org/docs/getting_started/downloads.html"
+    exit 0
+fi
+
 EMSDK_QUIET=1 . /opt/emsdk/emsdk_env.sh
 
 _SCRIPT_DIR=$(dirname $0);

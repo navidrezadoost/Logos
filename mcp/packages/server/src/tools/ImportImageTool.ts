@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Tool } from "../Tool";
 import { TextResponse, ToolResponse } from "../ToolResponse";
 import "reflect-metadata";
-import { PenpotMcpServer } from "../PenpotMcpServer";
+import { LogosMcpServer } from "../LogosMcpServer";
 import { ExecuteCodePluginTask } from "../tasks/ExecuteCodePluginTask";
 import { FileUtils } from "../utils/FileUtils";
 import * as fs from "fs";
@@ -63,7 +63,7 @@ export class ImportImageTool extends Tool<ImportImageArgs> {
      *
      * @param mcpServer - The MCP server instance
      */
-    constructor(mcpServer: PenpotMcpServer) {
+    constructor(mcpServer: LogosMcpServer) {
         super(mcpServer, ImportImageArgs.schema);
     }
 

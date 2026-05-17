@@ -2,10 +2,10 @@ import { EmptyToolArgs, Tool } from "../Tool";
 import "reflect-metadata";
 import type { ToolResponse } from "../ToolResponse";
 import { TextResponse } from "../ToolResponse";
-import { PenpotMcpServer } from "../PenpotMcpServer";
+import { LogosMcpServer } from "../LogosMcpServer";
 
 export class HighLevelOverviewTool extends Tool<EmptyToolArgs> {
-    constructor(mcpServer: PenpotMcpServer) {
+    constructor(mcpServer: LogosMcpServer) {
         super(mcpServer, EmptyToolArgs.schema);
     }
 

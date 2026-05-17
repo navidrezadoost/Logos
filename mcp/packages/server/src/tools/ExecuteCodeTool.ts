@@ -3,7 +3,7 @@ import { Tool } from "../Tool";
 import type { ToolResponse } from "../ToolResponse";
 import { TextResponse } from "../ToolResponse";
 import "reflect-metadata";
-import { PenpotMcpServer } from "../PenpotMcpServer";
+import { LogosMcpServer } from "../LogosMcpServer";
 import { ExecuteCodePluginTask } from "../tasks/ExecuteCodePluginTask";
 import { ExecuteCodeTaskParams } from "@penpot/mcp-common";
 
@@ -33,7 +33,7 @@ export class ExecuteCodeTool extends Tool<ExecuteCodeArgs> {
      *
      * @param mcpServer - The MCP server instance
      */
-    constructor(mcpServer: PenpotMcpServer) {
+    constructor(mcpServer: LogosMcpServer) {
         super(mcpServer, ExecuteCodeArgs.schema);
     }
 

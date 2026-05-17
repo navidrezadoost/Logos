@@ -16,6 +16,7 @@
    [app.main.ui.components.reorder-handler :refer [reorder-handler*]]
    [app.main.ui.components.select :refer [select]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.foundations.assets.duotone-icon :refer [duotone-icon*] :as di]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.hooks :as h]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
@@ -228,7 +229,7 @@
 
         [:div {:class (stl/css :stroke-width-input)
                :title (tr "workspace.options.stroke-width")}
-         [:> icon* {:icon-id i/stroke-size
+          [:> duotone-icon* {:icon-id di/pen-line
                     :size "s"}]
          [:> deprecated-input/numeric-input* {:value stroke-width
                                               :min 0

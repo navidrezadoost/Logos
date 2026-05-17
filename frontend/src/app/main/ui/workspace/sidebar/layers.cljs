@@ -18,6 +18,7 @@
    [app.main.ui.components.search-bar :refer [search-bar*]]
    [app.main.ui.components.title-bar :refer [title-bar*]]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.foundations.assets.duotone-icon :refer [duotone-icon*] :as di]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.notifications.badge :refer [badge-notification]]
@@ -324,7 +325,7 @@
                 [:> icon* {:icon-id filter-icon :size "s" :class (stl/css :layer-filter-icon)}]
                 [:span {:class (stl/css :layer-filter-name)}
                  name]
-                [:> icon* {:icon-id i/close-small :class (stl/css :layer-filter-close)}]]))]
+                [:> duotone-icon* {:icon-id di/close :class (stl/css :layer-filter-close)}]]))]
 
           (when ^boolean show-menu?
             [:ul {:class (stl/css :filters-container)}
@@ -338,7 +339,7 @@
                 (tr "workspace.sidebar.layers.frames")]]
 
               (when (contains? current-filters :frame)
-                [:> icon* {:icon-id i/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
+                [:> duotone-icon* {:icon-id di/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
 
              [:li {:class (stl/css-case :filter-menu-item true
                                         :selected (contains? current-filters :group))
@@ -350,19 +351,19 @@
                 (tr "workspace.sidebar.layers.groups")]]
 
               (when (contains? current-filters :group)
-                [:> icon* {:icon-id i/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
+                [:> duotone-icon* {:icon-id di/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
 
              [:li {:class (stl/css-case :filter-menu-item true
                                         :selected (contains? current-filters :mask))
                    :data-filter "mask"
                    :on-click add-filter}
               [:div {:class (stl/css :filter-menu-item-name-wrapper)}
-               [:> icon* {:icon-id i/mask :size "s" :class (stl/css :filter-menu-item-icon)}]
+               [:> duotone-icon* {:icon-id di/mask :size "s" :class (stl/css :filter-menu-item-icon)}]
                [:span {:class (stl/css :filter-menu-item-name)}
                 (tr "workspace.sidebar.layers.masks")]]
 
               (when (contains? current-filters :mask)
-                [:> icon* {:icon-id i/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
+                [:> duotone-icon* {:icon-id di/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
 
              [:li {:class (stl/css-case :filter-menu-item true
                                         :selected (contains? current-filters :component))
@@ -374,19 +375,19 @@
                 (tr "workspace.sidebar.layers.components")]]
 
               (when (contains? current-filters :component)
-                [:> icon* {:icon-id i/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
+                [:> duotone-icon* {:icon-id di/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
 
              [:li {:class (stl/css-case :filter-menu-item true
                                         :selected (contains? current-filters :text))
                    :data-filter "text"
                    :on-click add-filter}
               [:div {:class (stl/css :filter-menu-item-name-wrapper)}
-               [:> icon* {:icon-id i/text :size "s" :class (stl/css :filter-menu-item-icon)}]
+               [:> duotone-icon* {:icon-id di/text :size "s" :class (stl/css :filter-menu-item-icon)}]
                [:span {:class (stl/css :filter-menu-item-name)}
                 (tr "workspace.sidebar.layers.texts")]]
 
               (when (contains? current-filters :text)
-                [:> icon* {:icon-id i/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
+                [:> duotone-icon* {:icon-id di/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
 
              [:li {:class (stl/css-case :filter-menu-item true
                                         :selected (contains? current-filters :image))
@@ -398,7 +399,7 @@
                 (tr "workspace.sidebar.layers.images")]]
 
               (when (contains? current-filters :image)
-                [:> icon* {:icon-id i/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
+                [:> duotone-icon* {:icon-id di/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]
 
              [:li {:class (stl/css-case :filter-menu-item true
                                         :selected (contains? current-filters :shape))
@@ -410,7 +411,7 @@
                 (tr "workspace.sidebar.layers.shapes")]]
 
               (when (contains? current-filters :shape)
-                [:> icon* {:icon-id i/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]])]
+                [:> duotone-icon* {:icon-id di/tick :size "s" :class (stl/css :filter-menu-item-tick)}])]])]
 
          [:div {:class (stl/css :tool-window-bar)}
           [:> title-bar* {:collapsable  false

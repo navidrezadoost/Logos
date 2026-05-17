@@ -3,7 +3,7 @@ import * as http from "http";
 import { PluginTask } from "./PluginTask";
 import { PluginTaskResponse, PluginTaskResult } from "@penpot/mcp-common";
 import { createLogger } from "./logger";
-import type { PenpotMcpServer } from "./PenpotMcpServer";
+import type { LogosMcpServer } from "./LogosMcpServer";
 
 interface ClientConnection {
     socket: WebSocket;
@@ -23,7 +23,7 @@ export class PluginBridge {
     private readonly taskTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
     constructor(
-        public readonly mcpServer: PenpotMcpServer,
+        public readonly mcpServer: LogosMcpServer,
         private port: number,
         private taskTimeoutSecs: number = 30
     ) {

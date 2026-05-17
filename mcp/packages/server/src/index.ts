@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { PenpotMcpServer } from "./PenpotMcpServer";
+import { LogosMcpServer } from "./LogosMcpServer";
 import { createLogger, logFilePath } from "./logger";
 
 /**
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
             }
         }
 
-        const server = new PenpotMcpServer(multiUser);
+        const server = new LogosMcpServer(multiUser);
         await server.start();
 
         // keep the process alive

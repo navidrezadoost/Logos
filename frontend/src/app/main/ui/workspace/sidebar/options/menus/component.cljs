@@ -39,6 +39,7 @@
    [app.main.ui.ds.controls.radio-buttons :refer [radio-buttons*]]
    [app.main.ui.ds.controls.select :refer [select*]]
    [app.main.ui.ds.controls.switch :refer [switch*]]
+   [app.main.ui.ds.foundations.assets.duotone-icon :refer [duotone-icon*] :as di]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.ds.product.input-with-meta :refer [input-with-meta*]]
    [app.main.ui.hooks :as h]
@@ -187,7 +188,7 @@
              (tr "workspace.options.component.create-annotation"))]
 
           [:*
-           [:> icon* {:icon-id (if expanded? i/arrow-down i/arrow-right)
+           [:> duotone-icon* {:icon-id (if expanded? di/arrow-down di/arrow-right)
                       :class (stl/css :annotation-title-icon-arrow)
                       :size "s"}]
            [:span {:class (stl/css :annotation-title-name)}
@@ -204,25 +205,25 @@
                               (tr "labels.save"))
                      :on-click on-save
                      :class (stl/css :annotation-title-icon-action)}
-               [:> icon* {:icon-id i/tick
+               [:> duotone-icon* {:icon-id di/tick
                           :class (stl/css-case :annotation-title-icon-ok true
                                                :disabled invalid-text?)}]]
               [:div {:class (stl/css :annotation-title-icon-action)
                      :title (tr "labels.discard")
                      :on-click on-discard}
-               [:> icon* {:icon-id i/close
+               [:> duotone-icon* {:icon-id di/close
                           :class (stl/css :annotation-title-icon-nok)}]]]
 
              [:*
               [:div {:class (stl/css :annotation-title-icon-action)
                      :title (tr "labels.edit")
                      :on-click on-edit}
-               [:> icon* {:icon-id i/curve
+               [:> duotone-icon* {:icon-id di/bezier-curve
                           :class (stl/css :annotation-title-icon-ok)}]]
               [:div {:class (stl/css :annotation-title-icon-action)
                      :title (tr "labels.delete")
                      :on-click on-delete-annotation}
-               [:> icon* {:icon-id i/delete
+               [:> duotone-icon* {:icon-id di/trash-alt
                           :class (stl/css :annotation-title-icon-nok)}]]]))]]
 
        [:div {:class (stl/css-case :annotation-body-hidden (not expanded?))}
@@ -425,7 +426,7 @@
 
      (if malformed-msg
        [:div {:class (stl/css :variant-warning)}
-        [:> icon* {:icon-id i/msg-neutral
+        [:> duotone-icon* {:icon-id di/message
                    :class (stl/css :variant-warning-darken)}]
         [:div {:class (stl/css :variant-warning-highlight)}
          (str malformed-msg " " (tr "workspace.options.component.variant.malformed.structure.title"))]
@@ -434,7 +435,7 @@
 
        (when duplicated-msg
          [:div {:class (stl/css :variant-warning)}
-          [:> icon* {:icon-id i/msg-neutral
+          [:> duotone-icon* {:icon-id di/message
                      :class (stl/css :variant-warning-darken)}]
           [:div {:class (stl/css :variant-warning-highlight)}
            (str duplicated-msg)]]))]))
@@ -551,7 +552,7 @@
 
      (if (seq malformed-comps)
        [:div {:class (stl/css :variant-warning)}
-        [:> icon* {:icon-id i/msg-neutral
+        [:> duotone-icon* {:icon-id di/message
                    :class (stl/css :variant-warning-darken)}]
         [:div {:class (stl/css :variant-warning-highlight)}
          (tr "workspace.options.component.variant.malformed.copy")]
@@ -561,7 +562,7 @@
 
        (when (seq duplicated-comps)
          [:div {:class (stl/css :variant-warning)}
-          [:> icon* {:icon-id i/msg-neutral
+          [:> duotone-icon* {:icon-id di/message
                      :class (stl/css :variant-warning-darken)}]
           [:div {:class (stl/css :variant-warning-highlight)}
            (tr "workspace.options.component.variant.duplicated.copy.title")]
@@ -600,7 +601,7 @@
      (when (ctk/is-variant? item)
        [:span {:class (stl/css :swap-item-variant-icon)
                :title (tr "workspace.assets.components.num-variants" num-variants)}
-        [:> icon* {:icon-id i/variant
+        [:> duotone-icon* {:icon-id di/puzzle-piece
                    :size "s"}]])]))
 
 (mf/defc component-swap-group-title*
@@ -614,9 +615,9 @@
      [:span {:class (stl/css :swap-group-name)}
       (cpn/last-path group-name)]
 
-     [:> icon* {:class (stl/css :swap-group-icon)
+     [:> duotone-icon* {:class (stl/css :swap-group-icon)
                 :variant "ghost"
-                :icon-id i/arrow-right
+                :icon-id di/arrow-right
                 :size "s"}]]))
 
 (defn- find-common-path
@@ -810,7 +811,7 @@
          [:button {:class (stl/css :swap-library-back)
                    :on-click on-go-back
                    :title filter-path-with-dots}
-          [:> icon* {:icon-id i/arrow-left
+          [:> duotone-icon* {:icon-id di/arrow-left
                      :size "s"}]
           [:span {:class (stl/css :swap-library-back-name)}
            filter-path-with-dots]])
@@ -1022,7 +1023,7 @@
         (if is-swap-opened
           [:button {:class (stl/css :component-title-swap)
                     :on-click on-component-back}
-           [:> icon* {:icon-id i/arrow-left
+           [:> duotone-icon* {:icon-id di/arrow-left
                       :size "s"}]
            [:span (tr "workspace.options.component")]]
 
@@ -1322,7 +1323,7 @@
 
           (if malformed?
             [:div {:class (stl/css :variant-warning)}
-             [:> icon* {:icon-id i/msg-neutral
+             [:> duotone-icon* {:icon-id di/message
                         :class (stl/css :variant-warning-darken)}]
              [:div {:class (stl/css :variant-warning-highlight)}
               (tr "workspace.options.component.variant.malformed.group.title")]
@@ -1332,7 +1333,7 @@
 
             (when duplicated?
               [:div {:class (stl/css :variant-warning)}
-               [:> icon* {:icon-id i/msg-neutral
+               [:> duotone-icon* {:icon-id di/message
                           :class (stl/css :variant-warning-darken)}]
                [:div {:class (stl/css :variant-warning-highlight)}
                 (tr "workspace.options.component.variant.duplicated.group.title")]

@@ -18,6 +18,7 @@
    [app.main.data.workspace.shortcuts]
    [app.main.store :as st]
    [app.main.ui.components.search-bar :refer [search-bar*]]
+   [app.main.ui.ds.foundations.assets.duotone-icon :refer [duotone-icon*] :as di]
    [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.main.ui.ds.product.panel-title :refer [panel-title*]]
    [app.util.dom :as dom]
@@ -285,7 +286,7 @@
   [:div {:class (if is-sub
                   (stl/css :subsection-title)
                   (stl/css :section-title))}
-   [:> icon* {:icon-id (if is-visible i/arrow-down i/arrow-right)
+   [:> duotone-icon* {:icon-id (if is-visible di/arrow-down di/arrow-right)
               :size "s"}]
    [:span {:class (if is-sub
                     (stl/css :subsection-name)

@@ -9,6 +9,7 @@
    [app.main.store :as st]
    [app.main.ui.components.numeric-input :as deprecated-input]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
+   [app.main.ui.ds.foundations.assets.duotone-icon :refer [duotone-icon*] :as di]
    [app.main.ui.ds.foundations.assets.icon :refer [icon*] :as i]
    [app.main.ui.hooks :as hooks]
    [app.main.ui.workspace.sidebar.options.menus.input-wrapper-tokens :refer [numeric-input-wrapper*]]
@@ -204,7 +205,7 @@
 
          [:div {:class (stl/css :radius-1)
                 :title (tr "workspace.options.radius")}
-          [:> icon* {:icon-id i/corner-radius
+          [:> duotone-icon* {:icon-id di/corner
                      :size "s"
                      :class (stl/css :icon)}]
           [:> deprecated-input/numeric-input*

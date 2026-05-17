@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Tool } from "../Tool";
 import { ImageContent, PNGImageContent, PNGResponse, TextContent, TextResponse, ToolResponse } from "../ToolResponse";
 import "reflect-metadata";
-import { PenpotMcpServer } from "../PenpotMcpServer";
+import { LogosMcpServer } from "../LogosMcpServer";
 import { ExecuteCodePluginTask } from "../tasks/ExecuteCodePluginTask";
 import { FileUtils } from "../utils/FileUtils";
 import sharp from "sharp";
@@ -54,7 +54,7 @@ export class ExportShapeTool extends Tool<ExportShapeArgs> {
      *
      * @param mcpServer - The MCP server instance
      */
-    constructor(mcpServer: PenpotMcpServer) {
+    constructor(mcpServer: LogosMcpServer) {
         let schema: any = ExportShapeArgs.schema;
         if (!mcpServer.isFileSystemAccessEnabled()) {
             // remove filePath key from schema

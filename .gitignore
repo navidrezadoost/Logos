@@ -3,3 +3,9 @@ target/
 node_modules/
 **/node_modules/
 logos-wasm/dist/
+.cpcache/
+**/.cpcache/
+**/.shadow-cljs/
+backend/logs/
+backend/scripts/_env.local
+Cargo.lock

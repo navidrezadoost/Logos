@@ -43,13 +43,16 @@ async function findFiles(basePath, predicate, options = {}) {
   let files = await fs.readdir(basePath, {
     recursive: options.recursive ?? false,
   });
-  files = files.map((path) => ph.join(basePath, path));
+  files = files
+    .map((path) => ph.join(basePath, path))
+    .filter(predicate);
 
   return files;
 }
 
 function syncDirs(originPath, destPath) {
-  const command = `rsync -ar --delete ${originPath} ${destPath}`;
+  // Use Node.js cp instead of rsync for Flatpak/sandbox compatibility
+  const command = `cp -a ${originPath}. ${destPath}`;
 
   return new Promise((resolve, reject) => {
     proc.exec(command, (cause, stdout) => {
@@ -363,7 +366,15 @@ export async function compileTranslations() {
   }
 }
 
-async function generateSvgSprite(files, prefix) {
+// Normalizes duotone icon basenames so digit-starting names get an i- prefix,
+// and underscores are replaced with hyphens — matching ClojureScript identifier
+// conventions in generate-duotone-icons.mjs.
+function sanitizeDuotoneName(name) {
+  let n = name.replace(/_/g, "-");
+  return /^[0-9]/.test(n) ? "i-" + n : n;
+}
+
+async function generateSvgSprite(files, prefix, nameTransform = (n) => n) {
   const spriter = new SVGSpriter({
     mode: {
       symbol: { inline: true },
@@ -371,9 +382,10 @@ async function generateSvgSprite(files, prefix) {
   });
 
   for (let path of files) {
-    const name = `${prefix}${ph.basename(path)}`;
+    const base = ph.basename(path, ".svg");
+    const id = `${prefix}${nameTransform(base)}`;
     const content = await fs.readFile(path, { encoding: "utf-8" });
-    spriter.add(name, name, content);
+    spriter.add(id + ".svg", id + ".svg", content);
   }
 
   const { result } = await spriter.compileAsync();
@@ -406,6 +418,13 @@ async function generateSvgSprites() {
     "resources/public/images/sprites/assets.svg",
     assetsSprite,
   );
+
+  const duotone = await findFiles("resources/images/icons/duotone/", isSvgFile);
+  const duotoneSprite = await generateSvgSprite(duotone, "icon-dt-", sanitizeDuotoneName);
+  await fs.writeFile(
+    "resources/public/images/sprites/symbol/duotone.svg",
+    duotoneSprite,
+  );
 }
 
 async function generateTemplates() {
@@ -426,9 +445,14 @@ async function generateTemplates() {
     "resources/public/images/sprites/assets.svg",
     "utf-8",
   );
+  const duotoneSprite = await fs.readFile(
+    "resources/public/images/sprites/symbol/duotone.svg",
+    "utf-8",
+  );
   const partials = {
     "../public/images/sprites/symbol/icons.svg": iconsSprite,
     "../public/images/sprites/symbol/cursors.svg": cursorsSprite,
+    "../public/images/sprites/symbol/duotone.svg": duotoneSprite,
     "../public/images/sprites/assets.svg": assetsSprite,
   };
 
