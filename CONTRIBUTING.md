@@ -5,7 +5,7 @@ everything you need to get started — from building the project to
 submitting your first pull request.
 
 For architecture deep-dives, see the `docs/` directory or the
-rendered documentation at the [Help Center](https://help.penpot.app/).
+rendered documentation at the [Help Center](https://docs.logos.app/).
 
 ## Architecture Overview — 19 Crates
 

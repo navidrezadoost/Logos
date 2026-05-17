@@ -50,7 +50,7 @@
 (defmethod ig/assert-key ::wrk/netty-io-executor
   [_ {:keys [threads]}]
   (assert (or (nil? threads) (int? threads))
-          "expected valid threads value, revisit PENPOT_NETTY_IO_THREADS environment variable"))
+          "expected valid threads value, revisit LOGOS_NETTY_IO_THREADS environment variable"))
 
 (defmethod ig/init-key ::wrk/netty-io-executor
   [_ {:keys [threads]}]
@@ -74,7 +74,7 @@
 (defmethod ig/assert-key ::wrk/netty-executor
   [_ {:keys [threads]}]
   (assert (or (nil? threads) (int? threads))
-          "expected valid threads value, revisit PENPOT_EXEC_THREADS environment variable"))
+          "expected valid threads value, revisit LOGOS_EXEC_THREADS environment variable"))
 
 (defmethod ig/init-key ::wrk/netty-executor
   [_ {:keys [threads]}]

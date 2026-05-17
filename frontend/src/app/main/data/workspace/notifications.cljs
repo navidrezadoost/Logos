@@ -55,7 +55,7 @@
 
             initmsg    [{:type :subscribe-file
                          :file-id file-id
-                         :version (obj/get global "penpotVersion")}
+                         :version (obj/get global "logosVersion")}
                         {:type :subscribe-team
                          :team-id team-id}]
 

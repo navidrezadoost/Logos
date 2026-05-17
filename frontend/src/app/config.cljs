@@ -65,18 +65,18 @@
 
 (defn- parse-flags
   [global]
-  (let [flags (obj/get global "penpotFlags" "")
+  (let [flags (obj/get global "logosFlags" "")
         flags (sequence (map keyword) (str/words flags))]
     (flags/parse flags/default flags)))
 
 (defn- parse-version
   [global]
-  (-> (obj/get global "penpotVersion")
+  (-> (obj/get global "logosVersion")
       (v/parse)))
 
 (defn parse-build-date
   [global]
-  (let [date (obj/get global "penpotBuildDate")]
+  (let [date (obj/get global "logosBuildDate")]
     (if (= date "%buildDate%")
       "unknown"
       date)))
@@ -86,7 +86,7 @@
 (def default-theme  "default")
 (def default-language "en")
 
-(def themes               (obj/get global "penpotThemes"))
+(def themes               (obj/get global "logosThemes"))
 
 (def build-date           (parse-build-date global))
 (def flags                (parse-flags global))
@@ -95,14 +95,14 @@
 (def browser              (parse-browser))
 (def platform             (parse-platform))
 
-(def version-tag          (obj/get global "penpotVersionTag"))
-(def terms-of-service-uri (obj/get global "penpotTermsOfServiceURI"))
-(def privacy-policy-uri   (obj/get global "penpotPrivacyPolicyURI"))
-(def flex-help-uri        (obj/get global "penpotGridHelpURI" "https://help.penpot.app/user-guide/flexible-layouts/"))
-(def grid-help-uri        (obj/get global "penpotGridHelpURI" "https://help.penpot.app/user-guide/flexible-layouts/"))
-(def plugins-list-uri     (obj/get global "penpotPluginsListUri" "https://penpot.app/penpothub/plugins"))
-(def plugins-whitelist    (into #{} (obj/get global "penpotPluginsWhitelist" [])))
-(def templates-uri        (obj/get global "penpotTemplatesUri" "https://penpot.github.io/penpot-files/"))
+(def version-tag          (obj/get global "logosVersionTag"))
+(def terms-of-service-uri (obj/get global "logosTermsOfServiceURI"))
+(def privacy-policy-uri   (obj/get global "logosPrivacyPolicyURI"))
+(def flex-help-uri        (obj/get global "logosGridHelpURI" "https://help.penpot.app/user-guide/flexible-layouts/"))
+(def grid-help-uri        (obj/get global "logosGridHelpURI" "https://help.penpot.app/user-guide/flexible-layouts/"))
+(def plugins-list-uri     (obj/get global "logosPluginsListUri" "https://penpot.app/penpothub/plugins"))
+(def plugins-whitelist    (into #{} (obj/get global "logosPluginsWhitelist" [])))
+(def templates-uri        (obj/get global "logosTemplatesUri" "https://penpot.github.io/penpot-files/"))
 
 ;; We set the current parsed flags under common for make
 ;; it available for common code without the need to pass
@@ -116,15 +116,15 @@
   (u/ensure-path-slash uri-str))
 
 (def public-uri
-  (normalize-uri (or (obj/get global "penpotPublicURI")
+  (normalize-uri (or (obj/get global "logosPublicURI")
                      (obj/get location "origin"))))
 
 (def rasterizer-uri
-  (or (some-> (obj/get global "penpotRasterizerURI") normalize-uri)
+  (or (some-> (obj/get global "logosRasterizerURI") normalize-uri)
       public-uri))
 
 (def worker-uri
-  (obj/get global "penpotWorkerURI" "/js/worker/main.js"))
+  (obj/get global "logosWorkerURI" "/js/worker/main.js"))
 
 (defn external-feature-flag
   [flag value]

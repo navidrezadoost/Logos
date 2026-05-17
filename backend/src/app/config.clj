@@ -33,9 +33,9 @@
        v)})
 
 (def default
-  {:database-uri "postgresql://postgres/penpot"
-   :database-username "penpot"
-   :database-password "penpot"
+  {:database-uri "postgresql://postgres/logos"
+   :database-username "logos"
+   :database-password "logos"
 
    :default-blob-version 4
 
@@ -60,8 +60,8 @@
    :auth-token-cookie-name "auth-token"
 
    :assets-path "/internal/assets/"
-   :smtp-default-reply-to "Penpot <no-reply@example.com>"
-   :smtp-default-from "Penpot <no-reply@example.com>"
+   :smtp-default-reply-to "Logos <no-reply@example.com>"
+   :smtp-default-from "Logos <no-reply@example.com>"
 
    :profile-complaint-max-age (ct/duration {:days 7})
    :profile-complaint-threshold 2
@@ -69,7 +69,7 @@
    :profile-bounce-max-age (ct/duration {:days 7})
    :profile-bounce-threshold 10
 
-   :telemetry-uri "https://telemetry.penpot.app/"
+   :telemetry-uri "https://telemetry.logos.app/"
 
    :media-max-file-size (* 1024 1024 30) ; 30MiB
 
@@ -275,10 +275,11 @@
   (sm/explainer schema:config))
 
 (defn read-config
-  "Reads the configuration from enviroment variables and decodes all
-  known values."
-  [& {:keys [prefix default] :or {prefix "penpot"}}]
-  (->> (read-env prefix)
+  "Reads the configuration from environment variables and decodes all
+  known values. Accepts LOGOS_* env vars (preferred) and PENPOT_* env
+  vars for backward compatibility (LOGOS_* takes precedence)."
+  [& {:keys [prefix default] :or {prefix "logos"}}]
+  (->> (merge (read-env "penpot") (read-env prefix))
        (merge default)
        (decode-config)))
 
