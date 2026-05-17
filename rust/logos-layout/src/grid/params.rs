@@ -38,7 +38,7 @@ pub type Uuid = u64;
 /// - `Percent` → fraction of container size (`50%`)
 /// - `Flex` → fraction unit (`1fr`, `2fr`)
 /// - `Auto` → content-sized (uses child min/max content)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GridTrackType {
     /// Fixed pixel size.
     Fixed,
@@ -207,7 +207,7 @@ impl GridPosition {
 }
 
 /// Per-cell `align-self` override (block / column axis).
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TrackAlignSelf {
     /// Inherit from container `align-items`.
     #[default]
@@ -231,7 +231,7 @@ impl TrackAlignSelf {
 }
 
 /// Per-cell `justify-self` override (inline / row axis).
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TrackJustifySelf {
     /// Inherit from container `justify-items`.
     #[default]
@@ -324,7 +324,7 @@ impl GridCell {
 // ---------------------------------------------------------------------------
 
 /// `justify-content` — distribute free space between columns.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum JustifyContent {
     #[default]
     Start,
@@ -363,7 +363,7 @@ impl JustifyContent {
 }
 
 /// `align-content` — distribute free space between rows.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum AlignContent {
     #[default]
     Start,
@@ -398,7 +398,7 @@ impl AlignContent {
 }
 
 /// `align-items` — default child alignment in the block (row) axis within cells.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum AlignItems {
     #[default]
     Start,
@@ -419,7 +419,7 @@ impl AlignItems {
 }
 
 /// `justify-items` — default child alignment in the inline (column) axis within cells.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum JustifyItems {
     #[default]
     Start,
@@ -447,7 +447,7 @@ impl JustifyItems {
 ///
 /// - `Row`: fill rows first (default CSS `grid-auto-flow: row`)
 /// - `Column`: fill columns first (`grid-auto-flow: column`)
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum GridDirection {
     #[default]
     Row,
