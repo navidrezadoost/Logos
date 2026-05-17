@@ -29,6 +29,7 @@
    [app.setup :as-alias setup]
    [app.storage :as sto]
    [app.tokens :as tokens]
+   [app.util.redis-cache :as rsc]
    [app.util.services :as sv]
    [app.worker :as wrk]
    [cuerdas.core :as str]))
@@ -101,7 +102,7 @@
   ;; no profile-id is in session, and when db call raises not found. In all other
   ;; cases we need to reraise the exception.
   (try
-    (let [profile (-> (get-profile pool profile-id)
+    (let [profile (-> (get-profile-cached cfg profile-id)
                       (strip-private-attrs)
                       (update :props filter-props))]
       (if (contains? cf/flags :nitrate)
@@ -119,6 +120,18 @@
   (-> (db/get-by-id conn :profile id (assoc opts ::db/remove-deleted false))
       (decode-row)))
 
+(defn get-profile-cached
+  "Like `get-profile` but wraps the result in a Redis read-through cache
+  (5-minute TTL) when the :redis-cache flag is enabled.
+
+  Use this on hot read paths (e.g. the ::get-profile RPC handler) that
+  are called on every authenticated request.  Internal callers that need
+  a strong read — such as UPDATE ... FOR UPDATE locking — must continue
+  to call `get-profile` directly to bypass the cache."
+  [cfg id]
+  (rsc/cache-get cfg (rsc/profile-key id) rsc/profile-ttl
+                 #(get-profile (::db/pool cfg) id)))
+
 ;; --- MUTATION: Update Profile (own)
 
 (def ^:private
@@ -133,7 +146,7 @@
    ::sm/params schema:update-profile
    ::sm/result schema:profile
    ::db/transaction true}
-  [{:keys [::db/conn]} {:keys [::rpc/profile-id fullname lang theme] :as params}]
+  [{:keys [::db/conn] :as cfg} {:keys [::rpc/profile-id fullname lang theme] :as params}]
   ;; NOTE: we need to retrieve the profile independently if we use
   ;; it or not for explicit locking and avoid concurrent updates of
   ;; the same row/object.
@@ -150,6 +163,9 @@
                  :theme theme}
                 {:id profile-id}
                 {::db/return-keys false})
+
+    ;; P1.5: Invalidate cached profile so the next read reflects this update.
+    (rsc/cache-del cfg (rsc/profile-key profile-id))
 
     (-> profile
         (strip-private-attrs)
@@ -279,6 +295,9 @@
     (db/update! pool :profile
                 {:photo-id (:id photo)}
                 {:id profile-id})
+
+    ;; P1.5: Invalidate cached profile — photo change is visible in thumbnail.
+    (rsc/cache-del cfg (rsc/profile-key profile-id))
 
     (-> (rph/wrap)
         (rph/with-meta {::audit/replace-props
@@ -427,6 +446,9 @@
                 {:id profile-id}
                 {::db/return-keys false})
 
+    ;; P1.5: Invalidate cached profile so prop changes are immediately visible.
+    (rsc/cache-del cfg (rsc/profile-key profile-id))
+
     (filter-props props)))
 
 (sv/defmethod ::update-profile-props
@@ -460,6 +482,9 @@
     (db/update! conn :profile
                 {:deleted-at deleted-at}
                 {:id profile-id})
+
+    ;; P1.5: Evict cache immediately — deleted profiles must not be served.
+    (rsc/cache-del cfg (rsc/profile-key profile-id))
 
     ;; Schedule cascade deletion to a worker
     (wrk/submit! {::db/conn conn
