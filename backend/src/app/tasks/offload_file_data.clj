@@ -47,15 +47,18 @@
   storage_format flag to 'paged' — all within the caller's
   transaction.
 
-  Skips files that are already in paged format."
+  Skips files that are already in paged format or exceed the automatic
+  size limit (C2 guard — see fdata_paged/max-auto-fragment-bytes)."
   [cfg file-id]
   (let [file (bfc/get-file cfg file-id :read-only? false)]
     (if (fdata-paged/paged? file)
       (l/dbg :hint "skipping already-paged file" :file-id (str file-id))
-      (do
-        ;; Resolve pointer-maps so we have plain maps to encode.
-        (let [realized (fdata/realize cfg file)]
-          (fdata-paged/fragment-file! cfg realized))))))
+      (let [realized (fdata/realize cfg file)
+            result   (fdata-paged/fragment-file! cfg realized)]
+        (when (= :skipped-too-large result)
+          (l/warn :hint "file skipped for automatic fragmentation (size limit)"
+                  :file-id (str file-id)))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; HANDLER

@@ -136,21 +136,50 @@
 ;; Migration helpers  (called from offload-file-data task)
 ;; ──────────────────────────────────────────────────────────────────
 
+;; C2 guard: files larger than this limit are skipped during automatic
+;; background fragmentation to avoid OOM on constrained backend instances.
+;; They can be fragmented manually via the `fragment-file!` REPL function
+;; with a larger JVM heap allocation.
+;; Issue: "Guard against large-file OOM during page fragmentation"
+(def ^:private max-auto-fragment-bytes (* 50 1024 1024))
+
+(def ^:private sql:get-file-data-size
+  "SELECT octet_length(data) AS data_bytes
+     FROM file
+    WHERE id = ?")
+
+(defn file-too-large?
+  "Return true when the stored file data blob exceeds the auto-fragment limit."
+  [{:keys [::db/conn] :as _cfg} file-id]
+  (let [row (db/exec-one! conn [sql:get-file-data-size file-id])]
+    (> (or (:data-bytes row) 0) max-auto-fragment-bytes)))
+
 (defn fragment-file!
   "Split a monolithic file's page data into per-page rows.
 
   `file` must already have its `:data` decoded (keys :pages-index).
   Each page is written at revn 0 (initial import).  After all pages
-  are written the `storage_format` column is flipped to 'paged'."
+  are written the `storage_format` column is flipped to 'paged'.
+
+  Returns :ok on success, :skipped-too-large when the file exceeds
+  `max-auto-fragment-bytes` (C2 guard)."
   [{:keys [::db/conn] :as cfg} {:keys [id data] :as _file}]
-  (let [pages-index (:pages-index data)
-        page-ids    (keys pages-index)]
-    (doseq [page-id page-ids]
-      (let [page    (get pages-index page-id)
-            encoded (blob/encode page)]
-        (db/exec! conn [sql:upsert-page-data id page-id encoded 0])))
-    ;; Atomically promote the file
-    (db/exec! conn [sql:promote-file id])
-    (l/dbg :hint "file fragmented into per-page rows"
-           :file-id (str id)
-           :page-count (count page-ids))))
+  (if (file-too-large? cfg id)
+    (do
+      (l/warn :hint "skipping automatic page fragmentation: file data exceeds size limit"
+              :file-id (str id)
+              :limit-bytes max-auto-fragment-bytes
+              :action "fragment manually with expanded heap; see issue: Guard against large-file OOM")
+      :skipped-too-large)
+    (let [pages-index (:pages-index data)
+          page-ids    (keys pages-index)]
+      (doseq [page-id page-ids]
+        (let [page    (get pages-index page-id)
+              encoded (blob/encode page)]
+          (db/exec! conn [sql:upsert-page-data id page-id encoded 0])))
+      ;; Atomically promote the file
+      (db/exec! conn [sql:promote-file id])
+      (l/dbg :hint "file fragmented into per-page rows"
+             :file-id (str id)
+             :page-count (count page-ids))
+      :ok)))
