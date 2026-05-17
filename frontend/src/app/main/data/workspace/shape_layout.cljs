@@ -9,6 +9,7 @@
    [app.common.data :as d]
    [app.common.data.macros :as dm]
    [app.common.files.changes-builder :as pcb]
+   [app.common.files.geometry-affecting :as gaf]
    [app.common.files.helpers :as cfh]
    [app.common.files.shapes-helpers :as cfsh]
    [app.common.geom.point :as gpt]
@@ -28,6 +29,7 @@
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dwse]
    [app.main.data.workspace.shapes :as dwsh]
+   [app.main.data.workspace.layout-cache :as lc]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [beicon.v2.core :as rx]
@@ -98,7 +100,7 @@
 ;; Never call this directly but through the data-event `:layout/update`
 ;; Otherwise a lot of cycle dependencies could be generated
 (defn- update-layout-positions
-  [{:keys [page-id ids undo-group]}]
+  [{:keys [page-id ids undo-group skip-if-cached?]}]
   (ptk/reify ::update-layout-positions
     ptk/WatchEvent
     (watch [_ state _]
@@ -106,18 +108,35 @@
             objects (dsh/lookup-page-objects state page-id)
             ids (->> ids (remove uuid/zero?) (filter #(contains? objects %)))]
         (if (d/not-empty? ids)
-          (let [modif-tree (dwm/create-modif-tree ids (ctm/reflow-modifiers))]
-            (if (features/active-feature? state "render-wasm/v1")
-              (rx/of (dwm/apply-wasm-modifiers modif-tree
-                                               :stack-undo? true
-                                               :undo-group undo-group
-                                               :ignore-touched true))
-              (rx/of (dwm/apply-modifiers {:page-id page-id
-                                           :modifiers modif-tree
-                                           :stack-undo? true
-                                           :ignore-touched true
-                                           :undo-group undo-group}))))
+          (let [;; P1.3 — Layout dirty-flag / cache check.
+                ;; When skip-if-cached? is true the caller has determined this
+                ;; is a style-only change (colour, shadow, blur, opacity).  If
+                ;; ALL the requested frame ids have a valid cached layout result
+                ;; we skip re-computation entirely.  Geometry-affecting changes
+                ;; must pass skip-if-cached? = false (the default) to force a
+                ;; fresh run and update the cache.
+                all-cached?
+                (and skip-if-cached?
+                     (every? (fn [id] (some? (lc/lookup-layout id))) ids))]
+            (if all-cached?
+              ;; Fast path — every frame has a fresh cached result.
+              (rx/empty)
+              ;; Normal path — compute layout and update the cache.
+              (do
+                (let [modif-tree (dwm/create-modif-tree ids (ctm/reflow-modifiers))]
+                  (doseq [id ids] (lc/cache-layout! id modif-tree))
+                  (if (features/active-feature? state "render-wasm/v1")
+                    (rx/of (dwm/apply-wasm-modifiers modif-tree
+                                                     :stack-undo? true
+                                                     :undo-group undo-group
+                                                     :ignore-touched true))
+                    (rx/of (dwm/apply-modifiers {:page-id page-id
+                                                 :modifiers modif-tree
+                                                 :stack-undo? true
+                                                 :ignore-touched true
+                                                 :undo-group undo-group})))))))
           (rx/empty))))))
+
 
 (defn initialize-shape-layout
   []
