@@ -125,10 +125,12 @@
       (mbus/purge! msgbus [ch]))
 
     ;; Close file subscription if exists
-    (when-let [{:keys [topic channel]} fsub]
+    (when-let [{:keys [topic channel file-id]} fsub]
       (sp/close! channel)
       (mbus/purge! msgbus [channel])
-      (mbus/pub! msgbus :topic topic :message msg))))
+      ;; Notify legacy and meta listeners of disconnection
+      (mbus/pub! msgbus :topic topic                          :message msg)
+      (mbus/pub! msgbus :topic (mbus/file-meta-topic file-id) :message msg))))
 
 (defmethod handle-message :subscribe-team
   [{:keys [::mbus/msgbus]} {:keys [::ws/id ::ws/state ::ws/output-ch ::session-id]} {:keys [team-id] :as params}]
@@ -150,44 +152,61 @@
 
 
 (defmethod handle-message :subscribe-file
-  [{:keys [::mbus/msgbus]} {:keys [::ws/id ::ws/state ::ws/output-ch ::session-id ::profile-id]} {:keys [file-id] :as params}]
-  (l/trace :fn "handle-message" :event "subscribe-file" :file-id file-id :conn-id id)
+  [{:keys [::mbus/msgbus]} {:keys [::ws/id ::ws/state ::ws/output-ch ::session-id ::profile-id]} {:keys [file-id page-id] :as params}]
+  (l/trace :fn "handle-message" :event "subscribe-file" :file-id file-id :page-id page-id :conn-id id)
   (let [psub (::file-subscription @state)
         fch  (sp/chan :buf (sp/dropping-buffer 64)
                       :xf  (remove #(= (:session-id %) session-id)))]
 
-    (let [subs {:file-id file-id :channel fch :topic file-id}]
-      (swap! state assoc ::file-subscription subs))
+    ;; P2.1: when page-id is provided, subscribe the channel to both the
+    ;; page-scoped topic (full change-sets) and the file-meta topic (presence,
+    ;; pointer-updates, :page-updated notifications from OTHER pages).
+    ;; Without page-id, keep the legacy file-id subscription for backward compat.
+    (let [topics      (if page-id
+                        [(mbus/page-topic file-id page-id)
+                         (mbus/file-meta-topic file-id)]
+                        [file-id])
+          topic-for-presence (if page-id
+                               (mbus/file-meta-topic file-id)
+                               file-id)
+          subs        {:file-id          file-id
+                       :page-id          page-id
+                       :channel          fch
+                       :topic            (first topics)
+                       :presence-topic   topic-for-presence}]
 
-    ;; Close previous subscription if exists
-    (when-let [ch (:channel psub)]
-      (sp/close! ch)
-      (mbus/purge! msgbus [ch]))
+      (swap! state assoc ::file-subscription subs)
 
-    (sp/go-loop []
-      (when-let [{:keys [type] :as message} (sp/take! fch)]
-        (sp/put! output-ch message)
-        (when (or (= :join-file type)
-                  (= :leave-file type)
-                  (= :disconnect type))
-          (let [message {:type :presence
-                         :file-id file-id
-                         :session-id session-id
-                         :profile-id profile-id}]
-            (mbus/pub! msgbus
-                       :topic file-id
-                       :message message)))
-        (recur)))
+      ;; Close previous subscription channel if exists
+      (when-let [ch (:channel psub)]
+        (sp/close! ch)
+        (mbus/purge! msgbus [ch]))
 
-    ;; Subscribe to file topic
-    (mbus/sub! msgbus :topic file-id :chan fch)
+      (sp/go-loop []
+        (when-let [{:keys [type] :as message} (sp/take! fch)]
+          (sp/put! output-ch message)
+          (when (or (= :join-file type)
+                    (= :leave-file type)
+                    (= :disconnect type))
+            (let [message {:type :presence
+                           :file-id file-id
+                           :session-id session-id
+                           :profile-id profile-id}]
+              ;; Publish presence to both legacy and meta topics
+              (mbus/pub! msgbus :topic file-id              :message message)
+              (mbus/pub! msgbus :topic (mbus/file-meta-topic file-id) :message message)))
+          (recur)))
 
-    ;; Notifify the rest of participants of the new connection.
-    (let [message {:type :join-file
-                   :file-id file-id
-                   :session-id session-id
-                   :profile-id profile-id}]
-      (mbus/pub! msgbus :topic file-id :message message))))
+      ;; Subscribe the channel to the resolved topics
+      (mbus/sub! msgbus :topics topics :chan fch)
+
+      ;; Notify other participants of the new connection
+      (let [message {:type :join-file
+                     :file-id file-id
+                     :session-id session-id
+                     :profile-id profile-id}]
+        (mbus/pub! msgbus :topic file-id              :message message)
+        (mbus/pub! msgbus :topic (mbus/file-meta-topic file-id) :message message)))))
 
 (defmethod handle-message :unsubscribe-file
   [{:keys [::mbus/msgbus]} {:keys [::ws/id ::ws/state ::session-id ::profile-id]} {:keys [file-id] :as params}]
@@ -200,7 +219,9 @@
                  :profile-id profile-id}]
 
     (when (= (:file-id subs) file-id)
-      (mbus/pub! msgbus :topic file-id :message message)
+      ;; Publish leave to both legacy and meta topics so all client types receive it
+      (mbus/pub! msgbus :topic file-id                          :message message)
+      (mbus/pub! msgbus :topic (mbus/file-meta-topic file-id)  :message message)
       (let [ch (:channel subs)]
         (sp/close! ch)
         (mbus/purge! msgbus [ch])))))
@@ -225,7 +246,9 @@
                       (assoc :subs-id file-id)
                       (assoc :profile-id profile-id)
                       (assoc :session-id session-id))]
-      (mbus/pub! msgbus :topic file-id :message message))))
+      ;; Publish to both legacy topic and meta topic so all client types receive cursor updates
+      (mbus/pub! msgbus :topic file-id                         :message message)
+      (mbus/pub! msgbus :topic (mbus/file-meta-topic file-id) :message message))))
 
 (defmethod handle-message :default
   [_ {:keys [::ws/id]} message]

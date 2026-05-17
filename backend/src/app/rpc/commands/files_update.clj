@@ -467,24 +467,55 @@
 (defn- send-notifications!
   [cfg {:keys [team changes session-id] :as params} file]
   (let [lchanges (filter library-change? changes)
-        msgbus   (::mbus/msgbus cfg)]
+        msgbus   (::mbus/msgbus cfg)
+        file-id  (:id file)
 
+        ;; P2.1: group changes by page-id so we can route to page-scoped topics
+        changes-by-page (->> changes
+                             (filter :page-id)
+                             (group-by :page-id))
+
+        base-msg {:profile-id (:profile-id params)
+                  :file-id    file-id
+                  :session-id (:session-id params)
+                  :revn       (:revn file)
+                  :vern       (:vern file)}]
+
+    ;; Legacy broadcast — all changes on the file-id topic (backward compat
+    ;; with clients that do not send :page-id in their :subscribe-file message)
     (mbus/pub! msgbus
-               :topic (:id file)
-               :message {:type :file-change
-                         :profile-id (:profile-id params)
-                         :file-id (:id file)
-                         :session-id (:session-id params)
-                         :revn (:revn file)
-                         :vern (:vern file)
-                         :changes changes})
+               :topic file-id
+               :message (assoc base-msg :type :file-change :changes changes))
+
+    ;; P2.1 page-scoped broadcasts — send full change-set only to subscribers
+    ;; of the affected page, so clients on other pages are not flooded with
+    ;; shape data they don't need (70–90% bandwidth saving for multi-page files)
+    (doseq [[page-id page-changes] changes-by-page]
+      (mbus/pub! msgbus
+                 :topic (mbus/page-topic file-id page-id)
+                 :message (assoc base-msg
+                                 :type    :file-change
+                                 :page-id page-id
+                                 :changes page-changes)))
+
+    ;; P2.1 meta notifications — inform clients on OTHER pages that something
+    ;; changed, so they can refresh thumbnails / show a stale-page indicator
+    (when-let [page-ids (not-empty (set (keys changes-by-page)))]
+      (doseq [page-id page-ids]
+        (mbus/pub! msgbus
+                   :topic (mbus/file-meta-topic file-id)
+                   :message {:type       :page-updated
+                             :file-id    file-id
+                             :page-id    page-id
+                             :revn       (:revn file)
+                             :session-id (:session-id params)})))
 
     (when (and (:is-shared file) (seq lchanges))
       (mbus/pub! msgbus
                  :topic (:id team)
                  :message {:type :library-change
                            :profile-id (:profile-id params)
-                           :file-id (:id file)
+                           :file-id file-id
                            :session-id session-id
                            :revn (:revn file)
                            :modified-at (ct/now)

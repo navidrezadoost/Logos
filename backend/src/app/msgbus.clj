@@ -138,6 +138,24 @@
   (-purge instance chans)
   nil)
 
+;; ──────────────────────────────────────────────────────────────────
+;; P2.1 — page-scoped topic helpers
+;; ──────────────────────────────────────────────────────────────────
+
+(defn page-topic
+  "Redis PubSub topic for page-specific change-sets.
+  Only clients subscribed to the same page receive full :file-change messages."
+  [file-id page-id]
+  (str file-id ":page:" page-id))
+
+(defn file-meta-topic
+  "Redis PubSub topic for file-level notifications (presence, :page-updated,
+  pointer updates).  Used by page-aware clients instead of the legacy file-id
+  topic so they don't receive full change-sets from other pages."
+  [file-id]
+  (str file-id ":meta"))
+
+
 ;; --- IMPL
 
 (defn- conj-subscription
