@@ -25,6 +25,7 @@
    [app.db :as db]
    [app.db.sql :as-alias sql]
    [app.features.fdata :as feat.fdata]
+   [app.features.fdata-paged :as feat.fdata-paged]
    [app.features.logical-deletion :as ldel]
    [app.http.sse :as sse]
    [app.loggers.audit :as-alias audit]
@@ -397,12 +398,21 @@
                   (cfeat/check-client-features! (:features params))
                   (cfeat/check-file-features! (:features file)))
 
-        page  (binding [pmap/*load-fn* (partial feat.fdata/load-pointer cfg file-id)]
-                (let [page-id (or page-id (-> file :data :pages first))
-                      page    (dm/get-in file [:data :pages-index page-id])]
-                  (if (pmap/pointer-map? page)
-                    (deref page)
-                    page)))]
+        resolved-page-id
+        (or page-id (-> file :data :pages first))
+
+        ;; P2.2: prefer per-page row when the file has been promoted to
+        ;; paged storage.  Fall back to the monolithic pointer-map path
+        ;; transparently so that all existing code paths still work.
+        page  (if (feat.fdata-paged/paged? file)
+                (or (:page (feat.fdata-paged/load-page cfg (:id file) resolved-page-id))
+                    ;; row missing — fall back (e.g., during incremental migration)
+                    (binding [pmap/*load-fn* (partial feat.fdata/load-pointer cfg file-id)]
+                      (let [p (dm/get-in file [:data :pages-index resolved-page-id])]
+                        (if (pmap/pointer-map? p) (deref p) p))))
+                (binding [pmap/*load-fn* (partial feat.fdata/load-pointer cfg file-id)]
+                  (let [p (dm/get-in file [:data :pages-index resolved-page-id])]
+                    (if (pmap/pointer-map? p) (deref p) p))))]
 
     (when-not perms
       (ex/raise :type :not-found

@@ -20,6 +20,7 @@
    [app.config :as cf]
    [app.db :as db]
    [app.features.fdata :as fdata]
+   [app.features.fdata-paged :as fdata-paged]
    [app.features.file-snapshots :as fsnap]
    [app.features.logical-deletion :as ldel]
    [app.http.errors :as errors]
@@ -262,6 +263,19 @@
                   {::db/return-keys false})
 
       (persist-file! cfg file)
+
+      ;; P2.2: for files promoted to paged storage, write each
+      ;; changed page into file_data_page.  This is additive — the
+      ;; monolithic file row is still updated above for safety until
+      ;; the migration is 100% complete across all replicas.
+      (when (fdata-paged/paged? file)
+        (let [affected-page-ids (->> changes
+                                     (keep :page-id)
+                                     (into #{}))]
+          (doseq [page-id affected-page-ids]
+            (when-let [page (get-in file [:data :pages-index page-id])]
+              (let [revn (get file :revn 0)]
+                (fdata-paged/save-page-data! cfg (:id file) page-id page revn))))))
 
       (when (contains? cf/flags :redis-cache)
         (invalidate-caches! cfg file))
