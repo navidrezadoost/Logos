@@ -8,8 +8,10 @@
 
 pub mod layout_data;
 pub mod params;
+pub mod positions;
 
 pub use layout_data::{AlignSelf, ChildLayoutData, ChildShape, SizingMode};
 pub use params::{
     AlignContent, AlignItems, FlexContainer, FlexDirection, FlexWrap, JustifyContent,
 };
+pub use positions::{compute_positions, ChildFinalPosition, FlexLine, Uuid};

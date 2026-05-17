@@ -28,7 +28,8 @@ pub mod point;
 
 // Re-export the most-used types at crate root for ergonomic imports.
 pub use flex::{
-    AlignContent, AlignItems, AlignSelf, ChildLayoutData, ChildShape, FlexContainer,
-    FlexDirection, FlexWrap, JustifyContent, SizingMode,
+    compute_positions, AlignContent, AlignItems, AlignSelf, ChildFinalPosition, ChildLayoutData,
+    ChildShape, FlexContainer, FlexDirection, FlexLine, FlexWrap, JustifyContent, SizingMode,
+    Uuid,
 };
 pub use point::{center_points, Point};
