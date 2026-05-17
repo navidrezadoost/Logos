@@ -1504,7 +1504,7 @@ impl RenderState {
     //
     // Unlike `get_current_tile_bounds`, which calculates bounds using the exact
     // scaled offset of the viewbox, this method snaps the origin to the nearest
-    // lower multiple of `TILE_SIZE`. This ensures the tile bounds are aligned
+    // lower multiple of `get_active_tile_size()`. This ensures the tile bounds are aligned
     // with the global tile grid, which is useful for rendering tiles in a
     /// consistent and predictable layout.
     pub fn get_current_aligned_tile_bounds(&mut self) -> Rect {
@@ -2139,14 +2139,23 @@ impl RenderState {
                             }
                         }
 
-                        // P1.6: Occlusion culling — skip shapes fully hidden behind opaque frames in front.
+                        // P1.6: Occlusion culling — skip shapes fully hidden behind opaque frames.
+                        //
+                        // A shape qualifies as an occluder only when ALL of:
+                        //   1. It is a frame (bounded rect shape, not a group or path).
+                        //   2. `needs_layer()` is false — rules out opacity < 1.0, non-SrcOver blend
+                        //      modes, blur effects, and masked groups in one call.
+                        //   3. Every fill is a solid color with alpha == 255 — a semi-transparent
+                        //      solid fill (e.g. rgba(r,g,b,0.5)) or a gradient cannot fully occlude.
+                        //      Non-solid fills (gradient, image) are rejected because their per-pixel
+                        //      alpha is unknown at this stage.
                         let mut coverage = crate::occlusion::OpaqueCoverage::new();
                         for root_id in valid_ids.iter().rev() {
                             if let Some(shape) = tree.get(root_id) {
-                                if shape.is_frame()
-                                    && shape.opacity() >= 1.0
-                                    && shape.blend_mode().0 == skia::BlendMode::SrcOver
-                                {
+                                let fills_opaque = shape.fills().all(
+                                    |f| matches!(f, Fill::Solid(SolidColor(c)) if c.a() == 255),
+                                );
+                                if shape.is_frame() && !shape.needs_layer() && fills_opaque {
                                     coverage.add_opaque_rect(shape.selrect());
                                 }
                             }

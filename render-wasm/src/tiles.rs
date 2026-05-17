@@ -94,8 +94,6 @@ impl TileViewbox {
 }
 
 /// Legacy constant kept for reference; actual rendering uses `get_active_tile_size()`.
-pub const TILE_SIZE: f32 = 512.;
-
 // ---------------------------------------------------------------------------
 // Adaptive tile sizing (P1.6 — sub-task 1)
 // ---------------------------------------------------------------------------
