@@ -51,6 +51,7 @@
    [app.main.data.workspace.interactions :as dwi]
    [app.main.data.workspace.layers :as dwly]
    [app.main.data.workspace.layout :as layout]
+   [app.main.data.workspace.layout-cache :as lc]
    [app.main.data.workspace.libraries :as dwl]
    [app.main.data.workspace.notifications :as dwn]
    [app.main.data.workspace.pages :as dwpg]
@@ -495,7 +496,12 @@
                (dwcl/stop-picker)
                (dwc/set-workspace-visited)
                (modal/hide)
-               (ntf/hide))))))
+               ;; P1.3 — clear the layout cache on workspace teardown so
+               ;; stale entries from the previous session don't leak.
+               (ptk/reify ::clear-layout-cache
+                 ptk/EffectEvent
+                 (effect [_ _ _] (lc/clear-all!)))
+               (ntf/hide)))))))
 
 (defn- reload-current-file
   []

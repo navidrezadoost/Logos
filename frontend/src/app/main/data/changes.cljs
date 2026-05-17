@@ -16,6 +16,7 @@
    [app.common.uuid :as uuid]
    [app.main.data.event :as ev]
    [app.main.data.helpers :as dsh]
+   [app.main.data.workspace.layout-cache :as lc]
    [app.main.features :as features]
    [app.main.worker :as mw]
    [app.render-wasm.shape :as wasm.shape]
@@ -112,12 +113,20 @@
                   (update-in state [:files file-id :data] apply-changes))]
 
             (let [objects (dm/get-in state [:files file-id :data :pages-index (:current-page-id state) :objects])]
+              ;; P1.3 — bump layout cache version counters for geometry-affecting
+              ;; changes so cached layout results are invalidated for dirty frames.
+              (lc/bump-frames-from-changes! redo-changes objects)
               (wasm.shape/process-shape-changes! objects @shape-changes))
 
             state)
 
           ;; wasm renderer deactivated
-          (update-in state [:files file-id :data] apply-changes))))))
+          (let [state   (update-in state [:files file-id :data] apply-changes)
+                objects (dm/get-in state [:files file-id :data :pages-index (:current-page-id state) :objects])]
+            ;; P1.3 — bump counters in non-WASM mode too so the cache guard
+            ;; produces correct results if WASM is later re-enabled.
+            (lc/bump-frames-from-changes! redo-changes objects)
+            state))))))
 
 (defn commit
   "Create a commit event instance"
