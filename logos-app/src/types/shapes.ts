@@ -8,6 +8,45 @@
 
 export type ShapeType = "frame" | "rect" | "circle" | "ellipse" | "path" | "text" | "group" | "bool" | "svg-raw";
 
+// ---------------------------------------------------------------------------
+// Variable font support
+// ---------------------------------------------------------------------------
+
+/**
+ * A single OpenType variable font axis override.
+ *
+ * `tag` is the 4-character ASCII axis identifier from the OpenType spec
+ * (e.g. `"wght"`, `"wdth"`, `"slnt"`, `"opsz"`, `"ital"`).
+ *
+ * `value` is a number within the axis range declared by the font.
+ * The render-wasm receives these and converts them to
+ * `SkFontArguments::VariationPosition::Coordinate` entries.
+ */
+export interface FontVariationAxis {
+  /** 4-character OpenType axis tag, e.g. "wght" */
+  tag: string;
+  /** Axis value within the font-defined range, e.g. 750 for weight */
+  value: number;
+  /** Human-readable axis name from the font's fvar table, e.g. "Weight" */
+  name?: string;
+  /** Minimum value declared by the font for this axis */
+  min?: number;
+  /** Maximum value declared by the font for this axis */
+  max?: number;
+  /** Default value declared by the font for this axis */
+  default?: number;
+}
+
+/**
+ * Serialised font-variation-settings for a text shape or typography style.
+ * Matches the CSS `font-variation-settings` property format and the
+ * ClojureScript `schema:font-variation-settings` Malli schema.
+ *
+ * Key = 4-char axis tag, value = axis value.
+ * Example: `{ wght: 750, wdth: 100 }`
+ */
+export type FontVariationSettings = Record<string, number>;
+
 export interface Rect {
   x: number;
   y: number;
@@ -47,6 +86,12 @@ export interface Shape {
   parentId: string | null;
   /** Ordered child IDs (for frames/groups). */
   children: string[];
+  /**
+   * Variable font axis overrides for text shapes.
+   * Undefined / absent for non-text shapes and static fonts.
+   * Transmitted to render-wasm as SkFontArguments variation coordinates.
+   */
+  fontVariationSettings?: FontVariationSettings;
 }
 
 /** Minimal shape factory. */
