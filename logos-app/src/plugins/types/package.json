@@ -1,0 +1,23 @@
+{
+  "name": "@logos/plugin-types",
+  "version": "0.1.0",
+  "description": "TypeScript type declarations for the Logos plugin API — auto-generated from Malli schemas",
+  "types": "./generated/index.d.ts",
+  "license": "MPL-2.0",
+  "keywords": [
+    "logos",
+    "plugin",
+    "types",
+    "design-tool",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/navidrezadoost/Logos.git",
+    "directory": "logos-app/src/plugins/types"
+  },
+  "files": [
+    "generated/"
+  ],
+  "peerDependencies": {}
+}

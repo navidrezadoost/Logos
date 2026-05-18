@@ -11,18 +11,25 @@
 
 import { useDocumentStore, type Page } from "../stores/documentStore";
 import { useSelectionStore } from "../stores/selectionStore";
-import type { Shape } from "../types/shapes";
-import type { PluginFill, PluginPage, PluginShape, PluginShapeType } from "./types";
+import type { Shape as InternalShape } from "../types/shapes";
+import type {
+  Fill,
+  PluginFill,
+  PluginPage,
+  PluginShape,
+  ShapeType,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Internal → Plugin shape mapping
 // ---------------------------------------------------------------------------
 
-function toPluginShapeType(type: Shape["type"]): PluginShapeType {
+function toPluginShapeType(type: InternalShape["type"]): ShapeType {
   switch (type) {
     case "circle":
     case "ellipse":
-      return "ellipse";
+      // canonical external name is 'circle' (matches Malli schema)
+      return "circle";
     case "frame":
       return "frame";
     case "group":
@@ -40,7 +47,7 @@ function toPluginShapeType(type: Shape["type"]): PluginShapeType {
   }
 }
 
-function toPluginShape(s: Shape): PluginShape {
+function toPluginShape(s: InternalShape): PluginShape {
   return {
     id: s.id,
     type: toPluginShapeType(s.type),
@@ -52,9 +59,19 @@ function toPluginShape(s: Shape): PluginShape {
     rotation: s.rotation,
     opacity: s.opacity,
     hidden: s.hidden,
+    locked: s.locked,
+    blendMode: "normal",
     fills: s.fills.map(
-      (f): PluginFill => ({ type: "solid", color: f.color, opacity: f.opacity })
+      (f): Fill => ({ type: "solid", color: f.color, opacity: f.opacity })
     ),
+    strokes: [],
+    shadows: [],
+    constraintsH: "left",
+    constraintsV: "top",
+    transform: s.transform,
+    children: s.children,
+    frameId: null,
+    parentId: s.parentId,
   };
 }
 
@@ -128,7 +145,7 @@ export function buildPluginApi(_pluginId: string): LogosPluginApi {
       const s = shapes[id];
       if (!s) throw new Error(`Shape ${id} not found`);
 
-      const shapePatch: Partial<Shape> = {};
+      const shapePatch: Partial<InternalShape> = {};
       if (patch.x !== undefined || patch.y !== undefined || patch.width !== undefined || patch.height !== undefined) {
         shapePatch.bounds = {
           x: patch.x ?? s.bounds.x,
@@ -142,7 +159,9 @@ export function buildPluginApi(_pluginId: string): LogosPluginApi {
       if (patch.hidden !== undefined) shapePatch.hidden = patch.hidden;
       if (patch.rotation !== undefined) shapePatch.rotation = patch.rotation;
       if (patch.fills !== undefined) {
-        shapePatch.fills = patch.fills.map((f) => ({ type: "solid" as const, color: f.color, opacity: f.opacity }));
+        shapePatch.fills = patch.fills
+          .filter((f): f is { type: "solid"; color: string; opacity: number } => f.type === "solid")
+          .map((f) => ({ type: "solid" as const, color: f.color, opacity: f.opacity }));
       }
 
       getDocState().batchUpdate({ [id]: shapePatch });
