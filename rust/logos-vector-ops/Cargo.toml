@@ -1,0 +1,23 @@
+[package]
+name        = "logos-vector-ops"
+version     = "0.1.0"
+edition     = "2021"
+description = "Boolean operations (union, intersect, subtract, exclude) on VectorNetwork regions"
+license     = "MPL-2.0"
+
+[dependencies]
+logos-vector = { path = "../logos-vector" }
+
+# Skia path-ops backend — uncomment when skia-safe is available in the registry.
+# [dependencies.skia-safe]
+# version          = "0.87.0"
+# default-features = false
+# features         = ["binary-cache"]
+# optional         = true
+
+[features]
+default = []
+skia    = []  # placeholder — enable when skia-safe is available in the registry
+
+[dev-dependencies]
+# None — all test fixtures are constructed programmatically.
