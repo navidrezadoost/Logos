@@ -6,7 +6,7 @@
  * UI needs to render controls, layers panel, inspector, etc.
  */
 
-export type ShapeType = "frame" | "rect" | "circle" | "path" | "text" | "group" | "bool" | "svg-raw";
+export type ShapeType = "frame" | "rect" | "circle" | "ellipse" | "path" | "text" | "group" | "bool" | "svg-raw";
 
 export interface Rect {
   x: number;

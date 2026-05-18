@@ -1,16 +1,29 @@
 /**
- * components/layers/LayersPanel.tsx
+ * components/layers/LayersPanel.tsx  (M3 revision)
  *
- * Layers panel — scrollable list of shapes on the current page.
- * Plain CSS-scroll (no react-window dependency) for M2; virtualize in M3+.
+ * Virtualized layers panel using @tanstack/react-virtual.
+ * Supports 10 000+ shapes without DOM overhead — only the visible rows
+ * are mounted.
  */
 
+import { useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCurrentPageShapes, useDocumentStore } from "../../stores/documentStore";
 import { useSelectionStore, useIsSelected } from "../../stores/selectionStore";
 import type { Shape } from "../../types/shapes";
 
+const ITEM_HEIGHT = 32;
+
 export function LayersPanel(): React.ReactElement {
   const shapes = useCurrentPageShapes();
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: shapes.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ITEM_HEIGHT,
+    overscan: 8,
+  });
 
   return (
     <div style={panelStyle}>
@@ -20,10 +33,26 @@ export function LayersPanel(): React.ReactElement {
           No shapes yet. Press R to add one.
         </div>
       ) : (
-        <div style={{ overflowY: "auto", flex: 1 }}>
-          {shapes.map((shape) => (
-            <ShapeRow key={shape.id} shape={shape} />
-          ))}
+        <div ref={scrollRef} style={{ overflowY: "auto", flex: 1 }}>
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+            {virtualizer.getVirtualItems().map((vRow) => {
+              const shape = shapes[vRow.index];
+              return (
+                <div
+                  key={shape.id}
+                  style={{
+                    position: "absolute",
+                    top: vRow.start,
+                    left: 0,
+                    right: 0,
+                    height: ITEM_HEIGHT,
+                  }}
+                >
+                  <ShapeRow shape={shape} />
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -43,7 +72,7 @@ function ShapeRow({ shape }: { shape: Shape }): React.ReactElement {
       style={{
         display: "flex",
         alignItems: "center",
-        height: 32,
+        height: ITEM_HEIGHT,
         padding: "0 8px",
         gap: 6,
         cursor: "pointer",
@@ -88,9 +117,13 @@ function ShapeRow({ shape }: { shape: Shape }): React.ReactElement {
 function shapeIcon(type: string): string {
   switch (type) {
     case "rect": return "▭";
-    case "ellipse": return "○";
+    case "ellipse":
+    case "circle": return "○";
     case "text": return "T";
-    case "path": return "✏";
+    case "path":
+    case "bool": return "✏";
+    case "frame": return "⬜";
+    case "group": return "▤";
     default: return "◻";
   }
 }

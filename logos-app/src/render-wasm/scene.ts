@@ -86,6 +86,7 @@ const SHAPE_TYPE_MAP: Record<Shape["type"], number> = {
   frame:    SHAPE_TYPE.frame,
   rect:     SHAPE_TYPE.rect,
   circle:   SHAPE_TYPE.circle,
+  ellipse:  SHAPE_TYPE.circle, // ellipse maps to the same Rust enum variant
   path:     SHAPE_TYPE.path,
   text:     SHAPE_TYPE.text,
   group:    SHAPE_TYPE.group,

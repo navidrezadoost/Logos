@@ -13,6 +13,9 @@ import { create } from "zustand";
 import { nanoid } from "nanoid";
 import { type Shape, type Rect, createRect } from "../types/shapes";
 
+/** Generate a proper UUID v4 for shapes — required by the WASM bridge's uuidToU32x4(). */
+const shapeId = (): string => crypto.randomUUID();
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,8 +49,14 @@ interface DocumentState {
   /** Add a shape to the current page; returns the new shape id. */
   addRect: (bounds: Rect, color?: string) => string;
 
+  /** Add any pre-built shape to the current page; returns the shape id. */
+  addShape: (shape: Shape) => string;
+
   /** Update mutable display properties (name, color, opacity…). */
   updateShape: (id: string, patch: Partial<Shape>) => void;
+
+  /** Apply multiple shape patches atomically (Worker result). */
+  batchUpdate: (patches: Record<string, Partial<Shape>>) => void;
 
   /**
    * Remove a shape and unlink from its page / parent.
@@ -99,7 +108,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   // ── Shapes ────────────────────────────────────────────────────────────────
 
   addRect: (bounds, color = "#0000ff") => {
-    const id = nanoid(21); // 21-char ~UUID collision resistance
+    const id = shapeId(); // crypto.randomUUID() — hex format required by WASM bridge
     const { currentPageId: pid } = get();
     const name = `Rectangle ${Object.values(get().shapes).filter((s) => s.type === "rect").length + 1}`;
     const shape = createRect(id, name, bounds, color);
@@ -117,10 +126,34 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     return id;
   },
 
+  addShape: (shape) => {
+    const { currentPageId: pid } = get();
+    set((s) => ({
+      shapes: { ...s.shapes, [shape.id]: shape },
+      pages: {
+        ...s.pages,
+        [pid]: {
+          ...s.pages[pid],
+          rootShapeIds: [shape.id, ...s.pages[pid].rootShapeIds],
+        },
+      },
+    }));
+    return shape.id;
+  },
+
   updateShape: (id, patch) =>
     set((s) => ({
       shapes: { ...s.shapes, [id]: { ...s.shapes[id], ...patch } },
     })),
+
+  batchUpdate: (patches) =>
+    set((s) => {
+      const next = { ...s.shapes };
+      for (const [id, patch] of Object.entries(patches)) {
+        if (next[id]) next[id] = { ...next[id], ...patch };
+      }
+      return { shapes: next };
+    }),
 
   removeShape: (id) =>
     set((s) => {
