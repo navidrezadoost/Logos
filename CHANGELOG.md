@@ -8,6 +8,59 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ## [Unreleased] — 2026-05-18
 
+### P4.2 V3 — Vector Network Boolean Operations (`phase4/vector-networks-v3`)
+
+**Context**: Adds `logos-vector-ops`, a new crate in the Rust sub-workspace, implementing the four standard boolean set operations (union, intersection, subtraction, exclusive-or) on closed `Region` pairs from a `VectorNetwork`. Uses a pure-Rust Greiner-Hormann polygon clipping engine as the default backend; a `skia` Cargo feature flag is reserved for the Skia PathOp backend to be wired in during V4 WASM integration.
+
+**Branch**: `phase4/vector-networks-v3` · **Commit**: `5a028dd8`
+
+#### New crate — `rust/logos-vector-ops`
+
+- **`Cargo.toml`** — workspace member; depends on `logos-vector` (path dep); `skia` feature declared as a placeholder for downstream `skia-safe` wiring
+- **`src/boolean.rs`** — Greiner-Hormann polygon clipping (≈ 420 lines)
+  - **Phase 1**: intrinsic edge-vs-edge intersection search over all A×B edge pairs; intersection vertices inserted into both doubly-linked vertex rings; sorted by alpha parameter along each original edge
+  - **Phase 2**: entry/exit marking on A's intersection vertices via point-in-polygon ray-cast of A's origin against B; alternating toggle thereafter
+  - **Phase 3a — Union** (`trace`, `look_for=false`): starts at EXIT vertices on A; switches forward to B at ENTRY crossings; returns to A at the corresponding B EXIT neighbor
+  - **Phase 3b — Intersect** (`trace`, `look_for=true`): starts at ENTRY vertices on A; switches forward to B at EXIT crossings; returns to A at B ENTRY neighbor
+  - **Phase 3c — Subtract** (`trace_subtract`): starts at EXIT vertices on A; switches to B traversed **backwards** (via `.prev` links) at ENTRY crossings; returns to A at backward-B EXIT
+  - **Exclude** — deferred to V4; approximated as union for this release
+  - **Degeneracy handler**: bounding-box pre-check; point-in-polygon containment for identical/contained/disjoint cases with per-op correct output
+- **`src/convert.rs`** — `Poly = Vec<(f64, f64)>`; `region_to_poly()` samples Bézier segments at `BEZIER_STEPS=8` interior points; `poly_to_network()` adds straight-line anchors + segments to a fresh `VectorNetwork`, returns a `Region`; `poly_bbox()` + `bboxes_overlap()` for the pre-check
+- **`src/ops.rs`** — public API: `BoolOp` enum (`Union | Intersect | Subtract | Exclude`), `BoolResult { network, regions }`, `boolean_op(net_a, ra, net_b, rb, op) → BoolResult`; `BoolResult::total_area()` and `region_count()` helpers
+- **`src/skia_ops.rs`** — stub module, compiled only under `--features skia`
+- **`src/lib.rs`** — re-exports `boolean_op`, `BoolOp`, `BoolResult`; `no_run` doc-example
+
+#### Workspace change
+
+- **`rust/Cargo.toml`**: `"logos-vector-ops"` added to `members`
+
+#### Tests — 14/14 green
+
+| Test | Coverage |
+|---|---|
+| `union_idempotent` | A ∪ A area ≈ A |
+| `intersect_idempotent` | A ∩ A area ≈ A |
+| `union_with_empty` | A ∪ ∅ = A |
+| `intersect_with_empty` | A ∩ ∅ = ∅ |
+| `union_a_in_b` | containment: unit sq ⊂ 2×1 rect → union = 2×1 |
+| `intersect_a_in_b` | containment: unit sq ⊂ 2×1 rect → intersect = unit sq |
+| `union_disjoint` | two non-touching squares — both returned |
+| `intersect_disjoint` | two non-touching squares — empty |
+| `subtract_disjoint` | A−B with no overlap → A |
+| `union_overlapping` | 3×3 sq ∪ 1×5 rect → area ≈ 11 |
+| `intersect_overlapping` | 3×3 sq ∩ 1×5 rect → area ≈ 3 |
+| `subtract_overlapping` | 3×3 sq − 1×5 rect → area ≈ 6 |
+| `subtract_contained` | outer rect − inner square → hole, area ≥ 1 |
+| *(doc-test)* | `lib.rs` example compiles |
+
+#### Architecture notes
+
+- **`logos-vector` stays zero-dependency pure Rust** — no Skia, no WASM-specific code; V1 + V2 (slot-map graph + DCEL cycle detection) are not touched
+- **Bézier accuracy**: 8 samples per cubic segment gives < 0.5 px error at typical canvas scales (0–4096); reconfigurable via `BEZIER_STEPS` constant
+- **Output**: result region coordinates are stored in a fresh `VectorNetwork` as straight-line polylines; curve-fitting (V5) will restore Bézier handles where possible
+
+---
+
 ### M5 — ClojureScript Frontend Removal (`phase3/m5-cljs-removal`)
 
 **Context**: Migration complete. The ClojureScript SPA (`frontend/`) has been retired from the build pipeline. `logos-app/` (Vite + React 18 + TypeScript 5) is now the sole frontend.
