@@ -15,6 +15,7 @@
    [app.main.router :as rt]
    [app.main.store :as st]
    [app.render-wasm :as wasm]
+   [app.render-wasm.logos-layout :as logos-layout]
    [clojure.set :as set]
    [cuerdas.core :as str]
    [okulary.core :as l]
@@ -36,9 +37,14 @@
                        enable-wasm  (conj "render-wasm/v1")
                        disable-wasm (disj "render-wasm/v1"))]
     ;; If wasm render is enabled text-editor/v2 must be used
-    (cond-> features
-      (contains? features "render-wasm/v1")
-      (conj "text-editor/v2"))))
+    (let [features (cond-> features
+                     (contains? features "render-wasm/v1")
+                     (conj "text-editor/v2"))]
+      ;; Eagerly load the logos-layout WASM module when the feature is enabled
+      (when (and (contains? features "logos-layout-wasm/v1")
+                 (not (logos-layout/ready?)))
+        (logos-layout/init!))
+      features)))
 
 (defn get-enabled-features
   "An explicit lookup of enabled features for the current team"

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# bin/logos — unified Logos project CLI
+# Usage: logos <command> [args...]
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ─── colour helpers ────────────────────────────────────────────────────────────
+bold=$'\e[1m'; reset=$'\e[0m'; cyan=$'\e[36m'; yellow=$'\e[33m'; red=$'\e[31m'
+
+usage() {
+  cat <<EOF
+${bold}Usage:${reset} logos <command> [args...]
+
+${cyan}Development${reset}
+  dev             Start logos-app Vite dev server
+  build           Production build of logos-app
+  preview         Serve the logos-app production build locally
+
+${cyan}Testing${reset}
+  test            Run all tests (Rust + frontend vitest)
+  test:rust       cargo test --workspace
+  test:front      vitest in logos-app
+
+${cyan}Rust / WASM${reset}
+  rust            cargo build --workspace (debug)
+  rust:release    cargo build --workspace --release
+  wasm            Build logos-layout-wasm (requires wasm-pack)
+
+${cyan}Code quality${reset}
+  check           tsc --noEmit (logos-app) + cargo check
+  lint            eslint logos-app/src
+
+${cyan}Utilities${reset}
+  logs            tail -F backend/logs/*.log (if present)
+  clean           Remove build artefacts (logos-app/dist, rust target/)
+
+EOF
+  exit 1
+}
+
+# ─── dispatch ─────────────────────────────────────────────────────────────────
+CMD="${1:-}"
+shift || true
+
+case "$CMD" in
+  dev)
+    echo "${cyan}→ logos-app dev server${reset}"
+    cd "$REPO_ROOT/logos-app" && exec npm run dev "$@"
+    ;;
+
+  build)
+    echo "${cyan}→ logos-app production build${reset}"
+    cd "$REPO_ROOT/logos-app" && exec npm run build "$@"
+    ;;
+
+  preview)
+    echo "${cyan}→ logos-app preview${reset}"
+    cd "$REPO_ROOT/logos-app" && exec npm run preview "$@"
+    ;;
+
+  test)
+    echo "${cyan}→ Rust tests${reset}"
+    cd "$REPO_ROOT" && cargo test --workspace
+    echo "${cyan}→ Frontend tests${reset}"
+    cd "$REPO_ROOT/logos-app" && npx vitest run "$@"
+    ;;
+
+  test:rust)
+    cd "$REPO_ROOT" && exec cargo test --workspace "$@"
+    ;;
+
+  test:front)
+    cd "$REPO_ROOT/logos-app" && exec npx vitest run "$@"
+    ;;
+
+  rust)
+    cd "$REPO_ROOT" && exec cargo build --workspace "$@"
+    ;;
+
+  rust:release)
+    cd "$REPO_ROOT" && exec cargo build --workspace --release "$@"
+    ;;
+
+  wasm)
+    WASM_SCRIPT="$REPO_ROOT/scripts/build-logos-layout-wasm.sh"
+    if [[ -f "$WASM_SCRIPT" ]]; then
+      exec bash "$WASM_SCRIPT" "$@"
+    else
+      echo "${red}error:${reset} $WASM_SCRIPT not found" >&2
+      exit 1
+    fi
+    ;;
+
+  check)
+    echo "${cyan}→ TypeScript check${reset}"
+    cd "$REPO_ROOT/logos-app" && npx tsc --noEmit
+    echo "${cyan}→ Cargo check${reset}"
+    cd "$REPO_ROOT" && cargo check --workspace
+    ;;
+
+  lint)
+    cd "$REPO_ROOT/logos-app" && exec npx eslint src "$@"
+    ;;
+
+  logs)
+    LOG_DIR="$REPO_ROOT/backend/logs"
+    if ls "$LOG_DIR"/*.log &>/dev/null; then
+      exec tail -F "$LOG_DIR"/*.log
+    else
+      echo "${yellow}No log files found in $LOG_DIR${reset}"
+    fi
+    ;;
+
+  clean)
+    echo "${yellow}Removing logos-app/dist…${reset}"
+    rm -rf "$REPO_ROOT/logos-app/dist"
+    echo "${yellow}Removing rust/target and target/…${reset}"
+    rm -rf "$REPO_ROOT/rust/target" "$REPO_ROOT/target"
+    echo "Done."
+    ;;
+
+  help|--help|-h|"")
+    usage
+    ;;
+
+  *)
+    echo "${red}error:${reset} Unknown command '${bold}$CMD${reset}'" >&2
+    usage
+    ;;
+esac

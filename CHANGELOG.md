@@ -6,6 +6,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — 2026-05-18
+
+### M5 — ClojureScript Frontend Removal (`phase3/m5-cljs-removal`)
+
+**Context**: Migration complete. The ClojureScript SPA (`frontend/`) has been retired from the build pipeline. `logos-app/` (Vite + React 18 + TypeScript 5) is now the sole frontend.
+
+#### Build system
+- **`Makefile`**: `WASM_OUT` now targets `logos-app/public/logos-layout/`; added `build-app` target; `clean` removes `logos-app/dist`
+- **`run-ci.sh`**: Replaced `frontend/` ClojureScript CI block with `logos-app` TypeScript check + vitest
+- **`logos.toml`**: `assets_dir` updated to `./logos-app/dist`
+
+#### Docker
+- **`docker/images/Dockerfile.frontend`**: Replaced Penpot upstream image with a two-stage build (Node 20 builder → nginx 1.27 static server, SPA fallback, immutable-hash asset caching)
+- **`docker/images/docker-compose.yaml`**: `logos-frontend` service now uses locally built `logos-frontend` image
+
+#### CI
+- **`.github/workflows/logos-app.yml`** *(new)*: Three-job workflow — `typecheck-and-test` (tsc + vitest), `lint` (ESLint), `build` (Vite prod + artifact upload)
+- **`.github/workflows/benchmark-memory.yml`**: Cache key updated from `frontend/deps.edn` to `logos-app/package.json`
+
+#### Documentation
+- **`ARCHITECTURE.md`**: Section 2 fully rewritten to describe the React/TypeScript stack (Zustand, workers, plugin bridge, WASM ABI)
+
+---
+
 ## [Unreleased] — 2026-05-17
 
 ### Rust Geometry & Layout Foundation (Phase 3.0)

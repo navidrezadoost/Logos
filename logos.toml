@@ -49,4 +49,4 @@ pdf_quality = "standard"   # "draft" | "standard" | "high"
 public_url = "http://localhost:8080"
 # Path to compiled frontend assets on disk (for development hot-reload).
 # Leave unset (or comment out) to use assets embedded in the binary.
-assets_dir = "./logos-wasm/dist"
+assets_dir = "./logos-app/dist"

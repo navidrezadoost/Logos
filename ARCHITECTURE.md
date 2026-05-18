@@ -7,7 +7,7 @@
 ## Table of Contents
 
 1. [High-Level Overview](#1-high-level-overview)
-2. [Frontend — ClojureScript SPA](#2-frontend--clojurescript-spa)
+2. [Frontend — React/TypeScript SPA](#2-frontend--reacttypescript-spa)
 3. [Backend — Clojure API Server](#3-backend--clojure-api-server)
 4. [Common — Shared Logic](#4-common--shared-logic)
 5. [WebAssembly Renderer](#5-webassembly-renderer)
@@ -26,7 +26,7 @@
 ## 1. High-Level Overview
 
 ```
-Browser (ClojureScript SPA)
+Browser (React + TypeScript SPA — logos-app)
        │  HTTP RPC + WebSocket
        ▼
 Clojure Backend (API + WebSocket)
@@ -40,93 +40,96 @@ Clojure Backend (API + WebSocket)
 
 | Layer | Language | Build Tool |
 |---|---|---|
-| Frontend | ClojureScript → ES Modules | shadow-cljs |
+| **Frontend** | **React 18 + TypeScript 5** | **Vite 6** |
 | Backend | Clojure | deps.edn / Integrant |
 | Renderer | Rust → WebAssembly | cargo / wasm-pack |
 | Exporter | ClojureScript (Node.js) | shadow-cljs |
-| Plugins | TypeScript | esbuild / vite |
+| Plugins | TypeScript (sandboxed iframe) | esbuild / vite |
 | MCP server | TypeScript | tsup / Node.js |
 
 ### Development Ports
 
 | Service | Port | Command |
 |---|---|---|
-| Frontend dev server | 8888 | `pnpm run watch:app:no-wasm` |
+| **logos-app dev server** | **5173** | **`logos dev`** |
 | Backend HTTP | 3449 | `bash scripts/start-dev-local` |
 | nREPL (backend) | 6061 | auto-started by Integrant |
 
 ---
 
-## 2. Frontend — ClojureScript SPA
+## 2. Frontend — React/TypeScript SPA
+
+> **Migration complete (M1–M4)**: The ClojureScript frontend (`frontend/`) has been superseded
+> by `logos-app/`, a Vite + React 18 + TypeScript 5 application over the same Rust/WASM
+> rendering core. The ClojureScript source is preserved in Git history.
 
 ### 2.1 Technology Stack
 
-- **shadow-cljs** — ClojureScript compiler, hot-reload, npm interop
-- **Rumext** — a thin React wrapper providing functional components via macros (`mf/defc`, `mf/memo`)
-- **PTK** (Potok) — an event-driven state machine (see §11)
-- **Transit-JSON** — serialised wire format between frontend and backend
+- **Vite 6** — dev server with HMR, production bundler
+- **React 18** — functional components, concurrent rendering
+- **TypeScript 5** — strict mode, project-wide type safety
+- **Zustand** — lightweight flux-like state (documentStore, selectionStore, uiStore)
+- **@tanstack/react-virtual** — virtualised layers panel (handles 10 000+ shapes)
+- **Workers** — layout, snap, and serialization in dedicated Web Workers
 
-### 2.2 Entry Points
+### 2.2 Directory Layout
 
-`frontend/src/app/main.cljs` bootstraps the app. shadow-cljs produces separate JS chunks per "page":
-
-| Chunk | When loaded |
-|---|---|
-| `main-auth.js` | Login / register pages |
-| `main-dashboard.js` | Project/file dashboard |
-| `main-workspace.js` | Design canvas (heaviest) |
-| `main-viewer.js` | View-only / prototype player |
-| `main-settings.js` | Profile settings |
-| `rasterizer.js` | Offscreen thumbnail generator |
-
-### 2.3 Router
-
-`frontend/src/app/main/ui/routes.cljs`
-
-- Uses `reitit` for client-side routing
-- `valid-location?` logic guards against cross-origin navigation: accepts any `http://localhost` or `http://127.0.0.1` origin, or paths that start with `cf/public-uri`
-- Route match drives which top-level Rumext component is mounted
-
-### 2.4 Configuration
-
-`frontend/resources/public/js/config.js` — injected at build time:
-
-```javascript
-globalThis.penpotPublicURI    // API base URL (e.g., "http://localhost:3449")
-globalThis.penpotRasterizerURI // Rasterizer origin
-globalThis.flags               // Feature flags bitmask
+```
+logos-app/src/
+  components/
+    canvas/     Canvas.tsx — WASM bridge + Canvas 2D fallback, mouse-drag shape creation
+    toolbar/    Toolbar.tsx — tool selection (V/R/O/T/P/H)
+    layers/     LayersPanel.tsx — virtualised shape tree
+    inspector/  Inspector.tsx — x/y/w/h + fill picker
+  stores/
+    documentStore.ts  — pages + shapes (Zustand)
+    selectionStore.ts — selected IDs
+    uiStore.ts        — active tool, panel visibility
+  render-wasm/
+    module.ts   — Emscripten module typings
+    scene.ts    — uploadShapeBatched() 104-byte WASM ABI
+  worker/
+    layout.worker.ts    — flex/grid layout
+    snap.worker.ts      — snap guides (range-tree)
+    serialize.worker.ts — shape → 104-byte binary
+    index.ts            — WorkerPool singleton
+  plugins/
+    bridge.ts   — sandboxed iframe + postMessage protocol
+    api.ts      — host-side plugin API dispatch
+    types.ts    — stable TypeScript types for plugin authors
+    sample/     — hello-world sample plugin
+  types/
+    shapes.ts   — Shape, Fill, Rect, Transform
 ```
 
-`frontend/src/app/config.cljs` reads these into ClojureScript vars.
+### 2.3 Canvas Rendering Pipeline
 
-### 2.5 Canvas Rendering Pipeline
+**Canvas 2D fallback (default — no Emscripten required):**
+1. Zustand shapes → `syncScene2D()` in `scene.ts`
+2. `requestAnimationFrame` loop paints each shape as a filled rect/ellipse
+3. Selection handles drawn as dashed overlays
 
-Two rendering backends are available and selected at runtime:
+**WebAssembly mode (when Emscripten/Skia is available):**
+1. `uploadShapeBatched()` writes 104-byte records into WASM heap
+2. Calls `_set_shape_base_props()`, `_set_shape_fills()` → Rust scene graph
+3. `_render_frame()` rasterises via Skia onto the canvas element
 
-**SVG mode (default in dev without wasm):**
-1. Shape tree (`app.common.types.shape`) converted to Hiccup-like data
-2. Rumext renders a `<svg>` element per frame
-3. CSS transforms drive position/rotation
-4. Text uses `<foreignObject>` with a div + contenteditable
+### 2.4 Worker Orchestration
 
-**WebAssembly mode (`render-wasm`):**
-1. Rust/WASM module exposes `add_shape`, `update_shape`, `render_frame` C-ABI
-2. Frontend calls WASM through JS wrappers in `frontend/src/app/render_wasm/`
-3. Skia-based rasterisation in a 2D canvas element
-4. Significantly faster for large files (thousands of shapes)
-
-### 2.6 Workspace Subsystems
-
-| Subsystem | Namespace prefix | Responsibility |
+| Worker | Protocol | Purpose |
 |---|---|---|
-| Canvas | `app.main.ui.workspace.canvas` | SVG viewport, pan/zoom, rulers |
-| Selection | `app.main.data.workspace.selection` | hit-testing, selection box |
-| History | `app.main.data.workspace.state-helpers` | undo/redo stack |
-| Transform | `app.main.data.workspace.transforms` | move, resize, rotate |
-| Path editor | `app.main.ui.workspace.path` | Bézier curve editing |
-| Text editor | `app.main.ui.workspace.text` | inline text, typography |
-| Components | `app.main.data.components` | main/copy sync |
-| Tokens | `app.main.ui.workspace.tokens` | design token management |
+| `layout.worker` | `COMPUTE_LAYOUT → LAYOUT_RESULT` | Flex/grid auto-layout |
+| `snap.worker` | `SNAP → SNAP_RESULT` | Snap guides (binary range tree) |
+| `serialize.worker` | `SERIALIZE → SERIALIZED` | Shape → 104-byte binary (zero-copy transfer) |
+
+### 2.5 Plugin System
+
+See `logos-app/src/plugins/README.md` for the full specification.
+
+- Each plugin runs in `<iframe sandbox="allow-scripts">` (null origin — no DOM access)
+- `logos.call(method, params)` → host dispatches to `api.ts` with permission check
+- Permissions granted at `connectPlugin()` time; cannot be escalated at runtime
+- Push events: `selectionChange`, `pageChange`, `documentChange`
 
 ### 2.7 Thumbnail Rasterizer
 

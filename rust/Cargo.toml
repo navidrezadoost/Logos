@@ -20,6 +20,7 @@
 [workspace]
 members = [
     "logos-layout",
+    "logos-layout-wasm",
     "logos-rebase",
     "logos-ws",
 ]

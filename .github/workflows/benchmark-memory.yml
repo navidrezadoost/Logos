@@ -49,7 +49,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.docker-cache
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker/**', 'backend/deps.edn', 'frontend/deps.edn') }}
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker/**', 'backend/deps.edn', 'logos-app/package.json') }}
           restore-keys: |
             ${{ runner.os }}-docker-
 
@@ -57,7 +57,7 @@ jobs:
       - name: Start Logos services
         run: |
           docker compose -f docker/devenv/docker-compose.yaml up -d \
-            postgres redis minio backend frontend exporter
+            postgres redis minio backend logos-app exporter
         timeout-minutes: 10
 
       # ── Wait for health ────────────────────────────────────────────────────
