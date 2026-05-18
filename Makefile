@@ -2,9 +2,10 @@
 ##
 ## Targets
 ## ───────
-##  make build          Build everything (Rust native + WASM, ClojureScript deps)
+##  make build          Build Rust native + WASM
+##  make build-app      Build logos-app (React + TypeScript) production bundle
 ##  make build-rust     Build Rust crates (native release) in rust/
-##  make build-wasm     Build logos-layout WASM target with wasm-pack
+##  make build-wasm     Build logos-layout WASM, output → logos-app/public/logos-layout/
 ##  make test           Run all Rust unit tests in rust/
 ##  make test-rust      Same as test
 ##  make clean          Remove all build artefacts
@@ -17,19 +18,24 @@
 ##  wasm-pack  (cargo install wasm-pack)  — only for build-wasm / build targets
 ##
 ## WASM output lands in:
-##  frontend/pkg/logos-layout/
+##  logos-app/public/logos-layout/
 
 CARGO        := cargo
 WASM_PACK    := wasm-pack
 RUST_DIR     := rust
 LAYOUT_CRATE := $(RUST_DIR)/logos-layout
-WASM_OUT     := frontend/pkg/logos-layout
+WASM_OUT     := logos-app/public/logos-layout
 
-.PHONY: build build-rust build-wasm test test-rust clean fmt lint
+.PHONY: build build-app build-rust build-wasm test test-rust clean fmt lint
 
 ## ── Default target ──────────────────────────────────────────────
+## Add 'build-app' to also build the React frontend
 
 build: build-rust build-wasm
+
+build-app:
+	@echo "==> Building logos-app (React + TypeScript)"
+	cd logos-app && npm run build
 
 ## ── Rust native build ───────────────────────────────────────────
 
@@ -69,3 +75,5 @@ clean:
 	@echo "==> Cleaning Rust build artefacts"
 	$(CARGO) clean --manifest-path $(RUST_DIR)/Cargo.toml
 	rm -rf $(WASM_OUT)
+	@echo "==> Cleaning logos-app dist"
+	rm -rf logos-app/dist

@@ -11,20 +11,11 @@ clojure -M:dev:test
 pnpm run test
 popd
 
-echo "################ test frontend ################"
-pushd frontend
+echo "################ build + test logos-app (React/TypeScript) ################"
+pushd logos-app
 pnpm install
-pnpm run fmt:clj:check
-pnpm run fmt:js:check
-pnpm run lint:scss
-pnpm run lint:clj
-pnpm run test
-popd
-
-echo "################ test integration ################"
-pushd frontend
-pnpm install
-pnpm run test:e2e -x --workers=4
+npx tsc --noEmit
+npx vitest run
 popd
 
 echo "################ test backend ################"
