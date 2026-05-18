@@ -1,0 +1,15 @@
+[package]
+name        = "logos-vector"
+version     = "0.1.0"
+edition     = "2021"
+description = "Half-edge vector network graph — anchors, segments, regions, boolean ops"
+license     = "MPL-2.0"
+
+[dependencies]
+# No external dependencies for V1 — pure graph operations.
+# region detection (V2) and boolean ops (V3) will add:
+#   geo           = "0.28"   -- computational geometry primitives
+#   petgraph      = "0.6"    -- graph algorithms (optional, for cycle detection)
+
+[dev-dependencies]
+# None for V1.
