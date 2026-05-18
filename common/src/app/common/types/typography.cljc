@@ -17,6 +17,16 @@
 ;; SCHEMA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; font-variation-settings schema:
+;; A map of OpenType axis tags (string, 4 ASCII chars) to numeric values.
+;; Example: {"wght" 750.0, "wdth" 100.0}
+;; This is the same model as the CSS `font-variation-settings` property
+;; and maps directly to SkFontArguments::VariationPosition in render-wasm.
+(def schema:font-variation-settings
+  [:map-of
+   [:string {:min 4 :max 4}]  ;; 4-char OpenType axis tag
+   :number])                   ;; axis value (float)
+
 (def schema:typography
   [:map {:title "Typography"}
    [:id ::sm/uuid]
@@ -32,7 +42,10 @@
    [:text-transform :string]
    [:modified-at {:optional true} ::ct/inst]
    [:path {:optional true} [:maybe :string]]
-   [:plugin-data {:optional true} ctpg/schema:plugin-data]])
+   [:plugin-data {:optional true} ctpg/schema:plugin-data]
+   ;; Variable-font axis overrides. Absent for static fonts.
+   ;; {"wght" 750 "wdth" 100} → CSS font-variation-settings: 'wght' 750, 'wdth' 100
+   [:font-variation-settings {:optional true} schema:font-variation-settings]])
 
 (def check-typography
   (sm/check-fn schema:typography))
@@ -43,7 +56,8 @@
 
 (defn make-typography
   [{:keys [id name path font-id font-family font-variant-id font-size
-           font-weight font-style line-height letter-spacing text-transform]}]
+           font-weight font-style line-height letter-spacing text-transform
+           font-variation-settings]}]
   (-> {:id (or id (uuid/next))
        :name (or name "Typography 1")
        :path path
@@ -55,7 +69,9 @@
        :font-style (or font-style "normal")
        :line-height (or line-height "1.2")
        :letter-spacing (or letter-spacing "0")
-       :text-transform (or text-transform "none")}
+       :text-transform (or text-transform "none")
+       ;; Variable font axis overrides — nil for static fonts, omitted by without-nils.
+       :font-variation-settings font-variation-settings}
       (d/without-nils)))
 
 
