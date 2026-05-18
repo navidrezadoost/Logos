@@ -25,7 +25,6 @@ use crate::anchor::Anchor;
 use crate::error::VectorError;
 use crate::region::Region;
 use crate::segment::Segment;
-
 /// A vector network: a half-edge graph of anchors connected by cubic Bézier
 /// segments, with optionally filled closed regions.
 #[derive(Debug, Clone, Default)]
@@ -260,6 +259,18 @@ impl VectorNetwork {
 
     /// All cached regions (populated by V2 cycle detection).
     pub fn regions(&self) -> &[Region] {
+        &self.regions
+    }
+
+    /// Detect closed regions using the planar face traversal algorithm and
+    /// cache the result on this network.
+    ///
+    /// Call this after any structural mutation (add/remove anchor or segment)
+    /// to keep the region cache current. Region detection is O(E log E).
+    ///
+    /// Returns an immutable slice of the detected regions.
+    pub fn find_regions(&mut self) -> &[Region] {
+        self.regions = crate::cycle::find_regions(self);
         &self.regions
     }
 
