@@ -1,50 +1,37 @@
 import { Canvas } from "./components/canvas/Canvas";
+import { Toolbar } from "./components/toolbar/Toolbar";
+import { LayersPanel } from "./components/layers/LayersPanel";
+import { Inspector } from "./components/inspector/Inspector";
+import { useUiStore } from "./stores/uiStore";
 
 export default function App(): React.ReactElement {
+  const layersPanelOpen = useUiStore((s) => s.layersPanelOpen);
+  const inspectorOpen = useUiStore((s) => s.inspectorOpen);
+
   return (
     <div
       style={{
-        minHeight: "100vh",
         display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "24px",
-        padding: "40px",
+        flexDirection: "row",
+        width: "100vw",
+        height: "100vh",
+        overflow: "hidden",
+        background: "#1e1e2e",
+        color: "#cdd6f4",
+        fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
-      <h1
-        style={{
-          fontSize: "20px",
-          fontWeight: 600,
-          letterSpacing: "0.05em",
-          color: "#cba6f7",
-        }}
-      >
-        Logos — Phase M1 React Shell
-      </h1>
+      {/* Left tool palette */}
+      <Toolbar />
 
-      <p
-        style={{
-          fontSize: "13px",
-          color: "#a6adc8",
-          maxWidth: "600px",
-          textAlign: "center",
-          lineHeight: "1.6",
-        }}
-      >
-        The canvas below proves the WASM bridge.{" "}
-        <strong>Green badge</strong> = Rust/Skia renderer active.{" "}
-        <strong>Red badge</strong> = Canvas 2D fallback (build{" "}
-        <code>render-wasm</code> with EMSDK to activate Skia).
-      </p>
+      {/* Layers panel */}
+      {layersPanelOpen && <LayersPanel />}
 
+      {/* Main canvas — fills remaining space */}
       <Canvas />
 
-      {/* M2 placeholder — Zustand sidebar + tool palette will be added here */}
-      <p style={{ fontSize: "11px", color: "#585b70", fontFamily: "monospace" }}>
-        M2 → Zustand state · sidebar · tool palette
-      </p>
+      {/* Right inspector panel */}
+      {inspectorOpen && <Inspector />}
     </div>
   );
 }

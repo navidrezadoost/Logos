@@ -1,120 +1,74 @@
 /**
- * Canvas.tsx
+ * components/canvas/Canvas.tsx  (M2 revision)
  *
- * Phase M1 spike component.
- *
- * Renders one hardcoded rectangle using either:
- *   A) The Rust/Skia render-wasm engine (WebGL2, via Emscripten Module), or
- *   B) Canvas 2D API (fallback when render-wasm has not been built yet).
- *
- * The presence of the rectangle in either path validates the architecture.
- * Path A requires `frontend/resources/public/js/render-wasm.{js,wasm}` to
- * exist (built via `cd render-wasm && ./build`).
- *
- * Initialization sequence (Path A):
- *   loadRenderWasm(jsUrl, wasmUrl)
- *     └─ dynamic import render-wasm.js (Emscripten ES6 module)
- *     └─ createRustSkiaModule({locateFile}) → Module
- *   initCanvasContext(mod, canvas)
- *     └─ getContext("webgl2") → ctx
- *     └─ mod.GL.registerContext + makeContextCurrent
- *     └─ mod._init(width, height)
- *     └─ mod._set_render_options(0, dpr)
- *   drawHardcodedRect(mod)
- *     └─ mod._init_shapes_pool(1)
- *     └─ mod._use_shape(0,0,0,1)   ← UUID
- *     └─ mod._set_shape_type(3)    ← rect
- *     └─ mod._set_shape_selrect(50,50,250,150)
- *     └─ applySolidFill(mod, 0xFF0000FF)  ← blue ARGB
- *     └─ mod._render_sync()
+ * Subscribes to documentStore and re-renders the Rust/Skia scene whenever
+ * the shape list changes. Handles the WASM lifecycle (load → init → sync)
+ * and a Canvas 2D fallback for environments without the Emscripten build.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import {
   loadRenderWasm,
   initCanvasContext,
   cleanUp,
-  drawHardcodedRect,
   type RenderWasmModule,
 } from "../../render-wasm/module";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-
-const CANVAS_W = 800;
-const CANVAS_H = 600;
+import { syncScene, syncScene2D } from "../../render-wasm/scene";
+import { useCurrentPageShapes } from "../../stores/documentStore";
+import { useSelectionStore } from "../../stores/selectionStore";
+import { useUiStore } from "../../stores/uiStore";
 
 const WASM_JS_URL: string =
-  typeof __RENDER_WASM_JS__ !== "undefined"
-    ? __RENDER_WASM_JS__
-    : "/js/render-wasm.js";
-
+  typeof __RENDER_WASM_JS__ !== "undefined" ? __RENDER_WASM_JS__ : "/js/render-wasm.js";
 const WASM_WASM_URL: string =
-  typeof __RENDER_WASM_WASM__ !== "undefined"
-    ? __RENDER_WASM_WASM__
-    : "/js/render-wasm.wasm";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Canvas 2D fallback  (visible when render-wasm is not yet built)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function drawFallback(canvas: HTMLCanvasElement): void {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  // Clear to dark background matching the app theme
-  ctx.fillStyle = "#1e1e2e";
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-
-  // The hardcoded rectangle — same geometry as the WASM path
-  ctx.fillStyle = "#0000ff";
-  ctx.fillRect(50, 50, 200, 100); // x, y, w, h
-
-  // Label (present only in fallback mode)
-  ctx.fillStyle = "rgba(255,255,255,0.5)";
-  ctx.font = "13px monospace";
-  ctx.fillText("Canvas 2D fallback — build render-wasm to enable Skia renderer", 50, 200);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Component
-// ─────────────────────────────────────────────────────────────────────────────
+  typeof __RENDER_WASM_WASM__ !== "undefined" ? __RENDER_WASM_WASM__ : "/js/render-wasm.wasm";
 
 type RenderMode = "loading" | "wasm" | "fallback";
 
 export function Canvas(): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const moduleRef = useRef<RenderWasmModule | null>(null);
-  const [mode, setMode] = useState<RenderMode>("loading");
+  const modeRef = useRef<RenderMode>("loading");
 
+  const [mode, setMode] = useState<RenderMode>("loading");
+  const [size, setSize] = useState({ w: 800, h: 600 });
+
+  const shapes = useCurrentPageShapes();
+  const clearSelection = useSelectionStore((s) => s.clearSelection);
+  const { zoom, panX, panY, activeTool } = useUiStore();
+
+  // ── Resize observer ────────────────────────────────────────────────────────
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect;
+      setSize({ w: Math.floor(width), h: Math.floor(height) });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // ── WASM boot (once) ───────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     let cancelled = false;
 
     (async () => {
-      // 1. Try to load the Emscripten module
       const mod = await loadRenderWasm(WASM_JS_URL, WASM_WASM_URL);
-
       if (cancelled) return;
-
       if (mod !== null) {
-        // Path A: Rust/Skia renderer
         const ok = initCanvasContext(mod, canvas);
         if (ok) {
           moduleRef.current = mod;
-          drawHardcodedRect(mod);
+          modeRef.current = "wasm";
           setMode("wasm");
           return;
         }
-        // WebGL2 unavailable on this GPU — fall through to Canvas 2D
-        console.warn("[logos-app] WebGL2 init failed, using Canvas 2D fallback.");
       }
-
-      // Path B: Canvas 2D fallback
-      drawFallback(canvas);
+      modeRef.current = "fallback";
       setMode("fallback");
     })();
 
@@ -126,40 +80,69 @@ export function Canvas(): React.ReactElement {
         moduleRef.current = null;
       }
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Re-render on store changes ─────────────────────────────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || modeRef.current === "loading") return;
+
+    if (modeRef.current === "wasm" && moduleRef.current) {
+      syncScene(moduleRef.current, shapes, size.w, size.h);
+    } else {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.save();
+        ctx.translate(panX, panY);
+        ctx.scale(zoom, zoom);
+        syncScene2D(ctx, shapes, size.w / zoom, size.h / zoom);
+        ctx.restore();
+      }
+    }
+  }, [shapes, size, zoom, panX, panY, mode]);
+
+  const handleCanvasClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (e.target === canvasRef.current) clearSelection();
+    },
+    [clearSelection]
+  );
+
+  const cursor =
+    activeTool === "hand" ? "grab"
+    : activeTool === "rect" || activeTool === "ellipse" || activeTool === "text" ? "crosshair"
+    : "default";
 
   return (
-    <div style={{ position: "relative", display: "inline-block" }}>
+    <div
+      ref={containerRef}
+      style={{ flex: 1, position: "relative", overflow: "hidden", background: "#313244" }}
+    >
       <canvas
         ref={canvasRef}
-        width={CANVAS_W}
-        height={CANVAS_H}
-        style={{
-          display: "block",
-          border: "1px solid #45475a",
-          borderRadius: "4px",
-        }}
+        width={size.w}
+        height={size.h}
+        onClick={handleCanvasClick}
+        style={{ display: "block", cursor, width: "100%", height: "100%" }}
       />
 
-      {/* Status badge */}
-      <span
-        style={{
-          position: "absolute",
-          top: 8,
-          right: 8,
-          padding: "2px 8px",
-          borderRadius: "4px",
-          fontSize: "11px",
-          fontFamily: "monospace",
-          background:
-            mode === "wasm"
-              ? "#a6e3a1"
-              : mode === "fallback"
-                ? "#f38ba8"
-                : "#cdd6f4",
-          color: "#1e1e2e",
-        }}
-      >
+      {shapes.length === 0 && mode !== "loading" && (
+        <div style={{
+          position: "absolute", inset: 0, display: "flex",
+          alignItems: "center", justifyContent: "center",
+          pointerEvents: "none", color: "#585b70",
+          fontSize: "13px", fontFamily: "monospace",
+        }}>
+          Press R to add a rectangle
+        </div>
+      )}
+
+      <span style={{
+        position: "absolute", bottom: 8, right: 8, padding: "2px 8px",
+        borderRadius: "4px", fontSize: "11px", fontFamily: "monospace",
+        background: mode === "wasm" ? "#a6e3a1" : mode === "fallback" ? "#f38ba8" : "#cdd6f4",
+        color: "#1e1e2e",
+      }}>
         {mode === "loading" && "⏳ loading…"}
         {mode === "wasm"     && "✓ render-wasm / Skia"}
         {mode === "fallback" && "⚠ Canvas 2D fallback"}
