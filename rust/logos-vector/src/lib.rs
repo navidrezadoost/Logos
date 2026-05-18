@@ -43,12 +43,14 @@
 //! ```
 
 pub mod anchor;
+pub mod cycle;
 pub mod error;
 pub mod graph;
 pub mod region;
 pub mod segment;
 
 pub use anchor::Anchor;
+pub use cycle::find_regions;
 pub use error::VectorError;
 pub use graph::VectorNetwork;
 pub use region::Region;
