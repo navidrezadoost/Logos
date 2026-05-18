@@ -28,9 +28,9 @@ export interface RenderWasmModule {
   HEAP32: Int32Array;
   HEAPU32: Uint32Array;
   HEAPF32: Float32Array;
-  /** Allocate `size` bytes in the WASM heap; returns a pointer. */
+  /** Allocate `size` bytes in the WASM heap; returns a byte offset into HEAPU8. */
   _alloc_bytes(size: number): number;
-  /** Free the last allocation. */
+  /** Free the last allocation (must pair with _alloc_bytes). */
   _free_bytes(): void;
   // Lifecycle
   _init(width: number, height: number): void;
@@ -40,8 +40,33 @@ export interface RenderWasmModule {
   // Viewport
   _resize_viewbox(width: number, height: number): void;
   _set_canvas_background(color: number): void;
+  _set_view(zoom: number, x: number, y: number): void;
   // Shapes pool
   _init_shapes_pool(total: number): void;
+
+  /**
+   * Batched shape base-props — reads 104 bytes from the WASM heap
+   * (previously written via _alloc_bytes + HEAPU8 writes) and applies
+   * them to the selected shape.
+   *
+   * Layout: matches render-wasm/src/wasm/shapes/base_props.rs BASE_PROPS_SIZE=104
+   *   [0..16)  id UUID (4×u32 LE)
+   *   [16..32) parent_id UUID (4×u32 LE)
+   *   [32]     shape_type u8
+   *   [33]     flags u8  (bit0=clip, bit1=hidden)
+   *   [34]     blend_mode u8
+   *   [35]     constraint_h u8  (0xFF = None)
+   *   [36]     constraint_v u8  (0xFF = None)
+   *   [37..40) padding
+   *   [40..44) opacity f32 LE
+   *   [44..48) rotation f32 LE (degrees)
+   *   [48..72) transform 6×f32 LE (a,b,c,d,e,f)
+   *   [72..88) selrect 4×f32 LE (x1,y1,x2,y2)
+   *   [88..104) corners 4×f32 LE (r1,r2,r3,r4)
+   */
+  _set_shape_base_props(): void;
+
+  // Legacy individual shape-property setters (still exported, used as fallback)
   /** Select the active shape by its UUID (four u32 words). */
   _use_shape(a: number, b: number, c: number, d: number): void;
   _set_shape_type(type: number): void;
@@ -50,6 +75,10 @@ export interface RenderWasmModule {
   _set_shape_transform(a: number, b: number, c: number, d: number, e: number, f: number): void;
   _set_shape_rotation(r: number): void;
   _set_shape_clip_content(clip: boolean): void;
+  _set_shape_opacity(opacity: number): void;
+  _set_shape_hidden(hidden: boolean): void;
+  _set_shape_corners(r1: number, r2: number, r3: number, r4: number): void;
+  _set_parent(a: number, b: number, c: number, d: number): void;
   /** Write fill data from the current alloc buffer into the active shape. */
   _set_shape_fills(): void;
   // Render

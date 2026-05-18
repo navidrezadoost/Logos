@@ -1,93 +1,114 @@
 /**
  * worker/serialize.worker.ts
  *
- * Serializes the React-shell shape tree into the binary format expected
- * by the Rust/Skia WASM renderer on the main thread.
+ * Serializes the React-shell shape array into 104-byte per-shape binary records
+ * matching the Rust `set_shape_base_props()` ABI exactly.
  *
- * This worker pre-encodes shape records so the main-thread render loop only
- * needs to `postMessage` an ArrayBuffer to the canvas effect — avoiding
- * heavy JSON.stringify in the UI thread.
+ * Binary layout (matches render-wasm/src/wasm/shapes/base_props.rs):
+ *
+ * | Offset | Size | Field        | Type                               |
+ * |--------|------|--------------|------------------------------------|
+ * |  0     |  16  | id           | UUID (4 × u32 LE)                  |
+ * | 16     |  16  | parent_id    | UUID (4 × u32 LE, zero if null)    |
+ * | 32     |   1  | shape_type   | u8 (Frame=0,Group=1,Bool=2,Rect=3, |
+ * |        |      |              |      Path=4,Text=5,Circle=6,SVG=7) |
+ * | 33     |   1  | flags        | u8 bit0=clip, bit1=hidden          |
+ * | 34     |   1  | blend_mode   | u8 (0 = Normal)                    |
+ * | 35     |   1  | constraint_h | u8 (0xFF = None)                   |
+ * | 36     |   1  | constraint_v | u8 (0xFF = None)                   |
+ * | 37     |   3  | padding      | zeros                               |
+ * | 40     |   4  | opacity      | f32 LE                              |
+ * | 44     |   4  | rotation     | f32 LE (degrees)                   |
+ * | 48     |  24  | transform    | 6 × f32 LE (a,b,c,d,e,f)           |
+ * | 72     |  16  | selrect      | 4 × f32 LE (x1,y1,x2,y2)           |
+ * | 88     |  16  | corners      | 4 × f32 LE (r1,r2,r3,r4)           |
+ * |--------|------|--------------|----------------------------------------|
+ * | Total  | 104  |              |                                        |
+ *
+ * Fills are serialized separately (8 bytes per fill via applySolidFill).
  *
  * Message protocol
  * ─────────────────
  * IN:
  *   { type: "SERIALIZE"; id: string; payload: SerializeRequest }
  *
- * OUT:
- *   { type: "SERIALIZE_RESULT"; id: string; buffer: ArrayBuffer }   (transferable)
- *   { type: "SERIALIZE_ERROR";  id: string; error: string }
+ * OUT (transferable — zero-copy):
+ *   { type: "SERIALIZE_RESULT"; id: string; buffer: ArrayBuffer }
+ *   — buffer layout: 4-byte header (shape count u32 LE) + N × 104-byte records.
+ *
+ *   { type: "SERIALIZE_ERROR"; id: string; error: string }
  */
 
 import type { Shape } from "../types/shapes";
 
 export interface SerializeRequest {
   shapes: Shape[];
-  /** Viewport width (used by _resize_viewbox) */
   width: number;
-  /** Viewport height */
   height: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Binary layout (per-shape record)
-// Mirrors the layout expected by module.ts / syncScene()
-//
-// Header: 4 bytes
-//   u32 LE — number of shape records
-//
-// Per shape record (fixed 96 bytes):
-//   [0..15]  u8[16]  UUID bytes  (from uuidToU32x4 → stored as 4×u32 LE)
-//   [16]     u8      ShapeType   (0=rect, 1=ellipse, 2=text, 3=path, 4=frame)
-//   [17..19] u8[3]   padding
-//   [20..35] f32[4]  selrect: x1, y1, x2, y2
-//   [36..59] f32[6]  transform: a, b, c, d, e, f
-//   [60]     f32     rotation (radians)
-//   [64..67] u32     fill ARGB (0xAARRGGBB)
-//   [68..95] u8[28]  reserved / future use
-//
+// Constants — must stay in sync with Rust RawShapeType enum
 // ─────────────────────────────────────────────────────────────────────────────
 
-const RECORD_BYTES = 96;
-const HEADER_BYTES = 4;
+const RECORD_BYTES = 104;
+const HEADER_BYTES = 4; // u32 LE: shape count
 
-const SHAPE_TYPE_MAP: Record<string, number> = {
-  rect: 0,
-  ellipse: 1,
-  text: 2,
-  path: 3,
-  frame: 4,
-  group: 4, // treat as frame for now
-  "svg-raw": 3,
-  circle: 1,
-  bool: 3,
+const SHAPE_TYPE: Record<string, number> = {
+  frame:    0,
+  group:    1,
+  bool:     2,
+  rect:     3,
+  path:     4,
+  text:     5,
+  circle:   6,
+  ellipse:  6, // same as circle in Rust enum
+  "svg-raw": 7,
 };
 
-/** Parse a UUID string → four u32 LE words. */
-function uuidToWords(uuid: string): [number, number, number, number] {
+const FLAG_HIDDEN   = 0x02;
+const BLEND_NORMAL  = 0x00;
+const CONSTRAINT_NONE = 0xFF;
+
+// Pre-built zero UUID (16 bytes of zeros) — used for null parent_id
+const ZERO_UUID_BYTES = new Uint8Array(16);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parse a standard UUID string (with dashes) into 4 × u32 LE and write to
+ * a DataView at the given byte offset.
+ *
+ * UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+ * The four u32 words are taken from consecutive 8-hex-char groups after
+ * stripping dashes. This matches uuid/get-u32 in ClojureScript and the
+ * uuid_from_u32_quartet() Rust helper used by set_shape_base_props.
+ */
+function writeUUID(view: DataView, offset: number, uuid: string | null): void {
+  if (!uuid) {
+    // Write 16 zero bytes
+    for (let i = 0; i < 16; i++) view.setUint8(offset + i, 0);
+    return;
+  }
   const hex = uuid.replace(/-/g, "");
-  return [
-    parseInt(hex.slice(0, 8), 16),
-    parseInt(hex.slice(8, 16), 16),
-    parseInt(hex.slice(16, 24), 16),
-    parseInt(hex.slice(24, 32), 16),
-  ];
+  if (hex.length !== 32) {
+    for (let i = 0; i < 16; i++) view.setUint8(offset + i, 0);
+    return;
+  }
+  view.setUint32(offset + 0,  parseInt(hex.slice( 0,  8), 16), true);
+  view.setUint32(offset + 4,  parseInt(hex.slice( 8, 16), 16), true);
+  view.setUint32(offset + 8,  parseInt(hex.slice(16, 24), 16), true);
+  view.setUint32(offset + 12, parseInt(hex.slice(24, 32), 16), true);
 }
 
-/** "#rrggbb" + opacity [0-1] → 0xAARRGGBB */
-function hexToARGB(hex: string, opacity: number): number {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const a = Math.round(opacity * 255);
-  return ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Main serializer
+// ─────────────────────────────────────────────────────────────────────────────
 
-function serialize(req: SerializeRequest): ArrayBuffer {
-  const { shapes, width, height } = req;
+function serializeShapes(shapes: Shape[]): ArrayBuffer {
   const n = shapes.length;
-
-  // Buffer: 4-byte header (width u16 + height u16) + count u32 + records
-  // Simplified: just shape count in header, width/height passed separately
   const buf = new ArrayBuffer(HEADER_BYTES + n * RECORD_BYTES);
   const view = new DataView(buf);
 
@@ -96,41 +117,59 @@ function serialize(req: SerializeRequest): ArrayBuffer {
 
   for (let i = 0; i < n; i++) {
     const shape = shapes[i];
-    const offset = HEADER_BYTES + i * RECORD_BYTES;
+    const base = HEADER_BYTES + i * RECORD_BYTES;
 
-    // UUID → 4×u32
-    const [w0, w1, w2, w3] = uuidToWords(shape.id);
-    view.setUint32(offset + 0, w0, true);
-    view.setUint32(offset + 4, w1, true);
-    view.setUint32(offset + 8, w2, true);
-    view.setUint32(offset + 12, w3, true);
+    // [0..16) — id UUID
+    writeUUID(view, base + 0, shape.id);
 
-    // ShapeType u8
-    view.setUint8(offset + 16, SHAPE_TYPE_MAP[shape.type] ?? 0);
+    // [16..32) — parent_id UUID (zero if null)
+    writeUUID(view, base + 16, shape.parentId);
 
-    // selrect: x1, y1, x2, y2
-    const { x, y, w, h } = shape.bounds;
-    view.setFloat32(offset + 20, x, true);
-    view.setFloat32(offset + 24, y, true);
-    view.setFloat32(offset + 28, x + w, true);
-    view.setFloat32(offset + 32, y + h, true);
+    // [32] — shape_type u8
+    view.setUint8(base + 32, SHAPE_TYPE[shape.type] ?? SHAPE_TYPE.rect);
 
-    // transform: a, b, c, d, e, f
+    // [33] — flags u8 (bit1=hidden)
+    const flags = shape.hidden ? FLAG_HIDDEN : 0;
+    view.setUint8(base + 33, flags);
+
+    // [34] — blend_mode u8 (always Normal for now)
+    view.setUint8(base + 34, BLEND_NORMAL);
+
+    // [35] — constraint_h u8
+    view.setUint8(base + 35, CONSTRAINT_NONE);
+
+    // [36] — constraint_v u8
+    view.setUint8(base + 36, CONSTRAINT_NONE);
+
+    // [37..40) — padding (already zero from ArrayBuffer)
+
+    // [40] — opacity f32 LE
+    view.setFloat32(base + 40, shape.opacity, true);
+
+    // [44] — rotation f32 LE (degrees — Rust expects degrees, not radians)
+    view.setFloat32(base + 44, shape.rotation, true);
+
+    // [48..72) — transform 6 × f32 LE (a,b,c,d,e,f)
     const [a, b, c, d, e, f] = shape.transform;
-    view.setFloat32(offset + 36, a, true);
-    view.setFloat32(offset + 40, b, true);
-    view.setFloat32(offset + 44, c, true);
-    view.setFloat32(offset + 48, d, true);
-    view.setFloat32(offset + 52, e, true);
-    view.setFloat32(offset + 56, f, true);
+    view.setFloat32(base + 48, a, true);
+    view.setFloat32(base + 52, b, true);
+    view.setFloat32(base + 56, c, true);
+    view.setFloat32(base + 60, d, true);
+    view.setFloat32(base + 64, e, true);
+    view.setFloat32(base + 68, f, true);
 
-    // rotation (degrees → radians)
-    view.setFloat32(offset + 60, (shape.rotation * Math.PI) / 180, true);
+    // [72..88) — selrect 4 × f32 LE (x1, y1, x2, y2)
+    const { x, y, w, h } = shape.bounds;
+    view.setFloat32(base + 72, x,     true);
+    view.setFloat32(base + 76, y,     true);
+    view.setFloat32(base + 80, x + w, true);
+    view.setFloat32(base + 84, y + h, true);
 
-    // fill ARGB
-    const solid = shape.fills.find((f) => f.type === "solid");
-    const argb = solid ? hexToARGB(solid.color, solid.opacity * shape.opacity) : 0xff000000;
-    view.setUint32(offset + 64, argb, true);
+    // [88..104) — corners 4 × f32 LE (r1, r2, r3, r4) — zero for non-frames
+    view.setFloat32(base + 88,  0, true);
+    view.setFloat32(base + 92,  0, true);
+    view.setFloat32(base + 96,  0, true);
+    view.setFloat32(base + 100, 0, true);
   }
 
   return buf;
@@ -150,8 +189,7 @@ self.onmessage = (e: MessageEvent) => {
   if (type !== "SERIALIZE") return;
 
   try {
-    const buffer = serialize(payload);
-    // Transfer the ArrayBuffer (zero-copy) using the global postMessage available in Worker scope.
+    const buffer = serializeShapes(payload.shapes);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (self.postMessage as (msg: unknown, transfer: Transferable[]) => void)(
       { type: "SERIALIZE_RESULT", id, buffer },
