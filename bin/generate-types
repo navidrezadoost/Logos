@@ -1,0 +1,610 @@
+#!/usr/bin/env bb
+;; bin/generate-types
+;;
+;; Babashka script: reads Malli schema definitions from `common/src/` and
+;; emits TypeScript declaration files consumed by the React frontend.
+;;
+;; Supersedes `bin/generate-plugin-types` (which only emitted plugin API
+;; types).  That script is kept for backward compat but delegates here.
+;;
+;; Usage:
+;;   bin/generate-types [--out <dir>] [--check]
+;;
+;;   --out <dir>   Output directory. Default: logos-app/src/types/generated/
+;;   --check       Diff mode: exit 1 if generated output differs from what
+;;                 is already on disk.  Used in CI.
+;;
+;; Prerequisites:
+;;   brew install borkdude/brew/babashka   # or https://babashka.org
+;;
+;; What is generated:
+;;   shapes.d.ts  — all shape-related union types + interface skeletons
+;;   changes.d.ts — CRDT change-set op discriminants
+;;   index.d.ts   — re-exports both files
+;;
+;; What stays hand-written (NOT generated):
+;;   logos-app/src/types/shapes.ts       — Logos-specific runtime types,
+;;     factory functions, helpers, vector-network geometry, variant/instance
+;;     metadata, WebGPU/WASM helpers.  These are Logos extensions that have
+;;     no counterpart in the common/ Malli schemas.
+
+(require '[clojure.string :as str]
+         '[clojure.java.io :as io]
+         '[babashka.fs :as fs])
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Paths
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(def repo-root
+  (-> (io/file *file*) .getParentFile .getParent .getAbsolutePath))
+
+(def common-src  (str repo-root "/common/src/app/common"))
+(def common-types (str common-src "/types"))
+
+(def out-dir
+  (or (some-> (drop-while #(not= "--out" %) *command-line-args*) second)
+      (str repo-root "/logos-app/src/types/generated")))
+
+(def check-mode?
+  (some #(= "--check" %) *command-line-args*))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Source helpers
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(defn slurp-clj
+  "Read a Clojure source file using an absolute-path sub-path from common-src."
+  [rel-path]
+  (let [f (io/file (str common-src "/" rel-path))]
+    (when (.exists f) (slurp f))))
+
+(defn extract-set-literal
+  "Extract the first `#{…}` literal from a top-level `(def sym-name #{…})`
+   and return it as a Clojure set of keywords, or nil if missing.
+   Works on the raw source string — no full evaluation needed."
+  [src sym-name]
+  (when src
+    (when-let [m (re-find
+                  (re-pattern
+                   (str "\\(def\\s+(?:\\^:private\\s+)?(?:\\^:dynamic\\s+)?"
+                        (name sym-name)
+                        "\\s+(#\\{[^}]*\\})"))
+                  src)]
+      (try
+        (->> (clojure.edn/read-string (second m))
+             (filter keyword?)      ;; drop nil from stroke-caps
+             set)
+        (catch Exception _ nil)))))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Read schema sources (all now .clj after CS1)
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(def shape-src   (slurp-clj "types/shape.clj"))
+(def layout-src  (slurp-clj "types/shape/layout.clj"))
+(def changes-src (slurp-clj "files/changes.clj"))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Extract sets from sources, with hard-coded fallbacks for robustness
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(defn get-set [src sym fallback]
+  (or (extract-set-literal src sym) fallback))
+
+;; Shape types
+(def shape-types
+  (get-set shape-src 'shape-types
+           #{:frame :group :bool :rect :path :text :circle :svg-raw :image}))
+
+(def blend-modes
+  (get-set shape-src 'blend-modes
+           #{:normal :darken :multiply :color-burn :lighten :screen
+             :color-dodge :overlay :soft-light :hard-light :difference
+             :exclusion :hue :saturation :color :luminosity}))
+
+(def h-constraint-types
+  (get-set shape-src 'horizontal-constraint-types
+           #{:left :right :leftright :center :scale}))
+
+(def v-constraint-types
+  (get-set shape-src 'vertical-constraint-types
+           #{:top :bottom :topbottom :center :scale}))
+
+(def bool-types
+  (get-set shape-src 'bool-types
+           #{:union :difference :exclude :intersection}))
+
+(def stroke-caps-line
+  (get-set shape-src 'stroke-caps-line #{:round :square}))
+
+(def stroke-caps-marker
+  (get-set shape-src 'stroke-caps-marker
+           #{:line-arrow :triangle-arrow :square-marker
+             :circle-marker :diamond-marker}))
+
+(def stroke-caps (into stroke-caps-line stroke-caps-marker))
+
+(def grow-types
+  (get-set shape-src 'grow-types
+           #{:auto-width :auto-height :fixed}))
+
+;; Layout types
+(def layout-types
+  (get-set layout-src 'layout-types #{:flex :grid}))
+
+(def flex-direction-types
+  (get-set layout-src 'flex-direction-types
+           #{:row :row-reverse :column :column-reverse}))
+
+(def grid-direction-types
+  (get-set layout-src 'grid-direction-types #{:row :column}))
+
+(def wrap-types
+  (get-set layout-src 'wrap-types #{:wrap :nowrap}))
+
+(def justify-content-types
+  (get-set layout-src 'justify-content-types
+           #{:start :center :end :space-between :space-around :space-evenly :stretch}))
+
+(def align-content-types
+  (get-set layout-src 'align-content-types
+           #{:start :end :center :space-between :space-around :space-evenly :stretch}))
+
+(def align-items-types
+  (get-set layout-src 'align-items-types #{:start :end :center :stretch}))
+
+(def justify-items-types
+  (get-set layout-src 'justify-items-types #{:start :end :center :stretch}))
+
+(def grid-track-types
+  (get-set layout-src 'grid-track-types #{:percent :flex :auto :fixed}))
+
+(def grid-position-types
+  (get-set layout-src 'grid-position-types #{:auto :manual :area}))
+
+(def grid-cell-align-self-types
+  (get-set layout-src 'grid-cell-align-self-types
+           #{:auto :start :center :end :stretch}))
+
+(def grid-cell-justify-self-types
+  (get-set layout-src 'grid-cell-justify-self-types
+           #{:auto :start :center :end :stretch}))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; TypeScript emitter helpers
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(defn kw->ts
+  "':foo-bar' → '\"foo-bar\"'"
+  [kw]
+  (str "\"" (name kw) "\""))
+
+(defn union-type
+  "Emit `export type Name = \"a\" | \"b\" | ...;`"
+  [type-name values]
+  (let [sorted (sort (map kw->ts values))]
+    (if (= 1 (count sorted))
+      (str "export type " type-name " = " (first sorted) ";")
+      (str "export type " type-name " =\n  | "
+           (str/join "\n  | " sorted)
+           ";"))))
+
+(defn ts-section [title & lines]
+  (str/join "\n"
+            (concat [(str "// ─── " title " "
+                          (apply str (repeat (max 0 (- 75 (count title))) "─")))]
+                    lines)))
+
+(defn ts-header [source-files]
+  (str/join "\n"
+            ["/**"
+             " * @generated by bin/generate-types"
+             " * Source: common/src/app/common/"
+             " *         " (str/join ", " source-files)
+             " *"
+             " * DO NOT EDIT THIS FILE DIRECTLY."
+             " * Run `bin/generate-types` to regenerate."
+             " *"
+             (str " * Generated: " (java.time.Instant/now))
+             " */"
+             ""]))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; shapes.d.ts
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(defn generate-shapes-dts []
+  (str/join "\n\n"
+    [(ts-header ["types/shape.clj" "types/shape/layout.clj"])
+
+     (ts-section "Shape primitives"
+       (union-type "ShapeType" shape-types)
+       ""
+       (union-type "BlendMode" blend-modes)
+       ""
+       (union-type "HorizontalConstraint" h-constraint-types)
+       ""
+       (union-type "VerticalConstraint" v-constraint-types)
+       ""
+       (union-type "BoolType" bool-types)
+       ""
+       (union-type "StrokeCap" stroke-caps)
+       ""
+       (union-type "GrowType" grow-types))
+
+     (ts-section "Fill types"
+       "/** CSS #rrggbb or #rrggbbaa color string. */"
+       "export type HexColor = string;"
+       ""
+       "export interface GradientStop {"
+       "  position: number;"
+       "  opacity: number;"
+       "  color: HexColor;"
+       "}"
+       ""
+       "export interface LinearGradient {"
+       "  type: \"linear\";"
+       "  startX: number;"
+       "  startY: number;"
+       "  endX: number;"
+       "  endY: number;"
+       "  width: number;"
+       "  stops: GradientStop[];"
+       "}"
+       ""
+       "export interface RadialGradient {"
+       "  type: \"radial\";"
+       "  startX: number;"
+       "  startY: number;"
+       "  endX: number;"
+       "  endY: number;"
+       "  width: number;"
+       "  stops: GradientStop[];"
+       "}"
+       ""
+       "export type Gradient = LinearGradient | RadialGradient;"
+       ""
+       "export interface SolidFill {"
+       "  type: \"solid\";"
+       "  color: HexColor;"
+       "  opacity: number;"
+       "}"
+       ""
+       "export interface GradientFill {"
+       "  type: \"gradient\";"
+       "  gradient: Gradient;"
+       "  opacity: number;"
+       "}"
+       ""
+       "export interface ImageFill {"
+       "  type: \"image\";"
+       "  imageId: string;"
+       "  opacity: number;"
+       "}"
+       ""
+       "export type Fill = SolidFill | GradientFill | ImageFill;")
+
+     (ts-section "Stroke"
+       "export type StrokeType = \"solid\" | \"dotted\" | \"dashed\" | \"mixed\";"
+       "export type StrokePosition = \"center\" | \"inner\" | \"outer\";"
+       ""
+       "export interface Stroke {"
+       "  color?: HexColor;"
+       "  opacity?: number;"
+       "  width?: number;"
+       "  type?: StrokeType;"
+       "  position?: StrokePosition;"
+       "  capStart?: StrokeCap;"
+       "  capEnd?: StrokeCap;"
+       "}")
+
+     (ts-section "Shadow and blur"
+       "export type ShadowType = \"drop-shadow\" | \"inner-shadow\";"
+       ""
+       "export interface Shadow {"
+       "  type: ShadowType;"
+       "  x: number;"
+       "  y: number;"
+       "  blur: number;"
+       "  spread: number;"
+       "  color: HexColor;"
+       "  opacity: number;"
+       "  hidden: boolean;"
+       "}"
+       ""
+       "export interface Blur {"
+       "  type: \"layer-blur\";"
+       "  value: number;"
+       "  hidden: boolean;"
+       "}")
+
+     (ts-section "Geometry"
+       "export interface Point {"
+       "  x: number;"
+       "  y: number;"
+       "}"
+       ""
+       "/** Axis-aligned bounding box. */"
+       "export interface Bounds {"
+       "  x: number;"
+       "  y: number;"
+       "  width: number;"
+       "  height: number;"
+       "}"
+       ""
+       "/** 6-element CSS affine matrix [a, b, c, d, e, f]. */"
+       "export type Transform = [number, number, number, number, number, number];")
+
+     (ts-section "Layout (flex / grid)"
+       (union-type "LayoutType" layout-types)
+       ""
+       (union-type "FlexDirection" flex-direction-types)
+       ""
+       (union-type "GridDirection" grid-direction-types)
+       ""
+       (union-type "WrapType" wrap-types)
+       ""
+       (union-type "JustifyContent" justify-content-types)
+       ""
+       (union-type "AlignContent" align-content-types)
+       ""
+       (union-type "AlignItems" align-items-types)
+       ""
+       (union-type "JustifyItems" justify-items-types)
+       ""
+       (union-type "GridTrackType" grid-track-types)
+       ""
+       (union-type "GridPosition" grid-position-types)
+       ""
+       (union-type "GridCellAlignSelf" grid-cell-align-self-types)
+       ""
+       (union-type "GridCellJustifySelf" grid-cell-justify-self-types)
+       ""
+       "export interface GridTrack {"
+       "  type: GridTrackType;"
+       "  value?: number | null;"
+       "}"
+       ""
+       "export interface GridCell {"
+       "  id: string;"
+       "  areaName?: string;"
+       "  row: number;"
+       "  rowSpan: number;"
+       "  column: number;"
+       "  columnSpan: number;"
+       "  position?: GridPosition;"
+       "  alignSelf?: GridCellAlignSelf;"
+       "  justifySelf?: GridCellJustifySelf;"
+       "  shapes: string[];"
+       "}"
+       ""
+       "export interface LayoutAttrs {"
+       "  layout?: LayoutType;"
+       "  layoutFlexDir?: FlexDirection;"
+       "  layoutGap?: { rowGap?: number; columnGap?: number };"
+       "  layoutWrapType?: WrapType;"
+       "  layoutPadding?: { p1?: number; p2?: number; p3?: number; p4?: number };"
+       "  layoutJustifyContent?: JustifyContent;"
+       "  layoutAlignContent?: AlignContent;"
+       "  layoutAlignItems?: AlignItems;"
+       "  layoutJustifyItems?: JustifyItems;"
+       "  layoutGridDir?: GridDirection;"
+       "  layoutGridRows?: GridTrack[];"
+       "  layoutGridColumns?: GridTrack[];"
+       "  layoutGridCells?: Record<string, GridCell>;"
+       "}")
+
+     (ts-section "Canonical shape interface"
+       "/**"
+       " * Canonical shape record: fields derived from the Malli schema"
+       " * in common/src/app/common/types/shape.clj."
+       " *"
+       " * Logos-specific extensions (vector networks, variable fonts,"
+       " * component/instance metadata) live in shapes.ts."
+       " */"
+       "export interface CanonicalShape {"
+       "  readonly id: string;"
+       "  type: ShapeType;"
+       "  name: string;"
+       "  x: number;"
+       "  y: number;"
+       "  width: number;"
+       "  height: number;"
+       "  rotation: number;"
+       "  opacity: number;"
+       "  hidden: boolean;"
+       "  locked: boolean;"
+       "  blendMode?: BlendMode;"
+       "  fills: Fill[];"
+       "  strokes: Stroke[];"
+       "  shadows: Shadow[];"
+       "  blur?: Blur;"
+       "  constraintsH?: HorizontalConstraint;"
+       "  constraintsV?: VerticalConstraint;"
+       "  transform: Transform;"
+       "  parentId: string | null;"
+       "  frameId: string | null;"
+       "  children: string[];"
+       "  // Layout attrs (present when type === \"frame\" with layout enabled)"
+       "  layout?: LayoutType;"
+       "  layoutFlexDir?: FlexDirection;"
+       "  layoutWrapType?: WrapType;"
+       "  layoutJustifyContent?: JustifyContent;"
+       "  layoutAlignContent?: AlignContent;"
+       "  layoutAlignItems?: AlignItems;"
+       "}")
+
+     "// end of generated file\n"]))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; changes.d.ts
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(defn generate-changes-dts []
+  (str/join "\n\n"
+    [(ts-header ["files/changes.clj"])
+
+     (ts-section "CRDT change operations"
+       "import type { CanonicalShape } from \"./shapes\";"
+       ""
+       "/** Discriminated union of all change operation types. */"
+       "export type ChangeOpType ="
+       "  | \"add-obj\""
+       "  | \"mod-obj\""
+       "  | \"del-obj\""
+       "  | \"reg-objects\""
+       "  | \"mov-objects\""
+       "  | \"add-page\""
+       "  | \"mod-page\""
+       "  | \"del-page\""
+       "  | \"mov-page\""
+       "  | \"add-media\""
+       "  | \"mod-media\""
+       "  | \"del-media\""
+       "  | \"add-color\""
+       "  | \"mod-color\""
+       "  | \"del-color\""
+       "  | \"add-typography\""
+       "  | \"mod-typography\""
+       "  | \"del-typography\""
+       "  | \"add-component\""
+       "  | \"mod-component\""
+       "  | \"del-component\""
+       "  | \"set-default-grid\""
+       "  | \"set-guide\""
+       "  | \"set-flow\""
+       "  | \"set-plugin-data\";")
+
+     (ts-section "Shape property operation"
+       "/** Assign a map of properties to a shape. */"
+       "export interface AssignOperation {"
+       "  type: \"assign\";"
+       "  value: Record<string, unknown>;"
+       "  ignoreTouched?: boolean;"
+       "  ignoreGeometry?: boolean;"
+       "}"
+       ""
+       "/** Set a single property on a shape. */"
+       "export interface SetOperation {"
+       "  type: \"set\";"
+       "  attr: string;"
+       "  val: unknown;"
+       "  ignoreTouched?: boolean;"
+       "  ignoreGeometry?: boolean;"
+       "}"
+       ""
+       "export interface SetTouchedOperation {"
+       "  type: \"set-touched\";"
+       "  touched: string[] | null;"
+       "}"
+       ""
+       "export interface SetRemoteSyncedOperation {"
+       "  type: \"set-remote-synced\";"
+       "  remoteSynced?: boolean | null;"
+       "}"
+       ""
+       "export type ShapeOperation ="
+       "  | AssignOperation"
+       "  | SetOperation"
+       "  | SetTouchedOperation"
+       "  | SetRemoteSyncedOperation;")
+
+     (ts-section "Core change types"
+       "export interface AddObjectChange {"
+       "  type: \"add-obj\";"
+       "  pageId: string;"
+       "  id: string;"
+       "  parentId?: string | null;"
+       "  frameId?: string | null;"
+       "  index?: number;"
+       "  obj: CanonicalShape;"
+       "}"
+       ""
+       "export interface ModifyObjectChange {"
+       "  type: \"mod-obj\";"
+       "  pageId: string;"
+       "  id: string;"
+       "  operations: ShapeOperation[];"
+       "}"
+       ""
+       "export interface DeleteObjectChange {"
+       "  type: \"del-obj\";"
+       "  pageId: string;"
+       "  id: string;"
+       "  ignoreTouched?: boolean;"
+       "}"
+       ""
+       "export interface MoveObjectsChange {"
+       "  type: \"mov-objects\";"
+       "  pageId: string;"
+       "  parentId: string;"
+       "  index?: number;"
+       "  shapes: string[];"
+       "}"
+       ""
+       "/** One atomic change in a CRDT change-set. */"
+       "export type Change ="
+       "  | AddObjectChange"
+       "  | ModifyObjectChange"
+       "  | DeleteObjectChange"
+       "  | MoveObjectsChange"
+       "  | { type: Exclude<ChangeOpType,"
+       "        \"add-obj\" | \"mod-obj\" | \"del-obj\" | \"mov-objects\">;"
+       "      [k: string]: unknown };"
+       ""
+       "/** A batch of changes transmitted over WebSocket. */"
+       "export interface ChangeSet {"
+       "  id: string;"
+       "  fileId: string;"
+       "  sessionId: string;"
+       "  revn: number;"
+       "  changes: Change[];"
+       "}")
+
+     "// end of generated file\n"]))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; index.d.ts
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(defn generate-index-dts []
+  (str/join "\n"
+    [(ts-header ["types/shape.clj" "files/changes.clj"])
+     "export * from \"./shapes\";"
+     "export * from \"./changes\";"
+     ""]))
+
+;; ─────────────────────────────────────────────────────────────────────────────
+;; Write / check
+;; ─────────────────────────────────────────────────────────────────────────────
+
+(defn write-or-check [dir fname content]
+  (let [path (str dir "/" fname)]
+    (if check-mode?
+      (let [existing (when (fs/exists? path) (slurp path))
+            ;; Strip the timestamp line from both for comparison
+            strip-ts #(str/replace % #"(?m)^\s*\* Generated:.*$" " * Generated: <timestamp>")]
+        (if (= (strip-ts (str existing)) (strip-ts content))
+          (println (str "  ✓ " fname " is up-to-date"))
+          (do
+            (println (str "  ✗ " fname " is OUT OF DATE — run `bin/generate-types` to fix"))
+            (System/exit 1))))
+      (do
+        (fs/create-dirs dir)
+        (spit path content)
+        (println (str "  ✓ " path))))))
+
+(println "bin/generate-types")
+(println (str "  mode:    " (if check-mode? "check" "write")))
+(println (str "  out-dir: " out-dir))
+(println "")
+
+(write-or-check out-dir "shapes.d.ts"  (generate-shapes-dts))
+(write-or-check out-dir "changes.d.ts" (generate-changes-dts))
+(write-or-check out-dir "index.d.ts"   (generate-index-dts))
+
+(when-not check-mode?
+  (println "")
+  (println "Done. The generated files are committed to the repo.")
+  (println "Run: cd logos-app && npx tsc --noEmit   to typecheck."))

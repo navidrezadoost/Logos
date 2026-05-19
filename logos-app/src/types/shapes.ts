@@ -4,9 +4,65 @@
  * Thin projection of shape data used by the React shell + Zustand stores.
  * The full geometry lives in the Rust scene graph; this is only what the
  * UI needs to render controls, layers panel, inspector, etc.
+ *
+ * Base types generated from common/ Malli schemas are re-exported from
+ * ./generated.  Only Logos-specific extensions are declared here.
  */
 
-export type ShapeType = "frame" | "rect" | "circle" | "ellipse" | "path" | "text" | "group" | "bool" | "svg-raw" | "vector-network" | "component" | "instance";
+// Re-export all generated base types so callers can use a single import path.
+export type {
+  BlendMode,
+  HexColor,
+  GradientStop,
+  LinearGradient,
+  RadialGradient,
+  Gradient,
+  ImageFill,
+  Stroke,
+  StrokeType,
+  StrokeCap,
+  StrokePosition,
+  Shadow,
+  ShadowType,
+  Blur,
+  HorizontalConstraint,
+  VerticalConstraint,
+  BoolType,
+  GrowType,
+  Point,
+  Bounds,
+  LayoutType,
+  FlexDirection,
+  GridDirection,
+  WrapType,
+  JustifyContent,
+  AlignContent,
+  AlignItems,
+  JustifyItems,
+  GridTrackType,
+  GridPosition,
+  GridCellAlignSelf,
+  GridCellJustifySelf,
+  GridTrack,
+  GridCell,
+  LayoutAttrs,
+  CanonicalShape,
+} from "./generated";
+
+/**
+ * Logos shape type extends the Malli schema's ShapeType with three types that
+ * exist only in the Logos frontend runtime:
+ *
+ *   "vector-network" — backed by logos-vector WASM
+ *   "component"      — component master (P4.4)
+ *   "instance"       — component instance (P4.4)
+ *   "ellipse"        — alias kept for legacy compatibility (maps to "circle" in
+ *                      the common schema)
+ */
+export type ShapeType =
+  | "frame" | "rect" | "circle" | "ellipse" | "path" | "text"
+  | "group" | "bool" | "svg-raw"
+  | "vector-network" | "component" | "instance";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Vector network geometry (mirrors rust/logos-vector-wasm JSON schema)
@@ -86,7 +142,11 @@ export interface Rect {
   h: number;
 }
 
-/** A 6-element affine transform matrix [a, b, c, d, e, f] (CSS matrix order). */
+/**
+ * A 6-element affine transform matrix [a, b, c, d, e, f] (CSS matrix order).
+ * This is the same type as `Transform` in generated/shapes.d.ts, re-declared
+ * here so `logos-app` code can import it from a single path.
+ */
 export type Transform = [number, number, number, number, number, number];
 
 export const IDENTITY_TRANSFORM: Transform = [1, 0, 0, 1, 0, 0];
@@ -149,49 +209,12 @@ export interface SolidFill {
   opacity: number;
 }
 
-/** One color stop for a gradient fill. */
-export interface GradientStop {
-  /** 0–1 position along the gradient. */
-  position: number;
-  /** Hex color, e.g. "#ff0000". */
-  color: string;
-  /** 0–1 opacity at this stop. */
-  opacity: number;
-}
-
 /**
- * Linear gradient fill.
+ * Gradient fill (linear or radial).
  *
- * `startX/Y` and `endX/Y` are expressed in the **shape's local [0,1] space**:
- *   (0,0) = top-left of AABB, (1,1) = bottom-right.
- * This mirrors the Penpot gradient coordinate system and avoids re-uploading
- * coordinates when the shape moves.
+ * Extends the generated `GradientFill` with `atlasSlot` — the index into the
+ * render-wasm's GradientAtlas texture assigned at upload time.
  */
-export interface LinearGradient {
-  type: "linear";
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  stops: GradientStop[];
-}
-
-/**
- * Radial gradient fill.
- *
- * `startX/Y` = centre of the ellipse (shape-local 0-1).
- * `endX/Y`   = point on the outer edge that defines the radius vector.
- */
-export interface RadialGradient {
-  type: "radial";
-  startX: number;
-  startY: number;
-  endX: number;
-  endY: number;
-  stops: GradientStop[];
-}
-
-/** Gradient fill (linear or radial). */
 export interface GradientFill {
   type: "gradient";
   gradient: LinearGradient | RadialGradient;
