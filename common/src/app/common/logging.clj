@@ -224,26 +224,29 @@
 (add-watch log-record ::default slf4j-log-handler)
 
 (defmacro set-level!
-  "A CLJS-only macro for set logging level to current (that matches the
-  current namespace) or user specified logger."
-  ([level]
+  "No-op on the JVM (common/ is CLJ-only after CS1).  When this macro is
+  loaded by the shadow-cljs compiler for the frontend, `(:ns &env)` is
+  truthy and it emits a CLJS expression that adjusts the in-process
+  `loggers` level map.  On the backend this macro expands to nil."
+  ([_level]
    (when (:ns &env)
-     `(.set ^js/Map loggers ~(str *ns*) (level->int ~level))))
-  ([name level]
+     `(.set ^js/Map loggers ~(str *ns*) (level->int ~_level))))
+  ([_name _level]
    (when (:ns &env)
-     `(.set ^js/Map loggers ~name (level->int ~level)))))
+     `(.set ^js/Map loggers ~_name (level->int ~_level)))))
 
 (defmacro raw!
+  "Emit a raw log record bypassing the async executor.
+  Always routes through `slf4j-log-handler` on the JVM.
+  The `console-log-handler` branch has been removed (CS3): the CLJS
+  console handler now lives in frontend/src/app/util/logging.cljs."
   [level message]
-  (let [cljs? (:ns &env)]
-    `(do
-       (~(if cljs?
-           `(partial console-log-handler nil nil nil)
-           `(partial slf4j-log-handler nil nil nil))
-        {::logger ~(str *ns*)
-         ::level ~level
-         ::message (delay ~message)})
-       nil)))
+  `(do
+     ((partial slf4j-log-handler nil nil nil)
+      {::logger ~(str *ns*)
+       ::level ~level
+       ::message (delay ~message)})
+     nil))
 
 (defmacro log
   [level & params]

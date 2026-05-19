@@ -40,12 +40,25 @@ Clojure Backend (API + WebSocket)
 
 | Layer | Language | Build Tool |
 |---|---|---|
-| **Frontend** | **React 18 + TypeScript 5** | **Vite 6** |
-| Backend | Clojure | deps.edn / Integrant |
+| **Frontend SPA** | **TypeScript 5 + React 18** | **Vite 6** |
+| Backend | Clojure (JVM) | deps.edn / Integrant |
+| Shared schemas | Clojure (Malli) + generated TypeScript | `bin/generate-types` |
 | Renderer | Rust → WebAssembly | cargo / wasm-pack |
+| Shaders | WGSL | naga / wgpu pipeline |
 | Exporter | ClojureScript (Node.js) | shadow-cljs |
 | Plugins | TypeScript (sandboxed iframe) | esbuild / vite |
 | MCP server | TypeScript | tsup / Node.js |
+| Migrations | PostgreSQL / SQL | Flyway |
+
+### Language Breakdown
+
+| Language | Role | Approx. % |
+|---|---|---|
+| **TypeScript** | Frontend SPA, workers, MCP server, Plugin SDK | **~45%** |
+| **Clojure** | Backend server, shared schemas (`common/`), exporter | **~35%** |
+| **Rust** | Layout engine, renderer, rebase, vector graphics, WASM | **~15%** |
+| WGSL | WebGPU compute & render shaders | ~3% |
+| SQL | PostgreSQL migrations | ~2% |
 
 ### Development Ports
 
@@ -59,9 +72,11 @@ Clojure Backend (API + WebSocket)
 
 ## 2. Frontend — React/TypeScript SPA
 
-> **Migration complete (M1–M4)**: The ClojureScript frontend (`frontend/`) has been superseded
-> by `logos-app/`, a Vite + React 18 + TypeScript 5 application over the same Rust/WASM
-> rendering core. The ClojureScript source is preserved in Git history.
+> **Migration complete (CS1–CS2)**: The ClojureScript frontend (`frontend/`) has been superseded
+> by `logos-app/`, a Vite + React 18 + TypeScript 5 application backed by the same Rust/WASM
+> rendering core.  The `common/` shared library is now pure Clojure (JVM); TypeScript consumer
+> types are auto-generated from Malli schemas by `bin/generate-types`.  No ClojureScript
+> toolchain is required to work on `logos-app/` or `backend/`.
 
 ### 2.1 Technology Stack
 
