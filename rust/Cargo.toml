@@ -25,6 +25,7 @@ members = [
     "logos-ws",
     "logos-vector",
     "logos-vector-ops",
+    "logos-vector-wasm",
 ]
 resolver = "2"
 

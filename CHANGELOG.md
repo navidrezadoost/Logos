@@ -6,7 +6,76 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
-## [Unreleased] — 2026-05-18
+## [Unreleased] — 2026-05-19
+
+### P4.2 V4 — WASM Bridge (`phase4/vector-networks-v4`)
+
+**Context**: Exposes the V3 Greiner-Hormann boolean ops and the V2 DCEL region-detection to the React frontend via a C-ABI WASM binary. Mirrors the `logos-layout-wasm` architecture exactly: JSON-in / JSON-out over a manual alloc/free memory protocol, no wasm-bindgen dependency.
+
+**Branch**: `phase4/vector-networks-v4`
+
+#### New crate — `rust/logos-vector-wasm`
+
+- **`Cargo.toml`** — `crate-type = ["cdylib", "rlib"]`; depends on `logos-vector` + `logos-vector-ops` + `serde` + `serde_json`
+- **`src/lib.rs`** — Complete C-ABI bridge (≈ 290 lines)
+
+  **Memory management (identical protocol to `logos-layout-wasm`)**
+  | Symbol | Description |
+  |---|---|
+  | `logos_vn_alloc(len) → ptr` | Allocate input buffer |
+  | `logos_vn_free_input(ptr, len)` | Free input buffer |
+  | `logos_vn_output_ptr() → ptr` | Pointer to last output JSON |
+  | `logos_vn_free_output()` | Release output buffer |
+
+  **Operations**
+  | Symbol | Input JSON | Output JSON |
+  |---|---|---|
+  | `logos_vn_boolean_op(ptr, len) → outLen` | `{ net_a, net_b, region_a, region_b, op }` | `{ ok, anchors, segments, regions }` |
+  | `logos_vn_find_regions(ptr, len) → outLen` | `{ net }` | `{ ok, regions }` |
+
+  **JSON schema** — `VNAnchor { x, y, hi?, ho? }`, `VNSegment { s, e, c1?, c2? }`, `VNNetwork { anchors, segments }`. All control points are absolute `[x, y]` pairs, matching Logos canvas coordinates.
+
+- **5 unit tests** — full round-trip through the C-ABI on native (x86/aarch64):
+  - `union_two_squares_via_abi` — alloc/encode/call/decode/free cycle
+  - `intersect_two_squares_via_abi`
+  - `find_regions_triangle` — closed triangle → 1 region
+  - `unknown_op_returns_error` — `ok: false` + `error` field
+  - `alloc_free_roundtrip` — memory safety smoke test
+
+#### New TypeScript files — `logos-app/src/worker/`
+
+- **`vector-network.types.ts`** — typed protocol definitions mirroring the Rust structs:
+  - `VNAnchor`, `VNSegment`, `VNNetwork`
+  - `BoolOpRequest`, `BoolOpResult` (`BoolOpSuccess | BoolOpError`), `BoolOp`
+  - `FindRegionsRequest`, `FindRegionsResult`
+  - Union-typed `VectorNetworkMessageIn` / `VectorNetworkMessageOut` for the worker channel
+- **`vector-network.worker.ts`** — off-main-thread worker (~130 lines):
+  - Boots `logos-vector-wasm` via dynamic import (Vite resolves this at build time when the package is built with `wasm-pack`)
+  - `callWasm<T>()` helper: encode JSON → `logos_vn_alloc` → write → call → read from `memory.buffer` → decode → free
+  - **Pure-TS fallback**: geometric approximation (`tsFallbackBoolOp`, `tsFallbackFindRegions`) keeps UI functional during development before WASM is compiled
+  - Handles `BOOL_OP` and `FIND_REGIONS` messages; posts `BOOL_OP_RESULT`, `FIND_REGIONS_RESULT`, `ERROR`, `READY`
+
+#### Workspace change
+
+- **`rust/Cargo.toml`**: `"logos-vector-wasm"` added to `members`
+
+#### Build instructions (V4 WASM compilation)
+
+```bash
+# Requires wasm-pack: cargo install wasm-pack
+wasm-pack build rust/logos-vector-wasm --target web --out-dir ../../logos-app/src/render-wasm/logos-vector-wasm
+# or link as npm package:
+cd rust/logos-vector-wasm && wasm-pack build --target web
+cd logos-app && pnpm add ../rust/logos-vector-wasm/pkg
+```
+
+#### Architecture notes
+
+- Zero wasm-bindgen — pure `#[no_mangle] extern "C"` ABI, callable from any `WebAssembly.instantiate` host
+- Worker thread is isolated from the render loop — boolean ops run concurrently with rendering
+- TS fallback ensures the feature degrades gracefully without the WASM binary
+
+---
 
 ### P4.2 V3 — Vector Network Boolean Operations (`phase4/vector-networks-v3`)
 
