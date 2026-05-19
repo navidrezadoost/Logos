@@ -17,6 +17,7 @@ interface UiState {
 
   layersPanelOpen: boolean;
   inspectorOpen: boolean;
+  aiPanelOpen: boolean;
 
   // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ interface UiState {
   resetView: () => void;
   toggleLayersPanel: () => void;
   toggleInspector: () => void;
+  toggleAiPanel: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -35,6 +37,7 @@ export const useUiStore = create<UiState>((set) => ({
   panY: 0,
   layersPanelOpen: true,
   inspectorOpen: true,
+  aiPanelOpen: false,
 
   setTool: (activeTool) => set({ activeTool }),
   setZoom: (zoom) => set({ zoom: Math.max(0.02, Math.min(256, zoom)) }),
@@ -42,4 +45,5 @@ export const useUiStore = create<UiState>((set) => ({
   resetView: () => set({ zoom: 1, panX: 0, panY: 0 }),
   toggleLayersPanel: () => set((s) => ({ layersPanelOpen: !s.layersPanelOpen })),
   toggleInspector: () => set((s) => ({ inspectorOpen: !s.inspectorOpen })),
+  toggleAiPanel: () => set((s) => ({ aiPanelOpen: !s.aiPanelOpen })),
 }));
