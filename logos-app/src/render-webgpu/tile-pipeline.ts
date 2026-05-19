@@ -13,6 +13,7 @@
  */
 
 import tileShaderSource from "./shaders/tile.wgsl?raw";
+import type { GradientAtlas } from "./gradient-atlas";
 import { TILE_SIZE_PX } from "./constants";
 
 // Uniform buffer layout (must match tile.wgsl `TileUniforms`):
@@ -21,9 +22,16 @@ import { TILE_SIZE_PX } from "./constants";
 const UNIFORM_BYTES = 32;
 
 export class TilePipeline {
-  private pipeline!:       GPURenderPipeline;
-  private uniformBuffer!:  GPUBuffer;
+  private pipeline!:        GPURenderPipeline;
+  private uniformBuffer!:   GPUBuffer;
   private bindGroupLayout!: GPUBindGroupLayout;
+
+  // Gradient resources — replaced by setGradientResources() when a gradient
+  // atlas is available.  Fallback resources are valid GPU objects so the
+  // bind group is always fully populated.
+  private gradParamsBuffer!:  GPUBuffer;
+  private gradAtlasTexture!:  GPUTexture;
+  private gradAtlasSampler!:  GPUSampler;
 
   // Set externally before each flush.
   private shapeBuffer: GPUBuffer | null  = null;
@@ -53,7 +61,34 @@ export class TilePipeline {
           buffer: { type: "uniform" } },
         { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
           buffer: { type: "read-only-storage" } },
+        // Gradient params buffer (one GradientEntry per shape slot).
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT,
+          buffer: { type: "read-only-storage" } },
+        // Gradient atlas texture (256×256 RGBA8).
+        { binding: 3, visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: "float", viewDimension: "2d" } },
+        // Gradient sampler.
+        { binding: 4, visibility: GPUShaderStage.FRAGMENT,
+          sampler: { type: "filtering" } },
       ],
+    });
+
+    // ── Fallback gradient resources ─────────────────────────────────────
+    // A 1-element storage buffer and a 1×1 transparent texture act as valid
+    // placeholders until setGradientResources() is called.
+    this.gradParamsBuffer = device.createBuffer({
+      label: "logos-tile-grad-params-fallback",
+      size:  32, // one GradientEntry (8 × f32)
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    this.gradAtlasTexture = device.createTexture({
+      label:  "logos-tile-grad-atlas-fallback",
+      size:   [1, 1],
+      format: "rgba8unorm",
+      usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    this.gradAtlasSampler = device.createSampler({
+      label: "logos-tile-grad-sampler-fallback",
     });
 
     const pipelineLayout = device.createPipelineLayout({
@@ -107,6 +142,19 @@ export class TilePipeline {
   }
 
   /**
+   * Provide the live gradient resources.
+   * Must be called whenever the GradientAtlas or gradient params buffer changes.
+   *
+   * @param paramsBuffer  GPU buffer produced by `createGradientParamsBuffer()`.
+   * @param atlas         The `GradientAtlas` instance (provides texture + sampler).
+   */
+  setGradientResources(paramsBuffer: GPUBuffer, atlas: GradientAtlas): void {
+    this.gradParamsBuffer = paramsBuffer;
+    this.gradAtlasTexture = atlas.texture;
+    this.gradAtlasSampler = atlas.sampler;
+  }
+
+  /**
    * Encode the render pass for one tile.
    *
    * @param encoder        Active GPUCommandEncoder.
@@ -145,12 +193,15 @@ export class TilePipeline {
     ]);
     device.queue.writeBuffer(this.uniformBuffer, 0, unis);
 
-    // Build bind group with current shape buffer.
+    // Build bind group with current shape buffer + gradient resources.
     const bindGroup = device.createBindGroup({
       layout: this.bindGroupLayout,
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: { buffer: this.shapeBuffer } },
+        { binding: 2, resource: { buffer: this.gradParamsBuffer } },
+        { binding: 3, resource: this.gradAtlasTexture.createView() },
+        { binding: 4, resource: this.gradAtlasSampler },
       ],
     });
 
@@ -173,5 +224,7 @@ export class TilePipeline {
 
   destroy(): void {
     this.uniformBuffer.destroy();
+    this.gradParamsBuffer.destroy();
+    this.gradAtlasTexture.destroy();
   }
 }

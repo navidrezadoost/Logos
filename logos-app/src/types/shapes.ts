@@ -149,7 +149,62 @@ export interface SolidFill {
   opacity: number;
 }
 
-export type Fill = SolidFill;
+/** One color stop for a gradient fill. */
+export interface GradientStop {
+  /** 0–1 position along the gradient. */
+  position: number;
+  /** Hex color, e.g. "#ff0000". */
+  color: string;
+  /** 0–1 opacity at this stop. */
+  opacity: number;
+}
+
+/**
+ * Linear gradient fill.
+ *
+ * `startX/Y` and `endX/Y` are expressed in the **shape's local [0,1] space**:
+ *   (0,0) = top-left of AABB, (1,1) = bottom-right.
+ * This mirrors the Penpot gradient coordinate system and avoids re-uploading
+ * coordinates when the shape moves.
+ */
+export interface LinearGradient {
+  type: "linear";
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  stops: GradientStop[];
+}
+
+/**
+ * Radial gradient fill.
+ *
+ * `startX/Y` = centre of the ellipse (shape-local 0-1).
+ * `endX/Y`   = point on the outer edge that defines the radius vector.
+ */
+export interface RadialGradient {
+  type: "radial";
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  stops: GradientStop[];
+}
+
+/** Gradient fill (linear or radial). */
+export interface GradientFill {
+  type: "gradient";
+  gradient: LinearGradient | RadialGradient;
+  /** Overall fill opacity [0, 1]; multiplied with per-stop opacity. */
+  opacity: number;
+  /**
+   * Index into the GradientAtlas texture (assigned at upload time).
+   * -1 if the gradient has not yet been registered with the atlas.
+   */
+  atlasSlot?: number;
+}
+
+export type Fill = SolidFill | GradientFill;
 
 export interface Shape {
   /** UUID string (maps to the u32×4 the Rust engine uses). */
@@ -188,6 +243,27 @@ export interface Shape {
   componentMeta?: ComponentMeta;
   /** Present when type === "instance". Holds overrides + selected variant. */
   instanceMeta?: InstanceMeta;
+
+  // ── Text fields (P5.2) — present only when type === "text" ───────────────
+  /**
+   * Raw text content of the shape.  May contain newlines; the text pipeline
+   * splits on `\n` and places each line below the previous one.
+   */
+  text?: string;
+  /** Font family name, e.g. "Inter", "Roboto".  Defaults to "sans-serif". */
+  fontFamily?: string;
+  /** Font weight (100–900).  Defaults to 400. */
+  fontWeight?: number;
+  /** Font size in canvas pixels.  Defaults to 16. */
+  fontSize?: number;
+  /**
+   * Hex color for the text fill, e.g. "#ffffff".
+   * When set, overrides `fills[0]` for text rendering.
+   * When absent, `fills[0]` (if solid) is used; falls back to "#000000".
+   */
+  textColor?: string;
+  /** Per-character opacity multiplier [0, 1].  Defaults to 1. */
+  textOpacity?: number;
 }
 
 /** Minimal shape factory. */

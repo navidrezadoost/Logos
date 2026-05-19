@@ -52,7 +52,7 @@ struct ShapeEntry {
     y : f32,
     w : f32,
     h : f32,
-    // Fill RGBA [0, 1].
+    // Solid fill RGBA [0, 1]  (ignored when fill_type > 0).
     r : f32,
     g : f32,
     b : f32,
@@ -63,26 +63,60 @@ struct ShapeEntry {
     opacity  : f32,
     // 0 = rect/frame, 1 = ellipse, 2 = other (drawn as rect fallback).
     shape_type : f32,
-    _pad       : f32,
+    // Fill type: 0 = solid, 1 = linear gradient, 2 = radial gradient.
+    fill_type  : f32,
 };
 
 @group(0) @binding(1) var<storage, read> shapes : array<ShapeEntry>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gradient params buffer  (group 0, binding 2)
+// One entry per shape slot; only meaningful when shape.fill_type > 0.
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct GradientEntry {
+    // Gradient start point in canvas coords.
+    x0 : f32,
+    y0 : f32,
+    // Gradient end point in canvas coords.
+    x1 : f32,
+    y1 : f32,
+    // V coordinate in the gradient atlas for this gradient's row:
+    //   atlas_v = (slot + 0.5) / GRADIENT_ATLAS_H
+    atlas_v : f32,
+    // Overall gradient opacity [0, 1].
+    grad_opacity : f32,
+    _p1 : f32,
+    _p2 : f32,
+};
+
+@group(0) @binding(2) var<storage, read> gradient_params : array<GradientEntry>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gradient atlas texture + sampler  (group 0, bindings 3, 4)
+// 256×256 RGBA8; each row is a 256-texel colour ramp for one gradient.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@group(0) @binding(3) var gradient_atlas : texture_2d<f32>;
+@group(0) @binding(4) var gradient_smp   : sampler;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Vertex shader
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct VertexOut {
-    @builtin(position) pos       : vec4f,
-    @location(0)       color     : vec4f,
+    @builtin(position)              pos          : vec4f,
+    @location(0)                    color        : vec4f,
     // Canvas-space position (for fragment clipping + SDF).
-    @location(1)       canvas_xy : vec2f,
+    @location(1)                    canvas_xy    : vec2f,
     // AABB centre + half-extents (for ellipse SDF).
-    @location(2)       aabb_cx   : f32,
-    @location(3)       aabb_cy   : f32,
-    @location(4)       aabb_hw   : f32,
-    @location(5)       aabb_hh   : f32,
-    @location(6)       shape_type: f32,
+    @location(2)                    aabb_cx      : f32,
+    @location(3)                    aabb_cy      : f32,
+    @location(4)                    aabb_hw      : f32,
+    @location(5)                    aabb_hh      : f32,
+    @location(6)                    shape_type   : f32,
+    // Instance index passed flat to the fragment stage for gradient lookup.
+    @location(7) @interpolate(flat) instance_idx : u32,
 };
 
 // Unit quad corners for 2-triangle strip (CCW winding).
@@ -125,14 +159,15 @@ fn vs_main(
     let ndc  = canvas_to_ndc(rx, ry);
 
     var out : VertexOut;
-    out.pos        = vec4f(ndc, 0.0, 1.0);
-    out.color      = vec4f(s.r, s.g, s.b, s.a * s.opacity * u.global_opacity);
-    out.canvas_xy  = vec2f(rx, ry);
-    out.aabb_cx    = cx;
-    out.aabb_cy    = cy;
-    out.aabb_hw    = s.w * 0.5;
-    out.aabb_hh    = s.h * 0.5;
-    out.shape_type = s.shape_type;
+    out.pos          = vec4f(ndc, 0.0, 1.0);
+    out.color        = vec4f(s.r, s.g, s.b, s.a * s.opacity * u.global_opacity);
+    out.canvas_xy    = vec2f(rx, ry);
+    out.aabb_cx      = cx;
+    out.aabb_cy      = cy;
+    out.aabb_hw      = s.w * 0.5;
+    out.aabb_hh      = s.h * 0.5;
+    out.shape_type   = s.shape_type;
+    out.instance_idx = ii;
     return out;
 }
 
@@ -150,7 +185,41 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
         discard;
     }
 
-    var alpha = in.color.a;
+    let s         = shapes[in.instance_idx];
+    let fill_type = s.fill_type;
+
+    // ── Colour resolve ────────────────────────────────────────────────────
+    var base_color : vec4f;
+
+    if (fill_type >= 0.5) {
+        // Gradient fill — sample the atlas.
+        let ge  = gradient_params[in.instance_idx];
+        let p   = in.canvas_xy;
+        let seg = vec2f(ge.x1 - ge.x0, ge.y1 - ge.y0);
+
+        var t : f32;
+        if (fill_type < 1.5) {
+            // Linear gradient: project canvas position onto start→end vector.
+            let len_sq = max(dot(seg, seg), 0.0001);
+            t = clamp(dot(p - vec2f(ge.x0, ge.y0), seg) / len_sq, 0.0, 1.0);
+        } else {
+            // Radial gradient: distance from centre relative to radius length.
+            let radius = max(length(seg), 0.0001);
+            t = clamp(length(p - vec2f(ge.x0, ge.y0)) / radius, 0.0, 1.0);
+        }
+
+        var grad_col = textureSample(gradient_atlas, gradient_smp, vec2f(t, ge.atlas_v));
+        // Apply shape opacity + gradient overall opacity.
+        base_color = vec4f(
+            grad_col.rgb,
+            grad_col.a * ge.grad_opacity * s.opacity * u.global_opacity
+        );
+    } else {
+        // Solid fill — already computed in vertex stage.
+        base_color = in.color;
+    }
+
+    var alpha = base_color.a;
 
     // Ellipse: signed-distance field for smooth anti-aliasing.
     if (in.shape_type >= 0.5 && in.shape_type < 1.5) {
@@ -163,7 +232,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4f {
         alpha *= clamp(-d, 0.0, 1.0);
     }
 
-    return vec4f(in.color.rgb * alpha, alpha);
+    return vec4f(base_color.rgb * alpha, alpha);
 }
 
 // Ellipse signed-distance field.
