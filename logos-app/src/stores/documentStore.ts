@@ -11,7 +11,7 @@
 
 import { create } from "zustand";
 import { nanoid } from "nanoid";
-import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, createRect, createVectorNetwork } from "../types/shapes";
+import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, type ComponentMeta, type InstanceMeta, createRect, createVectorNetwork, IDENTITY_TRANSFORM } from "../types/shapes";
 
 /** Generate a proper UUID v4 for shapes — required by the WASM bridge's uuidToU32x4(). */
 const shapeId = (): string => crypto.randomUUID();
@@ -86,6 +86,28 @@ interface DocumentState {
 
   /** Re-order shapes within a page (drag-and-drop in layers panel). */
   reorderPageShapes: (pageId: string, newOrder: string[]) => void;
+
+  // ── P4.4: Component Variants ──────────────────────────────────────────────
+
+  /**
+   * Convert an existing frame/group shape into a component master.
+   * The shape's type changes to "component" and componentMeta is set.
+   * Returns a snapshot of the shape as it was before promotion (so the
+   * caller can register defaults in componentStore).
+   */
+  promoteToComponent: (shapeId: string, meta: ComponentMeta) => Shape | null;
+
+  /**
+   * Add a new "instance" shell shape to the current page.
+   * The caller must also call componentStore.createInstance() to register
+   * the instance metadata and get back the InstanceMeta to attach here.
+   */
+  addInstanceShape: (
+    instanceId: string,
+    componentName: string,
+    bounds: Rect,
+    instanceMeta: InstanceMeta
+  ) => string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,6 +276,51 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         [pageId]: { ...s.pages[pageId], rootShapeIds: newOrder },
       },
     })),
+
+  // ── P4.4: Component Variants ──────────────────────────────────────────────
+
+  promoteToComponent: (shapeId, meta) => {
+    const shape = get().shapes[shapeId];
+    if (!shape) return null;
+    const snapshot = { ...shape };
+    set((s) => ({
+      shapes: {
+        ...s.shapes,
+        [shapeId]: { ...shape, type: "component", componentMeta: meta },
+      },
+    }));
+    return snapshot;
+  },
+
+  addInstanceShape: (instanceId, componentName, bounds, instanceMeta) => {
+    const { currentPageId: pid } = get();
+    const instanceShape: Shape = {
+      id: instanceId,
+      type: "instance",
+      name: `${componentName} (instance)`,
+      bounds,
+      transform: IDENTITY_TRANSFORM,
+      rotation: 0,
+      fills: [],
+      opacity: 1,
+      hidden: false,
+      locked: false,
+      parentId: null,
+      children: [],
+      instanceMeta,
+    };
+    set((s) => ({
+      shapes: { ...s.shapes, [instanceId]: instanceShape },
+      pages: {
+        ...s.pages,
+        [pid]: {
+          ...s.pages[pid],
+          rootShapeIds: [instanceId, ...s.pages[pid].rootShapeIds],
+        },
+      },
+    }));
+    return instanceId;
+  },
 }));
 
 // ─────────────────────────────────────────────────────────────────────────────

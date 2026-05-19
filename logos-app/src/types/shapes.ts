@@ -6,7 +6,7 @@
  * UI needs to render controls, layers panel, inspector, etc.
  */
 
-export type ShapeType = "frame" | "rect" | "circle" | "ellipse" | "path" | "text" | "group" | "bool" | "svg-raw" | "vector-network";
+export type ShapeType = "frame" | "rect" | "circle" | "ellipse" | "path" | "text" | "group" | "bool" | "svg-raw" | "vector-network" | "component" | "instance";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Vector network geometry (mirrors rust/logos-vector-wasm JSON schema)
@@ -91,6 +91,56 @@ export type Transform = [number, number, number, number, number, number];
 
 export const IDENTITY_TRANSFORM: Transform = [1, 0, 0, 1, 0, 0];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Component Variants (P4.4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A single variant property definition.
+ *
+ * - `variant`: enum of named values (e.g. state → ["default","hover","active"])
+ * - `boolean`: on/off toggle
+ * - `text`:    per-instance text override
+ */
+export type ComponentPropertyKind = "variant" | "boolean" | "text";
+
+export interface ComponentPropertyDef {
+  kind: ComponentPropertyKind;
+  /** Human-readable name (e.g. "State", "Has Icon"). */
+  name: string;
+  /** For `variant` kind: the ordered list of permitted values. */
+  values?: string[];
+  /** The value used when an instance has no override for this property. */
+  defaultValue: string;
+}
+
+/**
+ * Metadata stored on a shape when type === "component".
+ * Child shape IDs for the default variant live in `shape.children`.
+ */
+export interface ComponentMeta {
+  /** Named property definitions (key = property id / slug). */
+  properties: Record<string, ComponentPropertyDef>;
+}
+
+/**
+ * Metadata stored on a shape when type === "instance".
+ * Overrides are keyed by dot-path into the shape tree:
+ *   "rect1.fill" → "#FF0000"
+ *   "label.text" → "Click me"
+ */
+export interface InstanceMeta {
+  /** The component this instance references. */
+  componentId: string;
+  /** Per-property selected value — keys match ComponentMeta.properties. */
+  variantProperties: Record<string, string>;
+  /**
+   * Fine-grained overrides applied on top of the component defaults.
+   * Each key is a dot-path into the component's default shape tree.
+   */
+  overrides: Record<string, unknown>;
+}
+
 /** Solid fill. */
 export interface SolidFill {
   type: "solid";
@@ -132,6 +182,12 @@ export interface Shape {
   vnSegments?: VNSegment[];
   /** Closed regions (each is an ordered list of segment indices). */
   vnRegions?: VNRegion[];
+
+  // ── Component/Instance fields (P4.4) ─────────────────────────────────────
+  /** Present when type === "component". Holds property definitions. */
+  componentMeta?: ComponentMeta;
+  /** Present when type === "instance". Holds overrides + selected variant. */
+  instanceMeta?: InstanceMeta;
 }
 
 /** Minimal shape factory. */

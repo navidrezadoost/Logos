@@ -3,6 +3,7 @@ import { Canvas } from "./components/canvas/Canvas";
 import { Toolbar } from "./components/toolbar/Toolbar";
 import { LayersPanel } from "./components/layers/LayersPanel";
 import { Inspector } from "./components/inspector/Inspector";
+import { AssetsPanel } from "./components/assets/AssetsPanel";
 import { useUiStore } from "./stores/uiStore";
 import { initPersistence, loadPersistedDocument, stopPersistence } from "./offline/persist";
 import { createSyncManager } from "./offline/sync";
@@ -57,6 +58,9 @@ export default function App(): React.ReactElement {
 
       {/* Layers panel */}
       {layersPanelOpen && <LayersPanel />}
+
+      {/* Assets panel (component library) */}
+      <AssetsPanel />
 
       {/* Main canvas — fills remaining space */}
       <Canvas />

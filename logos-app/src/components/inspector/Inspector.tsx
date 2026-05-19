@@ -7,6 +7,7 @@
 
 import { useDocumentStore } from "../../stores/documentStore";
 import { useSelectionStore } from "../../stores/selectionStore";
+import { useComponentStore } from "../../stores/componentStore";
 import type { FontVariationAxis, Shape, SolidFill } from "../../types/shapes";
 
 // ---------------------------------------------------------------------------
@@ -24,7 +25,16 @@ const KNOWN_AXES: Omit<FontVariationAxis, "value">[] = [
 
 export function Inspector(): React.ReactElement {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
-  const { shapes, updateShape } = useDocumentStore();
+  const { shapes, updateShape, promoteToComponent } = useDocumentStore();
+  const {
+    components,
+    instances,
+    registerComponent,
+    addProperty,
+    removeProperty,
+    setVariantProperty,
+    resetInstance,
+  } = useComponentStore();
 
   const selected: Shape[] = selectedIds.flatMap((id) =>
     shapes[id] ? [shapes[id]] : []
@@ -89,6 +99,51 @@ export function Inspector(): React.ReactElement {
   function patchVariationAxis(tag: string, value: number) {
     updateShape(shape.id, {
       fontVariationSettings: { ...variationSettings, [tag]: value },
+    });
+  }
+
+  // ── Component / Instance helpers ─────────────────────────────────────────
+
+  const isComponent = shape.type === "component";
+  const isInstance = shape.type === "instance";
+  const compRecord = isComponent ? components[shape.id] : null;
+  const instRecord = isInstance ? instances[shape.id] : null;
+  const linkedComp = instRecord ? components[instRecord.componentId] : null;
+
+  function handleCreateComponent() {
+    // Collect child shapes as defaults
+    const defaultShapes: Record<string, Shape> = {};
+    for (const cid of shape.children) {
+      if (shapes[cid]) defaultShapes[cid] = shapes[cid];
+    }
+    const meta = { properties: {} };
+    const snapshot = promoteToComponent(shape.id, meta);
+    if (snapshot) {
+      registerComponent(shape.id, shape.name, defaultShapes, shape.children, {});
+    }
+  }
+
+  function handleAddVariantProperty() {
+    const name = prompt("Property name (e.g. 'State')")?.trim();
+    if (!name) return;
+    const valuesRaw = prompt("Comma-separated values (e.g. 'default,hover,active')")?.trim();
+    if (!valuesRaw) return;
+    const values = valuesRaw.split(",").map((v) => v.trim()).filter(Boolean);
+    if (values.length === 0) return;
+    const key = name.toLowerCase().replace(/\s+/g, "-");
+    addProperty(shape.id, key, {
+      kind: "variant",
+      name,
+      values,
+      defaultValue: values[0],
+    });
+    updateShape(shape.id, {
+      componentMeta: {
+        properties: {
+          ...(shape.componentMeta?.properties ?? {}),
+          [key]: { kind: "variant", name, values, defaultValue: values[0] },
+        },
+      },
     });
   }
 
@@ -180,6 +235,132 @@ export function Inspector(): React.ReactElement {
               onChange={(v) => patchVariationAxis(axis.tag, v)}
             />
           ))}
+        </Section>
+      )}
+
+      {/* ── P4.4: Create Component button (non-component, non-instance shapes) ── */}
+      {!isComponent && !isInstance && (
+        <Section title="Component">
+          <div style={{ padding: "6px 12px" }}>
+            <button
+              onClick={handleCreateComponent}
+              style={buttonStyle}
+            >
+              Create Component
+            </button>
+          </div>
+        </Section>
+      )}
+
+      {/* ── P4.4: Component master — property editor ── */}
+      {isComponent && compRecord && (
+        <Section title="Component Properties">
+          {Object.entries(compRecord.properties).length === 0 && (
+            <div style={{ padding: "4px 12px", fontSize: 11, color: "#585b70" }}>
+              No properties defined.
+            </div>
+          )}
+          {Object.entries(compRecord.properties).map(([key, def]) => (
+            <div key={key} style={{ padding: "3px 12px", display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ flex: 1, fontSize: 11, color: "#a6adc8" }}>
+                <span style={{ color: "#6c7086", fontSize: 10, marginRight: 4 }}>
+                  {def.kind}
+                </span>
+                {def.name}
+                {def.values && (
+                  <span style={{ color: "#585b70", marginLeft: 4 }}>
+                    [{def.values.join(", ")}]
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={() => removeProperty(shape.id, key)}
+                style={{ ...buttonStyle, padding: "1px 6px", fontSize: 10, background: "#45475a" }}
+                title="Remove property"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <div style={{ padding: "6px 12px" }}>
+            <button onClick={handleAddVariantProperty} style={buttonStyle}>
+              + Add Variant Property
+            </button>
+          </div>
+        </Section>
+      )}
+
+      {/* ── P4.4: Instance — variant dropdowns ── */}
+      {isInstance && instRecord && linkedComp && (
+        <Section title="Variants">
+          {Object.entries(linkedComp.properties).map(([key, def]) => {
+            const currentValue = instRecord.variantProperties[key] ?? def.defaultValue;
+            return (
+              <Row key={key} label={def.name}>
+                {def.kind === "variant" && def.values ? (
+                  <select
+                    value={currentValue}
+                    onChange={(e) => {
+                      setVariantProperty(shape.id, key, e.target.value);
+                      updateShape(shape.id, {
+                        instanceMeta: {
+                          ...instRecord,
+                          variantProperties: { ...instRecord.variantProperties, [key]: e.target.value },
+                        },
+                      });
+                    }}
+                    style={selectStyle}
+                  >
+                    {def.values.map((v) => (
+                      <option key={v} value={v}>{v}</option>
+                    ))}
+                  </select>
+                ) : def.kind === "boolean" ? (
+                  <input
+                    type="checkbox"
+                    checked={currentValue === "true"}
+                    onChange={(e) => {
+                      const val = e.target.checked ? "true" : "false";
+                      setVariantProperty(shape.id, key, val);
+                      updateShape(shape.id, {
+                        instanceMeta: {
+                          ...instRecord,
+                          variantProperties: { ...instRecord.variantProperties, [key]: val },
+                        },
+                      });
+                    }}
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={currentValue}
+                    onChange={(e) => {
+                      setVariantProperty(shape.id, key, e.target.value);
+                    }}
+                    style={{ ...selectStyle, padding: "3px 6px" }}
+                  />
+                )}
+              </Row>
+            );
+          })}
+          {Object.keys(instRecord.overrides).length > 0 && (
+            <div style={{ padding: "6px 12px" }}>
+              <button
+                onClick={() => {
+                  resetInstance(shape.id);
+                  updateShape(shape.id, {
+                    instanceMeta: { ...instRecord, overrides: {} },
+                  });
+                }}
+                style={{ ...buttonStyle, background: "#45475a" }}
+              >
+                Reset Overrides
+              </button>
+            </div>
+          )}
+          <div style={{ padding: "4px 12px", fontSize: 10, color: "#585b70" }}>
+            Component: {linkedComp.name}
+          </div>
         </Section>
       )}
     </div>
@@ -330,4 +511,38 @@ const panelStyle: React.CSSProperties = {
   flexDirection: "column",
   flexShrink: 0,
   overflowY: "auto",
+};
+
+const buttonStyle: React.CSSProperties = {
+  background: "#313244",
+  border: "1px solid #45475a",
+  borderRadius: 4,
+  color: "#cdd6f4",
+  fontSize: 11,
+  padding: "4px 10px",
+  cursor: "pointer",
+  width: "100%",
+  textAlign: "left",
+};
+
+const selectStyle: React.CSSProperties = {
+  width: "100%",
+  background: "#313244",
+  border: "1px solid #45475a",
+  borderRadius: 4,
+  color: "#cdd6f4",
+  fontSize: 12,
+  padding: "3px 6px",
+  outline: "none",
+};
+
+const numInputStyle: React.CSSProperties = {
+  width: "100%",
+  background: "#313244",
+  border: "1px solid #45475a",
+  borderRadius: 4,
+  color: "#cdd6f4",
+  fontSize: 12,
+  padding: "3px 6px",
+  outline: "none",
 };

@@ -23,6 +23,8 @@ import { useCurrentPageShapes, useDocumentStore } from "../../stores/documentSto
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useUiStore } from "../../stores/uiStore";
 import { usePenStore } from "../../stores/penStore";
+import { useComponentStore } from "../../stores/componentStore";
+import { DRAG_COMPONENT_TYPE } from "../assets/AssetsPanel";
 import { workerPool } from "../../worker";
 import { createRect } from "../../types/shapes";
 
@@ -54,7 +56,8 @@ export function Canvas(): React.ReactElement {
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const { select } = useSelectionStore();
   const { zoom, panX, panY, activeTool, setTool } = useUiStore();
-  const { addRect, addShape, addVectorNetwork } = useDocumentStore();
+  const { addRect, addShape, addVectorNetwork, addInstanceShape } = useDocumentStore();
+  const { createInstance, components } = useComponentStore();
 
   // Pen tool state
   const pen = usePenStore();
@@ -304,6 +307,35 @@ export function Canvas(): React.ReactElement {
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes(DRAG_COMPONENT_TYPE)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDrop={(e) => {
+        const componentId = e.dataTransfer.getData(DRAG_COMPONENT_TYPE);
+        if (!componentId) return;
+        e.preventDefault();
+
+        const rect = containerRef.current?.getBoundingClientRect();
+        const canvasX = rect ? (e.clientX - rect.left) / zoom - panX : 0;
+        const canvasY = rect ? (e.clientY - rect.top) / zoom - panY : 0;
+
+        const comp = components[componentId];
+        if (!comp) return;
+
+        const instanceId = crypto.randomUUID();
+        const meta = createInstance(instanceId, componentId);
+
+        // Use component master bounds if available, otherwise fallback size.
+        // The documentStore.shapes may hold the component shell; look it up.
+        const masterShape = useDocumentStore.getState().shapes[componentId];
+        const w = masterShape?.bounds.w ?? 200;
+        const h = masterShape?.bounds.h ?? 100;
+
+        addInstanceShape(instanceId, comp.name, { x: canvasX, y: canvasY, w, h }, meta);
+      }}
     >
       <canvas
         ref={canvasRef}
