@@ -5,6 +5,8 @@ import { LayersPanel } from "./components/layers/LayersPanel";
 import { Inspector } from "./components/inspector/Inspector";
 import { AssetsPanel } from "./components/assets/AssetsPanel";
 import { AIPanel } from "./components/ai/AIPanel";
+import { TemplateGallery } from "./components/gallery/TemplateGallery";
+import { useTemplateStore } from "./stores/templateStore";
 import { useUiStore } from "./stores/uiStore";
 import { initPersistence, loadPersistedDocument, stopPersistence } from "./offline/persist";
 import { createSyncManager } from "./offline/sync";
@@ -17,6 +19,7 @@ export default function App(): React.ReactElement {
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const toggleAiPanel = useUiStore((s) => s.toggleAiPanel);
+  const openGallery = useTemplateStore((s) => s.openGallery);
   const [syncStatus, setSyncStatus] = useSyncStatus(
     navigator.onLine ? "online" : "offline"
   );
@@ -73,6 +76,31 @@ export default function App(): React.ReactElement {
 
       {/* AI Design Assistant panel */}
       {aiPanelOpen && <AIPanel />}
+
+      {/* Template Library (always mounted; manages open state internally) */}
+      <TemplateGallery />
+
+      {/* Templates button */}
+      <button
+        onClick={openGallery}
+        title="Open Template Library"
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 60,
+          zIndex: 200,
+          background: "#313244",
+          color: "#cdd6f4",
+          border: "none",
+          borderRadius: 6,
+          padding: "6px 10px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        ⊞ Templates
+      </button>
 
       {/* AI toggle button */}
       <button
