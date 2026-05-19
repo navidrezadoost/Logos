@@ -9,6 +9,8 @@
 import { create } from "zustand";
 import { type Shape, IDENTITY_TRANSFORM } from "../types/shapes";
 import { useDocumentStore } from "./documentStore";
+import { LLMPipeline } from "../render-webgpu/llm-pipeline";
+import { requestWebGPUDevice } from "../render-webgpu/adapter";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -25,6 +27,8 @@ export interface AiMessage {
 }
 
 export type AiTab = "generate" | "palette" | "breakpoints";
+export type InferenceMode = "cloud" | "local";
+export type LlmStatus = "idle" | "loading-model" | "generating" | "error";
 
 export interface ResolvedPalette {
     label: string;
@@ -44,11 +48,16 @@ interface AiState {
     error: string | null;
     activeTab: AiTab;
     lastPalette: ResolvedPalette | null;
+    inferenceMode: InferenceMode;
+    llmStatus: LlmStatus;
+    llmProgress: { loaded: number; total: number; label: string } | null;
 
     setActiveTab: (tab: AiTab) => void;
+    setInferenceMode: (mode: InferenceMode) => void;
     clearHistory: () => void;
     setError: (e: string | null) => void;
     sendGeneratePrompt: (prompt: string, x?: number, y?: number, width?: number) => void;
+    sendLocalLLMPrompt: (prompt: string, x?: number, y?: number, width?: number) => void;
     sendPalettePrompt: (description: string, shapeIds?: string[]) => void;
     sendBreakpointPrompt: (frameId: string, widths: number[]) => void;
 }
@@ -247,14 +256,22 @@ function resolvePalette(description: string): PaletteEntry | null {
 // Store
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Singleton pipeline — re-used across calls.
+let _pipeline: LLMPipeline | null = null;
+let _pipelinePromise: Promise<LLMPipeline> | null = null;
+
 export const useAiStore = create<AiState>((set) => ({
     history: [],
     isLoading: false,
     error: null,
     activeTab: "generate",
     lastPalette: null,
+    inferenceMode: "cloud",
+    llmStatus: "idle",
+    llmProgress: null,
 
     setActiveTab: (activeTab) => set({ activeTab }),
+    setInferenceMode: (inferenceMode) => set({ inferenceMode }),
     clearHistory: () => set({ history: [], error: null }),
     setError: (error) => set({ error }),
 
@@ -283,6 +300,93 @@ export const useAiStore = create<AiState>((set) => ({
                 set({ isLoading: false });
             }
         }, 0);
+    },
+
+    async sendLocalLLMPrompt(prompt, x = 0, y = 0, _width = 800) {
+        if (!prompt.trim()) return;
+        set({ isLoading: true, error: null });
+        pushMsg(set, "user", prompt);
+
+        try {
+            // Initialise pipeline on first call.
+            if (!_pipeline) {
+                if (!_pipelinePromise) {
+                    set({ llmStatus: "loading-model", llmProgress: null });
+                    _pipelinePromise = (async () => {
+                        const handle = await requestWebGPUDevice();
+                        const pipe = await LLMPipeline.create(
+                            handle.device,
+                            "/models/logos-ai-sm.bin",
+                            (loaded, total) => {
+                                const label = total > 0
+                                    ? `Downloading model… ${Math.round(loaded / total * 100)}%`
+                                    : `Downloading model…`;
+                                set({ llmProgress: { loaded, total, label } });
+                            },
+                        );
+                        return pipe;
+                    })();
+                }
+                _pipeline = await _pipelinePromise;
+                set({ llmStatus: "idle", llmProgress: null });
+            }
+
+            set({ llmStatus: "generating" });
+            const chunks: string[] = [];
+            const output = await _pipeline.generate(
+                prompt,
+                (tok) => { chunks.push(tok); },
+            );
+
+            // Try to extract JSON action from output.
+            const jsonMatch = output.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                try {
+                    const cmd = JSON.parse(jsonMatch[0]);
+                    if (cmd.action === "create" && cmd.type && cmd.bounds) {
+                        const { addShape } = useDocumentStore.getState();
+                        const shape: Shape = {
+                            id: crypto.randomUUID(),
+                            type: cmd.type === "ellipse" ? "ellipse" : "rect",
+                            name: cmd.name ?? "AI Shape",
+                            bounds: {
+                                x: (cmd.bounds.x ?? 0) + x,
+                                y: (cmd.bounds.y ?? 0) + y,
+                                w: cmd.bounds.w ?? 160,
+                                h: cmd.bounds.h ?? 48,
+                            },
+                            transform: IDENTITY_TRANSFORM,
+                            rotation: 0,
+                            fills: cmd.fills ?? solidFill("#89b4fa"),
+                            opacity: cmd.opacity ?? 1,
+                            hidden: false,
+                            locked: false,
+                            parentId: null,
+                            children: [],
+                        };
+                        addShape(shape);
+                        pushMsg(set, "assistant",
+                            `Created **${shape.name}** via local inference.`,
+                            { createdShapeIds: [shape.id] });
+                    } else {
+                        pushMsg(set, "assistant", output || "(no output)");
+                    }
+                } catch {
+                    pushMsg(set, "assistant", output || "(no output)");
+                }
+            } else {
+                pushMsg(set, "assistant", output || "(no output)");
+            }
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            pushMsg(set, "error", `Local LLM error: ${msg}`);
+            set({ error: msg, llmStatus: "error" });
+            // Discard broken pipeline so next call retries init.
+            _pipeline = null;
+            _pipelinePromise = null;
+        } finally {
+            set({ isLoading: false, llmStatus: "idle" });
+        }
     },
 
     sendPalettePrompt(description, shapeIds) {

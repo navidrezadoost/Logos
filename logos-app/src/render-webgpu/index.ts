@@ -37,6 +37,13 @@ export type {
   FlexAlignSelf,
 } from "./flex-layout-pipeline";
 
+// P5.5 — local LLM inference via WebGPU
+export { LLMPipeline } from "./llm-pipeline";
+export type { LLMLoadState, TokenCallback } from "./llm-pipeline";
+export { encode, decode, VOCAB_SIZE, TOKEN_EOS, TOKEN_BOS } from "./llm-tokenizer";
+export { loadWeights, isModelCached, evictModel } from "./llm-weights";
+export type { ModelConfig, LoadedWeights, ProgressCallback } from "./llm-weights";
+
 export {
   TILE_SIZE_PX,
   SNAP_THRESHOLD_PX,
@@ -53,4 +60,9 @@ export {
   FLEX_LINE_DATA_BYTES,
   MAX_FLEX_CHILDREN,
   MAX_FLEX_LINES,
+  LLM_UNIFORM_BYTES,
+  LLM_MAX_SEQ,
+  LLM_MAX_NEW_TOKENS,
+  LLM_DEFAULT_MODEL_URL,
+  LLM_CACHE_DB_NAME,
 } from "./constants";
