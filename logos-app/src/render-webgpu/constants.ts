@@ -44,6 +44,58 @@ export const MAX_TILE_CACHE = 256;
 /** Snapping grid distance threshold in canvas pixels. */
 export const SNAP_THRESHOLD_PX = 8;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Gradient atlas (P5.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Width of the gradient atlas texture in texels.
+ * Each gradient occupies one full row: 256 texels give sufficient stop
+ * resolution for design-tool gradients (≤ 8 stops typical).
+ */
+export const GRADIENT_ATLAS_W = 256;
+
+/**
+ * Height of the gradient atlas texture = maximum simultaneous gradients.
+ * 256 rows × 256 texels/row = 256 KiB (RGBA8).
+ */
+export const GRADIENT_ATLAS_H = 256;
+
+/** Maximum number of distinct gradients that can be live at once. */
+export const MAX_GRADIENTS = GRADIENT_ATLAS_H;
+
+/**
+ * GPU buffer layout for one gradient's positional params (per-shape).
+ * Matches `GradientEntry` in tile.wgsl.
+ *   [x0, y0, x1, y1, atlas_v, _p1, _p2, _p3]  →  8 × f32 = 32 bytes
+ */
+export const GRADIENT_ENTRY_F32S = 8;
+export const GRADIENT_ENTRY_BYTES = GRADIENT_ENTRY_F32S * 4; // 32
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Glyph atlas (P5.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Side length of the glyph atlas texture in texels (square).
+ * 2048²×R8 ≈ 4 MiB.  Holds roughly 8 000 distinct glyphs at typical sizes.
+ */
+export const GLYPH_ATLAS_SIZE = 2048;
+
+/**
+ * GPU instance-buffer layout for one glyph quad.
+ * Matches `GlyphInstance` in text.wgsl.
+ *   [canvas_x, canvas_y, glyph_w, glyph_h,
+ *    uv_x, uv_y, uv_w, uv_h,
+ *    r, g, b, a_color,
+ *    opacity, _p1, _p2, _p3]  →  16 × f32 = 64 bytes
+ */
+export const GLYPH_INSTANCE_F32S  = 16;
+export const GLYPH_INSTANCE_BYTES = GLYPH_INSTANCE_F32S * 4; // 64
+
+/** Maximum glyph quads per frame across all text shapes in a single tile. */
+export const MAX_GLYPHS_PER_FRAME = 4096;
+
 /** Binding slots (must match WGSL @binding annotations). */
 export const BINDING = {
   UNIFORMS:  0,

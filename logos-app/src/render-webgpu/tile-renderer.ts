@@ -32,12 +32,19 @@
 
 import type { Shape } from "../types/shapes";
 import { requestWebGPUDevice, type WebGPUHandle } from "./adapter";
-import { packShapes, createShapeBuffer, uploadShapes, type PackedShapes } from "./shape-buffer";
+import {
+  packShapes, createShapeBuffer, uploadShapes,
+  packGradientParams, createGradientParamsBuffer, uploadGradientParams,
+  type PackedShapes,
+} from "./shape-buffer";
 import { TilePipeline } from "./tile-pipeline";
 import { HitTestPipeline } from "./hit-test-pipeline";
 import { SnapPipeline, type SnapResult } from "./snap-pipeline";
 import { CompositePipeline } from "./composite-pipeline";
 import { LayoutPipeline, type LayoutBoundsResult, type LayoutPadding } from "./layout-pipeline";
+import { GlyphAtlas } from "./glyph-atlas";
+import { GradientAtlas } from "./gradient-atlas";
+import { TextPipeline } from "./text-pipeline";
 import { TILE_SIZE_PX, SNAP_THRESHOLD_PX, MAX_TILE_CACHE } from "./constants";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,37 +88,53 @@ function visibleTiles(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class TileRenderer {
-  private readonly gpu:               WebGPUHandle;
-  private readonly shapeBuffer:       GPUBuffer;
-  private readonly tilePipeline:      TilePipeline;
-  private readonly hitPipeline:       HitTestPipeline;
-  private readonly snapPipeline:      SnapPipeline;
-  private readonly compositePipeline: CompositePipeline;
-  private readonly layoutPipeline:    LayoutPipeline;
+  private readonly gpu:                 WebGPUHandle;
+  private readonly shapeBuffer:         GPUBuffer;
+  private readonly gradientParamsBuffer:GPUBuffer;
+  private readonly tilePipeline:        TilePipeline;
+  private readonly hitPipeline:         HitTestPipeline;
+  private readonly snapPipeline:        SnapPipeline;
+  private readonly compositePipeline:   CompositePipeline;
+  private readonly layoutPipeline:      LayoutPipeline;
+  private readonly glyphAtlas:          GlyphAtlas;
+  private readonly gradientAtlas:       GradientAtlas;
+  private readonly textPipeline:        TextPipeline;
 
   /** Tile texture cache: key = "tx,ty" → GPUTexture (insertion-order LRU) */
   private readonly tileCache = new Map<string, GPUTexture>();
 
-  private lastPacked: PackedShapes = { data: new Float32Array(0), count: 0 };
+  private lastPacked:    PackedShapes = { data: new Float32Array(0), count: 0 };
+  /** Text shapes separated out during upload() for TextPipeline. */
+  private textShapes:    Shape[]      = [];
+  /** Non-text shapes sent to TilePipeline. */
+  private nonTextShapes: Shape[]      = [];
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly ctx:    GPUCanvasContext,
-    gpu:                     WebGPUHandle,
-    shapeBuffer:             GPUBuffer,
-    tilePipeline:            TilePipeline,
-    hitPipeline:             HitTestPipeline,
-    snapPipeline:            SnapPipeline,
-    compositePipeline:       CompositePipeline,
-    layoutPipeline:          LayoutPipeline,
+    gpu:                      WebGPUHandle,
+    shapeBuffer:              GPUBuffer,
+    gradientParamsBuffer:     GPUBuffer,
+    tilePipeline:             TilePipeline,
+    hitPipeline:              HitTestPipeline,
+    snapPipeline:             SnapPipeline,
+    compositePipeline:        CompositePipeline,
+    layoutPipeline:           LayoutPipeline,
+    glyphAtlas:               GlyphAtlas,
+    gradientAtlas:            GradientAtlas,
+    textPipeline:             TextPipeline,
   ) {
-    this.gpu               = gpu;
-    this.shapeBuffer       = shapeBuffer;
-    this.tilePipeline      = tilePipeline;
-    this.hitPipeline       = hitPipeline;
-    this.snapPipeline      = snapPipeline;
-    this.compositePipeline = compositePipeline;
-    this.layoutPipeline    = layoutPipeline;
+    this.gpu                  = gpu;
+    this.shapeBuffer          = shapeBuffer;
+    this.gradientParamsBuffer = gradientParamsBuffer;
+    this.tilePipeline         = tilePipeline;
+    this.hitPipeline          = hitPipeline;
+    this.snapPipeline         = snapPipeline;
+    this.compositePipeline    = compositePipeline;
+    this.layoutPipeline       = layoutPipeline;
+    this.glyphAtlas           = glyphAtlas;
+    this.gradientAtlas        = gradientAtlas;
+    this.textPipeline         = textPipeline;
   }
 
   // ── Factory ──────────────────────────────────────────────────────────────
@@ -138,8 +161,9 @@ export class TileRenderer {
       alphaMode: "premultiplied",
     });
 
-    const shapeBuffer = createShapeBuffer(device, "logos-shapes");
-    const tilePipeline = new TilePipeline(device, format);
+    const shapeBuffer          = createShapeBuffer(device, "logos-shapes");
+    const gradientParamsBuffer = createGradientParamsBuffer(device);
+    const tilePipeline         = new TilePipeline(device, format);
 
     const hitPipeline = new HitTestPipeline(device);
     await hitPipeline.init();
@@ -152,10 +176,18 @@ export class TileRenderer {
     const layoutPipeline = new LayoutPipeline();
     await layoutPipeline.init(device);
 
+    const glyphAtlas    = GlyphAtlas.create(device);
+    const gradientAtlas = GradientAtlas.create(device);
+    const textPipeline  = new TextPipeline(device, format, glyphAtlas);
+
+    // Wire gradient resources into the tile pipeline.
+    tilePipeline.setGradientResources(gradientParamsBuffer, gradientAtlas);
+
     return new TileRenderer(
       canvas, canvasCtx, gpu,
-      shapeBuffer, tilePipeline, hitPipeline, snapPipeline,
+      shapeBuffer, gradientParamsBuffer, tilePipeline, hitPipeline, snapPipeline,
       compositePipeline, layoutPipeline,
+      glyphAtlas, gradientAtlas, textPipeline,
     );
   }
 
@@ -166,9 +198,21 @@ export class TileRenderer {
    * Must be called before `renderFrame()` whenever the document changes.
    */
   upload(shapes: Shape[]): void {
-    this.lastPacked = packShapes(shapes);
+    // Split text vs non-text shapes — text shapes are rendered by TextPipeline.
+    this.textShapes    = shapes.filter((s) => s.type === "text");
+    this.nonTextShapes = shapes.filter((s) => s.type !== "text");
+
+    // Pack non-text shapes into the tile pipeline shape buffer.
+    this.lastPacked = packShapes(this.nonTextShapes);
     uploadShapes(this.gpu.device, this.shapeBuffer, this.lastPacked);
     this.tilePipeline.setShapeBuffer(this.shapeBuffer, this.lastPacked.count);
+
+    // Pack gradient params (flush atlas after packing so new gradient rows
+    // are uploaded before the next renderFrame).
+    const gradData = packGradientParams(this.nonTextShapes, this.gradientAtlas);
+    this.gradientAtlas.flush(this.gpu.device);
+    uploadGradientParams(this.gpu.device, this.gradientParamsBuffer, gradData);
+
     // Invalidate tile cache on document change.
     this._evictTileCache();
   }
@@ -193,6 +237,9 @@ export class TileRenderer {
     // Composite target: the canvas swap-chain texture.
     const swapChainView = this.ctx.getCurrentTexture().createView();
 
+    // Flush glyph atlas for any newly added text shapes.
+    this.glyphAtlas.flush(device);
+
     // Notify the composite pipeline that a new frame is starting so its
     // uniform-buffer pool cursor is reset.
     this.compositePipeline.beginFrame();
@@ -200,14 +247,15 @@ export class TileRenderer {
     // Render each tile to a cached texture, then blit to swap-chain.
     let isFirstTile = true;
     for (const { tx, ty } of tiles) {
-      const key     = `${tx},${ty}`;
-      const tileTex = this._getOrCreateTileTexture(key, format);
+      const key      = `${tx},${ty}`;
+      const tileTex  = this._getOrCreateTileTexture(key, format);
       const tileView = tileTex.createView();
 
       const tileCanvas = TILE_SIZE_PX / zoom;
       const originX    = tx * tileCanvas;
       const originY    = ty * tileCanvas;
 
+      // Pass 1: background shapes (rects, ellipses, vectors, etc.)
       this.tilePipeline.renderTile(
         encoder, tileView,
         originX, originY,
@@ -216,7 +264,16 @@ export class TileRenderer {
         /* globalOpacity */ 1,
       );
 
-      // Blit tile to swap-chain at the correct screen position.
+      // Pass 2: text shapes (glyph atlas quads on top of background).
+      this.textPipeline.renderTile(
+        encoder, tileView,
+        originX, originY,
+        tileCanvas, zoom,
+        vpW, vpH,
+        this.textShapes,
+      );
+
+      // Composite tile onto swap-chain.
       const screenX = Math.round(originX * zoom + panX);
       const screenY = Math.round(originY * zoom + panY);
       const screenW = Math.round(tileCanvas * zoom);
@@ -334,7 +391,11 @@ export class TileRenderer {
     this.snapPipeline.destroy();
     this.compositePipeline.destroy();
     this.layoutPipeline.destroy();
+    this.textPipeline.destroy();
+    this.glyphAtlas.destroy();
+    this.gradientAtlas.destroy();
     this.shapeBuffer.destroy();
+    this.gradientParamsBuffer.destroy();
     this.ctx.unconfigure();
   }
 }
