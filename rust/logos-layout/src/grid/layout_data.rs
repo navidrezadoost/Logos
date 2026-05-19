@@ -209,6 +209,15 @@ pub fn resolve_tracks(
                 auto_indices.push(i);
                 // base size stays 0 until auto is resolved
             }
+            GridTrackType::Subgrid => {
+                // Subgrid track: this item inherits its parent's track
+                // definitions within the spanned area. At this level of the
+                // algorithm the size comes from the parent's allocation, so we
+                // treat it as Auto (content-sized) and let the parent pass the
+                // concrete sizes down through the `GridContainer` it constructs
+                // for each subgrid item.
+                auto_indices.push(i);
+            }
         }
     }
 

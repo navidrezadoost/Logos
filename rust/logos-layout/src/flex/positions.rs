@@ -156,6 +156,12 @@ fn break_into_lines(
 }
 
 /// Step 3: Resolve flexible lengths (flex grow/shrink) for a single line.
+///
+/// Implements the CSS Flexbox spec §9.7 iterative algorithm:
+/// 1. Distribute free space proportionally to flex_grow / flex_shrink.
+/// 2. Freeze any item that hits its min/max constraint.
+/// 3. Redistribute the surplus/deficit among the remaining unfrozen items.
+/// 4. Repeat until all items are frozen or free space is exhausted.
 fn resolve_flexible_lengths(
     container: &FlexContainer,
     line: Vec<(Uuid, ChildLayoutData)>,
@@ -178,64 +184,154 @@ fn resolve_flexible_lengths(
     };
 
     let num_children = line.len();
+    // Note: gap may be negative (overlap mode); no clamping applied.
     let total_gap = main_gap * (num_children.saturating_sub(1)) as f64;
 
-    // Sum hypothetical main sizes (flex-basis)
+    // Hypothetical main sizes (flex-basis)
     let initial_main_sizes: Vec<f64> = line
         .iter()
         .map(|(_, data)| data.flex_basis_resolved())
         .collect();
     let total_hypothetical: f64 = initial_main_sizes.iter().sum();
-
     let free_space = available_main - total_hypothetical - total_gap;
 
-    // Grow or shrink?
     let final_main_sizes: Vec<f64> = if free_space > 0.0 {
-        // Grow: distribute proportionally to flex_grow
-        let total_grow: f64 = line.iter().map(|(_, data)| data.flex_grow).sum();
+        // --- Iterative grow with max-clamping and surplus redistribution ---
+        let mut sizes: Vec<f64> = initial_main_sizes.clone();
+        let mut frozen = vec![false; num_children];
 
-        if total_grow > 0.0 {
-            initial_main_sizes
-                .iter()
-                .zip(line.iter())
-                .map(|(initial, (_, data))| {
-                    let grow_share = (free_space * data.flex_grow) / total_grow;
-                    let grown = initial + grow_share;
-                    // Clamp to main_max
-                    grown.min(data.main_max)
-                })
-                .collect()
-        } else {
-            // No flex-grow: use initial sizes
-            initial_main_sizes
+        // Freeze items that have no flex_grow (they never grow).
+        for (i, (_, data)) in line.iter().enumerate() {
+            if data.flex_grow == 0.0 {
+                frozen[i] = true;
+            }
         }
+
+        let mut remaining_free = free_space;
+
+        loop {
+            let total_grow: f64 = line
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !frozen[*i])
+                .map(|(_, (_, data))| data.flex_grow)
+                .sum();
+
+            if total_grow == 0.0 || remaining_free <= 0.0 {
+                break;
+            }
+
+            let mut any_frozen_this_round = false;
+            let mut surplus = 0.0;
+
+            for (i, (_, data)) in line.iter().enumerate() {
+                if frozen[i] {
+                    continue;
+                }
+                let grow_share = (remaining_free * data.flex_grow) / total_grow;
+                let proposed = sizes[i] + grow_share;
+                if proposed >= data.main_max {
+                    surplus += proposed - data.main_max;
+                    sizes[i] = data.main_max;
+                    frozen[i] = true;
+                    any_frozen_this_round = true;
+                } else {
+                    sizes[i] = proposed;
+                }
+            }
+
+            if !any_frozen_this_round {
+                break;
+            }
+
+            // Also enforce main_min (shouldn't happen in grow, but be safe).
+            for (i, (_, data)) in line.iter().enumerate() {
+                if sizes[i] < data.main_min {
+                    surplus -= data.main_min - sizes[i];
+                    sizes[i] = data.main_min;
+                    frozen[i] = true;
+                }
+            }
+
+            remaining_free = surplus;
+        }
+
+        // Final pass: apply main_min floor to all (covers non-grow items too).
+        for (i, (_, data)) in line.iter().enumerate() {
+            if sizes[i] < data.main_min {
+                sizes[i] = data.main_min;
+            }
+        }
+
+        sizes
     } else if free_space < 0.0 {
-        // Shrink: distribute proportionally to flex_shrink * flex_basis
-        let total_shrink_factor: f64 = line
-            .iter()
-            .zip(initial_main_sizes.iter())
-            .map(|((_, data), basis)| data.flex_shrink * basis)
-            .sum();
+        // --- Iterative shrink with min-clamping and deficit redistribution ---
+        let mut sizes: Vec<f64> = initial_main_sizes.clone();
+        let mut frozen = vec![false; num_children];
 
-        if total_shrink_factor > 0.0 {
-            initial_main_sizes
-                .iter()
-                .zip(line.iter())
-                .map(|(initial, (_, data))| {
-                    let shrink_factor = data.flex_shrink * initial;
-                    let shrink_share = (free_space.abs() * shrink_factor) / total_shrink_factor;
-                    let shrunk = initial - shrink_share;
-                    // Clamp to main_min
-                    shrunk.max(data.main_min)
-                })
-                .collect()
-        } else {
-            // No flex-shrink: use initial sizes (overflow)
-            initial_main_sizes
+        // Freeze items that have no flex_shrink.
+        for (i, (_, data)) in line.iter().enumerate() {
+            if data.flex_shrink == 0.0 {
+                frozen[i] = true;
+            }
         }
+
+        let mut remaining_deficit = free_space.abs();
+
+        loop {
+            let total_shrink_factor: f64 = line
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !frozen[*i])
+                .map(|(i, (_, data))| data.flex_shrink * sizes[i])
+                .sum();
+
+            if total_shrink_factor == 0.0 || remaining_deficit <= 0.0 {
+                break;
+            }
+
+            let mut reclaim = 0.0;
+            let mut any_frozen_this_round = false;
+
+            for (i, (_, data)) in line.iter().enumerate() {
+                if frozen[i] {
+                    continue;
+                }
+                let factor = data.flex_shrink * sizes[i];
+                let shrink_share = (remaining_deficit * factor) / total_shrink_factor;
+                let proposed = sizes[i] - shrink_share;
+                if proposed <= data.main_min {
+                    reclaim += data.main_min - proposed;
+                    sizes[i] = data.main_min;
+                    frozen[i] = true;
+                    any_frozen_this_round = true;
+                } else {
+                    sizes[i] = proposed;
+                }
+            }
+
+            if !any_frozen_this_round {
+                break;
+            }
+
+            remaining_deficit = reclaim;
+        }
+
+        // Final pass: apply max ceiling.
+        for (i, (_, data)) in line.iter().enumerate() {
+            if sizes[i] > data.main_max {
+                sizes[i] = data.main_max;
+            }
+        }
+
+        sizes
     } else {
-        // Exact fit
+        // Exact fit — apply min/max clamps for safety.
         initial_main_sizes
+            .iter()
+            .zip(line.iter())
+            .map(|(s, (_, data))| s.clamp(data.main_min, data.main_max))
+            .collect()
     };
 
     // Resolve cross sizes
@@ -290,19 +386,33 @@ fn position_lines(
         available_width
     };
 
-    // Compute each line's cross size (max of children's cross sizes)
-    // For single-line containers, line takes full cross size
+    // Compute each line's natural cross size (max of children's cross sizes).
+    let natural_cross_sizes: Vec<f64> = lines
+        .iter()
+        .map(|line| {
+            line.iter()
+                .map(|child| child.cross_size)
+                .fold(0.0, f64::max)
+        })
+        .collect();
+
+    // For single-line containers the line always fills the full cross size.
+    // For multi-line + AlignContent::Stretch, distribute the remaining cross
+    // space equally among all lines so that cross_fill children expand
+    // correctly on every line, including the last / shortest one.
     let line_cross_sizes: Vec<f64> = if lines.len() == 1 {
         vec![available_cross]
-    } else {
-        lines
+    } else if matches!(container.align_content, AlignContent::Stretch) {
+        let total_natural: f64 = natural_cross_sizes.iter().sum();
+        let total_gap_cross = cross_gap * (lines.len().saturating_sub(1)) as f64;
+        let extra = (available_cross - total_natural - total_gap_cross).max(0.0);
+        let extra_per_line = extra / lines.len() as f64;
+        natural_cross_sizes
             .iter()
-            .map(|line| {
-                line.iter()
-                    .map(|child| child.cross_size)
-                    .fold(0.0, f64::max)
-            })
+            .map(|&s| s + extra_per_line)
             .collect()
+    } else {
+        natural_cross_sizes
     };
 
     // Distribute lines on cross axis (align-content for multi-line)
@@ -566,6 +676,36 @@ mod tests {
         )
     }
 
+    fn make_child_constrained(
+        id: Uuid,
+        basis: f64,
+        cross_min: f64,
+        flex_grow: f64,
+        main_min: f64,
+        main_max: f64,
+    ) -> (Uuid, ChildLayoutData) {
+        (
+            id,
+            ChildLayoutData {
+                main_min,
+                main_max,
+                main_fill: flex_grow > 0.0,
+                main_auto: false,
+                cross_min,
+                cross_max: f64::INFINITY,
+                cross_fill: false,
+                cross_auto: false,
+                width: Some(basis),
+                height: Some(cross_min),
+                flex_grow,
+                flex_shrink: 1.0,
+                flex_basis: Some(basis),
+                align_self: AlignSelf::Auto,
+                absolute: false,
+            },
+        )
+    }
+
     #[test]
     fn test_single_fixed_child_row() {
         let container = FlexContainer {
@@ -735,5 +875,146 @@ mod tests {
 
         assert_eq!(lines[0].children[0].width, 150.0);
         assert_eq!(lines[0].children[1].width, 150.0);
+    }
+
+    // ── P4.3 Enhancement tests ────────────────────────────────────────────
+
+    /// CSS §9.7: a flex-grow child capped by max-width frees surplus space
+    /// that must be redistributed to the remaining uncapped children.
+    ///
+    /// Container: 200 px, gap: 0
+    /// Child A: basis=0, flex-grow=1, max-width=50   → capped at 50
+    /// Child B: basis=0, flex-grow=1, no max          → gets 150 (surplus)
+    #[test]
+    fn test_max_constraint_surplus_redistributed() {
+        let container = FlexContainer {
+            direction: FlexDirection::Row,
+            wrap: FlexWrap::NoWrap,
+            gap: (0.0, 0.0),
+            ..Default::default()
+        };
+
+        let children = vec![
+            make_child_constrained(1, 0.0, 50.0, 1.0, 0.0, 50.0),
+            make_child_constrained(2, 0.0, 50.0, 1.0, 0.0, f64::INFINITY),
+        ];
+
+        let lines = compute_positions(&container, &children, 200.0, 200.0);
+
+        assert_eq!(lines.len(), 1);
+        let widths: Vec<f64> = lines[0].children.iter().map(|c| c.width).collect();
+        // Child A must be capped at its max_width.
+        assert_eq!(widths[0], 50.0, "child A should be capped at max_width=50");
+        // Child B absorbs the entire surplus.
+        assert_eq!(widths[1], 150.0, "child B should absorb the surplus");
+    }
+
+    /// CSS §9.7: a flex-grow child floored by min-width cannot shrink below
+    /// its minimum even when flex-shrink would push it below.
+    ///
+    /// Container: 200 px, gap: 0
+    /// Child A: basis=0, flex-grow=1, min-width=100  → floored at 100
+    /// Child B: basis=0, flex-grow=1, no min          → gets 100
+    #[test]
+    fn test_min_constraint_floor_on_grow() {
+        let container = FlexContainer {
+            direction: FlexDirection::Row,
+            wrap: FlexWrap::NoWrap,
+            gap: (0.0, 0.0),
+            ..Default::default()
+        };
+
+        let children = vec![
+            make_child_constrained(1, 0.0, 50.0, 1.0, 100.0, f64::INFINITY),
+            make_child_constrained(2, 0.0, 50.0, 1.0, 0.0, f64::INFINITY),
+        ];
+
+        let lines = compute_positions(&container, &children, 200.0, 200.0);
+
+        assert_eq!(lines.len(), 1);
+        let widths: Vec<f64> = lines[0].children.iter().map(|c| c.width).collect();
+        // Both grow to 100 (equal share). Child A would normally get 100 anyway,
+        // but verifying the floor is respected is the key invariant.
+        assert!(
+            widths[0] >= 100.0,
+            "child A must respect its min_width=100, got {}",
+            widths[0]
+        );
+        assert_eq!(
+            widths[0] + widths[1],
+            200.0,
+            "widths must sum to available space"
+        );
+    }
+
+    /// Negative gap: children overlap when gap < 0.
+    ///
+    /// Container: 200 px (no flex-grow)
+    /// Child A: 100 px fixed
+    /// Child B: 100 px fixed
+    /// Gap: -10  → child B starts at x=90, total occupied = 190 px
+    #[test]
+    fn test_negative_gap_overlaps_children() {
+        let container = FlexContainer {
+            direction: FlexDirection::Row,
+            wrap: FlexWrap::NoWrap,
+            gap: (0.0, -10.0), // (row-gap, column-gap); column-gap is main-axis for row
+            ..Default::default()
+        };
+
+        let children = vec![
+            make_child_data(1, 100.0, 50.0, 0.0),
+            make_child_data(2, 100.0, 50.0, 0.0),
+        ];
+
+        let lines = compute_positions(&container, &children, 200.0, 200.0);
+
+        assert_eq!(lines.len(), 1);
+        let c1 = &lines[0].children[0];
+        let c2 = &lines[0].children[1];
+
+        assert_eq!(c1.x, 0.0, "first child starts at 0");
+        assert_eq!(
+            c2.x, 90.0,
+            "second child starts at 100 + (-10) = 90 (overlaps by 10 px)"
+        );
+        assert_eq!(c1.width, 100.0);
+        assert_eq!(c2.width, 100.0);
+    }
+
+    /// Stretch with wrapping: when align-content is Stretch and wrap is
+    /// enabled, all lines (including the last shorter one) receive equal
+    /// cross-size, enabling cross_fill children to expand properly.
+    #[test]
+    fn test_stretch_with_wrapping_distributes_cross_evenly() {
+        let container = FlexContainer {
+            direction: FlexDirection::Row,
+            wrap: FlexWrap::Wrap,
+            gap: (0.0, 0.0),
+            align_items: AlignItems::Stretch,
+            align_content: super::super::params::AlignContent::Stretch,
+            ..Default::default()
+        };
+
+        // Three fixed-size children of 150 px each → wraps into [1,2] and [3]
+        // in a 300 px container, 200 px tall.
+        let children = vec![
+            make_child_data(1, 150.0, 50.0, 0.0),
+            make_child_data(2, 150.0, 50.0, 0.0),
+            make_child_data(3, 150.0, 50.0, 0.0),
+        ];
+
+        let lines = compute_positions(&container, &children, 300.0, 200.0);
+
+        assert_eq!(lines.len(), 2, "should wrap into two lines");
+        // With Stretch and 200 px / 2 lines (gap=0): each line gets 100 px.
+        assert_eq!(
+            lines[0].cross_size, 100.0,
+            "first line cross_size should be 100 (stretch)"
+        );
+        assert_eq!(
+            lines[1].cross_size, 100.0,
+            "last line cross_size should be 100 (stretch)"
+        );
     }
 }
