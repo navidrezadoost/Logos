@@ -24,6 +24,7 @@ members = [
     "logos-rebase",
     "logos-ws",
     "logos-vector",
+    "logos-vector-ops",
 ]
 resolver = "2"
 
