@@ -90,7 +90,7 @@
 
 ;; --- QUERY: Get profile (own)
 
-
+(declare get-profile-cached)
 
 (sv/defmethod ::get-profile
   {::rpc/auth false
