@@ -22,6 +22,7 @@
 import type { LayoutRequest } from "./layout.worker";
 import type { SnapRequest, SnapResult } from "./snap.worker";
 import type { SerializeRequest } from "./serialize.worker";
+import type { BoolOpRequest, BoolOpResult, FindRegionsRequest, FindRegionsResult } from "./vector-network.types";
 
 // Vite worker imports — bundled as separate JS modules in production.
 // The `?worker` query tells Vite to treat them as Worker constructors.
@@ -34,6 +35,9 @@ import SnapWorker from "./snap.worker?worker";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import SerializeWorker from "./serialize.worker?worker";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import VectorNetworkWorker from "./vector-network.worker?worker";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -58,8 +62,9 @@ class WorkerClient {
   private readyResolve!: () => void;
   readonly ready: Promise<void>;
 
-  constructor(WorkerClass: new () => Worker, resultType: string, errorType: string) {
+  constructor(WorkerClass: new () => Worker, resultType: string | string[], errorType: string) {
     this.worker = new WorkerClass();
+    const resultTypes = Array.isArray(resultType) ? resultType : [resultType];
     this.ready = new Promise<void>((res) => {
       this.readyResolve = res;
     });
@@ -81,7 +86,7 @@ class WorkerClient {
       if (!inFlight) return;
       this.pending.delete(id);
 
-      if (type === resultType) {
+      if (resultTypes.includes(type)) {
         inFlight.resolve(rest);
       } else if (type === errorType) {
         inFlight.reject(new Error(rest.error as string));
@@ -133,6 +138,7 @@ class WorkerPool {
   private _layout: WorkerClient | null = null;
   private _snap: WorkerClient | null = null;
   private _serialize: WorkerClient | null = null;
+  private _vectorNetwork: WorkerClient | null = null;
   private _initialized = false;
 
   /** Call once at app startup (e.g. in App.tsx useEffect). */
@@ -143,6 +149,7 @@ class WorkerPool {
       this._layout = new WorkerClient(LayoutWorker, "LAYOUT_RESULT", "LAYOUT_ERROR");
       this._snap = new WorkerClient(SnapWorker, "SNAP_RESULT", "SNAP_ERROR");
       this._serialize = new WorkerClient(SerializeWorker, "SERIALIZE_RESULT", "SERIALIZE_ERROR");
+      this._vectorNetwork = new WorkerClient(VectorNetworkWorker, ["BOOL_OP_RESULT", "FIND_REGIONS_RESULT"], "ERROR");
     } catch (err) {
       console.error("[WorkerPool] Failed to initialize workers:", err);
     }
@@ -166,13 +173,27 @@ class WorkerPool {
     return res.buffer;
   }
 
+  async boolOp(req: BoolOpRequest): Promise<BoolOpResult> {
+    if (!this._vectorNetwork) throw new Error("Worker pool not initialized");
+    const res = await this._vectorNetwork.post<{ result: BoolOpResult }>("BOOL_OP", req);
+    return res.result;
+  }
+
+  async findRegions(req: FindRegionsRequest): Promise<FindRegionsResult> {
+    if (!this._vectorNetwork) throw new Error("Worker pool not initialized");
+    const res = await this._vectorNetwork.post<{ result: FindRegionsResult }>("FIND_REGIONS", req);
+    return res.result;
+  }
+
   terminate(): void {
     this._layout?.terminate();
     this._snap?.terminate();
     this._serialize?.terminate();
+    this._vectorNetwork?.terminate();
     this._layout = null;
     this._snap = null;
     this._serialize = null;
+    this._vectorNetwork = null;
     this._initialized = false;
   }
 
@@ -183,4 +204,4 @@ class WorkerPool {
 
 /** Singleton worker pool — shared across the whole app. */
 export const workerPool = new WorkerPool();
-export type { LayoutRequest, SnapRequest, SnapResult, SerializeRequest };
+export type { LayoutRequest, SnapRequest, SnapResult, SerializeRequest, BoolOpRequest, BoolOpResult, FindRegionsRequest, FindRegionsResult };

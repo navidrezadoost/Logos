@@ -132,6 +132,45 @@ export function Inspector(): React.ReactElement {
         </Section>
       )}
 
+      {shape.type === "vector-network" && (
+        <Section title="Vector Network">
+          <Row label="Anchors">
+            <span style={{ fontSize: 12, color: "#cdd6f4" }}>
+              {shape.vnAnchors?.length ?? 0}
+            </span>
+          </Row>
+          <Row label="Segments">
+            <span style={{ fontSize: 12, color: "#cdd6f4" }}>
+              {shape.vnSegments?.length ?? 0}
+            </span>
+          </Row>
+          <Row label="Regions">
+            <span style={{ fontSize: 12, color: "#cdd6f4" }}>
+              {shape.vnRegions?.length ?? 0}
+            </span>
+          </Row>
+          {shape.vnAnchors && shape.vnAnchors.length > 0 && (
+            <div style={{ padding: "4px 12px" }}>
+              <div style={{ fontSize: 10, color: "#585b70", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                Anchors
+              </div>
+              <div style={{ maxHeight: 120, overflowY: "auto" }}>
+                {shape.vnAnchors.map((a, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, fontSize: 11, color: "#a6adc8", padding: "1px 0" }}>
+                    <span style={{ color: "#6c7086", width: 16 }}>{i}</span>
+                    <span>x {Math.round(a.x)}</span>
+                    <span>y {Math.round(a.y)}</span>
+                    {(a.hi || a.ho) && (
+                      <span style={{ color: "#585b70" }}>~</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Section>
+      )}
+
       {isText && (
         <Section title="Variable Axes">
           {displayAxes.map((axis) => (

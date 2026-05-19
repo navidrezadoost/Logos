@@ -11,7 +11,7 @@
 
 import { create } from "zustand";
 import { nanoid } from "nanoid";
-import { type Shape, type Rect, createRect } from "../types/shapes";
+import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, createRect, createVectorNetwork } from "../types/shapes";
 
 /** Generate a proper UUID v4 for shapes — required by the WASM bridge's uuidToU32x4(). */
 const shapeId = (): string => crypto.randomUUID();
@@ -51,6 +51,25 @@ interface DocumentState {
 
   /** Add any pre-built shape to the current page; returns the shape id. */
   addShape: (shape: Shape) => string;
+
+  /** Commit a completed pen session as a vector-network shape. */
+  addVectorNetwork: (
+    anchors: VNAnchor[],
+    segments: VNSegment[],
+    regions?: VNRegion[],
+    fill?: string
+  ) => string;
+
+  /**
+   * Replace two existing shapes with one new vector-network shape
+   * (used after a boolean op merges two shapes).
+   */
+  replaceWithVectorNetwork: (
+    removeIds: string[],
+    anchors: VNAnchor[],
+    segments: VNSegment[],
+    regions?: VNRegion[]
+  ) => string;
 
   /** Update mutable display properties (name, color, opacity…). */
   updateShape: (id: string, patch: Partial<Shape>) => void;
@@ -139,6 +158,46 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       },
     }));
     return shape.id;
+  },
+
+  addVectorNetwork: (anchors, segments, regions = [], fill = "#6c9ef8") => {
+    const id = shapeId();
+    const { currentPageId: pid } = get();
+    const count = Object.values(get().shapes).filter((s) => s.type === "vector-network").length + 1;
+    const shape = createVectorNetwork(id, `Path ${count}`, anchors, segments, regions, fill);
+    set((s) => ({
+      shapes: { ...s.shapes, [id]: shape },
+      pages: {
+        ...s.pages,
+        [pid]: {
+          ...s.pages[pid],
+          rootShapeIds: [id, ...s.pages[pid].rootShapeIds],
+        },
+      },
+    }));
+    return id;
+  },
+
+  replaceWithVectorNetwork: (removeIds, anchors, segments, regions = []) => {
+    const id = shapeId();
+    const { currentPageId: pid } = get();
+    const count = Object.values(get().shapes).filter((s) => s.type === "vector-network").length + 1;
+    const shape = createVectorNetwork(id, `Path ${count}`, anchors, segments, regions);
+    set((s) => {
+      const nextShapes = { ...s.shapes };
+      for (const rid of removeIds) delete nextShapes[rid];
+      nextShapes[id] = shape;
+      const nextPages = { ...s.pages };
+      nextPages[pid] = {
+        ...nextPages[pid],
+        rootShapeIds: [
+          id,
+          ...nextPages[pid].rootShapeIds.filter((sid) => !removeIds.includes(sid)),
+        ],
+      };
+      return { shapes: nextShapes, pages: nextPages };
+    });
+    return id;
   },
 
   updateShape: (id, patch) =>
