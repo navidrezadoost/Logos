@@ -25,6 +25,7 @@ import { useUiStore } from "../../stores/uiStore";
 import { usePenStore } from "../../stores/penStore";
 import { useComponentStore } from "../../stores/componentStore";
 import { useProtoStore } from "../../stores/prototypeStore";
+import { useDevModeStore } from "../../stores/devModeStore";
 import { PrototypeOverlay } from "../prototype/PrototypeOverlay";
 import { DRAG_COMPONENT_TYPE } from "../assets/AssetsPanel";
 import { workerPool } from "../../worker";
@@ -145,9 +146,13 @@ export function Canvas(): React.ReactElement {
   const isDrawTool = activeTool === "rect" || activeTool === "ellipse";
   const isPenTool = activeTool === "path";
   const isPrototypeTool = activeTool === "prototype";
+  const isDevTool = activeTool === "dev";
 
   // Prototype store
   const proto = useProtoStore();
+
+  // Dev mode store
+  const devMode = useDevModeStore();
 
   // ── Commit pen session (close or open path) ────────────────────────────────
   const commitPen = useCallback(
@@ -259,6 +264,19 @@ export function Canvas(): React.ReactElement {
         return;
       }
 
+      // ── Dev mode hover-inspect ─────────────────────────────────────────────
+      if (isDevTool) {
+        const hit = shapes.find(
+          (s) =>
+            x >= s.bounds.x &&
+            x <= s.bounds.x + s.bounds.w &&
+            y >= s.bounds.y &&
+            y <= s.bounds.y + s.bounds.h
+        );
+        devMode.setInspectedShape(hit?.id ?? null);
+        return;
+      }
+
       if (isPenTool) {
         pen.setCursor({ x, y });
         if (pen.draggingAnchor !== null) {
@@ -271,7 +289,7 @@ export function Canvas(): React.ReactElement {
       setDrag((d) => d ? { ...d, currentX: x, currentY: y } : null);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, isPrototypeTool, pen, drag, panX, panY, zoom, proto]
+    [isPenTool, isPrototypeTool, isDevTool, pen, drag, panX, panY, zoom, proto, devMode, shapes]
   );
 
   const handleMouseUp = useCallback(
