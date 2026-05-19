@@ -1,7 +1,11 @@
 {:deps {:aliases [:dev]}
  :http {:port #shadow/env ["HTTP_PORT" :as :int :default 3448]}
  :nrepl {:port #shadow/env ["NREPL_PORT" :as :int :default 3447] :host "0.0.0.0"}
- :dev-http {#shadow/env ["DEV_PORT" :as :int :default 8888] "classpath:public"}
+ :dev-http {#shadow/env ["DEV_PORT" :as :int :default 8888]
+            {:root "classpath:public"
+             ;; Proxy /api, /ws, /webhooks and /auth requests to the backend.
+             ;; Mirrors what nginx does in the Docker-based setup.
+             :proxy-url #shadow/env ["PENPOT_PUBLIC_URI" :default "http://localhost:3449"]}}
  :cache-dir #shadow/env ["CACHE" :default ".shadow-cljs"]
 
  :builds
