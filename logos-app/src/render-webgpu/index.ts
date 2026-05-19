@@ -24,6 +24,19 @@ export { GradientAtlas } from "./gradient-atlas";
 export { TextPipeline }  from "./text-pipeline";
 export type { GlyphUVRect, GlyphLayout } from "./glyph-atlas";
 
+// P5.4 — GPU-accelerated flex layout
+export { FlexLayoutPipeline } from "./flex-layout-pipeline";
+export type {
+  FlexChildShape,
+  FlexContainerParams,
+  ChildFinalPosition,
+  FlexDirection,
+  FlexWrap,
+  FlexAlign,
+  FlexSizingMode,
+  FlexAlignSelf,
+} from "./flex-layout-pipeline";
+
 export {
   TILE_SIZE_PX,
   SNAP_THRESHOLD_PX,
@@ -34,4 +47,10 @@ export {
   MAX_GRADIENTS,
   GLYPH_ATLAS_SIZE,
   MAX_GLYPHS_PER_FRAME,
+  FLEX_UNIFORM_BYTES,
+  FLEX_CHILD_INPUT_BYTES,
+  FLEX_CHILD_DATA_BYTES,
+  FLEX_LINE_DATA_BYTES,
+  MAX_FLEX_CHILDREN,
+  MAX_FLEX_LINES,
 } from "./constants";

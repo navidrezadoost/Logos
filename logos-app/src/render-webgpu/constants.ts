@@ -96,6 +96,41 @@ export const GLYPH_INSTANCE_BYTES = GLYPH_INSTANCE_F32S * 4; // 64
 /** Maximum glyph quads per frame across all text shapes in a single tile. */
 export const MAX_GLYPHS_PER_FRAME = 4096;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GPU-accelerated flex layout (P5.4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Flex uniform buffer size (bytes).
+ * Holds FlexUniforms: 10 × u32/f32 + 6 padding = 16 × 4 = 64 bytes.
+ */
+export const FLEX_UNIFORM_BYTES = 64;
+
+/**
+ * Per-child input entry size (bytes).
+ * ChildInput: 10 fields + 6 padding = 16 × 4 = 64 bytes.
+ */
+export const FLEX_CHILD_INPUT_BYTES = 64;
+
+/**
+ * Per-child data entry size (bytes).
+ * ChildData: 16 × f32/u32 = 64 bytes.
+ * Shared by all four flex compute stages as the intermediate buffer.
+ */
+export const FLEX_CHILD_DATA_BYTES = 64;
+
+/**
+ * Per-line data entry size (bytes).
+ * LineData: 8 × u32/f32 = 32 bytes.
+ */
+export const FLEX_LINE_DATA_BYTES = 32;
+
+/** Maximum children in one flex container (GPU buffer cap). */
+export const MAX_FLEX_CHILDREN = 16_384;
+
+/** Maximum flex lines per container (GPU line_data buffer cap). */
+export const MAX_FLEX_LINES = 512;
+
 /** Binding slots (must match WGSL @binding annotations). */
 export const BINDING = {
   UNIFORMS:  0,
