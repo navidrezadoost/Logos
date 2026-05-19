@@ -60,6 +60,66 @@ Logos is a Rust workspace with 19 crates organized into 7 layers:
 
 **Total: 2,007 tests across 92,201 lines of Rust.**
 
+## Multi-Language Architecture
+
+Logos uses three primary languages.  You only need the toolchain for the
+layer you're changing:
+
+| Layer | Language | Toolchain needed |
+|---|---|---|
+| `logos-app/` — Frontend SPA | TypeScript | Node.js 20+ + npm |
+| `backend/` — API server | Clojure (JVM) | OpenJDK 21 + Clojure CLI |
+| `common/` — Shared schemas | Clojure (JVM) | OpenJDK 21 + Clojure CLI |
+| Rust crates | Rust | rustup (see below) |
+
+> **No ClojureScript toolchain required.**  The TypeScript frontend `logos-app/` does
+> not use shadow-cljs, leiningen, or any ClojureScript compiler.  The `frontend/`
+> directory (legacy Penpot-compatible ClojureScript) is retained for the exporter and
+> is built via shadow-cljs only when running the full Penpot stack.
+
+### Schema Workflow
+
+`common/src/app/common/types/` contains [Malli](https://github.com/metosin/malli)
+schema definitions.  They are the single source of truth for shared data types.
+
+- **Clojure backend** — consumes schemas natively via `(require '[app.common.types.shape ...])`.
+- **TypeScript frontend** — consumes auto-generated `.d.ts` files in
+  `logos-app/src/types/generated/`.
+
+**If you change a Malli schema, you must regenerate the TypeScript types:**
+
+```bash
+# Requires Babashka (https://babashka.org)
+bin/generate-types
+
+# Verify no drift (same check the CI runs)
+bin/generate-types --check
+```
+
+Commit both the schema change and the regenerated `.d.ts` files in the same PR.
+The `generated-types-drift` CI job will fail if they are out of sync.
+
+### Frontend (TypeScript) Setup
+
+```bash
+cd logos-app
+npm ci
+npx tsc --noEmit   # type-check
+npx vitest run     # unit tests
+npm run dev        # dev server at http://localhost:5173
+```
+
+### Backend (Clojure) Setup
+
+```bash
+# From repo root — starts backend + REPL
+cd backend
+clj -M:dev
+
+# Run backend tests
+clj -M:test
+```
+
 ## Prerequisites
 
 - **Rust** 1.75+ (stable) — install via [rustup](https://rustup.rs/)

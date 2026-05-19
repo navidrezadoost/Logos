@@ -2,7 +2,9 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Active_Development-brightgreen.svg" alt="Status">
-  <img src="https://img.shields.io/badge/Language-Rust_2021-orange.svg" alt="Rust">
+  <img src="https://img.shields.io/badge/TypeScript-45%25-3178C6.svg" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Clojure-35%25-5881D8.svg" alt="Clojure">
+  <img src="https://img.shields.io/badge/Rust-15%25-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Renderer-WGPU_%2F_WebGPU-blue.svg" alt="WGPU">
   <img src="https://img.shields.io/badge/Collaboration-CRDT_%28yrs%29-purple.svg" alt="CRDT">
   <img src="https://img.shields.io/badge/License-MPL--2.0-lightgrey.svg" alt="License">
@@ -47,6 +49,21 @@ Logos (Cargo Workspace)
 ---
 
 ## Technology Stack
+
+### Language Breakdown
+
+| Language | Role | Approx. % |
+|---|---|---|
+| **TypeScript** | Frontend SPA (`logos-app/`), Plugin SDK, MCP server, workers | **~45%** |
+| **Clojure** | Backend API server (`backend/`), shared Malli schemas (`common/`), exporter | **~35%** |
+| **Rust** | Render engine, layout, text, vector graphics, WASM targets | **~15%** |
+| WGSL | WebGPU compute & render shaders | ~3% |
+| SQL | PostgreSQL migrations | ~2% |
+
+> **Schema source of truth:** Malli schemas in `common/src/app/common/types/` are the
+> canonical data type definitions.  TypeScript consumers import auto-generated `.d.ts` files
+> from `logos-app/src/types/generated/` (produced by `bin/generate-types`).
+> Clojure consumers use them natively.  See `ARCHITECTURE.md` for details.
 
 ### Core Language and Runtime
 
