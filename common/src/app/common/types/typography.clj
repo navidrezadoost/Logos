@@ -25,7 +25,7 @@
 (def schema:font-variation-settings
   [:map-of
    [:string {:min 4 :max 4}]  ;; 4-char OpenType axis tag
-   :number])                   ;; axis value (float)
+   ::sm/number])               ;; axis value (float)
 
 (def schema:typography
   [:map {:title "Typography"}
