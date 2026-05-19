@@ -38,5 +38,6 @@ export default defineConfig({
     __RENDER_WASM_JS__: JSON.stringify("/js/render-wasm.js"),
     __RENDER_WASM_WASM__: JSON.stringify("/js/render-wasm.wasm"),
     __LOGOS_LAYOUT_WASM__: JSON.stringify("/js/logos_layout_wasm.wasm"),
+    __LOGOS_VECTOR_WASM__: JSON.stringify("/js/logos_vector_wasm.wasm"),
   },
 });

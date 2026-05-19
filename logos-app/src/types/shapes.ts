@@ -6,7 +6,39 @@
  * UI needs to render controls, layers panel, inspector, etc.
  */
 
-export type ShapeType = "frame" | "rect" | "circle" | "ellipse" | "path" | "text" | "group" | "bool" | "svg-raw";
+export type ShapeType = "frame" | "rect" | "circle" | "ellipse" | "path" | "text" | "group" | "bool" | "svg-raw" | "vector-network";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vector network geometry (mirrors rust/logos-vector-wasm JSON schema)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One anchor point in a vector network, with optional Bézier handles. */
+export interface VNAnchor {
+  x: number;
+  y: number;
+  /** Handle-in control point [dx, dy] relative to anchor. */
+  hi?: [number, number] | null;
+  /** Handle-out control point [dx, dy] relative to anchor. */
+  ho?: [number, number] | null;
+}
+
+/** One segment in a vector network (cubic Bézier or straight line). */
+export interface VNSegment {
+  /** Start anchor index. */
+  s: number;
+  /** End anchor index. */
+  e: number;
+  /** First Bézier control point (absolute coords), or omit for straight line. */
+  c1?: [number, number] | null;
+  /** Second Bézier control point (absolute coords). */
+  c2?: [number, number] | null;
+}
+
+/**
+ * A closed region produced by `logos_vn_find_regions` —
+ * an ordered list of segment indices that bound the region.
+ */
+export type VNRegion = number[];
 
 // ---------------------------------------------------------------------------
 // Variable font support
@@ -92,6 +124,14 @@ export interface Shape {
    * Transmitted to render-wasm as SkFontArguments variation coordinates.
    */
   fontVariationSettings?: FontVariationSettings;
+
+  // ── Vector network fields (present only when type === "vector-network") ────
+  /** Anchor points of the vector network. */
+  vnAnchors?: VNAnchor[];
+  /** Segments connecting anchors. */
+  vnSegments?: VNSegment[];
+  /** Closed regions (each is an ordered list of segment indices). */
+  vnRegions?: VNRegion[];
 }
 
 /** Minimal shape factory. */
@@ -139,4 +179,49 @@ export function hexToARGB(hex: string, opacity = 1): number {
   const rgb = parseInt(hex.replace("#", ""), 16);
   const a = Math.round(opacity * 255) & 0xff;
   return ((a << 24) | (rgb & 0xffffff)) >>> 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vector network factory
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Build a bounding box from a set of anchor points. */
+function anchorsBounds(anchors: VNAnchor[]): Rect {
+  if (anchors.length === 0) return { x: 0, y: 0, w: 1, h: 1 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const a of anchors) {
+    if (a.x < minX) minX = a.x;
+    if (a.y < minY) minY = a.y;
+    if (a.x > maxX) maxX = a.x;
+    if (a.y > maxY) maxY = a.y;
+  }
+  return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+}
+
+/** Minimal vector-network shape factory. */
+export function createVectorNetwork(
+  id: string,
+  name: string,
+  anchors: VNAnchor[],
+  segments: VNSegment[],
+  regions: VNRegion[] = [],
+  fill = "#6c9ef8"
+): Shape {
+  return {
+    id,
+    type: "vector-network",
+    name,
+    bounds: anchorsBounds(anchors),
+    transform: IDENTITY_TRANSFORM,
+    rotation: 0,
+    fills: [{ type: "solid", color: fill, opacity: 1 }],
+    opacity: 1,
+    hidden: false,
+    locked: false,
+    parentId: null,
+    children: [],
+    vnAnchors: anchors,
+    vnSegments: segments,
+    vnRegions: regions,
+  };
 }

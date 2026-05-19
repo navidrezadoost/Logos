@@ -236,6 +236,30 @@ function draw2DShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
       ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
       ctx.fill();
       break;
+    case "vector-network": {
+      const anchors = shape.vnAnchors;
+      const segments = shape.vnSegments;
+      if (anchors && segments && anchors.length > 0) {
+        ctx.beginPath();
+        for (const seg of segments) {
+          const a = anchors[seg.s];
+          const b = anchors[seg.e];
+          if (!a || !b) continue;
+          ctx.moveTo(a.x, a.y);
+          if (seg.c1 && seg.c2) {
+            ctx.bezierCurveTo(seg.c1[0], seg.c1[1], seg.c2[0], seg.c2[1], b.x, b.y);
+          } else {
+            ctx.lineTo(b.x, b.y);
+          }
+        }
+        ctx.fillStyle = color;
+        ctx.fill("evenodd");
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+      break;
+    }
     default:
       ctx.fillRect(x, y, w, h);
   }

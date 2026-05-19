@@ -49,23 +49,25 @@ let wasm: VnWasmExports | null = null;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
+// Injected by Vite at build time; falls back to the conventional path at runtime.
+declare const __LOGOS_VECTOR_WASM__: string | undefined;
+const WASM_URL: string =
+  typeof __LOGOS_VECTOR_WASM__ !== "undefined"
+    ? __LOGOS_VECTOR_WASM__
+    : "/js/logos_vector_wasm.wasm";
+
 async function initWasm(): Promise<void> {
   try {
-    // In production, Vite resolves the WASM file from the logos-vector-wasm
-    // npm package (built via `wasm-pack build rust/logos-vector-wasm --target web`
-    // and published/linked into logos-app/node_modules).
-    // During development without a built package, this import will fail and
-    // the worker falls back to a pure-TS implementation.
-    const mod = await import("logos-vector-wasm" as string).catch(() => null);
-    if (mod && mod.default) {
-      const instance: WebAssembly.Instance = mod.default as WebAssembly.Instance;
-      wasm = instance.exports as unknown as VnWasmExports;
-      console.log("[vector-network.worker] logos-vector-wasm loaded ✓");
-    } else {
-      console.warn("[vector-network.worker] logos-vector-wasm not found — using TS fallback");
-    }
-  } catch {
-    console.warn("[vector-network.worker] WASM init failed — using TS fallback");
+    // Fetch and instantiate the raw C-ABI WASM binary directly.
+    // The exports are the #[no_mangle] extern "C" functions — no wasm-bindgen glue needed.
+    const result = await WebAssembly.instantiateStreaming(fetch(WASM_URL));
+    wasm = result.instance.exports as unknown as VnWasmExports;
+    console.log("[vector-network.worker] logos-vector-wasm loaded ✓");
+  } catch (err) {
+    console.warn(
+      "[vector-network.worker] WASM init failed — using TS fallback",
+      err
+    );
   }
   self.postMessage({ type: "READY" });
 }

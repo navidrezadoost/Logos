@@ -22,6 +22,7 @@ import { syncScene, syncScene2D } from "../../render-wasm/scene";
 import { useCurrentPageShapes, useDocumentStore } from "../../stores/documentStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useUiStore } from "../../stores/uiStore";
+import { usePenStore } from "../../stores/penStore";
 import { workerPool } from "../../worker";
 import { createRect } from "../../types/shapes";
 
@@ -53,7 +54,10 @@ export function Canvas(): React.ReactElement {
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const { select } = useSelectionStore();
   const { zoom, panX, panY, activeTool, setTool } = useUiStore();
-  const { addRect, addShape } = useDocumentStore();
+  const { addRect, addShape, addVectorNetwork } = useDocumentStore();
+
+  // Pen tool state
+  const pen = usePenStore();
 
   // ── Resize observer ────────────────────────────────────────────────────────
   useLayoutEffect(() => {
@@ -134,30 +138,102 @@ export function Canvas(): React.ReactElement {
   }
 
   const isDrawTool = activeTool === "rect" || activeTool === "ellipse";
+  const isPenTool = activeTool === "path";
+
+  // ── Commit pen session (close or open path) ────────────────────────────────
+  const commitPen = useCallback(
+    (closed: boolean) => {
+      const { anchors, segments, reset } = pen;
+      if (anchors.length < 2) { reset(); return; }
+
+      let finalSegments = [...segments];
+      if (closed && anchors.length >= 3) {
+        // Close the path: add segment from last anchor back to first
+        finalSegments.push({ s: anchors.length - 1, e: 0 });
+      }
+
+      const id = addVectorNetwork(anchors, finalSegments);
+      select(id);
+      reset();
+      setTool("select");
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pen, addVectorNetwork, select, setTool]
+  );
+
+  // Commit open path on Escape while pen tool is active
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (!isPenTool) return;
+      if (e.key === "Escape") {
+        commitPen(false);
+      } else if (e.key === "Enter") {
+        commitPen(true);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isPenTool, commitPen]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!isDrawTool) return;
       const { x, y } = toCanvas(e);
+
+      // ── Pen tool ────────────────────────────────────────────────────────────
+      if (isPenTool) {
+        e.preventDefault();
+
+        // Check if clicking close to the first anchor → close path
+        if (pen.anchors.length >= 3) {
+          const first = pen.anchors[0];
+          const dist = Math.hypot(x - first.x, y - first.y);
+          if (dist * zoom < 10) {
+            commitPen(true);
+            return;
+          }
+        }
+
+        // Add a new anchor; start handle drag
+        pen.addAnchor(x, y);
+        pen.startAnchorDrag(pen.anchors.length, x, y); // index after add
+        return;
+      }
+
+      // ── Rect / ellipse drag ─────────────────────────────────────────────────
+      if (!isDrawTool) return;
       setDrag({ startX: x, startY: y, currentX: x, currentY: y });
       e.preventDefault();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isDrawTool, panX, panY, zoom]
+    [isPenTool, isDrawTool, pen, zoom, commitPen, panX, panY]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!drag) return;
       const { x, y } = toCanvas(e);
+
+      if (isPenTool) {
+        pen.setCursor({ x, y });
+        if (pen.draggingAnchor !== null) {
+          pen.updateAnchorHandle(x, y);
+        }
+        return;
+      }
+
+      if (!drag) return;
       setDrag((d) => d ? { ...d, currentX: x, currentY: y } : null);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [drag, panX, panY, zoom]
+    [isPenTool, pen, drag, panX, panY, zoom]
   );
 
   const handleMouseUp = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isPenTool) {
+        pen.endAnchorDrag();
+        return;
+      }
+
       if (!drag) {
         // No drag — if select tool, clear selection on empty canvas click
         if (activeTool === "select" && e.target === containerRef.current) {
@@ -193,12 +269,13 @@ export function Canvas(): React.ReactElement {
       setTool("select");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [drag, activeTool, addRect, addShape, select, setTool, shapes, clearSelection]
+    [isPenTool, pen, drag, activeTool, addRect, addShape, select, setTool, shapes, clearSelection, commitPen]
   );
 
   const cursor =
     activeTool === "hand" ? "grab"
     : isDrawTool ? "crosshair"
+    : isPenTool ? "crosshair"
     : activeTool === "text" ? "text"
     : "default";
 
@@ -238,6 +315,18 @@ export function Canvas(): React.ReactElement {
       {/* Drag preview overlay */}
       {previewStyle && <div style={previewStyle} />}
 
+      {/* Pen tool overlay — SVG drawn on top of the WASM canvas */}
+      {isPenTool && (
+        <PenOverlay
+          anchors={pen.anchors}
+          segments={pen.segments}
+          cursor={pen.cursor}
+          zoom={zoom}
+          panX={panX}
+          panY={panY}
+        />
+      )}
+
       {shapes.length === 0 && mode !== "loading" && (
         <div style={{
           position: "absolute", inset: 0, display: "flex",
@@ -260,5 +349,106 @@ export function Canvas(): React.ReactElement {
         {mode === "fallback" && "⚠ Canvas 2D fallback"}
       </span>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pen preview SVG overlay
+// ─────────────────────────────────────────────────────────────────────────────
+
+import type { VNAnchor, VNSegment } from "../../types/shapes";
+import type { PenMousePos } from "../../stores/penStore";
+
+interface PenOverlayProps {
+  anchors: VNAnchor[];
+  segments: VNSegment[];
+  cursor: PenMousePos | null;
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+function toScreen(x: number, y: number, zoom: number, panX: number, panY: number) {
+  return { sx: x * zoom + panX, sy: y * zoom + panY };
+}
+
+function PenOverlay({ anchors, segments, cursor, zoom, panX, panY }: PenOverlayProps): React.ReactElement {
+  const ANCHOR_R = 4;
+  const CLOSE_THRESHOLD_PX = 10;
+
+  // Build SVG path string from committed segments
+  let pathD = "";
+  for (const seg of segments) {
+    const a = anchors[seg.s];
+    const b = anchors[seg.e];
+    if (!a || !b) continue;
+    const { sx: ax, sy: ay } = toScreen(a.x, a.y, zoom, panX, panY);
+    const { sx: bx, sy: by } = toScreen(b.x, b.y, zoom, panX, panY);
+    if (seg.c1 && seg.c2) {
+      const { sx: c1x, sy: c1y } = toScreen(seg.c1[0], seg.c1[1], zoom, panX, panY);
+      const { sx: c2x, sy: c2y } = toScreen(seg.c2[0], seg.c2[1], zoom, panX, panY);
+      pathD += `M ${ax} ${ay} C ${c1x} ${c1y} ${c2x} ${c2y} ${bx} ${by} `;
+    } else {
+      pathD += `M ${ax} ${ay} L ${bx} ${by} `;
+    }
+  }
+
+  // Live preview segment from last anchor to cursor
+  let previewD = "";
+  if (anchors.length > 0 && cursor) {
+    const last = anchors[anchors.length - 1];
+    const { sx: lx, sy: ly } = toScreen(last.x, last.y, zoom, panX, panY);
+    const { sx: cx, sy: cy } = toScreen(cursor.x, cursor.y, zoom, panX, panY);
+    previewD = `M ${lx} ${ly} L ${cx} ${cy}`;
+  }
+
+  // Is cursor near the first anchor (close-path hint)?
+  let nearFirst = false;
+  if (anchors.length >= 3 && cursor) {
+    const first = anchors[0];
+    const dx = (cursor.x - first.x) * zoom;
+    const dy = (cursor.y - first.y) * zoom;
+    nearFirst = Math.hypot(dx, dy) < CLOSE_THRESHOLD_PX;
+  }
+
+  return (
+    <svg
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        overflow: "visible",
+      }}
+    >
+      {/* Committed path segments */}
+      {pathD && (
+        <path d={pathD} fill="none" stroke="#89b4fa" strokeWidth={1.5} />
+      )}
+
+      {/* Live preview segment */}
+      {previewD && (
+        <path d={previewD} fill="none" stroke="#89b4fa" strokeWidth={1.5} strokeDasharray="4 3" />
+      )}
+
+      {/* Anchor dots */}
+      {anchors.map((a, i) => {
+        const { sx, sy } = toScreen(a.x, a.y, zoom, panX, panY);
+        const isFirst = i === 0;
+        const highlight = isFirst && nearFirst;
+        return (
+          <circle
+            key={i}
+            cx={sx}
+            cy={sy}
+            r={highlight ? ANCHOR_R + 2 : ANCHOR_R}
+            fill={highlight ? "#a6e3a1" : "#1e1e2e"}
+            stroke={highlight ? "#a6e3a1" : "#89b4fa"}
+            strokeWidth={1.5}
+          />
+        );
+      })}
+    </svg>
   );
 }
