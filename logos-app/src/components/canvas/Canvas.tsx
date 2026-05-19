@@ -26,6 +26,7 @@ import { usePenStore } from "../../stores/penStore";
 import { useComponentStore } from "../../stores/componentStore";
 import { useProtoStore } from "../../stores/prototypeStore";
 import { useDevModeStore } from "../../stores/devModeStore";
+import { useWebGPURenderer } from "../../render-webgpu/useWebGPURenderer";
 import { PrototypeOverlay } from "../prototype/PrototypeOverlay";
 import { DRAG_COMPONENT_TYPE } from "../assets/AssetsPanel";
 import { workerPool } from "../../worker";
@@ -64,6 +65,11 @@ export function Canvas(): React.ReactElement {
 
   // Pen tool state
   const pen = usePenStore();
+
+  // ── WebGPU tile renderer (Phase 5, feature-gated) ─────────────────────────
+  // canvasRef is the same <canvas> element Skia renders to.
+  // When WebGPU is unavailable this returns null and has zero overhead.
+  const gpuRenderer = useWebGPURenderer(canvasRef, shapes, zoom, panX, panY);
 
   // ── Resize observer ────────────────────────────────────────────────────────
   useLayoutEffect(() => {
@@ -456,6 +462,21 @@ export function Canvas(): React.ReactElement {
         {mode === "wasm"     && "✓ render-wasm / Skia"}
         {mode === "fallback" && "⚠ Canvas 2D fallback"}
       </span>
+
+      {/* WebGPU active badge */}
+      {gpuRenderer?.active && (
+        <span
+          title="Phase 5: WebGPU tile renderer active"
+          style={{
+            position: "absolute", bottom: 8, right: 172,
+            padding: "2px 8px", borderRadius: "4px",
+            fontSize: "11px", fontFamily: "monospace",
+            background: "#cba6f7", color: "#1e1e2e",
+          }}
+        >
+          ⚡ WebGPU
+        </span>
+      )}
     </div>
   );
 }
