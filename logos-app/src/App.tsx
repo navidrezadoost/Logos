@@ -4,6 +4,7 @@ import { Toolbar } from "./components/toolbar/Toolbar";
 import { LayersPanel } from "./components/layers/LayersPanel";
 import { Inspector } from "./components/inspector/Inspector";
 import { AssetsPanel } from "./components/assets/AssetsPanel";
+import { AIPanel } from "./components/ai/AIPanel";
 import { useUiStore } from "./stores/uiStore";
 import { initPersistence, loadPersistedDocument, stopPersistence } from "./offline/persist";
 import { createSyncManager } from "./offline/sync";
@@ -14,6 +15,8 @@ const DOCUMENT_ID = "local";
 export default function App(): React.ReactElement {
   const layersPanelOpen = useUiStore((s) => s.layersPanelOpen);
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
+  const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
+  const toggleAiPanel = useUiStore((s) => s.toggleAiPanel);
   const [syncStatus, setSyncStatus] = useSyncStatus(
     navigator.onLine ? "online" : "offline"
   );
@@ -67,6 +70,32 @@ export default function App(): React.ReactElement {
 
       {/* Right inspector panel */}
       {inspectorOpen && <Inspector />}
+
+      {/* AI Design Assistant panel */}
+      {aiPanelOpen && <AIPanel />}
+
+      {/* AI toggle button */}
+      <button
+        onClick={toggleAiPanel}
+        title="Toggle AI Assistant"
+        style={{
+          position: "absolute",
+          top: 12,
+          right: aiPanelOpen ? 316 : 12,
+          zIndex: 200,
+          background: aiPanelOpen ? "#89b4fa" : "#313244",
+          color: aiPanelOpen ? "#1e1e2e" : "#cdd6f4",
+          border: "none",
+          borderRadius: 6,
+          padding: "6px 10px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          transition: "right 0.15s, background 0.15s",
+        }}
+      >
+        ✦ AI
+      </button>
 
       {/* Sync status indicator — bottom-right overlay */}
       <div

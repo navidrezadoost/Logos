@@ -11,6 +11,9 @@ import { HighLevelOverviewTool } from "./tools/HighLevelOverviewTool";
 import { LogosApiInfoTool } from "./tools/LogosApiInfoTool";
 import { ExportShapeTool } from "./tools/ExportShapeTool";
 import { ImportImageTool } from "./tools/ImportImageTool";
+import { GenerateLayoutTool } from "./tools/GenerateLayoutTool";
+import { ApplyPaletteTool } from "./tools/ApplyPaletteTool";
+import { BreakpointTool } from "./tools/BreakpointTool";
 import { ReplServer } from "./ReplServer";
 import { ApiDocs } from "./ApiDocs";
 
@@ -130,6 +133,11 @@ export class LogosMcpServer {
         if (this.isFileSystemAccessEnabled()) {
             toolInstances.push(new ImportImageTool(this));
         }
+
+        // AI Design Assistant tools (P4.6)
+        toolInstances.push(new GenerateLayoutTool(this));
+        toolInstances.push(new ApplyPaletteTool(this));
+        toolInstances.push(new BreakpointTool(this));
 
         for (const tool of toolInstances) {
             const toolName = tool.getToolName();
