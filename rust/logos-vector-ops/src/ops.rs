@@ -7,7 +7,8 @@
 use logos_vector::{Region, VectorNetwork};
 
 use crate::boolean::{greiner_boolean, Op};
-use crate::convert::{poly_to_network, region_to_poly};
+use crate::convert::{region_to_poly};
+use crate::curve_fit::fit_and_insert;
 
 /// The four boolean operations on closed regions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,8 +95,11 @@ pub fn boolean_op(
 
         let mut out_net = VectorNetwork::new();
         let mut out_regions = Vec::new();
+        // Default tolerance: 1.0 pixel. Callers may wish to tune this based
+        // on the document zoom level, but 1.0 covers all typical design docs.
+        const CURVE_FIT_TOLERANCE: f64 = 1.0;
         for poly in &output_polys {
-            if let Some(region) = poly_to_network(&mut out_net, poly) {
+            if let Some(region) = fit_and_insert(&mut out_net, poly, CURVE_FIT_TOLERANCE) {
                 out_regions.push(region);
             }
         }

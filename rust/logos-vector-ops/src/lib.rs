@@ -29,9 +29,11 @@
 
 pub mod boolean;
 pub mod convert;
+pub mod curve_fit;
 pub mod ops;
 
 #[cfg(feature = "skia")]
 pub mod skia_ops;
 
 pub use ops::{boolean_op, BoolOp, BoolResult};
+pub use curve_fit::{fit_bezier_curves, CubicBezier};
