@@ -48,6 +48,7 @@
 (declare ^:private process-changes-and-validate)
 (declare ^:private take-snapshot?)
 (declare ^:private invalidate-caches!)
+(declare ^:private get-competing-change-sets)
 
 ;; PUBLIC API; intended to be used outside of this module
 (declare update-file!)
