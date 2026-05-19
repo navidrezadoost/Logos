@@ -2,7 +2,7 @@
  * components/toolbar/Toolbar.tsx
  *
  * Vertical icon toolbar (left edge of the workspace).
- * Keyboard shortcuts: V=select, R=rect, O=ellipse, T=text, P=pen, H=hand
+ * Keyboard shortcuts: V=select, R=rect, O=ellipse, T=text, P=pen, H=hand, K=prototype
  */
 
 import { useEffect } from "react";
@@ -25,6 +25,7 @@ const TOOLS: ToolButton[] = [
   { tool: "ellipse", icon: "○",  label: "Ellipse",   shortcut: "O" },
   { tool: "text",    icon: "T",  label: "Text",      shortcut: "T" },
   { tool: "path",    icon: "✏",  label: "Pen",       shortcut: "P" },
+  { tool: "prototype", icon: "⬡", label: "Prototype", shortcut: "K" },
   { tool: "hand",    icon: "✋", label: "Pan",       shortcut: "H" },
 ];
 
@@ -57,6 +58,7 @@ export function Toolbar(): React.ReactElement {
         case "o": setTool("ellipse"); break;
         case "t": setTool("text"); break;
         case "p": setTool("path"); break;
+        case "k": setTool("prototype"); break;
         case "h": setTool("hand"); break;
         case "0": resetView(); break;
         case "escape": clearSelection(); setTool("select"); break;

@@ -41,7 +41,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       };
     }),
 
-  selectRange: (ids) => set({ selectedIds: ids }),
+  selectRange: (ids) => set({ selectedIds: Array.from(new Set(ids)) }),
 
   clearSelection: () => set({ selectedIds: [] }),
 }));

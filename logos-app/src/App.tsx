@@ -6,8 +6,11 @@ import { Inspector } from "./components/inspector/Inspector";
 import { AssetsPanel } from "./components/assets/AssetsPanel";
 import { AIPanel } from "./components/ai/AIPanel";
 import { TemplateGallery } from "./components/gallery/TemplateGallery";
+import { PrototypePreview } from "./components/prototype/PrototypePreview";
 import { useTemplateStore } from "./stores/templateStore";
+import { useProtoStore } from "./stores/prototypeStore";
 import { useUiStore } from "./stores/uiStore";
+import { useDocumentStore } from "./stores/documentStore";
 import { initPersistence, loadPersistedDocument, stopPersistence } from "./offline/persist";
 import { createSyncManager } from "./offline/sync";
 import { SyncIndicator, useSyncStatus } from "./offline/indicator";
@@ -20,9 +23,16 @@ export default function App(): React.ReactElement {
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const toggleAiPanel = useUiStore((s) => s.toggleAiPanel);
   const openGallery = useTemplateStore((s) => s.openGallery);
+  const { activeTool, setTool } = useUiStore();
+  const { startPreview } = useProtoStore();
+  const currentPageId = useDocumentStore((s) => s.currentPageId);
+  const pages = useDocumentStore((s) => s.pages);
   const [syncStatus, setSyncStatus] = useSyncStatus(
     navigator.onLine ? "online" : "offline"
   );
+
+  const currentPage = pages[currentPageId];
+  const previewStartId = currentPage?.rootShapeIds[0] ?? null;
 
   useEffect(() => {
     let mgr: ReturnType<typeof createSyncManager> | null = null;
@@ -80,6 +90,9 @@ export default function App(): React.ReactElement {
       {/* Template Library (always mounted; manages open state internally) */}
       <TemplateGallery />
 
+      {/* Prototype Preview (always mounted; manages open state internally) */}
+      <PrototypePreview />
+
       {/* Templates button */}
       <button
         onClick={openGallery}
@@ -100,6 +113,53 @@ export default function App(): React.ReactElement {
         }}
       >
         ⊞ Templates
+      </button>
+
+      {/* Prototype tool button */}
+      <button
+        onClick={() => setTool(activeTool === "prototype" ? "select" : "prototype")}
+        title="Prototype mode — draw connections between frames"
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 168,
+          zIndex: 200,
+          background: activeTool === "prototype" ? "#cba6f7" : "#313244",
+          color: activeTool === "prototype" ? "#1e1e2e" : "#cdd6f4",
+          border: "none",
+          borderRadius: 6,
+          padding: "6px 10px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+          transition: "background 0.15s",
+        }}
+      >
+        ⬡ Prototype
+      </button>
+
+      {/* Preview button */}
+      <button
+        onClick={() => {
+          if (previewStartId) startPreview(previewStartId);
+        }}
+        title="Preview prototype"
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 280,
+          zIndex: 200,
+          background: "#313244",
+          color: "#a6e3a1",
+          border: "none",
+          borderRadius: 6,
+          padding: "6px 10px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        ▶ Preview
       </button>
 
       {/* AI toggle button */}

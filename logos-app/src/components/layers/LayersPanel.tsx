@@ -6,20 +6,55 @@
  * are mounted.
  */
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCurrentPageShapes, useDocumentStore } from "../../stores/documentStore";
 import { useSelectionStore, useIsSelected } from "../../stores/selectionStore";
 import type { Shape } from "../../types/shapes";
+import { MultiSelectChips, type ScrollMode } from "../ui/MultiSelectChips";
 
 const ITEM_HEIGHT = 32;
 
 export function LayersPanel(): React.ReactElement {
   const shapes = useCurrentPageShapes();
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastSelectedIdRef = useRef<string | null>(null);
+
+  // ── Type filter ───────────────────────────────────────────────────────────
+  const allTypes = Array.from(new Set(shapes.map((s) => s.type))).sort() as string[];
+  const [filteredTypes, setFilteredTypes] = useState<string[]>([]);
+  const [filterScrollMode, setFilterScrollMode] = useState<ScrollMode>("wrap");
+
+  const visibleShapes =
+    filteredTypes.length === 0
+      ? shapes
+      : shapes.filter((s) => filteredTypes.includes(s.type));
+
+  function handleRowSelect(e: React.MouseEvent<HTMLDivElement>, shape: Shape) {
+    const { select, toggleSelect, selectRange } = useSelectionStore.getState();
+
+    if (e.shiftKey && lastSelectedIdRef.current) {
+      const start = visibleShapes.findIndex((s) => s.id === lastSelectedIdRef.current);
+      const end = visibleShapes.findIndex((s) => s.id === shape.id);
+      if (start !== -1 && end !== -1) {
+        const [from, to] = start < end ? [start, end] : [end, start];
+          selectRange(visibleShapes.slice(from, to + 1).map((s) => s.id));
+        return;
+      }
+    }
+
+    if (e.metaKey || e.ctrlKey) {
+      toggleSelect(shape.id);
+      lastSelectedIdRef.current = shape.id;
+      return;
+    }
+
+    select(shape.id);
+    lastSelectedIdRef.current = shape.id;
+  }
 
   const virtualizer = useVirtualizer({
-    count: shapes.length,
+    count: visibleShapes.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ITEM_HEIGHT,
     overscan: 8,
@@ -28,15 +63,57 @@ export function LayersPanel(): React.ReactElement {
   return (
     <div style={panelStyle}>
       <div style={headerStyle}>Layers</div>
-      {shapes.length === 0 ? (
+
+      {/* Type filter bar — only shown when shapes exist */}
+      {allTypes.length > 0 && (
+        <div style={{ padding: "6px 8px", borderBottom: "1px solid #313244" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <span style={{ fontSize: 10, color: "#585b70", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Filter
+            </span>
+            <div style={{ display: "flex", gap: 2 }}>
+              {(["wrap", "scroll", "truncate"] as ScrollMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setFilterScrollMode(mode)}
+                  title={`${mode} mode`}
+                  style={{
+                    background: filterScrollMode === mode ? "#313244" : "transparent",
+                    border: "1px solid",
+                    borderColor: filterScrollMode === mode ? "#45475a" : "transparent",
+                    borderRadius: 3,
+                    color: filterScrollMode === mode ? "#cdd6f4" : "#45475a",
+                    fontSize: 10,
+                    padding: "1px 4px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {mode[0].toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          <MultiSelectChips
+            options={allTypes}
+            selected={filteredTypes}
+            onChange={setFilteredTypes}
+            getLabel={(v) => v}
+            getIcon={(v) => shapeIcon(v)}
+            scrollMode={filterScrollMode}
+            maxVisible={3}
+            allowEmpty
+          />
+        </div>
+      )}
+      {visibleShapes.length === 0 ? (
         <div style={{ padding: 12, color: "#45475a", fontSize: 11 }}>
-          No shapes yet. Press R to add one.
+          {filteredTypes.length > 0 ? "No shapes match the active filter." : "No shapes yet. Press R to add one."}
         </div>
       ) : (
         <div ref={scrollRef} style={{ overflowY: "auto", flex: 1 }}>
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {virtualizer.getVirtualItems().map((vRow) => {
-              const shape = shapes[vRow.index];
+              const shape = visibleShapes[vRow.index];
               return (
                 <div
                   key={shape.id}
@@ -48,7 +125,7 @@ export function LayersPanel(): React.ReactElement {
                     height: ITEM_HEIGHT,
                   }}
                 >
-                  <ShapeRow shape={shape} />
+                  <ShapeRow shape={shape} onSelect={handleRowSelect} />
                 </div>
               );
             })}
@@ -61,14 +138,19 @@ export function LayersPanel(): React.ReactElement {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ShapeRow({ shape }: { shape: Shape }): React.ReactElement {
+function ShapeRow({
+  shape,
+  onSelect,
+}: {
+  shape: Shape;
+  onSelect: (e: React.MouseEvent<HTMLDivElement>, shape: Shape) => void;
+}): React.ReactElement {
   const isSelected = useIsSelected(shape.id);
-  const { select } = useSelectionStore();
   const { removeShape } = useDocumentStore();
 
   return (
     <div
-      onClick={() => select(shape.id)}
+      onClick={(e) => onSelect(e, shape)}
       style={{
         display: "flex",
         alignItems: "center",
@@ -82,6 +164,7 @@ function ShapeRow({ shape }: { shape: Shape }): React.ReactElement {
         color: "#cdd6f4",
         userSelect: "none",
       }}
+      title="Click to select · Ctrl/Cmd-click to toggle · Shift-click for range"
       onMouseEnter={(e) => {
         if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "#1e1e2e";
       }}
