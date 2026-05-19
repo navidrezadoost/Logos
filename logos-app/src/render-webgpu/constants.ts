@@ -137,3 +137,22 @@ export const BINDING = {
   SHAPES:    1,
   RESULT:    2,
 } as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Local LLM inference (P5.5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** LLM uniform buffer size (bytes): 16 × u32/f32 = 64 bytes. */
+export const LLM_UNIFORM_BYTES = 64;
+
+/** Maximum context window (prompt + generated tokens). */
+export const LLM_MAX_SEQ = 256;
+
+/** Maximum newly-generated tokens per request. */
+export const LLM_MAX_NEW_TOKENS = 128;
+
+/** Default URL to fetch model weights from. */
+export const LLM_DEFAULT_MODEL_URL = "/models/logos-ai-sm.bin";
+
+/** IndexedDB database name for weight caching. */
+export const LLM_CACHE_DB_NAME = "logos-ai-cache";

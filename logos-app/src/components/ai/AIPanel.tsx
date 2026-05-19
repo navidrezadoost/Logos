@@ -10,7 +10,7 @@
  */
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import { useAiStore, type AiTab, type AiMessage } from "../../stores/aiStore";
+import { useAiStore, type AiTab, type AiMessage, type InferenceMode } from "../../stores/aiStore";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles (CSS-in-JS objects)
@@ -196,21 +196,70 @@ function GenerateTab() {
     const [x, setX] = useState("0");
     const [y, setY] = useState("0");
     const [width, setWidth] = useState("800");
-    const sendGeneratePrompt = useAiStore((s) => s.sendGeneratePrompt);
-    const isLoading = useAiStore((s) => s.isLoading);
+    const sendGeneratePrompt   = useAiStore((s) => s.sendGeneratePrompt);
+    const sendLocalLLMPrompt   = useAiStore((s) => s.sendLocalLLMPrompt);
+    const inferenceMode        = useAiStore((s) => s.inferenceMode);
+    const setInferenceMode     = useAiStore((s) => s.setInferenceMode);
+    const isLoading            = useAiStore((s) => s.isLoading);
+    const llmProgress          = useAiStore((s) => s.llmProgress);
 
     const handleSubmit = useCallback(() => {
         if (!prompt.trim() || isLoading) return;
-        sendGeneratePrompt(prompt.trim(), Number(x) || 0, Number(y) || 0, Number(width) || 800);
+        const nx = Number(x) || 0;
+        const ny = Number(y) || 0;
+        const nw = Number(width) || 800;
+        if (inferenceMode === "local") {
+            sendLocalLLMPrompt(prompt.trim(), nx, ny, nw);
+        } else {
+            sendGeneratePrompt(prompt.trim(), nx, ny, nw);
+        }
         setPrompt("");
-    }, [prompt, x, y, width, isLoading, sendGeneratePrompt]);
+    }, [prompt, x, y, width, isLoading, inferenceMode, sendGeneratePrompt, sendLocalLLMPrompt]);
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmit();
     };
 
+    const modeBtn = (mode: InferenceMode, label: string) => ({
+        ...BTN_GHOST,
+        padding: "3px 10px",
+        fontSize: 11,
+        borderColor:  inferenceMode === mode ? "#89b4fa" : "#313244",
+        color:        inferenceMode === mode ? "#89b4fa" : "#6c7086",
+        background:   inferenceMode === mode ? "#1a2744" : "transparent",
+    } as React.CSSProperties);
+
     return (
         <div style={CONTROLS}>
+            {/* Inference mode toggle */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 10, color: "#6c7086", marginRight: 4 }}>Inference:</span>
+                <button style={modeBtn("cloud", "Cloud")}  onClick={() => setInferenceMode("cloud")}>☁ Cloud</button>
+                <button style={modeBtn("local", "Local")}  onClick={() => setInferenceMode("local")}>⚡ Local</button>
+            </div>
+            {/* Model download progress (only shown during local model load) */}
+            {inferenceMode === "local" && llmProgress && (
+                <div style={{ fontSize: 10, color: "#89b4fa", padding: "2px 0" }}>
+                    {llmProgress.label}
+                    {llmProgress.total > 0 && (
+                        <div style={{
+                            marginTop: 3, height: 3, borderRadius: 2,
+                            background: "#313244", overflow: "hidden",
+                        }}>
+                            <div style={{
+                                height: "100%", borderRadius: 2,
+                                background: "#89b4fa",
+                                width: `${Math.round(llmProgress.loaded / llmProgress.total * 100)}%`,
+                            }} />
+                        </div>
+                    )}
+                </div>
+            )}
+            {inferenceMode === "local" && !llmProgress && (
+                <div style={{ fontSize: 10, color: "#45475a" }}>
+                    Local model runs entirely on your GPU — zero data sent to server.
+                </div>
+            )}
             <div>
                 <div style={LABEL}>Describe the layout you want</div>
                 <textarea
@@ -239,7 +288,9 @@ function GenerateTab() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 10, color: "#45475a" }}>⌘↵ to send</span>
                 <button style={{ ...BTN_PRIMARY, opacity: isLoading ? 0.5 : 1 }} onClick={handleSubmit} disabled={isLoading}>
-                    {isLoading ? "Generating…" : "Generate"}
+                    {isLoading
+                        ? (inferenceMode === "local" ? "Inferring…" : "Generating…")
+                        : (inferenceMode === "local" ? "⚡ Generate" : "Generate")}
                 </button>
             </div>
         </div>
