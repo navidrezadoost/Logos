@@ -24,6 +24,8 @@ import { useSelectionStore } from "../../stores/selectionStore";
 import { useUiStore } from "../../stores/uiStore";
 import { usePenStore } from "../../stores/penStore";
 import { useComponentStore } from "../../stores/componentStore";
+import { useProtoStore } from "../../stores/prototypeStore";
+import { PrototypeOverlay } from "../prototype/PrototypeOverlay";
 import { DRAG_COMPONENT_TYPE } from "../assets/AssetsPanel";
 import { workerPool } from "../../worker";
 import { createRect } from "../../types/shapes";
@@ -142,6 +144,10 @@ export function Canvas(): React.ReactElement {
 
   const isDrawTool = activeTool === "rect" || activeTool === "ellipse";
   const isPenTool = activeTool === "path";
+  const isPrototypeTool = activeTool === "prototype";
+
+  // Prototype store
+  const proto = useProtoStore();
 
   // ── Commit pen session (close or open path) ────────────────────────────────
   const commitPen = useCallback(
@@ -182,6 +188,38 @@ export function Canvas(): React.ReactElement {
     (e: React.MouseEvent<HTMLDivElement>) => {
       const { x, y } = toCanvas(e);
 
+      // ── Prototype tool ──────────────────────────────────────────────────────
+      if (isPrototypeTool) {
+        const hitShape = shapes.find(
+          (s) => s.parentId === null &&
+            x >= s.bounds.x && x <= s.bounds.x + s.bounds.w &&
+            y >= s.bounds.y && y <= s.bounds.y + s.bounds.h
+        );
+        if (hitShape) {
+          if (proto.pendingSource && proto.pendingSource !== hitShape.id) {
+            // Complete connection
+            proto.addInteraction(proto.pendingSource, {
+              trigger: "click",
+              target: hitShape.id,
+              transition: "instant",
+              duration: 300,
+              easing: "ease",
+            });
+            proto.setPendingSource(null);
+            proto.setArrowCursor(null);
+          } else {
+            // Start new connection
+            proto.setPendingSource(hitShape.id);
+          }
+        } else {
+          // Clicked empty space — cancel
+          proto.setPendingSource(null);
+          proto.setArrowCursor(null);
+          proto.clearConnectionSelection();
+        }
+        return;
+      }
+
       // ── Pen tool ────────────────────────────────────────────────────────────
       if (isPenTool) {
         e.preventDefault();
@@ -208,12 +246,18 @@ export function Canvas(): React.ReactElement {
       e.preventDefault();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, isDrawTool, pen, zoom, commitPen, panX, panY]
+    [isPenTool, isDrawTool, isPrototypeTool, pen, zoom, commitPen, panX, panY, proto, shapes]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const { x, y } = toCanvas(e);
+
+      if (isPrototypeTool && proto.pendingSource) {
+        const rect = containerRef.current!.getBoundingClientRect();
+        proto.setArrowCursor({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        return;
+      }
 
       if (isPenTool) {
         pen.setCursor({ x, y });
@@ -227,11 +271,13 @@ export function Canvas(): React.ReactElement {
       setDrag((d) => d ? { ...d, currentX: x, currentY: y } : null);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, pen, drag, panX, panY, zoom]
+    [isPenTool, isPrototypeTool, pen, drag, panX, panY, zoom, proto]
   );
 
   const handleMouseUp = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isPrototypeTool) return; // mouseup handled in mousedown
+
       if (isPenTool) {
         pen.endAnchorDrag();
         return;
@@ -272,13 +318,14 @@ export function Canvas(): React.ReactElement {
       setTool("select");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, pen, drag, activeTool, addRect, addShape, select, setTool, shapes, clearSelection, commitPen]
+    [isPenTool, isPrototypeTool, pen, drag, activeTool, addRect, addShape, select, setTool, shapes, clearSelection, commitPen]
   );
 
   const cursor =
     activeTool === "hand" ? "grab"
     : isDrawTool ? "crosshair"
     : isPenTool ? "crosshair"
+    : isPrototypeTool ? "crosshair"
     : activeTool === "text" ? "text"
     : "default";
 
@@ -346,6 +393,17 @@ export function Canvas(): React.ReactElement {
 
       {/* Drag preview overlay */}
       {previewStyle && <div style={previewStyle} />}
+
+      {/* Prototype tool overlay — arrows and connection drawing */}
+      {isPrototypeTool && (
+        <PrototypeOverlay
+          shapes={shapes}
+          zoom={zoom}
+          panX={panX}
+          panY={panY}
+          arrowDragEnd={proto.arrowCursor}
+        />
+      )}
 
       {/* Pen tool overlay — SVG drawn on top of the WASM canvas */}
       {isPenTool && (
