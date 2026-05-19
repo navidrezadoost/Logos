@@ -34,6 +34,13 @@ export const SHAPE_ENTRY_F32S  = SHAPE_ENTRY_BYTES / 4; // 12
 /** Maximum shapes uploaded to the GPU buffer in one batch. */
 export const MAX_SHAPES = 16_384;
 
+/**
+ * Maximum number of tile textures held in the tile cache.
+ * Older entries are evicted (LRU by insertion order) when this limit is
+ * reached.  256 tiles × 512²px × 4 bytes ≈ 256 MiB of GPU texture memory.
+ */
+export const MAX_TILE_CACHE = 256;
+
 /** Snapping grid distance threshold in canvas pixels. */
 export const SNAP_THRESHOLD_PX = 8;
 

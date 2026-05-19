@@ -36,7 +36,9 @@ import { packShapes, createShapeBuffer, uploadShapes, type PackedShapes } from "
 import { TilePipeline } from "./tile-pipeline";
 import { HitTestPipeline } from "./hit-test-pipeline";
 import { SnapPipeline, type SnapResult } from "./snap-pipeline";
-import { TILE_SIZE_PX, SNAP_THRESHOLD_PX } from "./constants";
+import { CompositePipeline } from "./composite-pipeline";
+import { LayoutPipeline, type LayoutBoundsResult, type LayoutPadding } from "./layout-pipeline";
+import { TILE_SIZE_PX, SNAP_THRESHOLD_PX, MAX_TILE_CACHE } from "./constants";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tile rectangle helpers (mirror of Rust `TileRect`)
@@ -79,13 +81,15 @@ function visibleTiles(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class TileRenderer {
-  private readonly gpu:          WebGPUHandle;
-  private readonly shapeBuffer:  GPUBuffer;
-  private readonly tilePipeline: TilePipeline;
-  private readonly hitPipeline:  HitTestPipeline;
-  private readonly snapPipeline: SnapPipeline;
+  private readonly gpu:               WebGPUHandle;
+  private readonly shapeBuffer:       GPUBuffer;
+  private readonly tilePipeline:      TilePipeline;
+  private readonly hitPipeline:       HitTestPipeline;
+  private readonly snapPipeline:      SnapPipeline;
+  private readonly compositePipeline: CompositePipeline;
+  private readonly layoutPipeline:    LayoutPipeline;
 
-  /** Tile texture cache: key = "tx,ty" → GPUTexture */
+  /** Tile texture cache: key = "tx,ty" → GPUTexture (insertion-order LRU) */
   private readonly tileCache = new Map<string, GPUTexture>();
 
   private lastPacked: PackedShapes = { data: new Float32Array(0), count: 0 };
@@ -98,12 +102,16 @@ export class TileRenderer {
     tilePipeline:            TilePipeline,
     hitPipeline:             HitTestPipeline,
     snapPipeline:            SnapPipeline,
+    compositePipeline:       CompositePipeline,
+    layoutPipeline:          LayoutPipeline,
   ) {
-    this.gpu          = gpu;
-    this.shapeBuffer  = shapeBuffer;
-    this.tilePipeline = tilePipeline;
-    this.hitPipeline  = hitPipeline;
-    this.snapPipeline = snapPipeline;
+    this.gpu               = gpu;
+    this.shapeBuffer       = shapeBuffer;
+    this.tilePipeline      = tilePipeline;
+    this.hitPipeline       = hitPipeline;
+    this.snapPipeline      = snapPipeline;
+    this.compositePipeline = compositePipeline;
+    this.layoutPipeline    = layoutPipeline;
   }
 
   // ── Factory ──────────────────────────────────────────────────────────────
@@ -139,9 +147,15 @@ export class TileRenderer {
     const snapPipeline = new SnapPipeline(device);
     await snapPipeline.init();
 
+    const compositePipeline = new CompositePipeline(device, format);
+
+    const layoutPipeline = new LayoutPipeline();
+    await layoutPipeline.init(device);
+
     return new TileRenderer(
       canvas, canvasCtx, gpu,
       shapeBuffer, tilePipeline, hitPipeline, snapPipeline,
+      compositePipeline, layoutPipeline,
     );
   }
 
@@ -179,7 +193,12 @@ export class TileRenderer {
     // Composite target: the canvas swap-chain texture.
     const swapChainView = this.ctx.getCurrentTexture().createView();
 
+    // Notify the composite pipeline that a new frame is starting so its
+    // uniform-buffer pool cursor is reset.
+    this.compositePipeline.beginFrame();
+
     // Render each tile to a cached texture, then blit to swap-chain.
+    let isFirstTile = true;
     for (const { tx, ty } of tiles) {
       const key     = `${tx},${ty}`;
       const tileTex = this._getOrCreateTileTexture(key, format);
@@ -200,7 +219,17 @@ export class TileRenderer {
       // Blit tile to swap-chain at the correct screen position.
       const screenX = Math.round(originX * zoom + panX);
       const screenY = Math.round(originY * zoom + panY);
-      this._blitTile(encoder, tileTex, swapChainView, screenX, screenY, zoom);
+      const screenW = Math.round(tileCanvas * zoom);
+      const screenH = Math.round(tileCanvas * zoom);
+
+      this.compositePipeline.blitTile(
+        encoder, swapChainView, tileTex,
+        screenX, screenY, screenW, screenH,
+        vpW, vpH,
+        /* opacity */ 1,
+        /* loadOp  */ isFirstTile ? "clear" : "load",
+      );
+      isFirstTile = false;
     }
 
     device.queue.submit([encoder.finish()]);
@@ -219,6 +248,26 @@ export class TileRenderer {
       this.lastPacked.count,
       canvasX, canvasY,
     );
+  }
+
+  // ── GPU compute layout ────────────────────────────────────────────────────
+
+  /**
+   * GPU-compute the bounding box of `children` using the WebGPU compute
+   * pipeline (mirrors `logos-layout/flex/bounds.rs::compute_bounds`).
+   *
+   * @param children Float32Array packed as [x0,y0,w0,h0, …].
+   * @param availW   Available container width.
+   * @param availH   Available container height.
+   * @param padding  Padding struct (top, right, bottom, left).
+   */
+  computeBounds(
+    children: Float32Array,
+    availW:   number,
+    availH:   number,
+    padding:  LayoutPadding,
+  ): Promise<LayoutBoundsResult> {
+    return this.layoutPipeline.computeBounds(children, availW, availH, padding);
   }
 
   // ── Async GPU snap ────────────────────────────────────────────────────────
@@ -244,7 +293,20 @@ export class TileRenderer {
   // ── Internal helpers ─────────────────────────────────────────────────────
 
   private _getOrCreateTileTexture(key: string, format: GPUTextureFormat): GPUTexture {
-    if (this.tileCache.has(key)) return this.tileCache.get(key)!;
+    if (this.tileCache.has(key)) {
+      // Re-insert to refresh insertion order (LRU hit).
+      const existing = this.tileCache.get(key)!;
+      this.tileCache.delete(key);
+      this.tileCache.set(key, existing);
+      return existing;
+    }
+
+    // Evict the oldest entry if we are at capacity.
+    if (this.tileCache.size >= MAX_TILE_CACHE) {
+      const oldestKey = this.tileCache.keys().next().value as string;
+      this.tileCache.get(oldestKey)!.destroy();
+      this.tileCache.delete(oldestKey);
+    }
 
     const tex = this.gpu.device.createTexture({
       label:  `logos-tile-${key}`,
@@ -261,31 +323,7 @@ export class TileRenderer {
     this.tileCache.clear();
   }
 
-  /**
-   * Blit a tile texture onto the swap-chain texture at screen position (sx, sy).
-   * Uses a copy-texture-to-texture for the simple non-transformed case.
-   *
-   * NOTE: This is the 1:1 pixel blit path. For sub-pixel positions or transforms,
-   * a full-screen quad pass would be used instead — that is a Phase 5.1 refinement.
-   */
-  private _blitTile(
-    encoder:     GPUCommandEncoder,
-    src:         GPUTexture,
-    dstView:     GPUTextureView,
-    screenX:     number,
-    screenY:     number,
-    _zoom:       number,
-  ): void {
-    // Simple blit: only valid when tile maps 1:1 to screen pixels (zoom=1).
-    // At other zoom levels this falls back to rendering quads (Phase 5.1).
-    // For the PoC we skip the blit if out-of-bounds or non-unit zoom.
-    void encoder;
-    void src;
-    void dstView;
-    void screenX;
-    void screenY;
-    // Phase 5.1 will add a dedicated compositing pass here.
-  }
+  // (Replaced by CompositePipeline.blitTile — see renderFrame())
 
   // ── Cleanup ──────────────────────────────────────────────────────────────
 
@@ -294,6 +332,8 @@ export class TileRenderer {
     this.tilePipeline.destroy();
     this.hitPipeline.destroy();
     this.snapPipeline.destroy();
+    this.compositePipeline.destroy();
+    this.layoutPipeline.destroy();
     this.shapeBuffer.destroy();
     this.ctx.unconfigure();
   }

@@ -12,4 +12,7 @@ export { TileRenderer } from "./tile-renderer";
 export { isWebGPUSupported, requestWebGPUDevice } from "./adapter";
 export type { WebGPUHandle } from "./adapter";
 export type { SnapResult }   from "./snap-pipeline";
-export { TILE_SIZE_PX, SNAP_THRESHOLD_PX, MAX_SHAPES } from "./constants";
+export { CompositePipeline } from "./composite-pipeline";
+export { LayoutPipeline }    from "./layout-pipeline";
+export type { LayoutBoundsResult, LayoutPadding } from "./layout-pipeline";
+export { TILE_SIZE_PX, SNAP_THRESHOLD_PX, MAX_SHAPES, MAX_TILE_CACHE } from "./constants";
