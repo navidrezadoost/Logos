@@ -31,3 +31,14 @@
 
 # Generated files — mark as generated so Linguist excludes from stats
 logos-app/src/types/generated/*.d.ts  linguist-generated=true
+
+# ── Historical dead code — preserved for git blame, not compiled ──────────────
+# frontend/ was the ClojureScript SPA superseded by logos-app/ in M5.
+# exporter/ ClojureScript files are historical; the exporter is TypeScript.
+# library/ was the ClojureScript UI component library, no longer built.
+# Marking as linguist-vendored removes them from language statistics entirely.
+frontend/**/*.cljs  linguist-vendored=true
+frontend/**/*.cljc  linguist-vendored=true
+exporter/**/*.cljs  linguist-vendored=true
+library/**/*.cljs   linguist-vendored=true
+library/**/*.cljc   linguist-vendored=true
