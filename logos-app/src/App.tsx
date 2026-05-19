@@ -7,6 +7,7 @@ import { AssetsPanel } from "./components/assets/AssetsPanel";
 import { AIPanel } from "./components/ai/AIPanel";
 import { TemplateGallery } from "./components/gallery/TemplateGallery";
 import { PrototypePreview } from "./components/prototype/PrototypePreview";
+import { DevModePanel } from "./components/devmode/DevModePanel";
 import { useTemplateStore } from "./stores/templateStore";
 import { useProtoStore } from "./stores/prototypeStore";
 import { useUiStore } from "./stores/uiStore";
@@ -81,8 +82,11 @@ export default function App(): React.ReactElement {
       {/* Main canvas — fills remaining space */}
       <Canvas />
 
-      {/* Right inspector panel */}
-      {inspectorOpen && <Inspector />}
+      {/* Right inspector panel — hidden in Dev mode */}
+      {inspectorOpen && activeTool !== "dev" && <Inspector />}
+
+      {/* Dev Mode inspection panel — shown only when Dev tool is active */}
+      {activeTool === "dev" && <DevModePanel />}
 
       {/* AI Design Assistant panel */}
       {aiPanelOpen && <AIPanel />}

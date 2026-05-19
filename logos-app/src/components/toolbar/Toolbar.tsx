@@ -26,6 +26,7 @@ const TOOLS: ToolButton[] = [
   { tool: "text",    icon: "T",  label: "Text",      shortcut: "T" },
   { tool: "path",    icon: "✏",  label: "Pen",       shortcut: "P" },
   { tool: "prototype", icon: "⬡", label: "Prototype", shortcut: "K" },
+  { tool: "dev",     icon: "</>",  label: "Dev Mode",  shortcut: "D" },
   { tool: "hand",    icon: "✋", label: "Pan",       shortcut: "H" },
 ];
 
@@ -59,6 +60,7 @@ export function Toolbar(): React.ReactElement {
         case "t": setTool("text"); break;
         case "p": setTool("path"); break;
         case "k": setTool("prototype"); break;
+        case "d": setTool("dev"); break;
         case "h": setTool("hand"); break;
         case "0": resetView(); break;
         case "escape": clearSelection(); setTool("select"); break;

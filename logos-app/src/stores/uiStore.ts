@@ -7,7 +7,7 @@
 
 import { create } from "zustand";
 
-export type Tool = "select" | "rect" | "ellipse" | "text" | "path" | "hand" | "prototype";
+export type Tool = "select" | "rect" | "ellipse" | "text" | "path" | "hand" | "prototype" | "dev";
 
 interface UiState {
   activeTool: Tool;
