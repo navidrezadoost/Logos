@@ -48,6 +48,10 @@ pub enum GridTrackType {
     Flex,
     /// Content-sized track (auto).
     Auto,
+    /// Subgrid — inherit track definitions from the parent grid.
+    /// The item itself does not define tracks; instead its children align to
+    /// the parent grid's track lines within the item's occupied span.
+    Subgrid,
 }
 
 impl GridTrackType {
@@ -67,6 +71,7 @@ impl GridTrackType {
             "percent" => GridTrackType::Percent,
             "flex"    => GridTrackType::Flex,
             "auto"    => GridTrackType::Auto,
+            "subgrid" => GridTrackType::Subgrid,
             _         => GridTrackType::Auto,
         }
     }
@@ -78,7 +83,13 @@ impl GridTrackType {
             GridTrackType::Percent => "percent",
             GridTrackType::Flex    => "flex",
             GridTrackType::Auto    => "auto",
+            GridTrackType::Subgrid => "subgrid",
         }
+    }
+
+    /// Returns `true` if this track inherits definitions from the parent grid.
+    pub fn is_subgrid(&self) -> bool {
+        matches!(self, GridTrackType::Subgrid)
     }
 }
 
@@ -161,7 +172,10 @@ impl GridTrack {
         match self.track_type {
             GridTrackType::Fixed => self.value,
             GridTrackType::Percent => self.value.map(|pct| container_size * pct / 100.0),
-            GridTrackType::Flex | GridTrackType::Auto => None,
+            // Flex and Auto are resolved in subsequent passes.
+            // Subgrid inherits track definitions from the parent; its own size
+            // is determined by the parent's track allocation, not by a local px value.
+            GridTrackType::Flex | GridTrackType::Auto | GridTrackType::Subgrid => None,
         }
     }
 }
@@ -980,5 +994,35 @@ mod tests {
         // When flex value is None, resolve should return None (unresolved)
         let t = GridTrack { track_type: GridTrackType::Flex, value: None };
         assert_eq!(t.resolve_px(400.0), None);
+    }
+
+    // ------------------------------------------------------------------
+    // P4.3: Subgrid track type
+    // ------------------------------------------------------------------
+
+    /// `Subgrid` parses from "subgrid", reports is_subgrid(), and resolves
+    /// to `None` (size comes from the parent grid, not a local px value).
+    #[test]
+    fn test_subgrid_track_type() {
+        let t = GridTrackType::from_str("subgrid");
+        assert_eq!(t, GridTrackType::Subgrid);
+        assert!(t.is_subgrid());
+        assert_eq!(t.as_str(), "subgrid");
+
+        let track = GridTrack { track_type: GridTrackType::Subgrid, value: None };
+        // resolve_px must return None for subgrid (inherited from parent).
+        assert_eq!(
+            track.resolve_px(500.0),
+            None,
+            "subgrid track size is determined by parent, not locally"
+        );
+    }
+
+    /// `GridTrack::from_parts("subgrid", None)` produces a Subgrid track.
+    #[test]
+    fn test_track_from_parts_subgrid() {
+        let t = GridTrack::from_parts("subgrid", None);
+        assert_eq!(t.track_type, GridTrackType::Subgrid);
+        assert!(t.track_type.is_subgrid());
     }
 }
