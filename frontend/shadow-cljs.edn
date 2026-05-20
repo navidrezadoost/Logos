@@ -98,7 +98,7 @@
    {:main
     {:entries [app.worker]
      :web-worker true
-     :prepend-js "importScripts('../render.js');"
+     :prepend-js "self.CLOSURE_NO_DEPS = true; self.CLOSURE_IMPORT_SCRIPT = function() { return false; }; importScripts('../render.js');"
      :depends-on #{}}}
 
    :js-options
