@@ -15,6 +15,7 @@
    [app.common.types.component :as ctk]
    [app.common.types.container :as ctn]
    [app.common.types.shape :as cts]
+   [app.common.types.shape.radius :as ctsr]
    [app.main.data.helpers :as dsh]
    [app.main.data.workspace :as dw]
    [app.main.data.workspace.shapes :as dwsh]
@@ -327,6 +328,74 @@
              :style {:fill (if (dbg/enabled? :handlers) "yellow" "none")
                      :stroke-width 0}}]]))
 
+;; Size of corner-radius drag handles (screen pixels)
+(def ^:private corner-radius-handle-size 5)
+
+(mf/defc corner-radius-handlers*
+  "Renders four small circle handles, one per corner, that let the user
+  drag to set the border radius of a shape.  Ctrl while dragging limits
+  the change to the dragged corner only."
+  {::mf/private true}
+  [{:keys [shape zoom color on-start-radius-drag]}]
+  (let [selrect-transform (mf/deref refs/workspace-selrect)
+        transform-type    (mf/deref refs/current-transform)
+        read-only?        (mf/use-ctx ctx/workspace-read-only?)
+        [selrect transform] (dsh/get-selrect selrect-transform shape)]
+
+    (when (and (not ^boolean read-only?)
+               (not (:blocked shape))
+               (not (:hide-radius-handles shape))
+               (ctsr/has-radius? shape)
+               (some? selrect)
+               (not (or (= transform-type :move)
+                        (= transform-type :rotate)
+                        (= transform-type :resize)
+                        (= transform-type :radius-drag))))
+
+      (let [x      (dm/get-prop selrect :x)
+            y      (dm/get-prop selrect :y)
+            w      (dm/get-prop selrect :width)
+            h      (dm/get-prop selrect :height)
+            min-d  (/ 10.0 zoom)   ; min visible offset in design-units
+            max-d  (* (min w h) 0.4)
+            r1     (or (:r1 shape) 0)
+            r2     (or (:r2 shape) 0)
+            r3     (or (:r3 shape) 0)
+            r4     (or (:r4 shape) 0)
+            d1     (min (max (double r1) min-d) max-d)
+            d2     (min (max (double r2) min-d) max-d)
+            d3     (min (max (double r3) min-d) max-d)
+            d4     (min (max (double r4) min-d) max-d)
+            hw     (/ corner-radius-handle-size zoom) ; visual half-size
+
+            ;; Apply the shape transform to get the final SVG coordinate
+            tp     (fn [cx cy]
+                     (let [pt (gpt/transform (gpt/point cx cy) transform)]
+                       [(dm/get-prop pt :x) (dm/get-prop pt :y)]))
+
+            corners [[:r1 (tp (+ x d1) (+ y d1))         "nwse-resize"]
+                     [:r2 (tp (- (+ x w) d2) (+ y d2))   "nesw-resize"]
+                     [:r3 (tp (- (+ x w) d3) (- (+ y h) d3)) "nwse-resize"]
+                     [:r4 (tp (+ x d4) (- (+ y h) d4))   "nesw-resize"]]]
+
+        [:g.radius-controls {:pointer-events "visible"}
+         (for [[corner [cx cy] cursor] corners]
+           [:circle
+            {:key       (name corner)
+             :cx        cx
+             :cy        cy
+             :r         hw
+             :data-corner (name corner)
+             :style     {:fill          "var(--app-white)"
+                         :stroke        color
+                         :stroke-width  (/ 1.5 zoom)
+                         :cursor        cursor}
+             :on-pointer-down
+             (fn [event]
+               (when (dom/left-mouse? event)
+                 (dom/stop-propagation event)
+                 (on-start-radius-drag event corner)))}])]))))
+
 (mf/defc controls-selection*
   [{:keys [shape zoom color on-move-selected on-context-menu disabled]}]
   (let [selrect-transform (mf/deref refs/workspace-selrect)
@@ -524,15 +593,28 @@
          (fn [event]
            (when (dom/left-mouse? event)
              (dom/stop-propagation event)
-             (st/emit! (dw/start-rotate [shape])))))]
+             (st/emit! (dw/start-rotate [shape])))))
 
-    [:> controls-handlers*
-     {:shape shape
-      :zoom zoom
-      :color color
-      :disabled disabled
-      :on-rotate on-rotate
-      :on-resize on-resize}]))
+        on-start-radius-drag
+        (mf/use-fn
+         (mf/deps shape-id)
+         (fn [_event corner]
+           (st/emit! (dw/start-radius-drag shape-id corner))))]
+
+    [:g.single-handlers
+     [:> controls-handlers*
+      {:shape shape
+       :zoom zoom
+       :color color
+       :disabled disabled
+       :on-rotate on-rotate
+       :on-resize on-resize}]
+     (when-not ^boolean disabled
+       [:> corner-radius-handlers*
+        {:shape shape
+         :zoom zoom
+         :color color
+         :on-start-radius-drag on-start-radius-drag}])]))
 
 (mf/defc single-selection*
   {::mf/private true}

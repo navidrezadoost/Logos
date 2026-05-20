@@ -26,6 +26,7 @@
    [app.common.types.shape-tree :as ctst]
    [app.common.types.shape.attrs :refer [editable-attrs]]
    [app.common.types.shape.layout :as ctl]
+   [app.common.types.shape.radius :as ctsr]
    [app.common.uuid :as uuid]
    [app.main.data.changes :as dch]
    [app.main.data.event :as ev]
@@ -33,6 +34,7 @@
    [app.main.data.workspace.collapse :as dwc]
    [app.main.data.workspace.modifiers :as dwm]
    [app.main.data.workspace.selection :as dws]
+   [app.main.data.workspace.shapes :as dwsh]
    [app.main.data.workspace.undo :as dwu]
    [app.main.features :as features]
    [app.main.snap :as snap]
@@ -527,6 +529,58 @@
                  (rx/take-until stopper)))
            (rx/of (dwm/apply-modifiers)
                   (finish-transform))))))))
+
+(defn start-radius-drag
+  "Enter mouse radius-drag mode for the given corner (:r1 :r2 :r3 :r4).
+  While dragging, the corner radius changes in real time.
+  Ctrl held → only the specific corner updates.
+  No modifier → all four corners update together.
+  All changes within one drag are grouped into a single undo step."
+  [shape-id corner]
+  (ptk/reify ::start-radius-drag
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-local :transform] :radius-drag))
+
+    ptk/WatchEvent
+    (watch [_ state stream]
+      (let [stopper  (mse/drag-stopper stream)
+            shape    (dsh/lookup-shape state shape-id)
+            w        (or (dm/get-prop shape :width) 0)
+            h        (or (dm/get-prop shape :height) 0)
+            max-r    (mth/floor (/ (mth/min w h) 2))
+            init-r   (get shape corner 0)
+            initial  @ms/mouse-position
+            undo-id  (js/Symbol)]
+
+        (rx/concat
+         (rx/of (dwu/start-undo-transaction undo-id))
+
+         (->> ms/mouse-position
+              (rx/with-latest-from ms/mouse-position-ctrl)
+              (rx/map
+               (fn [[pos ctrl?]]
+                 (let [dx    (- (.-x pos) (.-x initial))
+                       dy    (- (.-y pos) (.-y initial))
+                       ;; Project displacement onto the inward diagonal of each corner:
+                       ;; dragging toward the shape centre increases the radius.
+                       delta (case corner
+                               :r1 (/ (+ dx dy) 2.0)         ; top-left     → drag ↘
+                               :r2 (/ (+ (- dx) dy) 2.0)     ; top-right    → drag ↙
+                               :r3 (/ (+ (- dx) (- dy)) 2.0) ; bottom-right → drag ↖
+                               :r4 (/ (+ dx (- dy)) 2.0))    ; bottom-left  → drag ↗
+                       new-r (int (mth/clamp (+ init-r delta) 0 max-r))]
+                   (dwsh/update-shapes
+                    [shape-id]
+                    (fn [s]
+                      (if ctrl?
+                        (ctsr/set-radius-to-single-corner s corner new-r)
+                        (ctsr/set-radius-to-all-corners s new-r)))
+                    {:reg-objects? true :attrs [:r1 :r2 :r3 :r4]}))))
+              (rx/take-until stopper))
+
+         (rx/of (dwu/commit-undo-transaction undo-id)
+                (finish-transform)))))))
 
 (defn increase-rotation
   "Rotate shapes a fixed angle, from a keyboard action."

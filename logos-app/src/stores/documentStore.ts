@@ -10,6 +10,7 @@
  */
 
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import { nanoid } from "nanoid";
 import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, type ComponentMeta, type InstanceMeta, createRect, createVectorNetwork, IDENTITY_TRANSFORM } from "../types/shapes";
 
@@ -327,11 +328,19 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 // Selectors
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Ordered top-level shapes for the current page. */
+/** Ordered top-level shapes for the current page.
+ *
+ * Uses `useShallow` so Zustand compares the returned array element-by-element
+ * (by reference) rather than always treating the new `flatMap` result as a
+ * different value.  Without this, React 18's useSyncExternalStore fires the
+ * "getSnapshot should be cached" warning and causes an infinite update loop.
+ */
 export function useCurrentPageShapes(): Shape[] {
-  return useDocumentStore((s) => {
-    const page = s.pages[s.currentPageId];
-    if (!page) return [];
-    return page.rootShapeIds.flatMap((id) => (s.shapes[id] ? [s.shapes[id]] : []));
-  });
+  return useDocumentStore(
+    useShallow((s) => {
+      const page = s.pages[s.currentPageId];
+      if (!page) return [];
+      return page.rootShapeIds.flatMap((id) => (s.shapes[id] ? [s.shapes[id]] : []));
+    })
+  );
 }

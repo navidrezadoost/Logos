@@ -556,6 +556,7 @@
         (when (options :radius)
           [:> border-radius-menu* {:class (stl/css :border-radius)
                                    :ids ids
+                                   :shapes shapes
                                    :values values
                                    :applied-tokens applied-tokens}])])
      (when (or (options :clip-content)

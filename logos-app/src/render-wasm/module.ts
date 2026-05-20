@@ -144,12 +144,56 @@ export async function loadRenderWasm(
 
   _loadPromise = (async () => {
     try {
-      // Step 1: dynamic-import the ES6 Emscripten bundle
-      const { default: createRustSkiaModule } = await import(
-        /* @vite-ignore */ jsUrl
-      );
+      // Probe whether the Emscripten artefact exists before attempting to
+      // load it.  We use XMLHttpRequest (HEAD) rather than fetch() because
+      // Vite's dev-server middleware intercepts fetch() requests that map to
+      // its publicDir and throws a build-time error even for runtime calls.
+      const wasmExists = await new Promise<boolean>((resolve) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("HEAD", jsUrl, /* async= */ true);
+        xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
+        xhr.onerror = () => resolve(false);
+        xhr.send();
+      });
 
-      // Step 2: boot the module; `locateFile` tells Emscripten where the .wasm is
+      if (!wasmExists) {
+        console.warn(
+          "[logos-app] render-wasm not available — Canvas 2D fallback active.\n" +
+          "  To enable: build render-wasm with EMSDK and copy\n" +
+          "  render-wasm.{js,wasm} to frontend/resources/public/js/"
+        );
+        return null;
+      }
+
+      // Load the Emscripten JS bundle as raw text, then create a blob: URL
+      // so the dynamic import goes through the browser's native module loader
+      // and completely bypasses Vite's transform pipeline.
+      const xhr2 = new XMLHttpRequest();
+      const jsText = await new Promise<string | null>((resolve) => {
+        xhr2.open("GET", jsUrl, true);
+        xhr2.onload = () => xhr2.status === 200 ? resolve(xhr2.responseText) : resolve(null);
+        xhr2.onerror = () => resolve(null);
+        xhr2.send();
+      });
+      if (!jsText) return null;
+
+      const blob = new Blob([jsText], { type: "text/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+
+      // Dynamic-import the blob URL — Vite never intercepts blob: imports.
+      let createRustSkiaModule: ((opts?: object) => Promise<RenderWasmModule>) | undefined;
+      try {
+        ({ default: createRustSkiaModule } = await import(/* @vite-ignore */ blobUrl) as { default: typeof createRustSkiaModule });
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+
+      if (typeof createRustSkiaModule !== "function") {
+        console.warn("[logos-app] render-wasm bundle has no default export — Canvas 2D fallback active.");
+        return null;
+      }
+
+      // Boot the module; `locateFile` tells Emscripten where the .wasm binary is.
       const mod: RenderWasmModule = await createRustSkiaModule({
         locateFile: (_filename: string) => wasmUrl,
       });

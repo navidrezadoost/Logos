@@ -2,7 +2,6 @@
   "name": "@logos/plugins-runtime",
   "version": "1.4.2",
   "dependencies": {
-    "@logos/plugin-types": "workspace:../plugin-types",
     "ses": "^1.1.0",
     "zod": "^3.22.4"
   },
@@ -15,5 +14,13 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "vite-plugin-dts": "^4.0.0",
+    "vite-plugin-static-copy": "^2.0.0",
+    "vite-tsconfig-paths": "^5.0.0",
+    "vite-plugin-checker": "^0.8.0",
+    "typescript": "^5.0.0"
   }
 }

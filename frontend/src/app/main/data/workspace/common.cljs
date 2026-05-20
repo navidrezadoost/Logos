@@ -65,6 +65,14 @@
     (update [_ state]
       (update-in state [:workspace-local :hide-toolbar] not))))
 
+(defn set-toolbar-position
+  [position]
+  {:pre [(#{:top :bottom :left :right} position)]}
+  (ptk/reify ::set-toolbar-position
+    ptk/UpdateEvent
+    (update [_ state]
+      (assoc-in state [:workspace-local :toolbar-position] position))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Read only
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

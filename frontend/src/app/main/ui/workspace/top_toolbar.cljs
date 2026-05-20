@@ -79,6 +79,9 @@
                  (if path-editing? true visibility)))
              refs/workspace-local))
 
+(def ^:private toolbar-position-ref
+  (l/derived #(get % :toolbar-position :bottom) refs/workspace-local))
+
 (mf/defc top-toolbar*
   {::mf/memo true}
   [{:keys [layout]}]
@@ -91,6 +94,9 @@
         read-only?    (mf/use-ctx ctx/workspace-read-only?)
         rulers?       (mf/deref refs/rulers?)
         hide-toolbar? (mf/deref toolbar-hidden-ref)
+        toolbar-pos   (mf/deref toolbar-position-ref)
+
+        show-pos-menu? (mf/use-state false)
 
         interrupt
         (mf/use-fn #(st/emit! :interrupt (dw/clear-edition-mode)))
@@ -124,6 +130,26 @@
            (dom/blur! (dom/get-target event))
            (st/emit! (dwc/toggle-toolbar-visibility))))
 
+        toggle-pos-menu
+        (mf/use-fn
+         (fn [event]
+           (dom/stop-propagation event)
+           (let [new-val (not @show-pos-menu?)]
+             (reset! show-pos-menu? new-val)
+             (when new-val
+               (js/setTimeout
+                #(js/document.addEventListener
+                  "click"
+                  (fn [_] (reset! show-pos-menu? false))
+                  #js {:once true :capture false})
+                0)))))
+
+        set-position
+        (mf/use-fn
+         (fn [pos]
+           (reset! show-pos-menu? false)
+           (st/emit! (dwc/set-toolbar-position pos))))
+
         test-tooltip-board-text
         (if (not (:workspace-visited props))
           (tr "workspace.toolbar.frame-first-time" (sc/get-tooltip :draw-frame))
@@ -132,7 +158,14 @@
     (when-not ^boolean read-only?
       [:aside {:class (stl/css-case :main-toolbar true
                                     :main-toolbar-no-rulers (not rulers?)
-                                    :main-toolbar-hidden hide-toolbar?)}
+                                    :main-toolbar-hidden   hide-toolbar?
+                                    :main-toolbar-vertical (or (= toolbar-pos :left)
+                                                               (= toolbar-pos :right)))
+               :style (case toolbar-pos
+                        :top    #js {:top "28px"  :left "50%"  :transform "translateX(-50%)" :bottom "unset" :right "unset"}
+                        :left   #js {:top "50%"   :left "28px" :transform "translateY(-50%)" :bottom "unset" :right "unset"}
+                        :right  #js {:top "50%"   :right "28px" :left "unset" :transform "translateY(-50%)" :bottom "unset"}
+                        #js {:bottom "28px" :left "50%" :transform "translateX(-50%)" :top "unset" :right "unset"})}
        [:ul {:class (stl/css :main-toolbar-options)
              :data-testid "toolbar-options"}
         [:li
@@ -230,7 +263,41 @@
                               :aria-pressed (contains? layout :debug-panel)
                               :aria-label (tr "workspace.toolbar.debug")
                               :tooltip-placement "bottom"
-                              :on-click toggle-debug-panel}]])]]
+                              :on-click toggle-debug-panel}]])
+
+         ;; ── Position trigger button (popup is at [:aside] level) ──
+         [:li
+          [:> icon-button* {:variant "ghost"
+                            :class (stl/css :main-toolbar-options-button)
+                            :icon i/expand
+                            :aria-pressed @show-pos-menu?
+                            :aria-label "Toolbar position"
+                            :tooltip-placement "bottom"
+                            :on-click toggle-pos-menu}]]]]
+
+       ;; ── Position popup – direct child of [:aside] ──────────────
+       ;; Shows only the 3 positions that are NOT the current one.
+       (when @show-pos-menu?
+         (let [all-positions [[:top    i/arrow-up    "Top"]
+                              [:left   i/arrow-left  "Left"]
+                              [:right  i/arrow-right "Right"]
+                              [:bottom i/arrow-down  "Bottom"]]
+               options       (remove #(= (first %) toolbar-pos) all-positions)]
+           [:div {:class (stl/css :toolbar-position-menu)
+                  :on-click dom/stop-propagation
+                  :style (case toolbar-pos
+                           :top   #js {:top "calc(100% + 8px)"   :left "50%" :transform "translateX(-50%)" :bottom "unset" :right "unset"}
+                           :left  #js {:left "calc(100% + 8px)"  :top "50%"  :transform "translateY(-50%)" :bottom "unset" :right "unset"}
+                           :right #js {:right "calc(100% + 8px)" :top "50%"  :transform "translateY(-50%)" :bottom "unset" :left "unset"}
+                           #js {:bottom "calc(100% + 8px)" :left "50%" :transform "translateX(-50%)" :top "unset" :right "unset"})}
+            (for [[pos icon label] options]
+              [:div {:key (name pos) :class (stl/css :pos-row)}
+               [:> icon-button* {:variant "ghost"
+                                 :class (stl/css :pos-btn)
+                                 :icon icon
+                                 :aria-label label
+                                 :on-click #(set-position pos)}]
+               [:span {:class (stl/css :pos-label)} label]])]))
 
        [:button {:title (tr "workspace.toolbar.toggle-toolbar")
                  :aria-label (tr "workspace.toolbar.toggle-toolbar")

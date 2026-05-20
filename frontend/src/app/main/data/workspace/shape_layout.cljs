@@ -35,6 +35,8 @@
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
+(declare update-layout-positions)
+
 (def layout-keys
   [:layout
    :layout-flex-dir
@@ -153,12 +155,13 @@
              ;; they are process together. It will get a better performance.
              (rx/buffer-time 100)
              (rx/filter #(d/not-empty? %))
-             (rx/mapcat
+             (rx/merge-map
               (fn [data]
                 (->> (group-by :page-id data)
                      (map (fn [[page-id items]]
                             (let [ids (reduce #(into %1 (:ids %2)) #{} items)]
-                              (update-layout-positions {:page-id page-id :ids ids})))))))
+                              (update-layout-positions {:page-id page-id :ids ids}))))
+                     (rx/from))))
              (rx/take-until stopper))))))
 
 (defn finalize-shape-layout

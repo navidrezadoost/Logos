@@ -51,6 +51,13 @@
    [promesa.core :as p]
    [rumext.v2 :as mf]))
 
+(declare set-object)
+(declare process-object)
+(declare request-render)
+(declare begin-shapes-loading!)
+(declare end-shapes-loading!)
+(declare render-finish)
+
 (def use-dpr? (contains? cf/flags :render-wasm-dpr))
 
 (def ^:const UUID-U8-SIZE 16)
@@ -255,7 +262,7 @@
                               (js/console.error "sync-objects async failed" err))))))
          ;; Nothing changed — just ensure the render callback fires
          (do
-           (when render-callback (render-callback))))))))
+           (when render-callback (render-callback)))))))))
 
 (defn- register-deferred-render!
   []

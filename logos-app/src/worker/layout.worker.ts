@@ -65,20 +65,10 @@ let layoutReady = false;
 let wasmModule: WebAssembly.Instance | null = null;
 
 async function initWasm(): Promise<void> {
-  try {
-    // Dynamic import — Vite will bundle the WASM at build time when the
-    // logos-layout-wasm package is built and placed in node_modules.
-    // Until then we fall back to the pure-TS solver below.
-    const mod = await import("logos-layout-wasm" as string).catch(() => null);
-    if (mod) {
-      wasmModule = mod as unknown as WebAssembly.Instance;
-      console.log("[layout.worker] logos-layout-wasm loaded");
-    } else {
-      console.warn("[layout.worker] logos-layout-wasm not found — using TS fallback");
-    }
-  } catch {
-    console.warn("[layout.worker] logos-layout-wasm unavailable — using TS fallback");
-  }
+  // logos-layout-wasm is compiled from rust/logos-layout-wasm and published
+  // as an npm package once the Rust build pipeline is wired up.  Until then
+  // the pure-TS solver below is used as a complete fallback — no dynamic
+  // import is attempted so Vite never tries to resolve the missing package.
   layoutReady = true;
   self.postMessage({ type: "READY" });
 }

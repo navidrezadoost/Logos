@@ -6,39 +6,65 @@
 
 @use "refactor/common-refactor.scss" as deprecated;
 
+// ── Base toolbar ──────────────────────────────────────────────────
+// Position coordinates (top/left/bottom/right/transform) are applied
+// as inline styles from ClojureScript so they always reflect the
+// reactive state without depending on SCSS hot-reload.
+
 .main-toolbar {
   cursor: initial;
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  flex-direction: column;
+  flex-direction: row;
   height: deprecated.$s-56;
+  width: auto;
   padding: deprecated.$s-8 deprecated.$s-16;
   border-radius: deprecated.$s-8;
   border: deprecated.$s-2 solid var(--panel-border-color);
   z-index: deprecated.$z-index-1;
   background-color: var(--color-background-primary);
   transition:
-    top 0.3s,
-    height 0.3s,
-    opacity 0.3s;
-
-  --toolbar-position-y: #{deprecated.$s-28};
-  --toolbar-offset-y: 0px;
-  top: calc(var(--toolbar-position-y) + var(--toolbar-offset-y));
+    height 0.15s ease,
+    width 0.15s ease,
+    opacity 0.3s ease;
 }
 
-.main-toolbar-no-rulers {
-  --toolbar-position-y: 0px;
-  --toolbar-offset-y: #{deprecated.$s-8};
+// ── Vertical mode (left / right positions) ────────────────────────
+.main-toolbar-vertical {
+  flex-direction: column;
+  height: auto;
+  width: deprecated.$s-56;
+  padding: deprecated.$s-16 deprecated.$s-8;
+
+  .main-toolbar-options {
+    flex-direction: column;
+  }
+
+  .toolbar-handler {
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: deprecated.$s-12;
+    top: unset;
+    right: unset;
+  }
+
+  &.main-toolbar-hidden {
+    width: deprecated.$s-16;
+    height: auto;
+    border-radius: deprecated.$s-8;
+
+    .main-toolbar-options {
+      opacity: deprecated.$op-0;
+      visibility: hidden;
+    }
+  }
 }
 
-.main-toolbar-hidden {
-  --toolbar-offset-y: -#{deprecated.$s-4};
+// ── Hidden state (horizontal: bottom/top) ─────────────────────────
+.main-toolbar-hidden:not(.main-toolbar-vertical) {
   height: deprecated.$s-16;
-  z-index: deprecated.$z-index-1;
   border-radius: 0 0 deprecated.$s-8 deprecated.$s-8;
   border-block-start: 0;
 
@@ -48,9 +74,11 @@
   }
 }
 
+// ── Options list ──────────────────────────────────────────────────
 .main-toolbar-options {
   position: relative;
   display: flex;
+  flex-direction: row;
   align-items: center;
   margin: 0;
   opacity: deprecated.$op-10;
@@ -67,6 +95,7 @@
   width: deprecated.$s-36;
 }
 
+// ── Drag/toggle handle ────────────────────────────────────────────
 .toolbar-handler {
   @include deprecated.flexCenter;
   @include deprecated.buttonStyle;
@@ -84,4 +113,59 @@
     border-radius: deprecated.$s-4;
     background-color: var(--palette-handler-background-color);
   }
+}
+
+// ── Position popup ────────────────────────────────────────────────
+// top/bottom/left/right/transform are injected as inline style from
+// ClojureScript based on current toolbar-pos value.
+
+.toolbar-position-menu {
+  @include deprecated.menuShadow;
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: deprecated.$s-8;
+  border-radius: deprecated.$br-8;
+  border: deprecated.$s-2 solid var(--panel-border-color);
+  background-color: var(--color-background-primary);
+  z-index: deprecated.$z-index-4;
+}
+
+.pos-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: deprecated.$s-4;
+  height: deprecated.$s-36;
+}
+
+.pos-center-dot {
+  width: deprecated.$s-8;
+  height: deprecated.$s-8;
+  border-radius: 50%;
+  background-color: var(--panel-border-color);
+}
+
+.pos-btn {
+  height: deprecated.$s-28;
+  width: deprecated.$s-28;
+  border-radius: deprecated.$br-6;
+
+  &:hover {
+    background-color: var(--menu-background-color-hover);
+  }
+}
+
+.pos-label {
+  font-size: deprecated.$fs-11;
+  color: var(--color-foreground-secondary);
+  min-width: deprecated.$s-36;
+}
+
+.pos-btn-active {
+  background-color: var(--menu-background-color-hover);
+  border: 1px solid var(--color-accent-primary, var(--panel-border-color));
 }

@@ -501,7 +501,7 @@
                (ptk/reify ::clear-layout-cache
                  ptk/EffectEvent
                  (effect [_ _ _] (lc/clear-all!)))
-               (ntf/hide)))))))
+               (ntf/hide))))))
 
 (defn- reload-current-file
   []
@@ -1412,6 +1412,7 @@
 (dm/export dwt/update-dimensions)
 (dm/export dwt/change-orientation)
 (dm/export dwt/start-rotate)
+(dm/export dwt/start-radius-drag)
 (dm/export dwt/increase-rotation)
 (dm/export dwt/start-move-selected)
 (dm/export dwt/move-selected)

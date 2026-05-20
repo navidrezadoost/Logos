@@ -6,6 +6,40 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — 2026-05-20
+
+### Workspace toolbar — repositionable position & design polish
+
+**Context**: The main workspace toolbar can now be moved to any of the four screen edges (top, bottom, left, right). A compact popup triggered by the new Position button shows the three non-current positions as icon + label rows. When placed on the left or right the toolbar switches to a vertical column layout automatically.
+
+#### Frontend — `frontend/src/app/main/`
+
+- **`data/workspace/common.cljs`** — Added `set-toolbar-position [position]` event. Validates input against `#{:top :bottom :left :right}` and stores the value in `[:workspace-local :toolbar-position]`.
+- **`ui/workspace/top_toolbar.cljs`**
+  - Added `toolbar-position-ref` lens (defaults to `:bottom`).
+  - New local state `show-pos-menu?` with `toggle-pos-menu` (click-to-open, auto-close on next outside click via `{:once true}` document listener delayed with `setTimeout(0)`).
+  - New `set-position` handler emits `set-toolbar-position` and closes the popup.
+  - The `[:aside]` element now receives reactive inline styles covering all four anchor positions and gains `.main-toolbar-vertical` for left/right orientations.
+  - Position popup shows exactly the **3 non-current positions** using `(remove #(= (first %) toolbar-pos) all-positions)`.
+- **`ui/workspace/top_toolbar.scss`**
+  - `.main-toolbar` — `position: absolute`, placement driven by inline styles.
+  - `.main-toolbar-vertical` — column layout, `height: auto`, `width: $s-56`.
+  - `.toolbar-position-menu` — dark-themed floating panel with shadow and `z-index-4`.
+  - `.pos-row`, `.pos-btn`, `.pos-label` — new styles for the position popup rows.
+
+### Radius drag handles on shape corners
+
+**Context**: Individual and uniform corner-radius values can now be adjusted by dragging the circular handles on each corner of a selected rectangle.
+
+#### Frontend — `frontend/src/app/main/`
+
+- **`data/workspace/transforms.cljs`** — Added `start-radius-drag [shape-id corner]` event. Per-corner inward diagonal projection converts drag displacement into a clamped radius delta. Ctrl → single corner; no modifier → all four corners. Single undo transaction wraps the entire drag.
+- **`ui/workspace/sidebar/options/menus/border_radius.cljs`** — Receives `shapes` prop; computes `hide-handles?` from the full shape list.
+- **`ui/workspace/viewport/selection.cljs`** — Renders per-corner radius drag handles for selected rectangles; dispatches `start-radius-drag` on `mousedown`.
+
+---
+
+
 ## [Unreleased] — 2026-05-19
 
 ### P4.2 V4 — WASM Bridge (`phase4/vector-networks-v4`)

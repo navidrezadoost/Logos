@@ -47,7 +47,7 @@
 
 (mf/defc border-radius-menu*
   {::mf/wrap [#(mf/memo' % check-border-radius-menu-props)]}
-  [{:keys [class ids values applied-tokens]}]
+  [{:keys [class ids values applied-tokens shapes]}]
   (let [token-numeric-inputs
         (features/use-feature "tokens/numeric-input")
 
@@ -126,6 +126,20 @@
          (fn []
            (swap! radius-expanded* not)))
 
+        ;; Whether ALL selected shapes have radius handles hidden.
+        ;; A mixed state (some hidden, some not) shows as "not hidden".
+        hide-handles?
+        (and (seq shapes)
+             (every? :hide-radius-handles shapes))
+
+        on-toggle-handles
+        (mf/use-fn
+         (mf/deps ids hide-handles?)
+         (fn []
+           (st/emit!
+            (dwsh/update-shapes ids
+                                (fn [s] (assoc s :hide-radius-handles (not hide-handles?)))
+                                {:attrs [:hide-radius-handles]}))))
 
         on-all-radius-change
         (mf/use-fn
@@ -334,6 +348,16 @@
              :on-change on-radius-r3-change
              :value (:r3 values)}]]]))
 
+     [:> icon-button* {:variant "ghost"
+                       :on-click on-toggle-handles
+                       :aria-pressed hide-handles?
+                       :aria-label (if hide-handles?
+                                     (tr "workspace.options.radius.show-handles")
+                                     (tr "workspace.options.radius.hide-handles"))
+                       :title (if hide-handles?
+                                (tr "workspace.options.radius.show-handles")
+                                (tr "workspace.options.radius.hide-handles"))
+                       :icon (if hide-handles? i/hide i/shown)}]
      [:> icon-button* {:variant "ghost"
                        :on-click toggle-radius-mode
                        :aria-pressed radius-expanded

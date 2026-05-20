@@ -32,6 +32,8 @@
    [cuerdas.core :as str]
    [potok.v2.core :as ptk]))
 
+(declare extract-frame-changes)
+
 (l/set-level! :warn)
 
 (defn- find-request
@@ -305,43 +307,39 @@
                  (rx/map deref)
                  (rx/observe-on :async)
                  (rx/with-latest-from workspace-data-s)
-                 (rx/merge-map (partial extract-frame-changes-v2 page-id))
+                 (rx/merge-map #(rx/from (extract-frame-changes-v2 page-id %)))
                  (rx/tap #(l/trc :hint "incoming change"
                                  :origin "all"
                                  :frame-id (dm/str (:frame-id %))
                                  :geometry? (:geometry? %)))
-                 (rx/share))]
+                  (rx/share))
 
-        (->> (rx/merge
-              ;; 1. Immediate clear for geometry-affecting changes so the sidebar
-              ;;    never shows a stale thumbnail after shapes are moved/deleted.
-              (->> all-commits-s
-                   (rx/filter :geometry?)
-                   (rx/mapcat (fn [{:keys [tag frame-id]}]
-                                (rx/of (clear-thumbnail file-id page-id frame-id tag)))))
+                clear-geometry-s
+                (->> all-commits-s
+                  (rx/filter :geometry?)
+                  (rx/mapcat (fn [{:keys [tag frame-id]}]
+                      (rx/of (clear-thumbnail file-id page-id frame-id tag)))))
 
-              ;; 2. Per-frame 2-second debounced regeneration for ALL changes
-              ;;    (geometry + style).  Cancels and restarts the timer whenever a
-              ;;    new mutation arrives for the same frame within the window.
-              (->> all-commits-s
-                   (rx/tap (fn [{:keys [tag frame-id]}]
-                             (let [job-key [file-id page-id frame-id tag]]
-                               (tbd/schedule-update!
-                                job-key
-                                2000
-                                (fn []
-                                  (tbd/complete-job! job-key)
-                                  (st/emit!
-                                   (update-thumbnail file-id page-id frame-id tag
-                                                     "debounced"))))))))
-                   (rx/ignore))
+                debounce-s
+                (->> all-commits-s
+                  (rx/tap (fn [{:keys [tag frame-id]}]
+                      (let [job-key [file-id page-id frame-id tag]]
+                        (tbd/schedule-update!
+                      job-key
+                      2000
+                      (fn []
+                        (tbd/complete-job! job-key)
+                        (st/emit!
+                         (update-thumbnail file-id page-id frame-id tag
+                               "debounced")))))))
+                  (rx/ignore))
 
-              ;; 3. Cleanup: cancel all pending debounce timers when the page
-              ;;    is finalised so we don't dispatch against a dead page.
-              (->> stream
-                   (rx/filter (ptk/type? ::dwpg/finalize-page))
-                   (rx/take 1)
-                   (rx/tap (fn [_] (tbd/clear-all!)))
-                   (rx/ignore)))
+                cleanup-s
+                (->> stream
+                  (rx/filter (ptk/type? ::dwpg/finalize-page))
+                  (rx/take 1)
+                  (rx/tap (fn [_] (tbd/clear-all!)))
+                  (rx/ignore))]
 
-             (rx/take-until stopper-s))))))
+               (->> (rx/merge clear-geometry-s debounce-s cleanup-s)
+                 (rx/take-until stopper-s))))))
