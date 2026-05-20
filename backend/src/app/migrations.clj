@@ -463,7 +463,10 @@
     :fn (mg/resource "app/migrations/sql/0144-mod-server-error-report-table.sql")}
 
    {:name "0145-fix-plugins-uri-on-profile"
-    :fn mg0145/migrate}])
+    :fn mg0145/migrate}
+
+   {:name "0146-add-file-data-page"
+    :fn (mg/resource "app/migrations/sql/0146-add-file-data-page.sql")}])
 
 
 (defn apply-migrations!
