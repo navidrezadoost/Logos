@@ -1,0 +1,13 @@
+{
+  "name": "logos-figma-plugin",
+  "version": "1.0.0",
+  "description": "Export Figma variables/tokens for import into Logos",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.101.0",
+    "typescript": "^5.4.0"
+  }
+}

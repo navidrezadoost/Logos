@@ -22,6 +22,8 @@
   (ptk/reify ::clear-drawing
     ptk/UpdateEvent
     (update [_ state]
+      (js/console.log "[COMMON] clear-drawing fired; removing workspace-drawing."
+                      (str "tool-was=" (get-in state [:workspace-drawing :tool])))
       (dissoc state :workspace-drawing))))
 
 (defn handle-finish-drawing
@@ -29,20 +31,17 @@
   (ptk/reify ::handle-finish-drawing
     ptk/WatchEvent
     (watch [_ state _]
-      (let [drawing-state
-            (get state :workspace-drawing)
-
-            shape
-            (get drawing-state :object)
-
-            tool
-            (get drawing-state :tool)
-
-            objects
-            (dsh/lookup-page-objects state)
-
-            page-id
-            (:current-page-id state)]
+      (let [drawing-state (get state :workspace-drawing)
+            shape         (get drawing-state :object)
+            tool          (get drawing-state :tool)]
+        (js/console.log "[COMMON] handle-finish-drawing"
+                        (str "tool=" tool)
+                        (str "shape-type=" (:type shape))
+                        (str "initialized?=" (:initialized? shape))
+                        (str "click-draw?=" (:click-draw? shape))
+                        (str "content-len=" (count (:content shape))))
+        (let [objects (dsh/lookup-page-objects state)
+              page-id (:current-page-id state)]
 
         (rx/concat
          (when (:initialized? shape)
@@ -96,5 +95,5 @@
 
          ;; Delay so the mouse event can read the drawing state
          (->> (rx/of (clear-drawing))
-              (rx/delay 0)))))))
+              (rx/delay 0))))))))
 

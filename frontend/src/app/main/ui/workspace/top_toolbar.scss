@@ -116,56 +116,51 @@
 }
 
 // ── Position popup ────────────────────────────────────────────────
-// top/bottom/left/right/transform are injected as inline style from
-// ClojureScript based on current toolbar-pos value.
+// Rendered into <body> via mf/portal with position:fixed so the
+// toolbar's CSS transform does not affect placement.
 
 .toolbar-position-menu {
   @include deprecated.menuShadow;
-  position: absolute;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0;
-  padding: deprecated.$s-8;
+  align-items: stretch;
+  padding: deprecated.$s-4;
   border-radius: deprecated.$br-8;
   border: deprecated.$s-2 solid var(--panel-border-color);
   background-color: var(--color-background-primary);
-  z-index: deprecated.$z-index-4;
+  color: var(--color-foreground-primary);
+  min-width: 120px;
 }
 
 .pos-row {
   display: flex;
   flex-direction: row;
   align-items: center;
-  justify-content: flex-start;
-  gap: deprecated.$s-4;
+  gap: deprecated.$s-8;
   height: deprecated.$s-36;
-}
-
-.pos-center-dot {
-  width: deprecated.$s-8;
-  height: deprecated.$s-8;
-  border-radius: 50%;
-  background-color: var(--panel-border-color);
-}
-
-.pos-btn {
-  height: deprecated.$s-28;
-  width: deprecated.$s-28;
+  padding: 0 deprecated.$s-8;
   border-radius: deprecated.$br-6;
+  border: none;
+  cursor: pointer;
+  background-color: transparent;
+  color: inherit;
+  width: 100%;
+  text-align: left;
 
   &:hover {
     background-color: var(--menu-background-color-hover);
   }
 }
 
-.pos-label {
-  font-size: deprecated.$fs-11;
-  color: var(--color-foreground-secondary);
-  min-width: deprecated.$s-36;
+.pos-icon {
+  flex-shrink: 0;
+  width: deprecated.$s-16;
+  height: deprecated.$s-16;
+  color: inherit;
 }
 
-.pos-btn-active {
-  background-color: var(--menu-background-color-hover);
-  border: 1px solid var(--color-accent-primary, var(--panel-border-color));
+.pos-label {
+  font-size: deprecated.$fs-11;
+  color: inherit;
+  white-space: nowrap;
 }

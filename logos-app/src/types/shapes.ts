@@ -9,6 +9,17 @@
  * ./generated.  Only Logos-specific extensions are declared here.
  */
 
+// Import generated types for local use within this file.
+import type {
+  LinearGradient,
+  RadialGradient,
+  LayoutType,
+  FlexDirection,
+  WrapType,
+  JustifyContent,
+  AlignItems,
+} from "./rust-generated";
+
 // Re-export all generated base types so callers can use a single import path.
 export type {
   BlendMode,
@@ -47,7 +58,7 @@ export type {
   GridCell,
   LayoutAttrs,
   CanonicalShape,
-} from "./generated";
+} from "./rust-generated";
 
 /**
  * Logos shape type extends the Malli schema's ShapeType with three types that
@@ -287,6 +298,30 @@ export interface Shape {
   textColor?: string;
   /** Per-character opacity multiplier [0, 1].  Defaults to 1. */
   textOpacity?: number;
+  /** Line height in canvas pixels.  Undefined = "auto" (font's built-in leading). */
+  lineHeight?: number;
+  /** Letter spacing in canvas pixels.  0 = none. */
+  letterSpacing?: number;
+  /** Horizontal text alignment. */
+  textAlign?: "left" | "center" | "right" | "justify";
+  /** Text decoration. */
+  textDecoration?: "none" | "underline" | "line-through";
+
+  // ── Auto-layout fields (present when type === "frame" with layout enabled) ─
+  /** Whether this frame uses flex layout. */
+  layout?: LayoutType;
+  /** Flex direction (row / column). */
+  layoutFlexDir?: FlexDirection;
+  /** Flex wrap. */
+  layoutWrapType?: WrapType;
+  /** Main-axis alignment. */
+  layoutJustifyContent?: JustifyContent;
+  /** Cross-axis alignment. */
+  layoutAlignItems?: AlignItems;
+  /** Row and column gap in canvas pixels. */
+  layoutGap?: { rowGap?: number; columnGap?: number };
+  /** Inner padding [top, right, bottom, left] in canvas pixels. */
+  layoutPadding?: { p1?: number; p2?: number; p3?: number; p4?: number };
 }
 
 /** Minimal shape factory. */

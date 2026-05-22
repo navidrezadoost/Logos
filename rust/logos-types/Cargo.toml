@@ -1,0 +1,58 @@
+[package]
+name        = "logos-types"
+version     = "0.1.0"
+edition     = "2021"
+description = "Core data types for Logos — shapes, colors, typography, tokens (G1 / logos-types)"
+license-file = "../../LICENSE"
+repository  = "https://github.com/navidrezadoost/Logos"
+
+# This crate is the single source of truth for every domain type in Logos.
+# It replaces `common/src/app/common/types/` and `common/src/app/common/geom/`
+# (the type definitions, not the pure-math geometry which lives in logos-layout).
+#
+# Compilation targets
+# ───────────────────
+#   cargo build                            # native (Go backend via CGo)
+#   cargo build --target wasm32-unknown-unknown --features wasm
+#   wasm-pack build --target web           # browser (TypeScript frontend)
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Enable serde serialization (always-on in practice; behind a feature so
+# pure-native benchmarks can opt out without pulling in serde).
+serde   = ["dep:serde", "uuid/serde"]
+# wasm-bindgen glue for browser targets.
+wasm    = ["wasm-bindgen"]
+# TypeScript type generation.
+# When ts-rs becomes available in the registry, add:
+#   ts-rs = { version = "10", features = ["uuid-impl", "format"], optional = true }
+# and restore:
+#   ts = ["dep:ts-rs", "ts-rs/uuid-impl", "ts-rs/format"]
+# All structs already carry #[cfg_attr(feature = "ts", derive(ts_rs::TS))] etc.
+# so the switch will be a one-line Cargo.toml change.
+ts      = []
+
+[dependencies]
+# UUID generation + serialization.
+uuid = { version = "1", features = ["v4"] }
+
+# Geometry primitives from logos-layout.
+logos-layout = { path = "../logos-layout" }
+
+# Serialization — gated so wasm builds can drop it if needed.
+serde = { version = "1", features = ["derive"], optional = true }
+
+# WASM glue — only for browser builds.
+wasm-bindgen = { version = "0.2", optional = true }
+
+[dev-dependencies]
+# JSON round-trip tests.
+serde_json = "1"
+
+# ── Type-generation binary ────────────────────────────────────────────────────
+[[bin]]
+name = "generate-types"
+path = "src/bin/generate_types.rs"

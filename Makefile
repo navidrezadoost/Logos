@@ -25,8 +25,10 @@ WASM_PACK    := wasm-pack
 RUST_DIR     := rust
 LAYOUT_CRATE := $(RUST_DIR)/logos-layout
 WASM_OUT     := logos-app/public/logos-layout
+GOBACKEND_DIR := backend-go
+GOBIN        := go
 
-.PHONY: build build-app build-rust build-wasm test test-rust clean fmt lint
+.PHONY: build build-app build-rust build-wasm build-go-backend test test-rust generate-rust-types run-go-backend go-mod-tidy clean fmt lint
 
 ## ── Default target ──────────────────────────────────────────────
 ## Add 'build-app' to also build the React frontend
@@ -52,6 +54,41 @@ build-wasm:
 		--target web \
 		--out-dir ../../$(WASM_OUT) \
 		-- --features wasm
+
+## ── TypeScript type generation ─────────────────────────────────
+##
+## Runs the Rust-based TS type generator and writes
+## logos-app/src/types/rust-generated/*.ts
+## Usage:
+##   make generate-rust-types
+##   make generate-rust-types CHECK=1  (exit non-zero if files changed)
+
+## ── Go backend ───────────────────────────────────────────────────────────────
+## Go backend server (Phase G3). Requires DATABASE_URL in environment.
+run-go-backend:
+	@echo "==> Starting Go backend (port 8080)…"
+	cd $(GOBACKEND_DIR) && $(GOBIN) run ./cmd/server
+
+## Build the Go backend binary into backend-go/bin/server.
+build-go-backend:
+	@echo "==> Building Go backend binary…"
+	cd $(GOBACKEND_DIR) && $(GOBIN) build -o bin/server ./cmd/server
+
+## Download Go module dependencies.
+go-mod-tidy:
+	cd $(GOBACKEND_DIR) && $(GOBIN) mod tidy
+
+generate-rust-types:
+	@echo "==> Generating TypeScript types from logos-types (Rust)"
+	$(CARGO) run \
+		--manifest-path $(RUST_DIR)/Cargo.toml \
+		--package logos-types \
+		--bin generate-types \
+		--features logos-types/ts
+	@if [ "$$CHECK" = "1" ]; then \
+		git diff --exit-code logos-app/src/types/rust-generated/ || \
+			(echo "ERROR: Generated types changed. Run make generate-rust-types and commit."; exit 1); \
+	fi
 
 ## ── Tests ───────────────────────────────────────────────────────
 

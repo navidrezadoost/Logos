@@ -23,6 +23,7 @@ members = [
     "logos-layout-wasm",
     "logos-rebase",
     "logos-ws",
+    "logos-types",
     "logos-vector",
     "logos-vector-ops",
     "logos-vector-wasm",

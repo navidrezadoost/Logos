@@ -6,7 +6,103 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
-## [Unreleased] — 2026-05-20
+## [Unreleased] — 2026-05-22
+
+### G2 — Rust-native type system (logos-types crate + TS codegen)
+
+**Branches**: `main` / `go/g4-namespaces-2`
+
+A new `rust/logos-types` crate provides the canonical Rust definitions for every domain type (shapes, fills, strokes, colors, geometry, shadows, blur, tokens). A companion build step generates TypeScript `.d.ts` files under `logos-app/src/types/rust-generated/` from the same source of truth, eliminating the previous hand-maintained Malli → TS pipeline.
+
+#### New crate — `rust/logos-types/`
+
+- **`src/lib.rs`** — re-exports all modules.
+- **`src/shape.rs`** — `Shape`, `ShapeType`, `FrameClip` and all sub-shapes (rect, path, text, frame, group, boolean, svg-raw, component-instance, component-set).
+- **`src/geometry.rs`** — `Rect`, `Point`, `Matrix`, `Selrect`, `Transform`.
+- **`src/fill.rs`** — `Fill`, `FillType`, `Gradient`, `GradientStop`, `ImageFit`.
+- **`src/stroke.rs`** — `Stroke`, `StrokeType`, `StrokePosition`, `StrokeAlignment`.
+- **`src/color.rs`** — `Color` (RGBA + optional library reference).
+- **`src/shadow.rs`** — `Shadow`, `ShadowStyle`.
+- **`src/blur.rs`** — `Blur`, `BlurType`.
+- **`src/token.rs`** — `DesignToken`, `TokenType`, `TokenValue`.
+- **`src/compat.rs`** — `ChangeSet`, `Change`, `ChangeOp` for CRDT compatibility shim.
+- **`rust/Cargo.toml`** — added `logos-types` as a workspace member.
+
+#### TypeScript codegen output — `logos-app/src/types/rust-generated/`
+
+Auto-generated from Rust source via `bin/generate-types` replacement pipeline:
+`blur.ts`, `color.ts`, `compat.ts`, `fill.ts`, `geometry.ts`, `index.ts`, `shadow.ts`, `shape.ts`, `stroke.ts`, `token.ts`.
+
+#### Updated — `logos-app/src/types/shapes.ts`
+
+Re-wired to import from `./rust-generated/index` instead of the old `./generated/` directory. The deleted `logos-app/src/types/generated/` hand-maintained files (`changes.d.ts`, `index.d.ts`, `shapes.d.ts`) are removed. The old `bin/generate-types` Babashka script is removed.
+
+---
+
+### G3 + G4 — Go backend skeleton + profile namespace
+
+**Branches**: `go/g4-namespaces-1`, `go/g4-namespaces-2`
+
+Foundation layer for the Go rewrite of the Clojure RPC backend. Implements the full `profile` namespace (auth middleware, storage abstraction, full CRUD) and scaffolds the server, connection pool, Redis client, and S3-compatible storage abstraction.
+
+#### New — `backend-go/`
+
+- **`go.mod` / `go.sum`** — module `github.com/logos-design/logos/backend-go`, Go 1.22. Dependencies: `pgx/v5`, `go-chi/chi/v5`, `go-jose/go-jose/v3`, `go-redis/redis/v9`.
+- **`cmd/server/main.go`** — entry point: loads config, opens DB pool, connects Redis, initialises storage, builds `server.Deps`, starts HTTP server on `$PORT` (default 6060).
+- **`internal/config/config.go`** — env-var driven config: `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `STORAGE_BACKEND`, `STORAGE_LOCAL_DIR`, `S3_BUCKET/REGION/ENDPOINT`, `COOKIE_NAME`.
+- **`internal/db/postgres.go`** — thin `*pgxpool.Pool` wrapper with `New(ctx, url)`.
+- **`internal/redis/redis.go`** — `New(url) *redis.Client` helper.
+- **`internal/auth/session.go`** — JWE session middleware (alg=A256KW, enc=A256GCM, key via HKDF-Blake2b-512). Populates `profileID` in request context. `RequireAuth(w, r) bool` guard. `WithProfileID` for tests.
+- **`internal/storage/storage.go`** — `Backend` interface (`Put/Get/Delete`). `localBackend` writes to `STORAGE_LOCAL_DIR/<bucket>/<id>`. `s3Backend` stub.
+- **`internal/handler/health.go`** — `GET /api/_health` → 200 JSON.
+- **`internal/handler/profile.go`** — `ProfileHandler` (Redis read-through, `logos:cache:profile:<id>`), `UpdateProfileHandler`, `UpdateProfilePropsHandler` (JSONB merge), `UpdateProfilePhotoHandler` (multipart + storage), `DeleteProfileHandler`.
+- **`internal/handler/profile_test.go`** — integration tests (skipped without `TEST_DATABASE_URL`).
+- **`migrations/`** — SQL migration files matching the Clojure backend schema.
+- **`README.md`** — build + run instructions.
+
+#### Makefile updates
+
+- Added `go-build`, `go-run`, `go-test`, `go-vet` targets using `flatpak-spawn --host go`.
+
+---
+
+### logos-app — Migration importers, Figma plugin, toolbar components
+
+**Branch**: `go/g4-namespaces-2`
+
+New first-class features in the `logos-app` companion application.
+
+#### Migration importers — `logos-app/src/migration/`
+
+Three importers that allow opening Figma, Sketch, and Adobe XD files directly in Logos:
+
+- **`figma/figma-importer.ts`** — walks a Figma JSON tree, converts nodes to `Shape` objects using `figma-shape-converter.ts` and `figma-token-converter.ts`.
+- **`sketch/sketch-importer.ts`** — parses Sketch `.sketch` bundle (unzipped JSON). Converters in `sketch-shape-converter.ts` / `sketch-token-converter.ts`.
+- **`xd/xd-importer.ts`** — parses Adobe XD `.xd` manifest JSON. Converters in `xd-shape-converter.ts` / `xd-shape-converter.ts`.
+- **`README.md`** — Format coverage documentation.
+
+#### Figma plugin — `logos-app/figma-plugin/`
+
+A standalone Figma plugin that exports the current selection to the Logos format:
+- **`manifest.json`** — plugin ID and permissions.
+- **`code.ts`** — Figma plugin code (`figma.showUI` + traversal logic). 
+- **`ui.html`** — simple plugin UI with Export button.
+- **`package.json` / `tsconfig.json`** — TypeScript compilation config.
+
+#### New UI components
+
+- **`logos-app/src/components/toolbar/ToolButton.tsx`** — generic icon button for the toolbar, supports active/disabled/tooltip.
+- **`logos-app/src/components/toolbar/ToolDropdown.tsx`** — dropdown panel for grouped tool options (e.g. shape sub-tools).
+- **`logos-app/src/components/ui/ImportMigrationDialog.tsx`** — modal dialog for selecting and loading a Figma/Sketch/XD file. Calls the appropriate importer and emits the resulting shape tree.
+- **`logos-app/src/stores/tokenStore.ts`** — Zustand store for design tokens (CRUD + import from migration).
+- **`logos-app/src/stores/toolbarStore.ts`** — Zustand store for active tool, tool options, and toolbar position state.
+- **`logos-app/src/components/toolbar/Toolbar.tsx`** — extended with `ToolButton`/`ToolDropdown` usage, import trigger, and `toolbarStore` wiring.
+- **`logos-app/src/components/canvas/Canvas.tsx`** — extended with migration shape rendering and token application.
+- **`logos-app/src/App.tsx`** — wired `ImportMigrationDialog` and token/toolbar stores at root level.
+
+---
+
+
 
 ### Workspace toolbar — repositionable position & design polish
 

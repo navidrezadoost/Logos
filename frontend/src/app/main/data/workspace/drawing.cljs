@@ -14,6 +14,7 @@
    [app.main.data.workspace.drawing.box :as box]
    [app.main.data.workspace.drawing.common :as common]
    [app.main.data.workspace.drawing.curve :as curve]
+   [app.main.data.workspace.drawing.shapes :as shapes]
    [app.main.data.workspace.path :as path]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
@@ -28,24 +29,35 @@
   (ptk/reify ::select-for-drawing
     ptk/UpdateEvent
     (update [_ state]
-      (-> state
-          (update :workspace-layout (fn [workspace-layout]
-                                      (if (= tool :comments)
-                                        (disj workspace-layout :document-history)
-                                        workspace-layout)))
-          (update :workspace-drawing assoc :tool tool)
-          ;; When changing drawing tool disable "scale text" mode
-          ;; automatically, to help users that ignore how this
-          ;; mode works.
-          (update :workspace-layout disj :scale-text)))
+      (js/console.log "[DRAWING] select-for-drawing UpdateEvent" (str "tool=" tool)
+                      (str "workspace-drawing before=" (clj->js (get state :workspace-drawing))))
+      (let [next-state (-> state
+                           (update :workspace-layout (fn [workspace-layout]
+                                                       (if (= tool :comments)
+                                                         (disj workspace-layout :document-history)
+                                                         workspace-layout)))
+                           (update :workspace-drawing assoc :tool tool)
+                           (update :workspace-layout disj :scale-text))]
+        (js/console.log "[DRAWING] select-for-drawing state after update"
+                        (str "workspace-drawing.tool=" (get-in next-state [:workspace-drawing :tool])))
+        next-state))
 
     ptk/WatchEvent
     (watch [_ _ stream]
+      (js/console.log "[DRAWING] select-for-drawing WatchEvent" (str "tool=" tool))
       (rx/merge
        (when (= tool :path)
          (rx/of (start-drawing :path)))
 
-       (when (= tool :curve)
+       ;; Re-arm this tool after each completed draw so the user can keep
+       ;; drawing without re-clicking the toolbar (Figma-style sticky tools).
+       ;; :path manages its own cycle; :comments is special.
+       ;; We stop only on :interrupt (user pressed Escape or switched tools).
+       ;; NOTE: do NOT stop on clear-drawing — it fires from within the normal
+       ;; draw-finish sequence (before observe-on :async runs) and would
+       ;; cancel the re-arm race.
+       (when (and (not= tool :comments)
+                  (not= tool :path))
          (let [stopper (rx/filter dwc/interrupt? stream)]
            (->> stream
                 (rx/filter (ptk/type? ::common/handle-finish-drawing))
@@ -53,17 +65,6 @@
                 (rx/take 1)
                 (rx/observe-on :async)
                 (rx/map select-for-drawing)
-                (rx/take-until stopper))))
-
-       ;; NOTE: comments are a special case and they manage they
-       ;; own interrupt cycle.
-       (when (and (not= tool :comments)
-                  (not= tool :path))
-         (let [stopper (rx/filter (ptk/type? ::clear-drawing) stream)]
-           (->> stream
-                (rx/filter dwc/interrupt?)
-                (rx/take 1)
-                (rx/map common/clear-drawing)
                 (rx/take-until stopper))))))))
 
 ;; NOTE/TODO: when an exception is raised in some point of drawing the
@@ -77,11 +78,13 @@
     (ptk/reify ::start-drawing
       ptk/UpdateEvent
       (update [_ state]
+        (js/console.log "[DRAWING] start-drawing UpdateEvent" (str "type=" type))
         (update-in state [:workspace-drawing :lock] #(if (nil? %) lock-id %)))
 
       ptk/WatchEvent
       (watch [_ state stream]
         (let [lock (dm/get-in state [:workspace-drawing :lock])]
+          (js/console.log "[DRAWING] start-drawing WatchEvent" (str "type=" type) (str "lock-match=" (= lock lock-id)))
           (when (= lock lock-id)
             (rx/merge
              (rx/of (handle-drawing type))
@@ -95,10 +98,15 @@
   (ptk/reify ::handle-drawing
     ptk/WatchEvent
     (watch [_ _ _]
+      (js/console.log "[DRAWING] handle-drawing dispatching" (str "type=" type))
       (rx/of
        (case type
-         :path (path/handle-drawing)
-         :curve (curve/handle-drawing)
+         :path    (path/handle-drawing)
+         :curve   (curve/handle-drawing)
+         :line    (shapes/handle-drawing :line)
+         :arrow   (shapes/handle-drawing :arrow)
+         :polygon (shapes/handle-drawing :polygon)
+         :star    (shapes/handle-drawing :star)
          (box/handle-drawing type))))))
 
 (defn change-orientation

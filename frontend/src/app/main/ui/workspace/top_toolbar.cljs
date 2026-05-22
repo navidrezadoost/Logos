@@ -20,9 +20,10 @@
    [app.main.ui.components.file-uploader :refer [file-uploader*]]
    [app.main.ui.context :as ctx]
    [app.main.ui.ds.buttons.icon-button :refer [icon-button*]]
-   [app.main.ui.ds.foundations.assets.icon :as i]
+   [app.main.ui.ds.foundations.assets.icon :as i :refer [icon*]]
    [app.util.dom :as dom]
    [app.util.i18n :as i18n :refer [tr]]
+   [app.util.storage :as storage]
    [app.util.timers :as ts]
    [okulary.core :as l]
    [potok.v2.core :as ptk]
@@ -80,7 +81,211 @@
              refs/workspace-local))
 
 (def ^:private toolbar-position-ref
-  (l/derived #(get % :toolbar-position :bottom) refs/workspace-local))
+  (l/derived (fn [local]
+               (or (get local :toolbar-position)
+                   (some-> (get @storage/user :app.main.data.workspace/toolbar-position) keyword)
+                   :bottom))
+             refs/workspace-local))
+
+;; ─── Tool-group definitions ──────────────────────────────────────────────────
+;; Each group has a :default tool (shown when none of the group is active),
+;; a :tools vector of {:tool kw :label str :shortcut str :icon icon-id-or-nil
+;;                     :text str-or-nil} entries.
+;; :icon is a ds icon-id var; :text is a fallback when no icon exists.
+
+(def ^:private tool-groups
+  [{:id      :move-group
+    :tools   [{:tool :move   :label "Move"      :shortcut "V"       :icon i/move      :text nil}
+              {:tool :hand   :label "Hand"       :shortcut "H"       :icon nil         :text "✋"}
+              {:tool :scale  :label "Scale"      :shortcut "K"       :icon nil         :text "⤡"}]}
+   {:id      :frame-group
+    :tools   [{:tool :frame  :label "Frame"      :shortcut "F"       :icon i/board     :text nil}
+              {:tool :slice  :label "Slice"      :shortcut "S"       :icon i/stroke-rectangle :text nil}]}
+   {:id      :shape-group
+    :tools   [{:tool :rect    :label "Rectangle" :shortcut "R" :icon i/rectangle       :text nil}
+              {:tool :circle  :label "Ellipse"   :shortcut "O" :icon i/elipse          :text nil}
+              {:tool :line    :label "Line"       :shortcut "L" :icon i/stroke-arrow    :text nil}
+              {:tool :arrow   :label "Arrow"      :shortcut nil :icon i/arrow           :text nil}
+              {:tool :polygon :label "Polygon"    :shortcut nil :icon i/stroke-triangle :text nil}
+              {:tool :star    :label "Star"        :shortcut nil :icon nil              :text "☆"}]}
+   {:id      :pen-group
+    :tools   [{:tool :path   :label "Pen"    :shortcut "P" :icon i/path  :text nil}
+              {:tool :curve  :label "Pencil" :shortcut ""  :icon i/curve :text nil}]}])
+
+(defn- tool-in-group?
+  "True if `tool` belongs to the given group entry."
+  [group tool]
+  (some #(= (:tool %) tool) (:tools group)))
+
+(defn- active-tool-def
+  "Returns the tool-def that should be displayed for a group given the current
+  drawtool / move-active state and the group's locally-remembered last tool."
+  [group drawtool move-active? last-tool]
+  (let [tools      (:tools group)
+        active-def (or (some #(when (if (= (:tool %) :move)
+                                     move-active?
+                                     (= drawtool (:tool %)))
+                                 %)
+                             tools)
+                       (some #(when (= (:tool %) last-tool) %) tools)
+                       (first tools))]
+    active-def))
+
+;; ─── Grouped tool button ──────────────────────────────────────────────────────
+
+(mf/defc tool-group-button*
+  "Renders one grouped tool button with a small ▾ chevron that opens a dropdown.
+   Props:
+     :group       – the group map (from tool-groups)
+     :drawtool     – currently selected drawing tool keyword, or nil
+     :move-active  – true when no draw tool is active (Move is selected)
+     :open?        – whether this group's dropdown is open
+     :last-tool    – last tool selected in this group (atom-deref value)
+     :pending-tool – tool clicked but not yet in global state (immediate feedback)
+     :on-activate  – fn called with a tool keyword to activate a tool
+     :on-open      – fn called with no args to open this group's dropdown
+     :on-close     – fn called to close the dropdown"
+  [{:keys [group drawtool move-active? open? last-tool pending-tool on-activate on-close on-open]}]
+  (let [;; Prefer pending-tool for icon display (immediate feedback)
+        display-def  (active-tool-def group drawtool move-active?
+                                      (or pending-tool last-tool))
+        ;; Group is active if drawtool or pending-tool belongs to this group.
+        ;; Also suppress move-group highlight when a non-move tool is pending.
+        group-active (or (and (= (:id group) :move-group)
+                              move-active?
+                              (nil? pending-tool))
+                        (tool-in-group? group drawtool)
+                        (and (some? pending-tool)
+                             (tool-in-group? group pending-tool)))
+        btn-ref      (mf/use-ref nil)
+        btn-rect     (mf/use-state nil)]
+
+    ;; No document-listener needed — outside clicks are caught by the backdrop
+    ;; rendered inside the portal (see below).
+
+    [:li {:ref btn-ref
+          :style #js {:position "relative" :display "flex" :alignItems "center"}}
+     ;; ── Main tool button ────────────────────────────────────────────────
+     [:> icon-button* {:variant        "ghost"
+                       :class          (stl/css :main-toolbar-options-button)
+                       :icon           (or (:icon display-def) i/move)
+                       :aria-pressed   group-active
+                       :aria-label     (str (:label display-def)
+                                            (when-let [s (:shortcut display-def)]
+                                              (str " (" s ")")))
+                       :tooltip-placement "bottom"
+                       :on-click       (fn [_] (on-activate (:tool display-def)))}
+      ;; Text fallback overlay when no ds icon exists
+      (when (nil? (:icon display-def))
+        [:span {:style #js {:position "absolute" :top "50%" :left "50%"
+                             :transform "translate(-50%,-50%)"
+                             :fontSize "13px" :pointerEvents "none"}}
+         (:text display-def)])]
+
+     ;; ── Chevron (dropdown trigger) ───────────────────────────────────────
+     [:button {:title          (str "More " (name (:id group)) " tools")
+               :style          #js {:position  "absolute"
+                                     :bottom    "2px"
+                                     :right     "2px"
+                                     :width     "14px"
+                                     :height    "14px"
+                                     :padding   "0"
+                                     :border    "none"
+                                     :background "transparent"
+                                     :cursor    "pointer"
+                                     :color     (if group-active "#cba6f7" "#6c7086")
+                                     :fontSize  "8px"
+                                     :lineHeight "1"
+                                     :display   "flex"
+                                     :alignItems "center"
+                                     :justifyContent "center"
+                                     :zIndex    "1"}
+               ;; Stop BOTH pointerdown and click so nothing bubbles to the
+               ;; workspace viewport handlers that auto-hide the toolbar.
+               :on-pointer-down (fn [e]
+                                   (dom/stop-propagation e)
+                                   (dom/prevent-default e))
+               :on-click        (fn [e]
+                                   (dom/stop-propagation e)
+                                   (dom/prevent-default e)
+                                   (let [el (mf/ref-val btn-ref)]
+                                     (when el
+                                       (let [r (.getBoundingClientRect el)]
+                                         (reset! btn-rect {:top    (.-top r)
+                                                           :left   (.-left r)
+                                                           :right  (.-right r)
+                                                           :bottom (.-bottom r)
+                                                           :width  (.-width r)
+                                                           :height (.-height r)}))))
+                                   (on-open))}
+      "▾"]
+
+     ;; ── Dropdown ─────────────────────────────────────────────────────────
+     (when (and open? @btn-rect)
+       (let [{:keys [top left right bottom width height]} @btn-rect
+             vp-w  js/window.innerWidth
+             vp-h  js/window.innerHeight
+             below?      (< (+ bottom 8 (* 36 (count (:tools group)))) vp-h)
+             right?      (< (+ left 220) vp-w)
+             popup-top   (when below?       (+ bottom 6))
+             popup-bot   (when (not below?) (+ (- vp-h top) 6))
+             popup-left  (when right?       left)
+             popup-right (when (not right?) (+ (- vp-w right) (/ width 2)))]
+         (mf/portal
+          (mf/html
+           [:*
+            ;; Full-screen backdrop — catches outside clicks without swallowing them
+            ;; from inside items (backdrop z-index is below the popup).
+            [:div {:style    #js {:position "fixed" :top 0 :left 0
+                                  :right 0 :bottom 0 :zIndex 9997}
+                   :on-click (fn [e] (dom/stop-propagation e) (on-close))}]
+            ;; Popup menu
+            [:div {:style     (clj->js (cond-> {:position      "fixed"
+                                                :zIndex        9998
+                                                :background    "#18181a"
+                                                :border        "1px solid #313244"
+                                                :borderRadius  "8px"
+                                                :boxShadow     "0 8px 24px rgba(0,0,0,.5)"
+                                                :padding       "4px 0"
+                                                :minWidth      "180px"
+                                                :display       "flex"
+                                                :flexDirection "column"}
+                                         popup-top   (assoc :top    (str popup-top   "px"))
+                                         popup-bot   (assoc :bottom (str popup-bot   "px"))
+                                         popup-left  (assoc :left   (str popup-left  "px"))
+                                         popup-right (assoc :right  (str popup-right "px"))))
+                   :on-click dom/stop-propagation}
+             (for [{:keys [tool label shortcut icon text]} (:tools group)]
+               (let [is-active (if (= tool :move)
+                                 (and move-active? (nil? pending-tool))
+                                 (or (= drawtool tool) (= pending-tool tool)))]
+                 [:button {:key      (name tool)
+                           :style    #js {:display       "flex"
+                                          :flexDirection "row"
+                                          :alignItems    "center"
+                                          :gap           "8px"
+                                          :padding       "0 12px"
+                                          :height        "36px"
+                                          :border        "none"
+                                          :cursor        "pointer"
+                                          :width         "100%"
+                                          :textAlign     "left"
+                                          :background    (if is-active "rgba(203,166,247,.15)" "transparent")
+                                          :color         (if is-active "#cba6f7" "#cdd6f4")}
+                           :on-click (fn [_] (on-activate tool) (on-close))}
+                  [:span {:style #js {:width "20px" :textAlign "center" :flexShrink "0"}}
+                   (if icon
+                     [:> icon* {:icon-id icon
+                                :style   #js {:width "14px" :height "14px"
+                                              :color (if is-active "#cba6f7" "#cdd6f4")}}]
+                     [:span {:style #js {:fontSize "13px"}} text])]
+                  [:span {:style #js {:flex "1" :fontSize "13px"}} label]
+                  (when (seq shortcut)
+                    [:span {:style #js {:fontSize "11px" :color "#585b70" :fontFamily "monospace"}} shortcut])
+                  (when is-active
+                    [:span {:style #js {:fontSize "8px" :color "#cba6f7" :marginLeft "2px"}} "●"])]))]])
+          (dom/get-body))))]))
+;; ─── Main component ───────────────────────────────────────────────────────────
 
 (mf/defc top-toolbar*
   {::mf/memo true}
@@ -96,10 +301,46 @@
         hide-toolbar? (mf/deref toolbar-hidden-ref)
         toolbar-pos   (mf/deref toolbar-position-ref)
 
+        ;; Which group's dropdown is open (nil = none)
+        open-group     (mf/use-state nil)
+        ;; Last-used tool per group (so the displayed icon "sticks" after selection)
+        last-in-group  (mf/use-state {:move-group :move :frame-group :frame :shape-group :rect :pen-group :path})
+        ;; Tool just clicked but not yet committed to global state.
+        ;; Gives immediate visual feedback while waiting for the async dispatch.
+        pending-tool   (mf/use-state nil)
+
         show-pos-menu? (mf/use-state false)
+        pos-btn-ref    (mf/use-ref nil)
+        pos-rect       (mf/use-state nil)
+
+        move-active?   (and (nil? drawtool) (not edition))
 
         interrupt
         (mf/use-fn #(st/emit! :interrupt (dw/clear-edition-mode)))
+
+        ;; Activate a tool — handles :move specially (interrupt, not draw)
+        activate-tool
+        (mf/use-fn
+         (mf/deps drawtool edition)
+         (fn [tool]
+           (js/console.log "[TOOLBAR] activate-tool called" (str "tool=" tool) (str "current-drawtool=" drawtool))
+           ;; Update last-used per group immediately (icon shows right away)
+           (doseq [g tool-groups]
+             (when (tool-in-group? g tool)
+               (swap! last-in-group assoc (:id g) tool)))
+           (if (= tool :move)
+             (do
+               (reset! pending-tool nil)
+               (st/emit! :interrupt (dw/clear-edition-mode)))
+             (do
+               (reset! pending-tool tool)
+               (st/emit! :interrupt (dw/clear-edition-mode))
+               (ts/schedule 100 (fn []
+                 (js/console.log "[TOOLBAR] schedule-100 firing: emitting select-for-drawing" (str tool))
+                 (reset! pending-tool nil)
+                 ;; Emit :interrupt before select-for-drawing to cancel any stale
+                 ;; re-arm subscriptions left over from previous rapid tool switches.
+                 (st/emit! :interrupt (dw/select-for-drawing tool))))))))
 
         select-drawtool
         (mf/use-fn
@@ -108,8 +349,6 @@
                           (dom/get-data "tool")
                           (keyword))]
              (st/emit! :interrupt (dw/clear-edition-mode))
-
-             ;; Delay so anything that launched :interrupt can finish
              (ts/schedule 100 #(st/emit! (dw/select-for-drawing tool))))))
 
         toggle-debug-panel
@@ -137,6 +376,14 @@
            (let [new-val (not @show-pos-menu?)]
              (reset! show-pos-menu? new-val)
              (when new-val
+               (when-let [el (mf/ref-val pos-btn-ref)]
+                 (let [r (.getBoundingClientRect el)]
+                   (reset! pos-rect {:top    (.-top r)
+                                     :left   (.-left r)
+                                     :right  (.-right r)
+                                     :bottom (.-bottom r)
+                                     :width  (.-width r)
+                                     :height (.-height r)})))
                (js/setTimeout
                 #(js/document.addEventListener
                   "click"
@@ -148,12 +395,7 @@
         (mf/use-fn
          (fn [pos]
            (reset! show-pos-menu? false)
-           (st/emit! (dwc/set-toolbar-position pos))))
-
-        test-tooltip-board-text
-        (if (not (:workspace-visited props))
-          (tr "workspace.toolbar.frame-first-time" (sc/get-tooltip :draw-frame))
-          (tr "workspace.toolbar.frame" (sc/get-tooltip :draw-frame)))]
+           (st/emit! (dwc/set-toolbar-position pos))))]
 
     (when-not ^boolean read-only?
       [:aside {:class (stl/css-case :main-toolbar true
@@ -162,51 +404,31 @@
                                     :main-toolbar-vertical (or (= toolbar-pos :left)
                                                                (= toolbar-pos :right)))
                :style (case toolbar-pos
-                        :top    #js {:top "28px"  :left "50%"  :transform "translateX(-50%)" :bottom "unset" :right "unset"}
-                        :left   #js {:top "50%"   :left "28px" :transform "translateY(-50%)" :bottom "unset" :right "unset"}
-                        :right  #js {:top "50%"   :right "28px" :left "unset" :transform "translateY(-50%)" :bottom "unset"}
-                        #js {:bottom "28px" :left "50%" :transform "translateX(-50%)" :top "unset" :right "unset"})}
+                        :top    #js {:top "28px"  :left "50%"  :transform "translateX(-50%)" :bottom "unset" :right "unset"  :flexDirection "row"  :height "56px" :width "auto"}
+                        :left   #js {:top "50%"   :left "28px" :transform "translateY(-50%)" :bottom "unset" :right "unset"  :flexDirection "column" :height "auto" :width "56px"}
+                        :right  #js {:top "50%"   :right "28px" :left "unset" :transform "translateY(-50%)" :bottom "unset" :flexDirection "column" :height "auto" :width "56px"}
+                        #js {:bottom "28px" :left "50%" :transform "translateX(-50%)" :top "unset" :right "unset" :flexDirection "row" :height "56px" :width "auto"})}
        [:ul {:class (stl/css :main-toolbar-options)
-             :data-testid "toolbar-options"}
-        [:li
-         [:> icon-button* {:variant "ghost"
-                           :class (stl/css :main-toolbar-options-button)
-                           :icon i/move
-                           :aria-pressed (and (nil? drawtool) (not edition))
-                           :aria-label (tr "workspace.toolbar.move" (sc/get-tooltip :move))
-                           :tooltip-placement "bottom"
-                           :on-click interrupt}]]
+             :data-testid "toolbar-options"
+             :style (when (or (= toolbar-pos :left) (= toolbar-pos :right))
+                      #js {:flexDirection "column" :alignItems "center"})}
+
+        ;; ── Grouped tool buttons ──────────────────────────────────────────
+        (for [group tool-groups]
+          [:> tool-group-button*
+           {:key         (name (:id group))
+            :group       group
+            :drawtool    drawtool
+            :move-active? move-active?
+            :open?       (= @open-group (:id group))
+            :last-tool   (get @last-in-group (:id group))
+            :pending-tool @pending-tool
+            :on-activate activate-tool
+            :on-open     (fn [] (reset! open-group (:id group)))
+            :on-close    (fn [] (reset! open-group nil))}])
+
+        ;; ── Standalone: text ─────────────────────────────────────────────
         [:*
-         [:li
-          [:> icon-button* {:variant "ghost"
-                            :class (stl/css :main-toolbar-options-button)
-                            :icon i/board
-                            :aria-pressed (= drawtool :frame)
-                            :aria-label test-tooltip-board-text
-                            :tooltip-placement "bottom"
-                            :on-click select-drawtool
-                            :data-tool "frame"
-                            :data-testid "artboard-btn"}]]
-         [:li
-          [:> icon-button* {:variant "ghost"
-                            :class (stl/css :main-toolbar-options-button)
-                            :icon i/rectangle
-                            :aria-pressed (= drawtool :rect)
-                            :aria-label (tr "workspace.toolbar.rect" (sc/get-tooltip :draw-rect))
-                            :tooltip-placement "bottom"
-                            :on-click select-drawtool
-                            :data-tool "rect"
-                            :data-testid "rect-btn"}]]
-         [:li
-          [:> icon-button* {:variant "ghost"
-                            :class (stl/css :main-toolbar-options-button)
-                            :icon i/elipse
-                            :aria-pressed (= drawtool :circle)
-                            :aria-label (tr "workspace.toolbar.ellipse" (sc/get-tooltip :draw-ellipse))
-                            :tooltip-placement "bottom"
-                            :on-click select-drawtool
-                            :data-tool "circle"
-                            :data-testid "ellipse-btn"}]]
          [:li
           [:> icon-button* {:variant "ghost"
                             :class (stl/css :main-toolbar-options-button)
@@ -219,27 +441,6 @@
                             :data-testid "text-btn"}]]
 
          [:> image-upload*]
-
-         [:li
-          [:> icon-button* {:variant "ghost"
-                            :class (stl/css :main-toolbar-options-button)
-                            :icon i/curve
-                            :aria-pressed (= drawtool :curve)
-                            :aria-label (tr "workspace.toolbar.curve" (sc/get-tooltip :draw-curve))
-                            :tooltip-placement "bottom"
-                            :on-click select-drawtool
-                            :data-tool "curve"
-                            :data-testid "curve-btn"}]]
-         [:li
-          [:> icon-button* {:variant "ghost"
-                            :class (stl/css :main-toolbar-options-button)
-                            :icon i/path
-                            :aria-pressed (= drawtool :path)
-                            :aria-label (tr "workspace.toolbar.path" (sc/get-tooltip :draw-path))
-                            :tooltip-placement "bottom"
-                            :on-click select-drawtool
-                            :data-tool "path"
-                            :data-testid "path-btn"}]]
 
          (when (features/active-feature? @st/state "plugins/runtime")
            [:li
@@ -265,8 +466,8 @@
                               :tooltip-placement "bottom"
                               :on-click toggle-debug-panel}]])
 
-         ;; ── Position trigger button (popup is at [:aside] level) ──
-         [:li
+         ;; ── Position trigger button ───────────────────────────────────
+         [:li {:ref pos-btn-ref}
           [:> icon-button* {:variant "ghost"
                             :class (stl/css :main-toolbar-options-button)
                             :icon i/expand
@@ -275,32 +476,62 @@
                             :tooltip-placement "bottom"
                             :on-click toggle-pos-menu}]]]]
 
-       ;; ── Position popup – direct child of [:aside] ──────────────
-       ;; Shows only the 3 positions that are NOT the current one.
-       (when @show-pos-menu?
-         (let [all-positions [[:top    i/arrow-up    "Top"]
-                              [:left   i/arrow-left  "Left"]
-                              [:right  i/arrow-right "Right"]
-                              [:bottom i/arrow-down  "Bottom"]]
-               options       (remove #(= (first %) toolbar-pos) all-positions)]
-           [:div {:class (stl/css :toolbar-position-menu)
-                  :on-click dom/stop-propagation
-                  :style (case toolbar-pos
-                           :top   #js {:top "calc(100% + 8px)"   :left "50%" :transform "translateX(-50%)" :bottom "unset" :right "unset"}
-                           :left  #js {:left "calc(100% + 8px)"  :top "50%"  :transform "translateY(-50%)" :bottom "unset" :right "unset"}
-                           :right #js {:right "calc(100% + 8px)" :top "50%"  :transform "translateY(-50%)" :bottom "unset" :left "unset"}
-                           #js {:bottom "calc(100% + 8px)" :left "50%" :transform "translateX(-50%)" :top "unset" :right "unset"})}
-            (for [[pos icon label] options]
-              [:div {:key (name pos) :class (stl/css :pos-row)}
-               [:> icon-button* {:variant "ghost"
-                                 :class (stl/css :pos-btn)
-                                 :icon icon
-                                 :aria-label label
-                                 :on-click #(set-position pos)}]
-               [:span {:class (stl/css :pos-label)} label]])]))
-
        [:button {:title (tr "workspace.toolbar.toggle-toolbar")
                  :aria-label (tr "workspace.toolbar.toggle-toolbar")
                  :class (stl/css :toolbar-handler)
                  :on-click toggle-toolbar}
-        [:div {:class (stl/css :toolbar-handler-btn)}]]])))
+        [:div {:class (stl/css :toolbar-handler-btn)}]]
+
+       ;; ── Position popup ────────────────────────────────────────────────
+       (when (and @show-pos-menu? @pos-rect)
+         (let [{:keys [top left right bottom width height]} @pos-rect
+               vw  js/window.innerWidth
+               gap 6
+               all-positions [[:top    i/arrow-up    "Top"]
+                               [:left   i/arrow-left  "Left"]
+                               [:right  i/arrow-right "Right"]
+                               [:bottom i/arrow-down  "Bottom"]]
+               options    (remove #(= (first %) toolbar-pos) all-positions)
+               popup-style (case toolbar-pos
+                             :top    {:top    (str (+ bottom gap) "px")
+                                      :left   (str (+ left (/ width 2)) "px")
+                                      :transform "translateX(-50%)"}
+                             :left   {:top    (str (+ top (/ height 2)) "px")
+                                      :left   (str (+ right gap) "px")
+                                      :transform "translateY(-50%)"}
+                             :right  {:top    (str (+ top (/ height 2)) "px")
+                                      :right  (str (+ (- vw left) gap) "px")
+                                      :transform "translateY(-50%)"}
+                             {:bottom (str (+ (- js/window.innerHeight top) gap) "px")
+                              :left   (str (+ left (/ width 2)) "px")
+                              :transform "translateX(-50%)"})]
+           (mf/portal
+            (mf/html
+             [:div {:class (stl/css :toolbar-position-menu)
+                    :on-click dom/stop-propagation
+                    :style (clj->js (assoc popup-style
+                                           :position "fixed"
+                                           :zIndex 9999
+                                           :backgroundColor "#18181a"
+                                           :color "#fff"
+                                           :border "2px solid #404040"
+                                           :borderRadius "8px"
+                                           :padding "4px"
+                                           :minWidth "120px"
+                                           :display "flex"
+                                           :flexDirection "column"
+                                           :boxShadow "0 8px 24px rgba(0,0,0,0.5)"))}
+              (for [[pos icon label] options]
+                [:button {:key      (name pos)
+                          :class    (stl/css :pos-row)
+                          :style    #js {:display "flex" :flexDirection "row" :alignItems "center"
+                                         :gap "8px" :height "36px" :padding "0 8px"
+                                         :border "none" :cursor "pointer" :width "100%"
+                                         :backgroundColor "transparent" :color "#fff"
+                                         :borderRadius "4px"}
+                          :on-click (fn [e]
+                                      (dom/stop-propagation e)
+                                      (set-position pos))}
+                 [:> icon* {:icon-id icon :class (stl/css :pos-icon) :style #js {:width "16px" :height "16px" :color "#fff"}}]
+                 [:span {:class (stl/css :pos-label) :style #js {:fontSize "11px" :color "#fff"}} label]])])
+            (dom/get-body))))])))

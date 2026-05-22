@@ -9,6 +9,7 @@
    [app.common.logging :as log]
    [app.main.data.profile :as du]
    [app.main.data.workspace.layout :as dwl]
+   [app.util.storage :as storage]
    [beicon.v2.core :as rx]
    [potok.v2.core :as ptk]))
 
@@ -65,13 +66,19 @@
     (update [_ state]
       (update-in state [:workspace-local :hide-toolbar] not))))
 
+(def ^:private storage-key :app.main.data.workspace/toolbar-position)
+
 (defn set-toolbar-position
   [position]
   {:pre [(#{:top :bottom :left :right} position)]}
   (ptk/reify ::set-toolbar-position
     ptk/UpdateEvent
     (update [_ state]
-      (assoc-in state [:workspace-local :toolbar-position] position))))
+      (assoc-in state [:workspace-local :toolbar-position] position))
+
+    ptk/EffectEvent
+    (effect [_ _ _]
+      (swap! storage/user assoc storage-key (name position)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Read only

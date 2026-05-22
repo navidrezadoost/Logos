@@ -98,6 +98,10 @@
                           (not hidden)
                           (not create-comment?)
                           (not drawing-path?))
+                 (js/console.log "[VIEWPORT] on-pointer-down cond check"
+                                 (str "drawing-tool=" drawing-tool)
+                                 (str "node-editing?=" node-editing?)
+                                 (str "read-only?=" read-only?))
                  (cond
                    node-editing?
                    ;; Handle path node area selection
@@ -106,6 +110,7 @@
 
                    drawing-tool
                    (when-not read-only?
+                     (js/console.log "[VIEWPORT] firing start-drawing for" (str drawing-tool))
                      (st/emit! (dd/start-drawing drawing-tool)))
 
                    (or (not id) mod?)
@@ -114,6 +119,7 @@
                    (not drawing-tool)
                    (when-not read-only?
                      (st/emit! (dw/start-move-selected id shift?)))))))))))))
+
 
 (defn on-move-selected
   [hover hover-ids selected space? z? read-only?]

@@ -1,4 +1,5 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
+import { ImportMigrationDialog } from "./components/ui/ImportMigrationDialog";
 import { Canvas } from "./components/canvas/Canvas";
 import { Toolbar } from "./components/toolbar/Toolbar";
 import { LayersPanel } from "./components/layers/LayersPanel";
@@ -24,6 +25,7 @@ export default function App(): React.ReactElement {
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const toggleAiPanel = useUiStore((s) => s.toggleAiPanel);
   const openGallery = useTemplateStore((s) => s.openGallery);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const { activeTool, setTool } = useUiStore();
   const { startPreview } = useProtoStore();
   const currentPageId = useDocumentStore((s) => s.currentPageId);
@@ -96,6 +98,34 @@ export default function App(): React.ReactElement {
 
       {/* Prototype Preview (always mounted; manages open state internally) */}
       <PrototypePreview />
+
+      {/* Import migration dialog */}
+      <ImportMigrationDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+      />
+
+      {/* Import tokens button */}
+      <button
+        onClick={() => setImportDialogOpen(true)}
+        title="Import design tokens from Figma, Sketch, or XD"
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 390,
+          zIndex: 200,
+          background: "#313244",
+          color: "#7efff5",
+          border: "none",
+          borderRadius: 6,
+          padding: "6px 10px",
+          fontSize: 12,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        ↓ Import tokens
+      </button>
 
       {/* Templates button */}
       <button
