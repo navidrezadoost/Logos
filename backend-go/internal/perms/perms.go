@@ -147,3 +147,44 @@ func DenyForbidden(w http.ResponseWriter, canProceed bool) bool {
 	}
 	return true
 }
+
+// ─── File permissions ─────────────────────────────────────────────────────────
+// A file inherits permissions from its parent project.
+
+// GetFilePermissions returns project-level permissions for the given file.
+// It resolves the project for the file and delegates to GetProjectPermissions.
+func GetFilePermissions(ctx context.Context, pool *db.Pool, profileID, fileID string) (*ProjectPerms, error) {
+	var projectID string
+	err := pool.QueryRow(ctx,
+		`SELECT project_id FROM file WHERE id = $1 AND deleted_at IS NULL`, fileID,
+	).Scan(&projectID)
+	if err != nil {
+		return nil, err
+	}
+	return GetProjectPermissions(ctx, pool, profileID, projectID)
+}
+
+// CheckFileRead returns true when the profile has at least read access to the file.
+// On failure it writes 403 and returns false so the caller can "return" immediately.
+func CheckFileRead(w http.ResponseWriter, r *http.Request, pool *db.Pool, profileID, fileID string) bool {
+	p, err := GetFilePermissions(r.Context(), pool, profileID, fileID)
+	if err != nil || p == nil || !p.CanRead {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"insufficient-permissions"}`))
+		return false
+	}
+	return true
+}
+
+// CheckFileEdit returns true when the profile has edit access to the file.
+func CheckFileEdit(w http.ResponseWriter, r *http.Request, pool *db.Pool, profileID, fileID string) bool {
+	p, err := GetFilePermissions(r.Context(), pool, profileID, fileID)
+	if err != nil || p == nil || !p.CanEdit {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"insufficient-permissions"}`))
+		return false
+	}
+	return true
+}

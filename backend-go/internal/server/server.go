@@ -78,6 +78,25 @@ func New(deps Deps) http.Handler {
 		r.Patch("/rename-project", handler.RenameProjectHandler(deps.Pool))
 		r.Delete("/delete-project", handler.DeleteProjectHandler(deps.Pool))
 		r.Post("/update-project-pin", handler.UpdateProjectPinHandler(deps.Pool))
+
+		// Files (metadata)
+		r.Get("/get-file", handler.GetFileHandler(deps.Pool))
+		r.Get("/get-project-files", handler.GetProjectFilesHandler(deps.Pool))
+		r.Get("/get-file-libraries", handler.GetFileLibrariesHandler(deps.Pool))
+		r.Get("/get-file-collaborators", handler.GetFileCollaboratorsHandler(deps.Pool))
+		r.Patch("/update-file-metadata", handler.UpdateFileMetadataHandler(deps.Pool))
+
+		// Files — creation
+		r.Post("/create-file", handler.CreateFileHandler(deps.Pool))
+		r.Post("/duplicate-file", handler.DuplicateFileHandler(deps.Pool))
+
+		// Files — share links
+		r.Post("/create-share-link", handler.CreateShareLinkHandler(deps.Pool))
+		r.Delete("/delete-share-link", handler.DeleteShareLinkHandler(deps.Pool))
+		r.Get("/get-share-link", handler.GetShareLinkHandler(deps.Pool))
+
+		// Viewer (unauthenticated; accepts share-id or session)
+		r.Get("/get-view-only-bundle", handler.GetViewOnlyBundleHandler(deps.Pool))
 	})
 
 	return r
