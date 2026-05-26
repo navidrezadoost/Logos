@@ -145,6 +145,32 @@ func New(deps Deps) http.Handler {
 		r.Patch("/update-font", handler.UpdateFontHandler(deps.Pool))
 		r.Delete("/delete-font", handler.DeleteFontHandler(deps.Pool))
 		r.Delete("/delete-font-variant", handler.DeleteFontVariantHandler(deps.Pool))
+
+		// ── Binfile export/import (.penpot v3 ZIP) ────────────────────────
+		r.Post("/export-binfile", handler.ExportBinfileHandler(deps.Pool, deps.Storage))
+		r.Post("/import-binfile", handler.ImportBinfileHandler(deps.Pool, deps.Storage))
+
+		// ── File thumbnails ───────────────────────────────────────────────
+		r.Get("/get-file-object-thumbnails", handler.GetFileObjectThumbnailsHandler(deps.Pool))
+		r.Post("/create-file-object-thumbnail", handler.CreateFileObjectThumbnailHandler(deps.Pool, deps.Storage))
+		r.Delete("/delete-file-object-thumbnail", handler.DeleteFileObjectThumbnailHandler(deps.Pool))
+		r.Post("/create-file-thumbnail", handler.CreateFileThumbnailHandler(deps.Pool, deps.Storage))
+		r.Get("/get-file-thumbnail", handler.GetFileThumbnailHandler(deps.Pool))
+
+		// ── File snapshots ────────────────────────────────────────────────
+		r.Get("/get-file-snapshots", handler.GetFileSnapshotsHandler(deps.Pool))
+		r.Post("/create-file-snapshot", handler.CreateFileSnapshotHandler(deps.Pool))
+		r.Patch("/update-file-snapshot", handler.UpdateFileSnapshotHandler(deps.Pool))
+		r.Delete("/delete-file-snapshot", handler.DeleteFileSnapshotHandler(deps.Pool))
+		r.Post("/restore-file-snapshot", handler.RestoreFileSnapshotHandler(deps.Pool))
+		r.Post("/lock-file-snapshot", handler.LockFileSnapshotHandler(deps.Pool))
+		r.Post("/unlock-file-snapshot", handler.UnlockFileSnapshotHandler(deps.Pool))
+
+		// ── Webhooks ──────────────────────────────────────────────────────
+		r.Get("/get-webhooks", handler.GetWebhooksHandler(deps.Pool))
+		r.Post("/create-webhook", handler.CreateWebhookHandler(deps.Pool))
+		r.Patch("/update-webhook", handler.UpdateWebhookHandler(deps.Pool))
+		r.Delete("/delete-webhook", handler.DeleteWebhookHandler(deps.Pool))
 	})
 
 	return r
