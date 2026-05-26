@@ -20,6 +20,8 @@ type Deps struct {
 	Redis      *redis.Client   // may be nil (cache disabled)
 	Storage    storage.Backend // may be nil (photo uploads disabled)
 	AuthMW     *auth.Middleware
+	TokensKey  []byte // derived from LOGOS_SECRET_KEY; nil disables auth-write endpoints
+	CookieName string // auth cookie name, e.g. "auth-token"
 }
 
 // New returns an http.Handler with all routes registered.
@@ -97,6 +99,52 @@ func New(deps Deps) http.Handler {
 
 		// Viewer (unauthenticated; accepts share-id or session)
 		r.Get("/get-view-only-bundle", handler.GetViewOnlyBundleHandler(deps.Pool))
+
+		// ── Auth ─────────────────────────────────────────────────────────
+		r.Post("/login-with-password", handler.LoginHandler(deps.Pool, deps.TokensKey, deps.CookieName))
+		r.Post("/logout", handler.LogoutHandler(deps.Pool, deps.CookieName))
+		r.Post("/prepare-register-profile", handler.PrepareRegisterHandler(deps.Pool, deps.TokensKey))
+		r.Post("/register-profile", handler.RegisterProfileHandler(deps.Pool, deps.TokensKey, deps.CookieName))
+		r.Post("/request-profile-recovery", handler.RequestProfileRecoveryHandler(deps.Pool, deps.TokensKey))
+		r.Post("/recover-profile", handler.RecoverProfileHandler(deps.Pool, deps.TokensKey))
+		r.Post("/get-sso-provider", handler.GetSSOProviderHandler(deps.Pool))
+
+		// ── LDAP ─────────────────────────────────────────────────────────
+		r.Post("/login-with-ldap", handler.LoginWithLDAPHandler(deps.Pool, deps.TokensKey, deps.CookieName))
+
+		// ── Access tokens ────────────────────────────────────────────────
+		r.Post("/create-access-token", handler.CreateAccessTokenHandler(deps.Pool, deps.TokensKey))
+		r.Delete("/delete-access-token", handler.DeleteAccessTokenHandler(deps.Pool))
+		r.Get("/get-access-tokens", handler.GetAccessTokensHandler(deps.Pool))
+
+		// ── Generic token verification ───────────────────────────────────
+		r.Post("/verify-token", handler.VerifyTokenHandler(deps.Pool, deps.TokensKey, deps.CookieName))
+
+		// ── File updates (CRDT + OT rebase + Redis broadcast) ────────────
+		r.Post("/update-file", handler.UpdateFileHandler(deps.Pool, deps.Redis))
+
+		// ── Comments ─────────────────────────────────────────────────────
+		r.Get("/get-comment-threads", handler.GetCommentThreadsHandler(deps.Pool))
+		r.Get("/get-comments", handler.GetCommentsHandler(deps.Pool))
+		r.Post("/create-comment-thread", handler.CreateCommentThreadHandler(deps.Pool))
+		r.Post("/create-comment", handler.CreateCommentHandler(deps.Pool))
+		r.Patch("/update-comment", handler.UpdateCommentHandler(deps.Pool))
+		r.Patch("/update-comment-thread", handler.UpdateCommentThreadHandler(deps.Pool))
+		r.Delete("/delete-comment", handler.DeleteCommentHandler(deps.Pool))
+		r.Delete("/delete-comment-thread", handler.DeleteCommentThreadHandler(deps.Pool))
+		r.Patch("/update-comment-thread-status", handler.UpdateCommentThreadStatusHandler(deps.Pool))
+
+		// ── Media ─────────────────────────────────────────────────────────
+		r.Post("/upload-file-media-object", handler.UploadFileMediaObjectHandler(deps.Pool, deps.Storage))
+		r.Post("/clone-file-media-object", handler.CloneFileMediaObjectHandler(deps.Pool))
+		r.Get("/get-file-media-objects", handler.GetFileMediaObjectsHandler(deps.Pool))
+
+		// ── Fonts ─────────────────────────────────────────────────────────
+		r.Get("/get-font-variants", handler.GetFontVariantsHandler(deps.Pool))
+		r.Post("/create-font-variant", handler.CreateFontVariantHandler(deps.Pool, deps.Storage))
+		r.Patch("/update-font", handler.UpdateFontHandler(deps.Pool))
+		r.Delete("/delete-font", handler.DeleteFontHandler(deps.Pool))
+		r.Delete("/delete-font-variant", handler.DeleteFontVariantHandler(deps.Pool))
 	})
 
 	return r

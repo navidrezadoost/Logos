@@ -69,8 +69,10 @@ func main() {
 
 	// ── Auth middleware ──────────────────────────────────────────────────────
 	var authMW *auth.Middleware
+	var tokensKey []byte
 	if cfg.SecretKey != "" {
-		tokensKey, err := auth.DeriveTokensKey(cfg.SecretKey)
+		var err error
+		tokensKey, err = auth.DeriveTokensKey(cfg.SecretKey)
 		if err != nil {
 			log.Fatalf("[auth] key derivation failed: %v", err)
 		}
@@ -82,10 +84,12 @@ func main() {
 
 	// ── HTTP server ─────────────────────────────────────────────────────────
 	h := server.New(server.Deps{
-		Pool:    pool,
-		Redis:   rdb,
-		Storage: sto,
-		AuthMW:  authMW,
+		Pool:       pool,
+		Redis:      rdb,
+		Storage:    sto,
+		AuthMW:     authMW,
+		TokensKey:  tokensKey,
+		CookieName: cfg.CookieName,
 	})
 	srv := &http.Server{
 		Addr:         cfg.Addr,
