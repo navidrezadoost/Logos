@@ -2,20 +2,20 @@ name: generated-types drift check
 
 on:
   push:
-    branches: ["main", "phase-cs2/**", "phase3/**", "phase4/**"]
+    branches: ["main", "phase-cs2/**", "phase3/**", "phase4/**", "go/**"]
     paths:
-      - "common/src/app/common/types/**"
-      - "common/src/app/common/files/changes.clj"
+      - "rust/logos-types/**"
       - "bin/generate-types"
       - "logos-app/src/types/generated/**"
+      - "logos-app/src/types/rust-generated/**"
       - ".github/workflows/typecheck.yml"
   pull_request:
     branches: ["main"]
     paths:
-      - "common/src/app/common/types/**"
-      - "common/src/app/common/files/changes.clj"
+      - "rust/logos-types/**"
       - "bin/generate-types"
       - "logos-app/src/types/generated/**"
+      - "logos-app/src/types/rust-generated/**"
 
 jobs:
   generated-types-drift:
@@ -25,15 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Babashka
-        uses: turtlequeue/setup-babashka@v1.6.0
-        with:
-          babashka-version: "1.3.191"
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Check for schema drift
-        run: bin/generate-types --check
-        # Exit code 1 if any .d.ts file differs from what would be generated.
-        # Fix by running `bin/generate-types` locally and committing the results.
+      - name: Check for Rust-generated type drift
+        run: make generate-rust-types CHECK=1
+        # Exit code 1 if any rust-generated .ts file differs.
+        # Fix by running `make generate-rust-types` locally and committing.
 
   typecheck:
     name: TypeScript type-check (logos-app)

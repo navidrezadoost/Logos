@@ -31,6 +31,7 @@ import { PrototypeOverlay } from "../prototype/PrototypeOverlay";
 import { DRAG_COMPONENT_TYPE } from "../assets/AssetsPanel";
 import { workerPool } from "../../worker";
 import { createRect } from "../../types/shapes";
+import { theme } from "../../theme/colors";
 
 const WASM_JS_URL: string =
   typeof __RENDER_WASM_JS__ !== "undefined" ? __RENDER_WASM_JS__ : "/js/render-wasm.js";
@@ -512,7 +513,7 @@ export function Canvas(): React.ReactElement {
         return {
           position: "absolute" as const,
           left: x, top: y, width: w, height: h,
-          border: "1px solid #89b4fa",
+          border: `1px solid ${theme.accent}`,
           background: "rgba(137,180,250,0.12)",
           pointerEvents: "none" as const,
           boxSizing: "border-box" as const,
@@ -523,7 +524,7 @@ export function Canvas(): React.ReactElement {
   return (
     <div
       ref={containerRef}
-      style={{ flex: 1, position: "relative", overflow: "hidden", background: "#313244", cursor }}
+      style={{ flex: 1, position: "relative", overflow: "hidden", background: theme.canvas, cursor }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -620,7 +621,7 @@ export function Canvas(): React.ReactElement {
             position: "absolute", bottom: 8, right: 172,
             padding: "2px 8px", borderRadius: "4px",
             fontSize: "11px", fontFamily: "monospace",
-            background: "#cba6f7", color: "#1e1e2e",
+            background: theme.accent, color: theme.onAccent,
           }}
         >
           ⚡ WebGPU
@@ -702,12 +703,12 @@ function PenOverlay({ anchors, segments, cursor, zoom, panX, panY }: PenOverlayP
     >
       {/* Committed path segments */}
       {pathD && (
-        <path d={pathD} fill="none" stroke="#89b4fa" strokeWidth={1.5} />
+        <path d={pathD} fill="none" stroke={theme.accent} strokeWidth={1.5} />
       )}
 
       {/* Live preview segment */}
       {previewD && (
-        <path d={previewD} fill="none" stroke="#89b4fa" strokeWidth={1.5} strokeDasharray="4 3" />
+        <path d={previewD} fill="none" stroke={theme.accent} strokeWidth={1.5} strokeDasharray="4 3" />
       )}
 
       {/* Anchor dots */}
@@ -722,7 +723,7 @@ function PenOverlay({ anchors, segments, cursor, zoom, panX, panY }: PenOverlayP
             cy={sy}
             r={highlight ? ANCHOR_R + 2 : ANCHOR_R}
             fill={highlight ? "#a6e3a1" : "#1e1e2e"}
-            stroke={highlight ? "#a6e3a1" : "#89b4fa"}
+            stroke={highlight ? theme.success : theme.accent}
             strokeWidth={1.5}
           />
         );

@@ -1,120 +1,149 @@
 ---
-title: Assets storage
-desc: Learn about assets storage, API, object buckets, sharing, and garbage collection. See Penpot's technical guide for developers. Try Penpot - It's free.
+title: Assets Storage
+desc: "Logos storage subsystem: local FS, S3-compatible, and database backends."
 ---
 
-# Assets storage
+# Assets Storage
 
-The [storage.clj](https://github.com/penpot/penpot/blob/develop/backend/src/app/storage.clj)
-is a module that manages storage of binary objects. It's a generic utility
-that may be used for any kind of user uploaded files. Currently:
+Logos stores user-uploaded assets (images, fonts, thumbnails, file exports) through a
+pluggable storage backend. The backend is configured via the `STORAGE_BACKEND` environment
+variable.
 
- * Image assets in Penpot files.
- * Uploaded fonts.
- * Profile photos of users and teams.
+---
 
-There is an abstract interface and several implementations (or **backends**),
-depending on where the objects are actually stored:
+## Storage Backends
 
- * <code class="language-clojure">:assets-fs</code> stores ojects in the file system, under a given base path.
- * <code class="language-clojure">:assets-s3</code> stores them in any cloud storage with an AWS-S3 compatible
-   interface.
- * <code class="language-clojure">:assets-db</code> stores them inside the PostgreSQL database, in a special table
-   with a binary column.
+| Backend | `STORAGE_BACKEND` value | Description |
+|---|---|---|
+| **Local filesystem** | `local` | Writes files under `STORAGE_LOCAL_DIR` (default: `./data`) |
+| **S3-compatible** | `s3` | AWS S3, MinIO, Cloudflare R2, Backblaze B2, etc. |
 
-## Storage API
-
-The **StorageObject** record represents one stored object. It contains the
-metadata, that is always stored in the database (table <code class="language-clojure">storage_object</code>),
-while the actual object data goes to the backend.
-
- * <code class="language-clojure">:id</code> is the identifier you use to reference the object, may be stored
-   in other places to represent the relationship with other element.
- * <code class="language-clojure">:backend</code> points to the backend where the object data resides.
- * <code class="language-clojure">:created-at</code> is the date/time of object creation.
- * <code class="language-clojure">:deleted-at</code> is the date/time of object marked for deletion (see below).
- * <code class="language-clojure">:expired-at</code> allows to create objects that are automatically deleted
-   at some time (useful for temporary objects).
- * <code class="language-clojure">:touched-at</code> is used to check objects that may need to be deleted (see
-   below).
-
-Also more metadata may be attached to objects, such as the <code class="language-clojure">:content-type</code> or
-the <code class="language-clojure">:bucket</code> (see below).
-
-You can use the API functions to manipulate objects. For example <code class="language-clojure">put-object!</code>
-to create a new one, <code class="language-clojure">get-object</code> to retrieve the StorageObject,
-<code class="language-clojure">get-object-data</code> or <code class="language-clojure">get-object-bytes</code> to read the binary contents, etc.
-
-For profile photos or fonts, the object id is stored in the related table,
-without further ado. But for file images, one more indirection is used. The
-**file-media-object** is an abstraction that represents one image uploaded
-by the user (in the future we may support other multimedia types). It has its
-own database table, and references two <code class="language-clojure">StorageObjects</code>, one for the original
-file and another one for the thumbnail. Image shapes contains the id of the
-<code class="language-clojure">file-media-object</code> with the <code class="language-clojure">:is-local</code> property as true. Image assets in the
-file library also have a <code class="language-clojure">file-media-object</code> with <code class="language-clojure">:is-local</code> false,
-representing that the object may be being used in other files.
-
-## Serving objects
-
-Stored objects are always served by Penpot (even if they have a public URL,
-like when <code class="language-clojure">:s3</code> storage are used). We have an endpoint <code class="language-text">/assets</code> with three
-variants:
+### Local filesystem
 
 ```bash
-/assets/by-id/<uuid>
-/assets/by-file-media-id/<uuid>
-/assets/by-file-media-id/<uuid>/thumbnail
+export STORAGE_BACKEND=local
+export STORAGE_LOCAL_DIR=/opt/logos/data
 ```
 
-They take an object and retrieve its data to the user. For <code class="language-clojure">:db</code> backend, the
-data is extracted from the database and served by the app. For the other ones,
-we calculate the real url of the object, and pass it to our **nginx** server,
-via special HTTP headers, for it to retrieve the data and serve it to the user.
+Files are stored at `<STORAGE_LOCAL_DIR>/<bucket>/<object-id>`.
 
-This is the same in all environments (devenv, production or on premise).
+> In production, mount `STORAGE_LOCAL_DIR` on a persistent volume and back it up regularly.
 
-## Object buckets
+### S3-compatible
 
-Obects may be organized in **buckets**, that are a kind of "intelligent" folders
-(not related to AWS-S3 buckets, this is a Penpot internal concept).
+```bash
+export STORAGE_BACKEND=s3
+export S3_BUCKET=logos-assets
+export S3_REGION=eu-west-1
+export S3_ENDPOINT=https://s3.amazonaws.com      # omit for AWS; set for MinIO/R2
+export AWS_ACCESS_KEY_ID=<key>
+export AWS_SECRET_ACCESS_KEY=<secret>
+```
 
-The storage module may use the bucket (hardcoded) to make special treatment to
-object, such as storing in a different path, or guessing how to know if an object
-is referenced from other place.
+For MinIO in development:
 
-## Sharing and deleting objects
+```bash
+export S3_ENDPOINT=http://localhost:9000
+```
 
-To save storage space, duplicated objects wre shared. So, if for example
-several users upload the same image, or a library asset is instantiated many
-times, even by different users, the object data is actuall stored only once.
+---
 
-To achieve this, when an object is uploaded, its content is hashed, and the
-hash compared with other objects in the same bucket. If there is a match,
-the <code class="language-clojure">StorabeObject</code> is reused. Thus, there may be different, unrelated, shapes
-or library assets whose <code class="language-clojure">:object-id</code> is the same.
+## Storage Object Metadata
 
-### Garbage collector and reference count
+Every stored object has a row in the `storage_object` PostgreSQL table:
 
-Of course, when objects are shared, we cannot delete it directly when the
-associated item is removed or unlinked. Instead, we need some mechanism to
-track the references, and a garbage collector that deletes any object that
-is no longer referenced.
+| Column | Type | Description |
+|---|---|---|
+| `id` | UUID | Object identifier — used to reference the object |
+| `backend` | text | `local` or `s3` — where the bytes live |
+| `created_at` | timestamptz | Creation time |
+| `deleted_at` | timestamptz | Soft-delete marker (GC picks up these) |
+| `expired_at` | timestamptz | Auto-expiry for temporary objects |
+| `touched_at` | timestamptz | GC reference counting marker |
+| `metadata` | jsonb | Content-type, bucket, size, custom attributes |
 
-We don't use explicit reference counts or indexes. Instead, the storage system
-is intelligent enough to search, depending on the bucket (one for profile
-photos, other for file media objects, etc.) if there is any element that is
-using the object. For example, in the first case we look for user or team
-profiles where the <code class="language-clojure">:photo-id</code> field matches the object id.
+---
 
-When one item stops using one storage object (e. g. an image shape is deleted),
-we mark the object as <code class="language-clojure">:touched</code>. A periodic task revises all touched objectsm
-checking if they are still referenced in other places. If not, they are marked
-as :deleted. They're preserved in this state for some time (to allow "undeletion"
-if the user undoes the change), and eventually, another garbage collection task
-definitively deletes it, both in the backend and in the database table.
+## Asset Types and Their Tables
 
-For <code class="language-clojure">file-media-objects</code>, there is another collector, that periodically checks
-if a media object is referenced by any shape or asset in its file. If not, it
-marks the object as <code class="language-clojure">:touched</code> triggering the process described above.
+### File media objects
 
+User-uploaded images, SVGs, and video used in file designs. Stored in `file_media_object`:
+
+| Column | Description |
+|---|---|
+| `id` | UUID |
+| `file_id` | Owning file |
+| `storage_id` | Reference to `storage_object.id` for the full-resolution asset |
+| `thumb_id` | Reference to `storage_object.id` for the thumbnail (nullable) |
+| `is_local` | `true` = local to file, `false` = shared library asset |
+| `name` | User-visible asset name |
+| `media_type` | MIME type |
+| `width`, `height` | Dimensions in pixels |
+
+### Fonts
+
+Custom font variants uploaded per team. Stored in `team_font_variant`:
+
+| Column | Description |
+|---|---|
+| `id` | UUID |
+| `team_id` | Owning team |
+| `font_id` | Logical font group ID |
+| `font_family` | Family name |
+| `font_weight` | Numeric weight (400, 700…) |
+| `font_style` | `normal` or `italic` |
+| `storage_id` | Storage object for the font file |
+
+### Thumbnails
+
+File thumbnails used in the dashboard file cards. Stored in `file_thumbnail`:
+
+| Column | Description |
+|---|---|
+| `file_id` | Owning file |
+| `revn` | File revision this thumbnail was generated for |
+| `media_id` | Storage object for the thumbnail image |
+| `deleted_at` | Soft-delete |
+
+---
+
+## Go Storage Interface
+
+The storage backend is abstracted behind the `Backend` interface in
+`backend-go/internal/storage/storage.go`:
+
+```go
+type Backend interface {
+    Put(ctx context.Context, bucket, key string, r io.Reader, opts PutOptions) error
+    Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
+    Delete(ctx context.Context, bucket, key string) error
+}
+```
+
+Handlers receive a `*storage.Storage` (which wraps the active backend) via dependency injection.
+To serve an asset to the client, handlers call `Get` and stream the result directly to the
+HTTP response:
+
+```go
+rc, err := deps.Storage.Get(ctx, "media", mediaID)
+if err != nil {
+    writeError(w, http.StatusNotFound, "asset not found")
+    return
+}
+defer rc.Close()
+w.Header().Set("Content-Type", contentType)
+io.Copy(w, rc)
+```
+
+---
+
+## Garbage Collection
+
+A background goroutine periodically cleans up:
+
+1. **Expired objects** (`expired_at < now`) — temporary upload slots
+2. **Deleted objects** (`deleted_at < now - grace_period`) — soft-deleted assets
+3. **Unreferenced objects** — storage objects not pointed to by any `file_media_object`, `team_font_variant`, or `file_thumbnail` row
+
+The GC touches both the `storage_object` table (deletes the row) and the underlying storage backend (deletes the bytes).

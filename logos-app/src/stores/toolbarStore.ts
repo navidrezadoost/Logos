@@ -9,6 +9,7 @@
  */
 
 import { create } from "zustand";
+import type { ToolIconName } from "../components/toolbar/toolbarIcons";
 import type { Tool } from "./uiStore";
 
 // ─── Group + tool definitions ─────────────────────────────────────────────────
@@ -18,8 +19,8 @@ export interface ToolDef {
   label: string;
   /** Keyboard shortcut label string, e.g. "V" or "Shift+L". Empty string = none. */
   shortcut: string;
-  /** Unicode / text icon for the button. */
-  icon: string;
+  /** svger-cli icon id (matches src/icons/toolbar/*.svg basename). */
+  icon: ToolIconName;
 }
 
 export interface ToolGroup {
@@ -34,31 +35,31 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: "move",
     label: "Move tools",
     tools: [
-      { id: "select",    label: "Move",  shortcut: "V",           icon: "↖" },
-      { id: "hand",      label: "Hand",  shortcut: "H",           icon: "✋" },
-      { id: "scale",     label: "Scale", shortcut: "K",           icon: "⤡" },
+      { id: "select",    label: "Move",  shortcut: "V",           icon: "select" },
+      { id: "hand",      label: "Hand",  shortcut: "H",           icon: "hand" },
+      { id: "scale",     label: "Scale", shortcut: "K",           icon: "scale" },
     ],
   },
   {
     id: "frame",
     label: "Frame tools",
     tools: [
-      { id: "frame",     label: "Frame",     shortcut: "F",       icon: "▣" },
-      { id: "selection", label: "Selection", shortcut: "Shift+S", icon: "⬚" },
-      { id: "slice",     label: "Slice",     shortcut: "S",       icon: "⌂" },
+      { id: "frame",     label: "Frame",     shortcut: "F",       icon: "frame" },
+      { id: "selection", label: "Selection", shortcut: "Shift+S", icon: "selection" },
+      { id: "slice",     label: "Slice",     shortcut: "S",       icon: "slice" },
     ],
   },
   {
     id: "shapes",
     label: "Shape tools",
     tools: [
-      { id: "rect",        label: "Rectangle",    shortcut: "R",           icon: "▭" },
-      { id: "line",        label: "Line",         shortcut: "L",           icon: "╱" },
-      { id: "arrow",       label: "Arrow",        shortcut: "Shift+L",     icon: "→" },
-      { id: "ellipse",     label: "Ellipse",      shortcut: "O",           icon: "○" },
-      { id: "polygon",     label: "Polygon",      shortcut: "",            icon: "△" },
-      { id: "star",        label: "Star",         shortcut: "",            icon: "☆" },
-      { id: "imageImport", label: "Image/Video…", shortcut: "Ctrl+Shift+K", icon: "⬛" },
+      { id: "rect",        label: "Rectangle",    shortcut: "R",           icon: "rect" },
+      { id: "line",        label: "Line",         shortcut: "L",           icon: "line" },
+      { id: "arrow",       label: "Arrow",        shortcut: "Shift+L",     icon: "arrow" },
+      { id: "ellipse",     label: "Ellipse",      shortcut: "O",           icon: "ellipse" },
+      { id: "polygon",     label: "Polygon",      shortcut: "",            icon: "polygon" },
+      { id: "star",        label: "Star",         shortcut: "",            icon: "star" },
+      { id: "imageImport", label: "Image/Video…", shortcut: "Ctrl+Shift+K", icon: "imageImport" },
     ],
   },
 ];

@@ -1,10 +1,10 @@
 export default function () {
   function createText(): void {
-    const text = penpot.createText('Hello World!');
+    const text = logos.createText('Hello World!');
 
     if (text) {
-      text.x = penpot.viewport.center.x;
-      text.y = penpot.viewport.center.y;
+      text.x = logos.viewport.center.x;
+      text.y = logos.viewport.center.y;
       text.growType = 'auto-width';
       text.textTransform = 'uppercase';
       text.textDecoration = 'underline';

@@ -1,24 +1,24 @@
 ---
 layout: layouts/plugins.njk
 title: 1. Getting started
-desc: Dive into Penpot plugins! Extend Penpot's functionality by automating tasks and adding new features using JavaScript, HTML, & CSS. Get started now!
+desc: Dive into Logos plugins! Extend Logos's functionality by automating tasks and adding new features using JavaScript, HTML, & CSS. Get started now!
 ---
 
 # Getting started
 
 ## 1.1. Introduction
 
-Welcome to Penpot Plugins!
+Welcome to Logos Plugins!
 
-Plugins are the perfect tool to easily extend Penpot's functionality, you can automate repetitive tasks, add new features and much more.
+Plugins are the perfect tool to easily extend Logos's functionality, you can automate repetitive tasks, add new features and much more.
 
-Plugins can be created with your favorite framework or with not framework at all. Feel free to use whatever you want because Plugins are independent from Penpot's code and therefore you don't need any extra knowledge.
+Plugins can be created with your favorite framework or with not framework at all. Feel free to use whatever you want because Plugins are independent from Logos's code and therefore you don't need any extra knowledge.
 
-The plugins will be hosted outside Penpot, and each creator need to host theirs.
+The plugins will be hosted outside Logos, and each creator need to host theirs.
 
 ## 1.2. Pre-requisites
 
-- Basic experience with Penpot.
+- Basic experience with Logos.
 - Basic experience with JavaScript, HTML and CSS.
 - Node and npm (<a target="_blank" href="https://nodejs.org/en/learn/getting-started/how-to-install-nodejs">How to install Node.js</a>).
 - A text editor, ideally an IDE like <a target="_blank" href="https://code.visualstudio.com">Visual Studio Code</a> or similar.
@@ -46,7 +46,7 @@ You can open the plugin manager in any project via:
 ##### Menu
 
 <figure>
-  <video title="Open plugin manager from  penpot menu" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-menu.png" height="auto">
+  <video title="Open plugin manager from  logos menu" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-menu.png" height="auto">
     <source src="/img/plugins/plugins-menu.mp4" type="video/mp4">
   </video>
 </figure>
@@ -54,14 +54,14 @@ You can open the plugin manager in any project via:
 ##### Toolbar
 
 <figure>
-  <video title="Open plugin manager from penpot toolbar" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-toolbar.png" height="auto">
+  <video title="Open plugin manager from logos toolbar" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-toolbar.png" height="auto">
     <source src="/img/plugins/plugins-toolbar.mp4" type="video/mp4">
   </video>
 </figure>
 
 The plugin manager looks like this:
 
-![Penpot's plugin manager](/img/plugins/plugin-manager.png)
+![Logos's plugin manager](/img/plugins/plugin-manager.png)
 
 You need to provide the plugin's manifest URL for the installation. If there are no issues the plugin will be installed and then you would be able to open it whenever you like.
 
@@ -69,21 +69,21 @@ You need to provide the plugin's manifest URL for the installation. If there are
 
 | Name          | URL                                                                 |
 | ------------- | ------------------------------------------------------------------- |
-| Color palette |	https://create-palette.plugins.penpot.app/assets/manifest.json      |
-| Contrast	    | https://contrast.plugins.penpot.app/assets/manifest.json            |
-| Feather icons	| https://icons.plugins.penpot.app/assets/manifest.json               |
-| Lorem ipsum	  | https://lorem-ipsum.plugins.penpot.app/assets/manifest.json         |
-| Rename layers |	https://rename-layers.plugins.penpot.app/assets/manifest.json       |
-| Tables	      | https://table.plugins.penpot.app/assets/manifest.json               |
+| Color palette |	https://create-palette.plugins.logos.app/assets/manifest.json      |
+| Contrast	    | https://contrast.plugins.logos.app/assets/manifest.json            |
+| Feather icons	| https://icons.plugins.logos.app/assets/manifest.json               |
+| Lorem ipsum	  | https://lorem-ipsum.plugins.logos.app/assets/manifest.json         |
+| Rename layers |	https://rename-layers.plugins.logos.app/assets/manifest.json       |
+| Tables	      | https://table.plugins.logos.app/assets/manifest.json               |
 
 
 ## 1.4. Plugin's basics
 
 ### How does it work?
 
-Penpot's plugin system allows you to add new features to the platform through independent modules called plugins. These plugins run separately from the main Penpot app, inside iframes, which are like small, isolated browser windows within the app.
+Logos's plugin system allows you to add new features to the platform through independent modules called plugins. These plugins run separately from the main Logos app, inside iframes, which are like small, isolated browser windows within the app.
 
-Plugins communicate with Penpot by sending and receiving messages through the iframe.
+Plugins communicate with Logos by sending and receiving messages through the iframe.
 
 @startuml
 
@@ -93,16 +93,16 @@ BorderColor black
 ArrowColor black
 }
 
-Penpot_App -down-> WebComponent
-WebComponent -up-> Penpot_App : Write / Read
+Logos_App -down-> WebComponent
+WebComponent -up-> Logos_App : Write / Read
 WebComponent : - Create API
 WebComponent : - Create sandbox (ses)
 WebComponent : - Read plugin manifest
 WebComponent : - Run plugin code
 WebComponent -right-> Plugin_code
-Plugin_code : penpot.ui.open('Example plugin', '');
+Plugin_code : logos.ui.open('Example plugin', '');
 Plugin_code :
-Plugin_code : penpot.ui.onMessage((message) => {
+Plugin_code : logos.ui.onMessage((message) => {
 Plugin_code : console.log('iframe message', message);
 Plugin_code : });
 Plugin_code -right-> Iframe
@@ -152,7 +152,7 @@ The <code class="language-js">manifest.json</code> file contains the basic infor
 - **Name and description**: your plugin's basic information, which will be displayed in the plugin manager modal.
 - **Code**: your plugin's file location. It needs to be compiled to JavaScript and reachable.
 - **Icon**: your plugin's icon, which will be also displayed in the plugin manager modal. It'll be a <code class="language-js"><img src=""></code> tag so you can use whichever image format works better for you. **It's recommended to use a 56x56 pixel icon for the best appearance on all devices**.
-- **Permissions**: your plugin's permissions, which allow access to different parts of the Penpot API.
+- **Permissions**: your plugin's permissions, which allow access to different parts of the Logos API.
 
 #### Types of permissions
 
@@ -182,15 +182,15 @@ _Note: Write permissions automatically includes its corresponding read permissio
 
 ### What are plugin.ts and plugin.js files?
 
-The <code class="language-js">plugin.ts</code> file is where you write code to interact with the Penpot API using TypeScript. This file is then compiled into <code class="language-js">plugin.js</code> which is the final JavaScript code that runs the plugin. You don't write <code class="language-js">plugin.js</code> directly; it's generated from the <code class="language-js">plugin.ts</code> file.
+The <code class="language-js">plugin.ts</code> file is where you write code to interact with the Logos API using TypeScript. This file is then compiled into <code class="language-js">plugin.js</code> which is the final JavaScript code that runs the plugin. You don't write <code class="language-js">plugin.js</code> directly; it's generated from the <code class="language-js">plugin.ts</code> file.
 
 <p class="advice">
-<b>This is also the only file where you can use the Penpot object.</b> Do not try to use the Penpot object in your plugin interface scripts.
+<b>This is also the only file where you can use the Logos object.</b> Do not try to use the Logos object in your plugin interface scripts.
 </p>
 
 You can check some samples in:
 
-- <a href="https://github.com/penpot/penpot-plugins-samples/" target="_blank">Penpot plugin samples.</a>
+- <a href="https://github.com/logos/logos-plugins-samples/" target="_blank">Logos plugin samples.</a>
 
 ### What is TypeScript?
 
@@ -198,8 +198,8 @@ You may have noticed that we're using TypeScript in our plugin files, but what i
 
 TypeScript is like JavaScript with extra rules. These rules help you catch mistakes early, before you run your code. It makes your code more reliable and easier to manage, especially in big projects.
 
-We're using TypeScript to make working with the Penpot API easier, as it provides autocompletion and instant access to documentation. However, even with TypeScript’s powerful features, you'll still need to include the <code class="language-js">@penpot/plugin-types</code> npm package, which contains the typings for the Penpot Plugin API. This ensures that TypeScript can fully understand and work with the API.
+We're using TypeScript to make working with the Logos API easier, as it provides autocompletion and instant access to documentation. However, even with TypeScript’s powerful features, you'll still need to include the <code class="language-js">@logos/plugin-types</code> npm package, which contains the typings for the Logos Plugin API. This ensures that TypeScript can fully understand and work with the API.
 
 ![plugin-types example](/img/plugins/plugint-types-example.gif)
 
-You can install the package in any project with <code class="language-js">npm install @penpot/plugin-types</code>. You can check the details in [@penpot/plugin-types package](https://www.npmjs.com/package/@penpot/plugin-types).
+You can install the package in any project with <code class="language-js">npm install @logos/plugin-types</code>. You can check the details in [@logos/plugin-types package](https://www.npmjs.com/package/@logos/plugin-types).

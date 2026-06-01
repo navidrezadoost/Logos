@@ -46,7 +46,7 @@ export class ExportShapeArgs {
 }
 
 /**
- * Tool for executing JavaScript code in the Penpot plugin context
+ * Tool for executing JavaScript code in the Logos plugin context
  */
 export class ExportShapeTool extends Tool<ExportShapeArgs> {
     /**
@@ -70,7 +70,7 @@ export class ExportShapeTool extends Tool<ExportShapeArgs> {
 
     public getToolDescription(): string {
         let description =
-            "Exports a shape (or a shape's image fill) from the Penpot design to a PNG or SVG image, " +
+            "Exports a shape (or a shape's image fill) from the Logos design to a PNG or SVG image, " +
             "such that you can get an impression of what it looks like. ";
         if (this.mcpServer.isFileSystemAccessEnabled()) {
             description += "\nAlternatively, you can save it to a file.";
@@ -87,12 +87,12 @@ export class ExportShapeTool extends Tool<ExportShapeArgs> {
         // create code for exporting the shape
         let shapeCode: string;
         if (args.shapeId === "selection") {
-            shapeCode = `penpot.selection[0]`;
+            shapeCode = `logos.selection[0]`;
         } else {
-            shapeCode = `penpotUtils.findShapeById("${args.shapeId}")`;
+            shapeCode = `logosUtils.findShapeById("${args.shapeId}")`;
         }
         const asSvg = args.format === "svg";
-        const code = `return penpotUtils.exportImage(${shapeCode}, "${args.mode}", ${asSvg});`;
+        const code = `return logosUtils.exportImage(${shapeCode}, "${args.mode}", ${asSvg});`;
 
         // execute the code and obtain the image data
         const task = new ExecuteCodePluginTask({ code: code });

@@ -22,6 +22,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -68,6 +69,40 @@ type Comment struct {
 	ModifiedAt time.Time `json:"modifiedAt"`
 }
 
+// DashboardCommentThread is the enriched thread view used on the team dashboard.
+type DashboardCommentThread struct {
+	ID                  string    `json:"id"`
+	FileID              string    `json:"file-id"`
+	PageID              string    `json:"page-id"`
+	ProjectID           string    `json:"project-id"`
+	TeamID              string    `json:"team-id"`
+	OwnerID             string    `json:"owner-id"`
+	OwnerFullname       string    `json:"owner-fullname,omitempty"`
+	OwnerEmail          string    `json:"owner-email,omitempty"`
+	OwnerPhotoID        *string   `json:"owner-photo-id,omitempty"`
+	PageName            string    `json:"page-name,omitempty"`
+	FileName            string    `json:"file-name"`
+	Seqn                int       `json:"seqn"`
+	Content             string    `json:"content"`
+	Participants        []string  `json:"participants"`
+	Position            Point     `json:"position"`
+	IsResolved          bool      `json:"is-resolved"`
+	CountComments       int       `json:"count-comments"`
+	CountUnreadComments int       `json:"count-unread-comments"`
+	CreatedAt           time.Time `json:"created-at"`
+	ModifiedAt          time.Time `json:"modified-at"`
+}
+
+// CommentProfile is a limited profile view for comment participants.
+type CommentProfile struct {
+	ID       string  `json:"id"`
+	Email    string  `json:"email"`
+	Name     string  `json:"name"`
+	Fullname string  `json:"fullname"`
+	PhotoID  *string `json:"photo-id,omitempty"`
+	IsActive bool    `json:"is-active"`
+}
+
 // ─── GET /api/rpc/command/get-comment-threads ─────────────────────────────────
 
 type getCommentThreadsParams struct {
@@ -78,10 +113,7 @@ type getCommentThreadsParams struct {
 func GetCommentThreadsHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
-		fileID := r.URL.Query().Get("file-id")
-		if fileID == "" {
-			fileID = r.URL.Query().Get("fileId")
-		}
+		fileID := rpcParam(r, "file-id", "fileId")
 		if fileID == "" {
 			writeError(w, http.StatusUnprocessableEntity, "file-id is required")
 			return
@@ -202,7 +234,7 @@ func CreateCommentThreadHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -306,7 +338,7 @@ func CreateCommentHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -386,7 +418,7 @@ func UpdateCommentHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -427,7 +459,7 @@ func UpdateCommentThreadHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -477,7 +509,7 @@ func DeleteCommentHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -515,7 +547,7 @@ func DeleteCommentThreadHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -556,7 +588,7 @@ func UpdateCommentThreadStatusHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -580,6 +612,224 @@ func UpdateCommentThreadStatusHandler(pool *db.Pool) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{"modifiedAt": now.Format(time.RFC3339)})
+	}
+}
+
+// ─── GET /api/rpc/command/get-unread-comment-threads ───────────────────────────
+
+const commentThreadsSQL = `
+	SELECT DISTINCT ON (ct.id)
+	       ct.id::text,
+	       ct.file_id::text,
+	       ct.page_id::text,
+	       ct.owner_id::text,
+	       COALESCE(ct.page_name, ''),
+	       ct.seqn,
+	       ct.is_resolved,
+	       COALESCE(ct.participants::text, '[]'),
+	       ct.position::text,
+	       ct.created_at,
+	       ct.modified_at,
+	       COALESCE(pf.fullname, ''),
+	       COALESCE(pf.email, ''),
+	       pf.photo_id::text,
+	       p.team_id::text,
+	       p.id::text,
+	       f.name,
+	       first_value(c.content) OVER w AS content,
+	       (SELECT count(1)
+	          FROM comment AS c2
+	         WHERE c2.thread_id = ct.id) AS count_comments,
+	       (SELECT count(1)
+	          FROM comment AS c3
+	         WHERE c3.thread_id = ct.id
+	           AND c3.created_at >= coalesce(cts.modified_at, ct.created_at)) AS count_unread_comments
+	  FROM comment_thread AS ct
+	 INNER JOIN comment AS c ON (c.thread_id = ct.id)
+	 INNER JOIN file AS f ON (f.id = ct.file_id)
+	 INNER JOIN project AS p ON (p.id = f.project_id)
+	  LEFT JOIN comment_thread_status AS cts ON (cts.thread_id = ct.id AND cts.profile_id = $1)
+	  LEFT JOIN profile AS pf ON (ct.owner_id = pf.id)
+	 WHERE f.deleted_at IS NULL
+	   AND p.deleted_at IS NULL`
+
+const unreadAllCommentThreadsSQL = `
+	WITH threads AS (` + commentThreadsSQL + `
+	   AND p.team_id = $2
+	 WINDOW w AS (PARTITION BY c.thread_id ORDER BY c.created_at ASC))
+	SELECT * FROM threads AS t WHERE t.count_unread_comments > 0`
+
+const unreadPartialCommentThreadsSQL = `
+	WITH threads AS (` + commentThreadsSQL + `
+	   AND p.team_id = $2
+	   AND (ct.owner_id = $3 OR $3::uuid = ANY(ct.mentions))
+	 WINDOW w AS (PARTITION BY c.thread_id ORDER BY c.created_at ASC))
+	SELECT * FROM threads AS t WHERE t.count_unread_comments > 0`
+
+// GetUnreadCommentThreadsHandler implements GET /api/rpc/command/get-unread-comment-threads.
+func GetUnreadCommentThreadsHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		profileID := auth.ProfileID(r.Context())
+		if profileID == "" {
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
+			return
+		}
+
+		teamID := rpcParam(r, "team-id", "teamId")
+		if teamID == "" {
+			writeError(w, http.StatusUnprocessableEntity, "team-id is required")
+			return
+		}
+
+		tp, err := perms.GetTeamPermissions(r.Context(), pool, profileID, teamID)
+		if err != nil || tp == nil || !tp.CanRead {
+			writeError(w, http.StatusForbidden, "insufficient-permissions")
+			return
+		}
+
+		notify, err := dashboardCommentNotify(r.Context(), pool, profileID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+
+		var rows interface {
+			Next() bool
+			Close()
+			Scan(dest ...any) error
+		}
+		switch notify {
+		case "none":
+			writeJSON(w, http.StatusOK, []DashboardCommentThread{})
+			return
+		case "partial":
+			rows, err = pool.Query(r.Context(), unreadPartialCommentThreadsSQL, profileID, teamID, profileID)
+		default:
+			rows, err = pool.Query(r.Context(), unreadAllCommentThreadsSQL, profileID, teamID)
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		defer rows.Close()
+
+		threads := make([]DashboardCommentThread, 0)
+		for rows.Next() {
+			t, err := scanDashboardThread(rows)
+			if err != nil {
+				continue
+			}
+			threads = append(threads, t)
+		}
+		if threads == nil {
+			threads = []DashboardCommentThread{}
+		}
+		writeJSON(w, http.StatusOK, threads)
+	}
+}
+
+// ─── GET /api/rpc/command/get-profiles-for-file-comments ───────────────────────
+
+const fileCommentUsersSQL = `
+	WITH available_profiles AS (
+	     SELECT DISTINCT owner_id AS id
+	       FROM comment
+	      WHERE thread_id IN (SELECT id FROM comment_thread WHERE file_id = $1)
+	)
+	SELECT p.id::text,
+	       p.email,
+	       p.fullname,
+	       p.fullname,
+	       p.photo_id::text,
+	       COALESCE(p.is_active, false)
+	  FROM profile AS p
+	 WHERE p.id IN (SELECT id FROM available_profiles) OR p.id = $2`
+
+// GetProfilesForFileCommentsHandler implements GET /api/rpc/command/get-profiles-for-file-comments.
+func GetProfilesForFileCommentsHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		profileID := auth.ProfileID(r.Context())
+		if profileID == "" {
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
+			return
+		}
+
+		fileID := rpcParam(r, "file-id", "fileId")
+		if fileID == "" {
+			writeError(w, http.StatusUnprocessableEntity, "file-id is required")
+			return
+		}
+
+		fp, err := perms.GetFilePermissions(r.Context(), pool, profileID, fileID)
+		if err != nil || fp == nil {
+			writeError(w, http.StatusForbidden, "insufficient-permissions")
+			return
+		}
+
+		rows, err := pool.Query(r.Context(), fileCommentUsersSQL, fileID, profileID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		defer rows.Close()
+
+		profiles := make([]CommentProfile, 0)
+		for rows.Next() {
+			var p CommentProfile
+			var photoID *string
+			if err := rows.Scan(&p.ID, &p.Email, &p.Name, &p.Fullname, &photoID, &p.IsActive); err != nil {
+				continue
+			}
+			p.PhotoID = photoID
+			profiles = append(profiles, p)
+		}
+		if profiles == nil {
+			profiles = []CommentProfile{}
+		}
+		writeJSON(w, http.StatusOK, profiles)
+	}
+}
+
+// ─── POST /api/rpc/command/mark-all-threads-as-read ────────────────────────────
+
+type markAllThreadsAsReadParams struct {
+	Threads []string `json:"threads"`
+}
+
+// MarkAllThreadsAsReadHandler implements POST /api/rpc/command/mark-all-threads-as-read.
+func MarkAllThreadsAsReadHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		profileID := auth.ProfileID(r.Context())
+		if profileID == "" {
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
+			return
+		}
+
+		var params markAllThreadsAsReadParams
+		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+
+		now := time.Now().UTC().Add(time.Second)
+		for _, threadID := range params.Threads {
+			if threadID == "" {
+				continue
+			}
+			_, err := pool.Exec(r.Context(),
+				`INSERT INTO comment_thread_status (thread_id, profile_id, modified_at)
+				 VALUES ($1, $2, $3)
+				 ON CONFLICT (thread_id, profile_id)
+				 DO UPDATE SET modified_at = EXCLUDED.modified_at`,
+				threadID, profileID, now,
+			)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+				return
+			}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{})
 	}
 }
 
@@ -618,6 +868,67 @@ func scanThread(row scanRow) (CommentThread, error) {
 	}
 
 	return t, nil
+}
+
+func scanDashboardThread(row scanRow) (DashboardCommentThread, error) {
+	var t DashboardCommentThread
+	var posStr, participantsJSON string
+	var ownerPhotoID *string
+
+	err := row.Scan(
+		&t.ID, &t.FileID, &t.PageID, &t.OwnerID, &t.PageName,
+		&t.Seqn, &t.IsResolved, &participantsJSON, &posStr,
+		&t.CreatedAt, &t.ModifiedAt,
+		&t.OwnerFullname, &t.OwnerEmail, &ownerPhotoID,
+		&t.TeamID, &t.ProjectID, &t.FileName,
+		&t.Content, &t.CountComments, &t.CountUnreadComments,
+	)
+	if err != nil {
+		return t, err
+	}
+
+	t.Position = parsePoint(posStr)
+	t.OwnerPhotoID = ownerPhotoID
+
+	var ids []string
+	if err := json.Unmarshal([]byte(participantsJSON), &ids); err == nil {
+		t.Participants = ids
+	}
+	if t.Participants == nil {
+		t.Participants = []string{}
+	}
+
+	return t, nil
+}
+
+func dashboardCommentNotify(ctx context.Context, pool *db.Pool, profileID string) (string, error) {
+	var propsRaw []byte
+	err := pool.QueryRow(ctx,
+		`SELECT props FROM profile WHERE id = $1 AND deleted_at IS NULL`,
+		profileID,
+	).Scan(&propsRaw)
+	if err != nil {
+		return "all", err
+	}
+	if propsRaw == nil {
+		return "all", nil
+	}
+
+	var props map[string]any
+	if err := json.Unmarshal(propsRaw, &props); err != nil {
+		return "all", nil
+	}
+
+	notifications, _ := props["notifications"].(map[string]any)
+	if notifications == nil {
+		return "all", nil
+	}
+
+	notify, _ := notifications["dashboard-comments"].(string)
+	if notify == "" {
+		return "all", nil
+	}
+	return notify, nil
 }
 
 // parsePoint converts PostgreSQL point literal "(x,y)" to a Point.

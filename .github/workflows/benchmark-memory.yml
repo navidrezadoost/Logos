@@ -22,16 +22,16 @@ on:
   workflow_dispatch:
     inputs:
       regenerate_file:
-        description: "Regenerate the benchmark .penpot file before testing"
+        description: "Regenerate the benchmark .logos file before testing"
         required: false
         default: "false"
         type: boolean
 
 env:
-  LOGOS_URL:      "http://localhost:3449"
+  LOGOS_URL:      "http://localhost:6060"
   LOGOS_EMAIL:    "benchmark@logos.test"
   LOGOS_PASSWORD: "benchmark123!"
-  BENCHMARK_FILE: "test/benchmarks/fixtures/large-canvas.penpot"
+  BENCHMARK_FILE: "test/benchmarks/fixtures/large-canvas.logos"
 
 jobs:
   memory-benchmark:
@@ -44,12 +44,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ── Go toolchain (for backend binary + fixture generator) ─────────────
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend-go/go.mod
+          cache-dependency-path: backend-go/go.sum
+
       # ── Cache Docker layers ────────────────────────────────────────────────
       - name: Cache Docker layers
         uses: actions/cache@v4
         with:
           path: /tmp/.docker-cache
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker/**', 'backend/deps.edn', 'logos-app/package.json') }}
+          key: ${{ runner.os }}-docker-${{ hashFiles('docker/**', 'logos-app/package.json') }}
           restore-keys: |
             ${{ runner.os }}-docker-
 
@@ -57,8 +64,20 @@ jobs:
       - name: Start Logos services
         run: |
           docker compose -f docker/devenv/docker-compose.yaml up -d \
-            postgres redis minio backend logos-app exporter
+            postgres redis minio
         timeout-minutes: 10
+
+      # ── Build and start the Go backend ────────────────────────────────────
+      - name: Build Go backend
+        working-directory: backend-go
+        run: go build -o ../bin/logos-backend ./cmd/server
+
+      - name: Start Go backend
+        run: |
+          DATABASE_URL="postgres://logos:logos@localhost:5432/logos" \
+          REDIS_URL="redis://localhost:6379/0" \
+          BACKEND_GO_ADDR=":6060" \
+          ./bin/logos-backend &
 
       # ── Wait for health ────────────────────────────────────────────────────
       - name: Wait for backend health
@@ -71,7 +90,6 @@ jobs:
             fi
             if [ "$i" -eq 60 ]; then
               echo "ERROR: Backend did not become healthy within 60s"
-              docker compose -f docker/devenv/docker-compose.yaml logs backend
               exit 1
             fi
             sleep 2
@@ -80,39 +98,30 @@ jobs:
       # ── Create benchmark user (idempotent) ────────────────────────────────
       - name: Create benchmark test user
         run: |
-          curl -sf -X POST "$LOGOS_URL/api/rpc/command/register-profile-request" \
+          curl -sf -X POST "$LOGOS_URL/api/rpc/command/register-profile" \
             -H "Content-Type: application/json" \
-            -d '{"email":"'"$LOGOS_EMAIL"'","name":"Benchmark User"}' \
+            -d '{"email":"'"$LOGOS_EMAIL"'","password":"'"$LOGOS_PASSWORD"'","fullName":"Benchmark User"}' \
             || true
 
-      # ── Set up Java + Clojure for file generator ──────────────────────────
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-
-      - name: Install Clojure CLI
-        uses: DeLaGuardo/setup-clojure@12
-        with:
-          cli: latest
-
-      # ── Cache generated benchmark file ────────────────────────────────────
+      # ── Cache generated benchmark fixture ────────────────────────────────
       - name: Cache benchmark fixture
         id: cache-fixture
         uses: actions/cache@v4
         with:
           path: test/benchmarks/fixtures
-          key: benchmark-fixture-${{ hashFiles('test/benchmarks/generate_file.clj', 'common/src/app/common/files/builder.cljc') }}
+          key: benchmark-fixture-go-${{ hashFiles('backend-go/cmd/gen-benchmark/**', 'backend-go/internal/binfile/**') }}
 
       - name: Generate benchmark file
         if: steps.cache-fixture.outputs.cache-hit != 'true' || inputs.regenerate_file == 'true'
-        working-directory: test/benchmarks
+        working-directory: backend-go
         run: |
-          mkdir -p fixtures
-          clojure -M:gen-benchmark --output fixtures/large-canvas.penpot
+          mkdir -p ../test/benchmarks/fixtures
+          go run ./cmd/gen-benchmark \
+            --output ../test/benchmarks/fixtures/large-canvas.logos \
+            --pages 10 \
+            --objects 500
           echo "Generated fixture:"
-          ls -lh fixtures/large-canvas.penpot
+          ls -lh ../test/benchmarks/fixtures/large-canvas.logos
 
       # ── Set up Node + Playwright ───────────────────────────────────────────
       - name: Set up Node.js
@@ -138,7 +147,7 @@ jobs:
           LOGOS_URL:      ${{ env.LOGOS_URL }}
           LOGOS_EMAIL:    ${{ env.LOGOS_EMAIL }}
           LOGOS_PASSWORD: ${{ env.LOGOS_PASSWORD }}
-          BENCHMARK_FILE: ${{ github.workspace }}/test/benchmarks/fixtures/large-canvas.penpot
+          BENCHMARK_FILE: ${{ github.workspace }}/test/benchmarks/fixtures/large-canvas.logos
 
       # ── Upload artifacts ───────────────────────────────────────────────────
       - name: Upload heap snapshots and report
@@ -153,4 +162,6 @@ jobs:
       # ── Tear down services ─────────────────────────────────────────────────
       - name: Tear down services
         if: always()
-        run: docker compose -f docker/devenv/docker-compose.yaml down -v
+        run: |
+          pkill logos-backend || true
+          docker compose -f docker/devenv/docker-compose.yaml down -v

@@ -5,7 +5,7 @@
  *
  * Structure:
  *   ┌─────────────┐
- *   │  [Move ▾]   │  Group 1 — select / hand / scale
+ *   │  [Move ▾]   │  Group 1 — one slot; icon = active tool, ▾ opens list
  *   │  [Frame ▾]  │  Group 2 — frame / selection / slice
  *   │  [Rect ▾]   │  Group 3 — rect / line / arrow / ellipse / polygon / star / image
  *   │  ───────    │
@@ -50,32 +50,36 @@ import {
   groupForTool,
 } from "../../stores/toolbarStore";
 import { ToolButton } from "./ToolButton";
+import { ToolGroupButton } from "./ToolGroupButton";
 import { ToolDropdown } from "./ToolDropdown";
+import { theme } from "../../theme/colors";
+import type { ToolbarIconName } from "./toolbarIcons";
+import { BOOL_OP_ICONS, ToolbarIcon } from "./toolbarIcons";
 
 // ─── Standalone (non-grouped) tool buttons ────────────────────────────────────
 
 interface StandaloneToolDef {
   tool: Tool;
-  icon: string;
+  icon: ToolbarIconName;
   label: string;
   shortcut: string;
 }
 
 const STANDALONE_TOOLS: StandaloneToolDef[] = [
-  { tool: "text",      icon: "T",   label: "Text",      shortcut: "T" },
-  { tool: "path",      icon: "✏",  label: "Pen",       shortcut: "P" },
+  { tool: "text", icon: "text", label: "Text", shortcut: "T" },
+  { tool: "path", icon: "path", label: "Pen",  shortcut: "P" },
 ];
 
 const BOTTOM_TOOLS: StandaloneToolDef[] = [
-  { tool: "prototype", icon: "⬡",  label: "Prototype", shortcut: "" },
-  { tool: "dev",       icon: "</>", label: "Dev Mode",  shortcut: "D" },
+  { tool: "prototype", icon: "prototype", label: "Prototype", shortcut: "" },
+  { tool: "dev",       icon: "dev",       label: "Dev Mode",  shortcut: "D" },
 ];
 
-const BOOL_OPS: { op: BoolOp; icon: string; label: string }[] = [
-  { op: "union",     icon: "⊔", label: "Union"     },
-  { op: "intersect", icon: "⊓", label: "Intersect" },
-  { op: "subtract",  icon: "⊖", label: "Subtract"  },
-  { op: "exclude",   icon: "⊕", label: "Exclude"   },
+const BOOL_OPS: { op: BoolOp; label: string }[] = [
+  { op: "union",     label: "Union"     },
+  { op: "intersect", label: "Intersect" },
+  { op: "subtract",  label: "Subtract"  },
+  { op: "exclude",   label: "Exclude"   },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -198,13 +202,20 @@ export function Toolbar(): React.ReactElement {
     }
   }
 
-  // ── Open a group dropdown ─────────────────────────────────────────────────
-  function handleGroupClick(groupId: string) {
+  // ── Open a group dropdown (chevron / right-click) ─────────────────────────
+  function handleOpenGroupMenu(groupId: string) {
     const btnEl = groupBtnRefs.current[groupId];
     if (btnEl) {
       setDropdownTop(btnEl.getBoundingClientRect().top);
     }
-    openGroup(groupId);
+    openGroup(openGroupId === groupId ? null : groupId);
+  }
+
+  function handleActivateGroupTool(groupId: string, toolId: Tool) {
+    if (openGroupId === groupId) {
+      openGroup(null);
+    }
+    activateTool(toolId);
   }
 
   // ────────────────────────────────────────────────────────────────────────
@@ -212,8 +223,8 @@ export function Toolbar(): React.ReactElement {
     <div
       style={{
         width: 48,
-        background: "#1e1e2e",
-        borderRight: "1px solid #313244",
+        background: theme.panel,
+        borderRight: `1px solid ${theme.border}`,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -243,13 +254,14 @@ export function Toolbar(): React.ReactElement {
             key={group.id}
             ref={(el) => { groupBtnRefs.current[group.id] = el; }}
           >
-            <ToolButton
+            <ToolGroupButton
               icon={displayTool.icon}
               label={displayTool.label}
               shortcut={displayTool.shortcut}
               active={groupActive}
-              hasDropdown
-              onClick={() => handleGroupClick(group.id)}
+              menuOpen={dropdownOpen}
+              onActivate={() => handleActivateGroupTool(group.id, displayToolId)}
+              onOpenMenu={() => handleOpenGroupMenu(group.id)}
             />
 
             {dropdownOpen && (
@@ -269,7 +281,7 @@ export function Toolbar(): React.ReactElement {
       })}
 
       {/* Divider */}
-      <div style={{ width: 28, height: 1, background: "#313244", margin: "4px 0" }} />
+      <div style={{ width: 28, height: 1, background: theme.border, margin: "4px 0" }} />
 
       {/* ── Standalone: text + pen ───────────────────────────────────────── */}
       {STANDALONE_TOOLS.map((btn) => (
@@ -284,7 +296,7 @@ export function Toolbar(): React.ReactElement {
       ))}
 
       {/* Divider */}
-      <div style={{ width: 28, height: 1, background: "#313244", margin: "4px 0" }} />
+      <div style={{ width: 28, height: 1, background: theme.border, margin: "4px 0" }} />
 
       {/* ── Bottom: prototype + dev ──────────────────────────────────────── */}
       {BOTTOM_TOOLS.map((btn) => (
@@ -299,7 +311,7 @@ export function Toolbar(): React.ReactElement {
       ))}
 
       {/* Divider */}
-      <div style={{ width: 28, height: 1, background: "#313244", margin: "4px 0" }} />
+      <div style={{ width: 28, height: 1, background: theme.border, margin: "4px 0" }} />
 
       {/* Reset view */}
       <button
@@ -307,38 +319,40 @@ export function Toolbar(): React.ReactElement {
         onClick={resetView}
         style={{
           width: 36, height: 36, borderRadius: 6, border: "none",
-          background: "transparent", color: "#6c7086", fontSize: 11,
-          cursor: "pointer", fontFamily: "monospace",
+          background: "transparent", color: theme.textDim, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
         }}
       >
-        1:1
+        <ToolbarIcon name="resetView" size={16} />
       </button>
 
       {/* Boolean ops — shown only when exactly 2 vector-network shapes are selected */}
       {canBoolOp && (
         <>
-          <div style={{ width: 28, height: 1, background: "#313244", margin: "4px 0" }} />
+          <div style={{ width: 28, height: 1, background: theme.border, margin: "4px 0" }} />
           <div style={{
-            fontSize: 9, color: "#585b70", textTransform: "uppercase",
+            fontSize: 9, color: theme.textDim, textTransform: "uppercase",
             letterSpacing: "0.05em", textAlign: "center",
           }}>
             Bool
           </div>
-          {BOOL_OPS.map(({ op, icon, label }) => (
+          {BOOL_OPS.map(({ op, label }) => {
+            const Icon = BOOL_OP_ICONS[op];
+            return (
             <button
               key={op}
               title={label}
               onClick={() => runBoolOp(op)}
               style={{
                 width: 36, height: 36, borderRadius: 6, border: "none",
-                background: "transparent", color: "#cdd6f4", fontSize: 16,
-                cursor: "pointer", display: "flex", alignItems: "center",
-                justifyContent: "center",
+                background: "transparent", color: theme.text, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
               }}
             >
-              {icon}
+              <Icon size={18} aria-hidden focusable={false} />
             </button>
-          ))}
+            );
+          })}
         </>
       )}
     </div>

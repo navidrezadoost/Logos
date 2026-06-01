@@ -1,150 +1,187 @@
 ---
 title: Authentication
-desc: Dive into Penpot today! Learn about self-hosting, configuration, developer insights, authentication, and more. View Penpot's technical guide. Try it free.
+desc: "Logos Authentication Guide: password hashing, JWE sessions, API tokens, LDAP, and magic links."
 ---
 
-# User authentication
+# Authentication
 
-Users in Penpot may register via several different methods (if enabled in the
-configuration of the Penpot instance). We have implemented this as a series
-of "authentication backends" in our code:
+The Logos Go backend supports several authentication methods. The relevant source code
+lives entirely in `backend-go/internal/auth/` and `backend-go/internal/handler/auth.go`.
 
- * **penpot**: internal registration with email and password.
- * **ldap**: authentication over an external LDAP directory.
- * **oidc**, **google**, **github**, **gitlab**: authentication over an external
-   service using the [OpenID Connect](https://openid.net/connect) protocol. We
-   have a generic handler, and other ones already preconfigured for popular
-   services.
+---
 
-The main logic resides in the following files:
+## Authentication Methods
 
-```text
-backend/src/app/rpc/mutations/profile.clj
-backend/src/app/rpc/mutations/ldap.clj
-backend/src/app/rpc/mutations/verify-token.clj
-backend/src/app/http/oauth.clj
-backend/src/app/http/session.clj
-frontend/src/app/main/ui/auth/verify-token.cljs
+| Method | Handler command | Enabled by |
+|---|---|---|
+| **Email + password** | `login-with-password` | Always enabled |
+| **Magic link** | `login-with-token` | `send-email-verification` initiates; token mailed to user |
+| **LDAP** | `login-with-ldap` | `LOGOS_LDAP_HOST` configured |
+| **Registration** | `register-profile` | Always enabled (or disable via `LOGOS_ENABLE_REGISTRATION=false`) |
+
+---
+
+## Password Hashing
+
+Passwords are hashed with **Argon2id** using the PHC string format:
+
+```
+$argon2id$v=19$m=32768,t=3,p=2$<salt>$<hash>
 ```
 
-We store in the user profiles in the database the auth backend used to register
-first time (mainly for audit). A user may login with other methods later, if the
-email is the same.
+Parameters:
+- Memory cost: 32768 KiB (32 MB)
+- Time cost: 3 iterations
+- Parallelism: 2 lanes
+- Hash length: 32 bytes
+- Salt length: 16 bytes
 
-## Register and login
+These parameters match the original Clojure backend (`buddy-hashers`), so existing
+password hashes stored in the database continue to work without any re-hashing.
 
-The code is organized to try to reuse functions and unify processes as much as
-possible for the different auth systems.
+The Go implementation is in `backend-go/internal/auth/password.go`:
 
+```go
+// Hash a new password
+hash, err := auth.DerivePassword("user-password")
 
-### Penpot backend
+// Verify a stored hash
+ok, err := auth.VerifyPassword("user-password", storedHash)
+```
 
-When a user types an email and password in the basic Penpot registration page,
-frontend calls <code class="language-clojure">:prepare-register-profile</code> method. It generates a "register
-token", a temporary JWT token that includes the login data.
-
-This is used in the second registration page, that finally calls
-<code class="language-clojure">:register-profile</code> with the token and the rest of profile data. This function
-is reused in all the registration methods, and it's responsible of creating the
-user profile in the database. Then, it sends the confirmation email if using
-penpot backend, or directly opens a session (see below) for othe methods or if
-the user has been invited from a team.
-
-The confirmation email has a link to <code class="language-clojure">/auth/verify-token</code>, that has a handler
-in frontend, that is a hub for different kinds of tokens (registration email,
-email change and invitation link). This view uses <code class="language-clojure">:verify-token</code> RPC call and
-redirects to the corresponding page with the result.
-
-To login with the penpot backend, the user simply types the email and password
-and they are sent to <code class="language-clojure">:login</code> method to check and open session.
-
-### OIDC backend
-
-When the user press one of the "Log in with XXX" button, frontend calls
-<code class="language-clojure">/auth/oauth/:provider</code> (provider is google, github or gitlab). The handler
-generates a request token and redirects the user to the service provider to
-authenticate in it.
-
-If succesful, the provider redirects to the<code class="language-clojure">/auth/oauth/:provider/callback</code>.
-This verifies the call with the request token, extracts another access token
-from the auth response, and uses it to request the email and full name from the
-service provider.
-
-Then checks if this is an already registered profile or not. In the first case
-it opens a session, and in the second one calls<code class="language-clojure">:register-profile</code> to create a
-new user in the sytem.
-
-For the known service providers, the addresses of the protocol endpoints are
-hardcoded. But for a generic OIDC service, there is a discovery protocol to ask
-the provider for them, or the system administrator may set them via configuration
-variables.
-
-### LDAP
-
-Registration is not possible by LDAP (we use an external user directory managed
-outside of Penpot). Typically when LDAP registration is enabled, the plain user
-& password login is disabled.
-
-When the user types their user & password and presses "Login with LDAP" button,
-the <code class="language-clojure">:login-with-ldap</code> method is called. It connects with the LDAP service to
-validate credentials and retrieve email and full name.
-
-Similarly as the OIDC backend, it checks if the profile exists, and calls
-<code class="language-clojure">:login</code> or <code class="language-clojure">:register-profile</code> as needed.
+---
 
 ## Sessions
 
-User sessions are created when a user logs in via any one of the backends. A
-session token is generated (a JWT token that does not currently contain any data)
-and returned to frontend as a cookie.
+After successful authentication, the backend creates a session record in the
+`http_session_v2` table and issues a **JWE token** (JSON Web Encryption):
 
-Normally the session is stored in a DB table with the information of the user
-profile and the session expiration. But if a frontend connects to the backend in
-"read only" mode (for example, to debug something in production with the local
-devenv), sessions are stored in memory (may be lost if the backend restarts).
+| Property | Value |
+|---|---|
+| Algorithm | A256KW (AES-256 Key Wrap) |
+| Encryption | A256GCM (AES-256-GCM) |
+| Key derivation | HKDF-Blake2b-512 from `LOGOS_SECRET_KEY` |
+| Cookie name | `logos-auth` (configurable via `COOKIE_NAME`) |
+| Cookie flags | `HttpOnly`, `SameSite=Lax`, `Max-Age=7d` |
 
-## Team invitations
+**Token payload:**
 
-The invitation link has a call to <code class="language-clojure">/auth/verify-token</code> frontend view (explained
-above) with a token that includes the invited email.
-
-When a user follows it, the token is verified and then the corresponding process
-is routed, depending if the email corresponds to an existing account or not. The
-<code class="language-clojure">:register-profile</code> or <code class="language-clojure">:login</code> services are used, and the invitation token is
-attached so that the profile is linked to the team at the end.
-
-## Handling unfinished registrations and bouncing users
-
-All tokens have an expiration date, and when they are put in a permanent
-storage, a garbage colector task visits it periodically to cleand old items.
-
-Also our email sever registers email bounces and spam complaint reportings
-(see <code class="language-text">backend/src/app/emails.clj</code>). When the email of one profile receives too
-many notifications, it becames blocked. From this on, the user cannot login or
-register with this email, and no message will be sent to it. If it recovers
-later, it needs to be unlocked manually in the database.
-
-## How to test in devenv
-
-To test all normal registration process you can use the devenv [Mail
-catcher](/technical-guide/developer/devenv/#email) utility.
-
-To test OIDC, you need to register an application in one of the providers:
-
-* [Github](https://docs.github.com/en/developers/apps/building-oauth-apps/creating-an-oauth-app)
-* [Gitlab](https://docs.gitlab.com/ee/integration/oauth_provider.html)
-* [Google](https://support.google.com/cloud/answer/6158849)
-
-The URL of the app will be the devenv frontend: [http://localhost:3449]().
-
-And then put the credentials in <code class="language-text">backend/scripts/repl</code> and
-<code class="language-text">frontend/resources/public/js/config.js</code>.
-
-Finally, to test LDAP, in the devenv we include a [test LDAP](https://github.com/rroemhild/docker-test-openldap)
-server, that is already configured, and only needs to be enabled in frontend
-<code class="language-text">config.js</code>:
-
-```js
-var penpotFlags = "enable-login-with-ldap";
+```json
+{
+  "iss": "authentication",
+  "aud": "logos",
+  "sid": "<session-uuid>",
+  "uid": "<profile-uuid>",
+  "iat": 1716800000
+}
 ```
 
+The `JWEMiddleware` in `internal/server/server.go` verifies the cookie on every request
+and injects `profileID` into the request context via `auth.WithProfileID`.
+
+### Token compatibility
+
+Tokens issued by the original Clojure backend with `"aud": "penpot"` decrypt
+correctly — the Go verifier reads but does not assert the audience value.
+New tokens use `"aud": "logos"`.
+
+---
+
+## API Tokens
+
+Long-lived tokens for programmatic access (CI, integrations, plugins):
+
+| Property | Value |
+|---|---|
+| Token type | `iss: "token"` in JWE payload |
+| Expiry | None (revocable via API) |
+| Header | `Authorization: Token <token>` |
+
+Create a token:
+
+```http
+POST /api/rpc/command/create-access-token
+{"name": "my-ci-token"}
+→ {"token": "<jwe>", "id": "<uuid>", ...}
+```
+
+List and revoke:
+
+```http
+GET  /api/rpc/command/get-access-tokens
+POST /api/rpc/command/delete-access-token  {"id": "<uuid>"}
+```
+
+---
+
+## Registration Flow
+
+1. Client calls `prepare-register-profile` (validates email uniqueness, generates a register token)
+2. Client calls `register-profile` with the register token + profile data
+3. Backend creates the profile row with `is_active = false` and `source = 'logos'`
+4. Backend sends a verification email containing a link with a `verify-token` parameter
+5. User clicks the link → frontend calls `verify-token` → backend activates the profile and opens a session
+
+If email is already taken, `prepare-register-profile` returns a `validation` error.
+
+---
+
+## Magic Link Flow
+
+1. User enters their email on the "send magic link" form
+2. Client calls `send-email-verification` (or `request-email-change` for address changes)
+3. Backend generates a short-lived JWE token (`iss: "verify"`) and emails the link
+4. User clicks the link → frontend calls `login-with-token` with the token
+5. Backend verifies and creates a session
+
+---
+
+## LDAP
+
+LDAP is enabled when `LOGOS_LDAP_HOST` is set. Configuration:
+
+| Variable | Description |
+|---|---|
+| `LOGOS_LDAP_HOST` | LDAP server hostname |
+| `LOGOS_LDAP_PORT` | Port (default: 389) |
+| `LOGOS_LDAP_SSL` | `true` for LDAPS (default: `false`) |
+| `LOGOS_LDAP_START_TLS` | `true` to use STARTTLS |
+| `LOGOS_LDAP_BASE_DN` | Base DN for user search |
+| `LOGOS_LDAP_BIND_DN` | Service account DN for directory bind |
+| `LOGOS_LDAP_BIND_PASSWORD` | Service account password |
+| `LOGOS_LDAP_USER_QUERY` | LDAP query to find the user (default: `(mail=%s)`) |
+
+On successful LDAP bind, a Logos profile is created or matched by email address.
+Subsequent logins update the display name from the directory.
+
+---
+
+## Middleware Chain
+
+Every request to a protected endpoint passes through:
+
+```
+JWEMiddleware
+  → reads logos-auth cookie
+  → decrypts JWE
+  → looks up session in http_session_v2
+  → injects profileID into context
+  → calls next handler
+
+RequireAuth (called inside handler)
+  → reads profileID from context
+  → returns 401 if missing
+```
+
+Unauthenticated endpoints (login, register, verify-token) skip `RequireAuth`.
+
+---
+
+## Session Lifecycle
+
+| Event | Action |
+|---|---|
+| Login / register | INSERT into `http_session_v2`; set cookie |
+| Request | Session looked up by `sid` in JWT; `updated_at` bumped |
+| Logout | DELETE from `http_session_v2`; clear cookie |
+| Session expiry | Sessions expire after 7 days of inactivity; a cleanup job removes expired rows |

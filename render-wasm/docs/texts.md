@@ -2,7 +2,7 @@
 
 ## Paragraphs and Text Leaves
 
-Penpot uses Skia's [Paragraph](https://github.com/google/skia/blob/main/modules/skparagraph/src/ParagraphImpl.cpp) for rendering text. Each text shape can contain multiple styles, so every paragraph manages both overall and per-node style information. We use [ParagraphBuilder](https://github.com/google/skia/blob/main/modules/skparagraph/src/ParagraphBuilderImpl.cpp) for that.
+Logos uses Skia's [Paragraph](https://github.com/google/skia/blob/main/modules/skparagraph/src/ParagraphImpl.cpp) for rendering text. Each text shape can contain multiple styles, so every paragraph manages both overall and per-node style information. We use [ParagraphBuilder](https://github.com/google/skia/blob/main/modules/skparagraph/src/ParagraphBuilderImpl.cpp) for that.
 
 - **Paragraph Style:** The style for the entire paragraph (such as alignment or line height) is set first. See [ParagraphStyle](https://github.com/google/skia/blob/main/modules/skparagraph/src/ParagraphStyle.cpp).
 - **Text Nodes (Leaves) Style:** For each text node (referred to as a "leaf" internally), its specific style (like color or font weight) is processed, added to the builder, and incorporated into the final paragraph. See [TextStyle](https://github.com/google/skia/blob/main/modules/skparagraph/src/TextStyle.cpp).
@@ -11,7 +11,7 @@ Some styles, like strokes, are applied to the whole paragraph. Others, like fill
 
 ## Fills and Strokes
 
-Penpot uses Skia's paint API for both fills and strokes.
+Logos uses Skia's paint API for both fills and strokes.
 
 - **Strokes:** To achieve outline effects (inner, outer, or center), we create a separate paragraph for each paint type needed. We don't use the built-in function to draw strokes, as we need to support multiple strokes per text and this approach allows more flexibility. Strokes are always applied to the entire paragraph.
 - **Fills:** For fills, each fill is converted to a shader and applied to a paint, which is then used to style the text. When multiple fills are present, their shaders are merged so that all fills are applied together, layering one over the other.
@@ -22,7 +22,7 @@ Similar to strokes, we don't use the shadow utility from the text API to draw sh
 
 ## Fonts
 
-Penpot offers font handling for both Google Fonts and custom fonts, using Skia’s `FontCollection` and `TypefaceFontProvider` within our `FontStore`.
+Logos offers font handling for both Google Fonts and custom fonts, using Skia’s `FontCollection` and `TypefaceFontProvider` within our `FontStore`.
 
 - **Dynamic Loading:** Fonts are loaded dynamically as needed. When a shape requires a specific font, the font data is transferred to WebAssembly (WASM) for processing.
 - **Fallback Mechanism:** Skia requires explicit font data for proper Unicode rendering, so we cannot rely on browser fallback as with SVG. We detect the language used and automatically add the appropriate Noto Sans font as a fallback. If the user’s selected fonts cannot render the text, Skia’s fallback mechanism will try the next available font in the list.

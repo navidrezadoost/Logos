@@ -1,15 +1,15 @@
 export default function () {
   function createRulerGuides(): void {
-    const page = penpot.currentPage;
+    const page = logos.currentPage;
 
     if (page) {
-      page.addRulerGuide('horizontal', penpot.viewport.center.x);
-      page.addRulerGuide('vertical', penpot.viewport.center.y);
+      page.addRulerGuide('horizontal', logos.viewport.center.x);
+      page.addRulerGuide('vertical', logos.viewport.center.y);
     }
   }
 
   function removeRulerGuides(): void {
-    const page = penpot.currentPage;
+    const page = logos.currentPage;
 
     if (page) {
       page.removeRulerGuide(page.rulerGuides[0]);

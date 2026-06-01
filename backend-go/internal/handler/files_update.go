@@ -13,12 +13,8 @@
 //
 // File CRDT state
 // ───────────────
-// The Clojure backend loads and re-serialises the full file CRDT on every
-// update (app.common.files.changes/process-changes).  Porting that entire
-// state machine is out of scope for Session 4.  The Go handler records the
-// change-set in file_change, increments revn, and updates modified_at.  The
-// canonical file.data blob is left unchanged; it will be updated when the
-// file state machine is ported in a future session.
+// Incoming change-sets are applied to file.data (internal/changes) and persisted
+// on every update, matching the Clojure backend behaviour.
 //
 // OT rebase
 // ─────────
@@ -47,7 +43,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/logos-design/logos/backend-go/internal/auth"
+	"github.com/logos-design/logos/backend-go/internal/changes"
 	"github.com/logos-design/logos/backend-go/internal/db"
+	"github.com/logos-design/logos/backend-go/internal/filedata"
 	"github.com/logos-design/logos/backend-go/internal/perms"
 	"github.com/logos-design/logos/backend-go/internal/rebase"
 )
@@ -73,11 +71,11 @@ var libraryChangeTypes = map[rebase.Type]bool{
 
 type updateFileParams struct {
 	ID          string           `json:"id"`
-	SessionID   string           `json:"sessionId"`
+	SessionID   string           `json:"session-id"`
 	Revn        int64            `json:"revn"`
 	Vern        int64            `json:"vern"`
 	Changes     []rebase.Change  `json:"changes,omitempty"`
-	ChangesMeta []changeWithMeta `json:"changesWithMetadata,omitempty"`
+	ChangesMeta []changeWithMeta `json:"changes-with-metadata,omitempty"`
 }
 
 type changeWithMeta struct {
@@ -87,8 +85,8 @@ type changeWithMeta struct {
 type laggedChangeRow struct {
 	ID        string          `json:"id"`
 	Revn      int64           `json:"revn"`
-	FileID    string          `json:"fileId"`
-	SessionID string          `json:"sessionId"`
+	FileID    string          `json:"file-id"`
+	SessionID string          `json:"session-id"`
 	Changes   []rebase.Change `json:"changes"`
 }
 
@@ -107,6 +105,7 @@ type lockedFileRow struct {
 	Vern      int64
 	IsShared  bool
 	Version   int
+	Data      []byte
 }
 
 // ─── UpdateFileHandler ────────────────────────────────────────────────────────
@@ -130,14 +129,30 @@ func UpdateFileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
-		var params updateFileParams
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		var raw map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
 			return
+		}
+		rawBytes, err := json.Marshal(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		var params updateFileParams
+		if err := json.Unmarshal(rawBytes, &params); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if params.ID == "" {
+			params.ID = jsonFieldString(raw, "id")
+		}
+		if params.SessionID == "" {
+			params.SessionID = jsonFieldString(raw, "session-id", "sessionId")
 		}
 		if params.ID == "" {
 			writeError(w, http.StatusUnprocessableEntity, "id is required")
@@ -173,14 +188,14 @@ func UpdateFileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 		var file lockedFileRow
 		err = tx.QueryRow(r.Context(),
 			`SELECT f.id::text, f.project_id::text, p.team_id::text,
-			        f.revn, f.vern, f.is_shared, COALESCE(f.version, 0)
+			        f.revn, f.vern, f.is_shared, COALESCE(f.version, 0), f.data
 			   FROM file f
 			   JOIN project p ON p.id = f.project_id
 			  WHERE f.id = $1 AND f.deleted_at IS NULL
 			    FOR UPDATE OF f`,
 			params.ID,
 		).Scan(&file.ID, &file.ProjectID, &file.TeamID,
-			&file.Revn, &file.Vern, &file.IsShared, &file.Version)
+			&file.Revn, &file.Vern, &file.IsShared, &file.Version, &file.Data)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "file not found")
 			return
@@ -217,6 +232,14 @@ func UpdateFileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
+		fileData, err := applyChangesToFileData(file.Data, file.ID, changes)
+		if err != nil {
+			log.Printf("[update-file] apply changes failed file=%s: %v", file.ID, err)
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		logUpdateFileShapeHitTest(file.ID, changes, fileData)
+
 		now := time.Now().UTC()
 		deletedAt := now.Add(1 * time.Hour) // GC after 1h (matches Clojure)
 		newRevn := file.Revn + 1
@@ -244,10 +267,10 @@ func UpdateFileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		// ── Bump file revn ────────────────────────────────────────────────
+		// ── Bump file revn + persist file.data ────────────────────────────
 		if _, err = tx.Exec(r.Context(),
-			`UPDATE file SET revn = $1, modified_at = $2 WHERE id = $3`,
-			newRevn, now, file.ID,
+			`UPDATE file SET revn = $1, modified_at = $2, data = $3 WHERE id = $4`,
+			newRevn, now, fileData, file.ID,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "file revn update failed")
 			return
@@ -460,4 +483,46 @@ func copyMap(src map[string]any) map[string]any {
 		dst[k] = v
 	}
 	return dst
+}
+
+func applyChangesToFileData(raw []byte, fileID string, changeSet []rebase.Change) ([]byte, error) {
+	var data map[string]any
+	if len(raw) > 0 && raw[0] == '{' {
+		if err := json.Unmarshal(raw, &data); err != nil {
+			return nil, err
+		}
+	}
+	if data == nil {
+		data = filedata.BuildEmptyData(fileID, "")
+	}
+	filedata.NormalizeFileData(data)
+	if len(changeSet) == 0 {
+		return filedata.EncodeJSON(data)
+	}
+	updated, err := changes.ProcessChanges(data, changeSet)
+	if err != nil {
+		return nil, err
+	}
+	filedata.NormalizeFileData(updated)
+	return filedata.EncodeJSON(updated)
+}
+
+func logUpdateFileShapeHitTest(fileID string, changeSet []rebase.Change, fileData []byte) {
+	var data map[string]any
+	if err := json.Unmarshal(fileData, &data); err != nil {
+		return
+	}
+	page := filedata.FirstPage(data)
+	if page == nil {
+		return
+	}
+	objects, _ := page["objects"].(map[string]any)
+	for _, ch := range changeSet {
+		if ch.ID == "" {
+			continue
+		}
+		if shape, ok := objects[ch.ID].(map[string]any); ok {
+			filedata.LogShapeHitTest("update-file:"+string(ch.Type), fileID, ch.ID, shape)
+		}
+	}
 }

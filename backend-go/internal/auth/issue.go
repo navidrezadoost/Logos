@@ -61,9 +61,11 @@ func EncryptToken(claims TokenClaims, tokensKey []byte) (string, error) {
 		return "", fmt.Errorf("auth: marshal claims: %w", err)
 	}
 
+	// go-jose v3 parses "kid" as a string; the Clojure compat header used an integer,
+	// but since we no longer interop with Clojure tokens we drop it entirely.
+	// "ver" stays as an informational header so tooling can identify the token version.
 	opts := (&gojose.EncrypterOptions{}).
-		WithHeader("ver", 1).
-		WithHeader("kid", 1)
+		WithHeader("ver", 1)
 
 	enc, err := gojose.NewEncrypter(
 		gojose.A256GCM,
@@ -253,7 +255,7 @@ func CreateSession(ctx context.Context, pool *db.Pool, profileID, userAgent stri
 
 	claims := TokenClaims{
 		Iss: "authentication",
-		Aud: "penpot",
+		Aud: "logos",
 		Sid: sessionID,
 		Uid: profileID,
 		Iat: now,

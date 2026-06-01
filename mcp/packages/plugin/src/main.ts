@@ -6,7 +6,7 @@ document.body.dataset.theme = searchParams.get("theme") ?? "light";
 
 // Determine whether multi-user mode is enabled based on URL parameters
 const isMultiUserMode = searchParams.get("multiUser") === "true";
-console.log("Penpot MCP multi-user mode:", isMultiUserMode);
+console.log("Logos MCP multi-user mode:", isMultiUserMode);
 
 // WebSocket connection management
 let ws: WebSocket | null = null;
@@ -51,9 +51,9 @@ function connectToMcpServer(): void {
     }
 
     try {
-        let wsUrl = PENPOT_MCP_WEBSOCKET_URL;
+        let wsUrl = LOGOS_MCP_WEBSOCKET_URL;
         if (isMultiUserMode) {
-            // TODO obtain proper userToken from penpot
+            // TODO obtain proper userToken from logos
             const userToken = "dummyToken";
             wsUrl += `?userToken=${encodeURIComponent(userToken)}`;
         }
@@ -101,7 +101,7 @@ document.querySelector("[data-handler='connect-mcp']")?.addEventListener("click"
 
 // Listen plugin.ts messages
 window.addEventListener("message", (event) => {
-    if (event.data.source === "penpot") {
+    if (event.data.source === "logos") {
         document.body.dataset.theme = event.data.theme;
     } else if (event.data.type === "task-response") {
         // Forward task response back to MCP server

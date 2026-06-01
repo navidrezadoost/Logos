@@ -129,7 +129,7 @@ func GetViewOnlyBundleHandler(pool *db.Pool) http.HandlerFunc {
 			}
 			accessType = "profile"
 		} else {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 

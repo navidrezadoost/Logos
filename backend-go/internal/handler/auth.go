@@ -34,6 +34,11 @@ type loginParams struct {
 // the auth-token cookie.  Returns the public profile JSON on success.
 func LoginHandler(pool *db.Pool, tokensKey []byte, cookieName string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if len(tokensKey) == 0 {
+			writeError(w, http.StatusServiceUnavailable, "auth-disabled")
+			return
+		}
+
 		var params loginParams
 		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -179,7 +184,7 @@ func PrepareRegisterHandler(pool *db.Pool, tokensKey []byte) http.HandlerFunc {
 			Email:    params.Email,
 			FullName: params.FullName,
 			Password: params.Password,
-			Backend:  "penpot",
+			Backend:  "logos",
 			Exp:      time.Now().Add(7 * 24 * time.Hour),
 		}
 		if existingID != nil {
@@ -255,12 +260,12 @@ func RegisterProfileHandler(pool *db.Pool, tokensKey []byte, cookieName string) 
 		teamID := newUUID()
 		projectID := newUUID()
 
-		// Insert profile.
+		// Insert profile (onboarding skipped — user goes straight to dashboard).
 		if _, err = tx.Exec(r.Context(),
 			`INSERT INTO profile
 			   (id, fullname, email, password, auth_backend, is_active, is_blocked, is_demo, is_muted, props)
-			 VALUES ($1, $2, lower($3), $4, 'penpot', true, false, false, false, '{}')`,
-			profileID, claims.FullName, claims.Email, hashedPwd,
+			 VALUES ($1, $2, lower($3), $4, 'logos', true, false, false, false, $5::jsonb)`,
+			profileID, claims.FullName, claims.Email, hashedPwd, mustJSON(mergeOnboardingSkipProps(nil)),
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "profile insert failed")
 			return
@@ -268,7 +273,7 @@ func RegisterProfileHandler(pool *db.Pool, tokensKey []byte, cookieName string) 
 
 		// Insert default team.
 		if _, err = tx.Exec(r.Context(),
-			`INSERT INTO team (id, name, photo, is_default) VALUES ($1, 'Default', '', true)`,
+			`INSERT INTO team (id, name, is_default) VALUES ($1, 'Default', true)`,
 			teamID,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "team insert failed")
@@ -507,7 +512,7 @@ func extractDomain(emailAddr string) string {
 }
 
 // publicURI returns the configured public URI for building email links.
-// Falls back to http://localhost:3449 (the default Penpot development URL).
+// Falls back to http://localhost:3449 (the default Logos development URL).
 func publicURI() string {
 	if v := os.Getenv("PUBLIC_URI"); v != "" {
 		return v

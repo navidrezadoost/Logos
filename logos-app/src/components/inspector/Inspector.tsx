@@ -9,6 +9,7 @@ import { useDocumentStore } from "../../stores/documentStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useComponentStore } from "../../stores/componentStore";
 import type { FontVariationAxis, Shape, SolidFill } from "../../types/shapes";
+import { theme } from "../../theme/colors";
 
 // ---------------------------------------------------------------------------
 // Well-known variable font axes (fvar table metadata when font introspection
@@ -505,8 +506,8 @@ function AxisSlider({
 
 const panelStyle: React.CSSProperties = {
   width: 220,
-  background: "#181825",
-  borderLeft: "1px solid #313244",
+  background: theme.panel,
+  borderLeft: `1px solid ${theme.border}`,
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
@@ -514,10 +515,10 @@ const panelStyle: React.CSSProperties = {
 };
 
 const buttonStyle: React.CSSProperties = {
-  background: "#313244",
-  border: "1px solid #45475a",
+  background: theme.surface,
+  border: `1px solid ${theme.borderStrong}`,
   borderRadius: 4,
-  color: "#cdd6f4",
+  color: theme.text,
   fontSize: 11,
   padding: "4px 10px",
   cursor: "pointer",
@@ -527,10 +528,10 @@ const buttonStyle: React.CSSProperties = {
 
 const selectStyle: React.CSSProperties = {
   width: "100%",
-  background: "#313244",
-  border: "1px solid #45475a",
+  background: theme.surface,
+  border: `1px solid ${theme.borderStrong}`,
   borderRadius: 4,
-  color: "#cdd6f4",
+  color: theme.text,
   fontSize: 12,
   padding: "3px 6px",
   outline: "none",
@@ -538,10 +539,10 @@ const selectStyle: React.CSSProperties = {
 
 const numInputStyle: React.CSSProperties = {
   width: "100%",
-  background: "#313244",
-  border: "1px solid #45475a",
+  background: theme.surface,
+  border: `1px solid ${theme.borderStrong}`,
   borderRadius: 4,
-  color: "#cdd6f4",
+  color: theme.text,
   fontSize: 12,
   padding: "3px 6px",
   outline: "none",

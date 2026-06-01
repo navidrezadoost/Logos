@@ -1,12 +1,12 @@
-import { GridLayout } from '@penpot/plugin-types';
+import { GridLayout } from '@logos/plugin-types';
 import { PluginMessageEvent, TablePluginEvent } from './app/model';
 
-penpot.ui.open('TABLE PLUGIN', `?theme=${penpot.theme}`, {
+logos.ui.open('TABLE PLUGIN', `?theme=${logos.theme}`, {
   width: 280,
   height: 610,
 });
 
-penpot.ui.onMessage<PluginMessageEvent>((message) => {
+logos.ui.onMessage<PluginMessageEvent>((message) => {
   pluginData(message);
 
   if (message.type === 'table') {
@@ -20,10 +20,10 @@ penpot.ui.onMessage<PluginMessageEvent>((message) => {
       numCols = message.content.new.column;
     }
 
-    const board = penpot.createBoard();
+    const board = logos.createBoard();
     board.name = 'Table';
 
-    const viewport = penpot.viewport;
+    const viewport = logos.viewport;
     board.x = viewport.center.x - 150;
     board.y = viewport.center.y - 200;
     board.resize(numCols * 160, numRows * 50);
@@ -55,7 +55,7 @@ penpot.ui.onMessage<PluginMessageEvent>((message) => {
         }
       }
     }
-    penpot.closePlugin();
+    logos.closePlugin();
   }
 });
 
@@ -67,7 +67,7 @@ function createGroupCell(
   col: number,
   message: TablePluginEvent,
 ) {
-  const bg = penpot.createRectangle();
+  const bg = logos.createRectangle();
   bg.x = 0;
   bg.y = 0;
   bg.resize(100, 100);
@@ -108,9 +108,9 @@ function createGroupCell(
 
   let text;
   if (message.content.type === 'import' && message.content.import) {
-    text = penpot.createText(message.content.import[row][col]);
+    text = logos.createText(message.content.import[row][col]);
   } else if (message.content.new) {
-    text = row === 0 ? penpot.createText('Header') : penpot.createText('Cell');
+    text = row === 0 ? logos.createText('Header') : logos.createText('Cell');
   }
 
   if (text) {
@@ -125,7 +125,7 @@ function createGroupCell(
     text.fontSize = '12';
     text.fontWeight = row === 0 ? '500' : '400';
 
-    const group = penpot.group([bg, text]);
+    const group = logos.group([bg, text]);
     if (group) {
       text.constraintsHorizontal = 'leftright';
       text.constraintsVertical = 'topbottom';
@@ -147,7 +147,7 @@ function createFlexCell(
   col: number,
   message: TablePluginEvent,
 ) {
-  const board = penpot.createBoard();
+  const board = logos.createBoard();
 
   if (col === 0 && row === 0) {
     board.borderRadiusTopLeft = 8;
@@ -196,9 +196,9 @@ function createFlexCell(
 
   let text;
   if (message.content.type === 'import' && message.content.import) {
-    text = penpot.createText(message.content.import[row][col]);
+    text = logos.createText(message.content.import[row][col]);
   } else if (message.content.new) {
-    text = row === 0 ? penpot.createText('Header') : penpot.createText('Cell');
+    text = row === 0 ? logos.createText('Header') : logos.createText('Cell');
   }
 
   if (text) {
@@ -219,7 +219,7 @@ function createFlexCell(
 function pluginData(message: PluginMessageEvent) {
   if (message.type === 'tableconfig') {
     const { type, options } = message.content;
-    const page = penpot.currentPage;
+    const page = logos.currentPage;
 
     if (type === 'save') {
       page?.setPluginData('table-plugin', JSON.stringify(options));
@@ -239,5 +239,5 @@ function pluginData(message: PluginMessageEvent) {
 }
 
 function sendMessage(message: PluginMessageEvent) {
-  penpot.ui.sendMessage(message);
+  logos.ui.sendMessage(message);
 }

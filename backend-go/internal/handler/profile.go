@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/logos-design/logos/backend-go/internal/auth"
 	"github.com/logos-design/logos/backend-go/internal/db"
 	"github.com/logos-design/logos/backend-go/internal/storage"
+	"github.com/logos-design/logos/backend-go/internal/transit"
 )
 
 // cacheKey returns the Redis key for a cached profile.
@@ -25,30 +27,53 @@ func cacheKey(profileID string) string {
 // cacheTTL matches the Clojure backend's 5-minute TTL.
 const cacheTTL = 5 * time.Minute
 
-// Profile is the JSON-serialisable shape returned by GET /api/rpc/command/get-profile.
-// Field names use camelCase to match the wire format expected by the frontend.
+// Profile is the JSON-serialisable shape returned by get-profile.
+// Field names use kebab-case so the Transit middleware produces correct keyword
+// keys for the ClojureScript frontend (e.g. "~:is-active", "~:full-name").
 type Profile struct {
 	ID               string         `json:"id"`
 	FullName         string         `json:"fullname"`
 	Email            string         `json:"email"`
-	Lang             string         `json:"lang,omitempty"`
-	Theme            string         `json:"theme,omitempty"`
-	PhotoID          *string        `json:"photoId,omitempty"`
-	IsActive         bool           `json:"isActive"`
-	IsBlocked        bool           `json:"isBlocked"`
-	IsDemo           bool           `json:"isDemo"`
-	IsMuted          bool           `json:"isMuted"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	ModifiedAt       time.Time      `json:"modifiedAt"`
-	DefaultTeamID    *string        `json:"defaultTeamId,omitempty"`
-	DefaultProjectID *string        `json:"defaultProjectId,omitempty"`
+	Lang             string         `json:"lang"`
+	Theme            string         `json:"theme"`
+	PhotoID          *string        `json:"photo-id,omitempty"`
+	IsActive         bool           `json:"is-active"`
+	IsBlocked        bool           `json:"is-blocked"`
+	IsDemo           bool           `json:"is-demo"`
+	IsMuted          bool           `json:"is-muted"`
+	CreatedAt        time.Time      `json:"created-at"`
+	ModifiedAt       time.Time      `json:"modified-at"`
+	DefaultTeamID    *string        `json:"default-team-id,omitempty"`
+	DefaultProjectID *string        `json:"default-project-id,omitempty"`
 	Props            map[string]any `json:"props,omitempty"`
 }
 
+// now is a helper so zero-value Profile.CreatedAt is sensible.
+var epoch = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
 // anonymousProfile is returned when no authenticated session is present.
+// Mirrors the shape Penpot's Clojure backend returns for anonymous callers.
 var anonymousProfile = Profile{
-	ID:       "00000000-0000-0000-0000-000000000000",
-	FullName: "Anonymous User",
+	ID:         "00000000-0000-0000-0000-000000000000",
+	FullName:   "Anonymous User",
+	Email:      "",
+	Lang:       "",
+	Theme:      "default",
+	IsActive:   true,
+	IsBlocked:  false,
+	IsDemo:     false,
+	IsMuted:    false,
+	CreatedAt:  epoch,
+	ModifiedAt: epoch,
+}
+
+// apiError is a Penpot-compatible error response.
+// Using transit.Keyword for Type and Code causes them to be serialised as
+// Transit keywords ("~:error", "~:not-found", …) by the Transit middleware.
+type apiError struct {
+	Type transit.Keyword `json:"type"`
+	Code transit.Keyword `json:"code"`
+	Hint string          `json:"hint"`
 }
 
 // writeJSON encodes v as JSON and writes to w with the given HTTP status.
@@ -58,11 +83,59 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeError writes a JSON error response.
-func writeError(w http.ResponseWriter, status int, msg string) {
+// writePlainStringMap writes a Penpot [:map-of string string] RPC result.
+// Keys and values remain plain strings in Transit (object-id → media-id).
+func writePlainStringMap(w http.ResponseWriter, status int, m map[string]string) {
+	if m == nil {
+		m = map[string]string{}
+	}
+	body, err := transit.EncodePlainStringMap(m)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if len(body) == 0 {
+		body = []byte(`["^ "]`)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = fmt.Fprintf(w, `{"error":%q}`, msg)
+	if n, err := w.Write(body); err != nil {
+		log.Printf("[rpc] writePlainStringMap write failed: %v", err)
+	} else if n != len(body) {
+		log.Printf("[rpc] writePlainStringMap short write: wrote=%d want=%d", n, len(body))
+	}
+}
+
+// writeError writes a Penpot-style error response compatible with Transit
+// decoding on the ClojureScript side.
+func writeError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(apiError{
+		Type: "error",
+		Code: transit.Keyword(code),
+		Hint: code,
+	})
+}
+
+// writeAuthError writes a session/auth failure.  The ClojureScript frontend
+// dispatches on :type :authentication to redirect to login; :type :error falls
+// through to the default handler and shows "Unexpected error: …".
+func writeAuthError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(apiError{
+		Type: "authentication",
+		Code: transit.Keyword(code),
+		Hint: code,
+	})
+}
+
+// RPCNotFoundHandler returns a Penpot-compatible JSON 404 for unknown RPC methods.
+func RPCNotFoundHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "method-not-found")
+	}
 }
 
 // newUUID generates a random UUID v4 string without external dependencies.
@@ -89,6 +162,7 @@ func ProfileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 		// Try Redis cache first.
 		if rdb != nil {
 			if cached, ok := getCachedProfile(r.Context(), rdb, profileID); ok {
+				cached.Props = mergeOnboardingSkipProps(cached.Props)
 				writeJSON(w, http.StatusOK, cached)
 				return
 			}
@@ -126,7 +200,7 @@ func UpdateProfileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -166,7 +240,7 @@ func UpdateProfilePropsHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -231,7 +305,7 @@ func UpdateProfilePhotoHandler(pool *db.Pool, rdb *redis.Client, sto storage.Bac
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -299,7 +373,7 @@ func DeleteProfileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -337,10 +411,21 @@ func DeleteProfileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 func fetchProfile(ctx context.Context, pool *db.Pool, id string) (*Profile, error) {
 	const q = `
 		SELECT
-			id, fullname, email, lang, theme, photo_id,
-			is_active, is_blocked, is_demo, is_muted,
-			created_at, modified_at,
-			default_team_id, default_project_id, props
+			id::text,
+			COALESCE(fullname, ''),
+			COALESCE(email, ''),
+			COALESCE(lang, ''),
+			COALESCE(theme, 'default'),
+			photo_id,
+			COALESCE(is_active, false),
+			COALESCE(is_blocked, false),
+			COALESCE(is_demo, false),
+			COALESCE(is_muted, false),
+			created_at,
+			modified_at,
+			default_team_id,
+			default_project_id,
+			props
 		FROM profile
 		WHERE id = $1
 		  AND deleted_at IS NULL`
@@ -363,6 +448,7 @@ func fetchProfile(ctx context.Context, pool *db.Pool, id string) (*Profile, erro
 		p.Props = make(map[string]any)
 		_ = json.Unmarshal(propsRaw, &p.Props)
 	}
+	p.Props = mergeOnboardingSkipProps(p.Props)
 
 	return &p, nil
 }

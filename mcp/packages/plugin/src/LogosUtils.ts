@@ -1,10 +1,10 @@
-import { Board, Fill, FlexLayout, GridLayout, Page, Rectangle, Shape } from "@penpot/plugin-types";
+import { Board, Fill, FlexLayout, GridLayout, Page, Rectangle, Shape } from "@logos/plugin-types";
 
 export class LogosUtils {
     /**
      * Generates an overview structure of the given shape,
      * providing its id, name and type, and recursively its children's attributes.
-     * The `type` field indicates the type in the Penpot API.
+     * The `type` field indicates the type in the Logos API.
      * If the shape has a layout system (flex or grid), includes layout information.
      *
      * @param shape - The root shape to generate the structure from
@@ -55,9 +55,9 @@ export class LogosUtils {
      * Finds all shapes that matches the given predicate in the given shape tree.
      *
      * @param predicate - A function that takes a shape and returns true if it matches the criteria
-     * @param root - The root shape to start the search from (defaults to penpot.root)
+     * @param root - The root shape to start the search from (defaults to logos.root)
      */
-    public static findShapes(predicate: (shape: Shape) => boolean, root: Shape | null = penpot.root): Shape[] {
+    public static findShapes(predicate: (shape: Shape) => boolean, root: Shape | null = logos.root): Shape[] {
         let result = new Array<Shape>();
 
         let find = function (shape: Shape | null) {
@@ -104,7 +104,7 @@ export class LogosUtils {
         };
 
         if (root === null) {
-            const pages = penpot.currentFile?.pages;
+            const pages = logos.currentFile?.pages;
             if (pages) {
                 for (let page of pages) {
                     let result = find(page.root);
@@ -130,12 +130,12 @@ export class LogosUtils {
     }
 
     public static findPage(predicate: (page: Page) => boolean): Page | null {
-        let page = penpot.currentFile!.pages.find(predicate);
+        let page = logos.currentFile!.pages.find(predicate);
         return page || null;
     }
 
     public static getPages(): { id: string; name: string }[] {
-        return penpot.currentFile!.pages.map((page) => ({ id: page.id, name: page.name }));
+        return logos.currentFile!.pages.map((page) => ({ id: page.id, name: page.name }));
     }
 
     public static getPageById(id: string): Page | null {
@@ -147,7 +147,7 @@ export class LogosUtils {
     }
 
     public static getPageForShape(shape: Shape): Page | null {
-        for (const page of penpot.currentFile!.pages) {
+        for (const page of logos.currentFile!.pages) {
             if (page.getShapeById(shape.id)) {
                 return page;
             }
@@ -160,8 +160,8 @@ export class LogosUtils {
         if (!page) {
             throw new Error("Shape is not part of any page");
         }
-        penpot.openPage(page);
-        return penpot.generateStyle([shape], { type: "css", includeChildren: true });
+        logos.openPage(page);
+        return logos.generateStyle([shape], { type: "css", includeChildren: true });
     }
 
     /**
@@ -273,7 +273,7 @@ export class LogosUtils {
 
     /**
      * Decodes a base64 string to a Uint8Array.
-     * This is required because the Penpot plugin environment does not provide the atob function.
+     * This is required because the Logos plugin environment does not provide the atob function.
      *
      * @param base64 - The base64-encoded string to decode
      * @returns The decoded data as a Uint8Array
@@ -310,7 +310,7 @@ export class LogosUtils {
     }
 
     /**
-     * Imports an image from base64 data into the Penpot design as a Rectangle shape filled with the image.
+     * Imports an image from base64 data into the Logos design as a Rectangle shape filled with the image.
      * The rectangle has the image's original proportions by default.
      * Optionally accepts position (x, y) and dimensions (width, height) parameters.
      * If only one dimension is provided, the other is calculated to maintain the image's aspect ratio.
@@ -337,11 +337,11 @@ export class LogosUtils {
         // convert base64 to Uint8Array
         const bytes = LogosUtils.atob(base64);
 
-        // upload the image data to Penpot
-        const imageData = await penpot.uploadMediaData(name, bytes, mimeType);
+        // upload the image data to Logos
+        const imageData = await logos.uploadMediaData(name, bytes, mimeType);
 
         // create a rectangle shape
-        const rect = penpot.createRectangle();
+        const rect = logos.createRectangle();
         rect.name = name;
 
         // calculate dimensions

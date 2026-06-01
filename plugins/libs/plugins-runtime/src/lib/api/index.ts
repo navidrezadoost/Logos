@@ -18,7 +18,7 @@ import type {
   LocalStorage,
   Page,
   Path,
-  Penpot,
+  Logos,
   Rectangle,
   Shape,
   SvgRaw,
@@ -27,7 +27,7 @@ import type {
   User,
   VariantContainer,
   Viewport,
-} from '@penpot/plugin-types';
+} from '@logos/plugin-types';
 
 import { Permissions } from '../models/manifest.model.js';
 import { OpenUIOptions } from '../models/open-ui-options.model.js';
@@ -53,7 +53,7 @@ export function createApi(
     }
   };
 
-  const penpot: Penpot = {
+  const logos: Logos = {
     ui: {
       open: (name: string, url: string, options?: OpenUIOptions) => {
         plugin.openModal(name, url, options);
@@ -150,7 +150,7 @@ export function createApi(
       plugin.destroyListener(eventId);
     },
 
-    // Penpot State API
+    // Logos State API
 
     get root(): Shape | null {
       checkPermission('content:read');
@@ -361,6 +361,6 @@ export function createApi(
   };
 
   return {
-    penpot,
+    logos,
   };
 }

@@ -4,8 +4,8 @@ import { join, resolve } from "path";
 /**
  * Configuration for log file location and level.
  */
-const LOG_DIR = process.env.PENPOT_MCP_LOG_DIR || "logs";
-const LOG_LEVEL = process.env.PENPOT_MCP_LOG_LEVEL || "info";
+const LOG_DIR = process.env.LOGOS_MCP_LOG_DIR || "logs";
+const LOG_LEVEL = process.env.LOGOS_MCP_LOG_LEVEL || "info";
 
 /**
  * Generates a timestamped log file name.
@@ -20,7 +20,7 @@ function generateLogFileName(): string {
     const hours = String(now.getHours()).padStart(2, "0");
     const minutes = String(now.getMinutes()).padStart(2, "0");
     const seconds = String(now.getSeconds()).padStart(2, "0");
-    return `penpot-mcp-${year}${month}${day}-${hours}${minutes}${seconds}.log`;
+    return `logos-mcp-${year}${month}${day}-${hours}${minutes}${seconds}.log`;
 }
 
 /**

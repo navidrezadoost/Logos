@@ -112,7 +112,7 @@ func CreateWebhookHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -188,7 +188,7 @@ func UpdateWebhookHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -246,7 +246,7 @@ func DeleteWebhookHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 

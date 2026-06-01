@@ -198,10 +198,10 @@ function buildPaletteCode(
   let shapes;
   if (requestedIds) {
     shapes = requestedIds
-      .map((id) => penpot.currentPage.getShapeById(id))
+      .map((id) => logos.currentPage.getShapeById(id))
       .filter(Boolean);
   } else {
-    shapes = penpot.selection;
+    shapes = logos.selection;
   }
 
   if (!shapes || shapes.length === 0) {

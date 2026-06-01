@@ -1,8 +1,9 @@
-// Package binfile implements the .penpot v3 file export/import format.
+// Package binfile implements the .logos v3 file export/import format.
 //
 // # Format overview
 //
-// A .penpot file is a standard ZIP archive.  The root always contains:
+// A .logos file is a standard ZIP archive (the legacy .penpot extension is
+// accepted on import and triggers a deprecation log message).  The root always contains:
 //
 //	manifest.json              — type, version, file list
 //
@@ -48,6 +49,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
 )
@@ -72,7 +74,9 @@ var ErrFormatV1NotSupported = fmt.Errorf("binfile: v1 binary format is not suppo
 
 // Manifest is the root metadata entry in manifest.json.
 type Manifest struct {
-	Type        string      `json:"type"`                  // always "penpot/export-files"
+	// Type is "logos/export-files" for archives written by the Go backend.
+	// The legacy value "penpot/export-files" is accepted on import.
+	Type        string      `json:"type"`
 	Version     int         `json:"version"`               // always 1
 	GeneratedBy string      `json:"generated-by"`
 	GoExtension bool        `json:"go-extension,omitempty"` // true when written by Go
@@ -205,7 +209,7 @@ func ParseFormat(header []byte) int {
 
 // ─── ZIP writer ───────────────────────────────────────────────────────────────
 
-// WriteZIP encodes a single-file export as a .penpot ZIP and writes it to w.
+// WriteZIP encodes a single-file export as a .logos ZIP and writes it to w.
 func WriteZIP(w io.Writer, p ExportPayload) error {
 	zw := zip.NewWriter(w)
 	defer zw.Close()
@@ -214,7 +218,7 @@ func WriteZIP(w io.Writer, p ExportPayload) error {
 
 	// ── manifest.json ─────────────────────────────────────────────────────
 	manifest := Manifest{
-		Type:        "penpot/export-files",
+		Type:        "logos/export-files",
 		Version:     manifestVersion,
 		GeneratedBy: generatedBy,
 		GoExtension: true,
@@ -279,7 +283,7 @@ func WriteZIP(w io.Writer, p ExportPayload) error {
 
 // ─── ZIP reader ───────────────────────────────────────────────────────────────
 
-// ReadZIP parses a .penpot ZIP from the supplied bytes.
+// ReadZIP parses a .logos (or legacy .penpot) ZIP from the supplied bytes.
 // Returns ErrFormatV1NotSupported if the bytes represent a v1 binary file.
 func ReadZIP(data []byte) (*ImportPayload, error) {
 	if len(data) < 4 {
@@ -305,7 +309,9 @@ func ReadZIP(data []byte) (*ImportPayload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("binfile: read manifest: %w", err)
 	}
-	if manifest.Type != "penpot/export-files" {
+	if manifest.Type == "penpot/export-files" {
+		log.Printf("[binfile] DEPRECATION: archive uses legacy manifest type %q; re-export as .logos to update", manifest.Type)
+	} else if manifest.Type != "logos/export-files" {
 		return nil, fmt.Errorf("binfile: unexpected manifest type %q", manifest.Type)
 	}
 

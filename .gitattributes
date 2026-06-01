@@ -1,26 +1,20 @@
 # Linguist language overrides for correct GitHub statistics.
 #
-# Language distribution target:
-#   TypeScript  ~45%  — logos-app SPA, MCP server, Plugin SDK
-#   Clojure     ~35%  — backend server, common/ schemas, exporter
-#   Rust        ~15%  — layout, renderer, rebase, vector, WASM
-#   WGSL         ~3%  — WebGPU compute & render shaders
-#   SQL          ~2%  — PostgreSQL migrations
-#
-# Note: the `frontend/` directory contains ClojureScript (.cljs / .cljc)
-# files that are compiled by shadow-cljs for the legacy Penpot-compatible
-# UI.  These are correctly classified by Linguist as ClojureScript; no
-# override is needed because they share the "Clojure" language category
-# on GitHub (Linguist groups Clojure + ClojureScript + EDN together).
-
-# Clojure (backend, common schemas, exporter)
-*.clj  linguist-language=Clojure
+# Language distribution target (post-G5, zero Clojure):
+#   TypeScript  ~50%  — logos-app SPA, MCP server, Plugin SDK, workers
+#   Go          ~30%  — backend-go HTTP server, all 25 RPC namespaces
+#   Rust        ~17%  — layout, renderer, rebase, vector, WASM, types
+#   WGSL         ~2%  — WebGPU compute & render shaders
+#   SQL          ~1%  — PostgreSQL migrations
 
 # TypeScript (frontend SPA, plugins, MCP server)
 *.ts   linguist-language=TypeScript
 *.tsx  linguist-language=TypeScript
 
-# Rust (render, layout, vector, WASM)
+# Go (backend)
+*.go   linguist-language=Go
+
+# Rust (render, layout, vector, WASM, types)
 *.rs   linguist-language=Rust
 
 # WGSL (WebGPU shaders)
@@ -30,15 +24,18 @@
 *.sql  linguist-language=SQL
 
 # Generated files — mark as generated so Linguist excludes from stats
-logos-app/src/types/generated/*.d.ts  linguist-generated=true
+logos-app/src/types/generated/*.d.ts      linguist-generated=true
+logos-app/src/types/rust-generated/*.ts   linguist-generated=true
 
-# ── Historical dead code — preserved for git blame, not compiled ──────────────
-# frontend/ was the ClojureScript SPA superseded by logos-app/ in M5.
-# exporter/ ClojureScript files are historical; the exporter is TypeScript.
-# library/ was the ClojureScript UI component library, no longer built.
-# Marking as linguist-vendored removes them from language statistics entirely.
-frontend/**/*.cljs  linguist-vendored=true
-frontend/**/*.cljc  linguist-vendored=true
-exporter/**/*.cljs  linguist-vendored=true
-library/**/*.cljs   linguist-vendored=true
-library/**/*.cljc   linguist-vendored=true
+# ── Historical dead code — preserved for git blame, not compiled ─────────────
+# frontend/ was the ClojureScript SPA (superseded by logos-app/ in M5).
+# exporter/ was the ClojureScript headless exporter (superseded by Go binfile).
+# library/ was the ClojureScript UI component library (no longer built).
+# common/  was the shared Clojure/ClojureScript schema library (superseded by
+#          logos-types Rust crate).
+# All are marked linguist-vendored so they are excluded from language statistics.
+frontend/**  linguist-vendored=true
+exporter/**  linguist-vendored=true
+library/**   linguist-vendored=true
+common/**    linguist-vendored=true
+backend/**   linguist-vendored=true

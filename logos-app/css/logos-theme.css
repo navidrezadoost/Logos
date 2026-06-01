@@ -1,0 +1,199 @@
+/**
+ * Logos brand theme — panel #1e232d, accent #6b82fe.
+ *
+ * Penpot duplicates palette tokens on scoped `.main_ui_* .default` blocks inside
+ * main.css (higher specificity than a bare `.default`). Use body + !important so
+ * these win over the bundled cyan/teal defaults (#7efff5 / #00d1b8).
+ */
+html body.default,
+html body.default [class~="default"] {
+  --color-background-primary: #1e232d !important;
+  --color-background-default: #1e232d !important;
+  --color-background-secondary: #171b24 !important;
+  --color-background-tertiary: #252a36 !important;
+  --color-background-quaternary: #2d3340 !important;
+
+  --color-accent-primary: #6b82fe !important;
+  --color-accent-primary-muted: rgba(107, 130, 254, 0.25) !important;
+  --color-accent-secondary: #6b82fe !important;
+  --color-accent-tertiary: #6b82fe !important;
+  --color-accent-quaternary: #6b82fe !important;
+  --color-accent-overlay: rgba(107, 130, 254, 0.6) !important;
+  --color-accent-select: rgba(107, 130, 254, 0.12) !important;
+  --color-accent-action: #6b82fe !important;
+  --color-accent-action-hover: #8295fe !important;
+
+  --da-primary: #6b82fe !important;
+  --da-primary-muted: rgba(107, 130, 254, 0.35) !important;
+  --da-tertiary: #6b82fe !important;
+  --da-tertiary-10: rgba(107, 130, 254, 0.1) !important;
+  --da-tertiary-70: rgba(107, 130, 254, 0.7) !important;
+
+  --db-primary-60: rgba(30, 35, 45, 0.6) !important;
+  --color-overlay-default: rgba(30, 35, 45, 0.6) !important;
+  --color-overlay-onboarding: rgba(30, 35, 45, 0.9) !important;
+
+  --panel-background-color: #1e232d !important;
+  --app-background: #1e232d !important;
+  --layer-row-background-color: #1e232d !important;
+  --layer-row-foreground-color-selected: #6b82fe !important;
+  --layer-row-foreground-color-hover: #6b82fe !important;
+  --button-icon-foreground-color-selected: #6b82fe !important;
+  --icon-foreground-selected: #6b82fe !important;
+  --tab-foreground-color-selected: #6b82fe !important;
+  --sidebar-element-foreground-color-selected: #6b82fe !important;
+}
+
+/* Layer list + left toolbar — force accent on selected/hover rows */
+html body.default .main_ui_workspace_sidebar_layer_item__layer-row.main_ui_workspace_sidebar_layer_item__selected,
+html body.default .main_ui_workspace_sidebar_layer_item__layer-row.main_ui_workspace_sidebar_layer_item__selected .main_ui_workspace_sidebar_layer_item__element-children {
+  --layer-foreground-color: #6b82fe !important;
+  color: #6b82fe !important;
+}
+
+html body.default .main_ui_workspace_sidebar__button-icon-selected,
+html body.default .main_ui_workspace_sidebar_assets__button-icon-selected,
+html body.default .main_ui_workspace_tokens_sidebar__button-icon-selected {
+  color: #6b82fe !important;
+}
+
+html body.default .main_ui_workspace_sidebar__button-icon-selected svg,
+html body.default .main_ui_workspace_sidebar_assets__button-icon-selected svg,
+html body.default .main_ui_workspace_tokens_sidebar__button-icon-selected svg {
+  stroke: #6b82fe !important;
+}
+
+/* Design / Prototype / Inspect tab switcher (top of left panel) */
+html body.default .main_ui_ds_layout_tab_switcher__tabs {
+  --tabs-bg-color: #1e232d !important;
+}
+
+html body.default .main_ui_ds_layout_tab_switcher__tab-nav {
+  background-color: #1e232d !important;
+}
+
+html body.default .main_ui_ds_layout_tab_switcher__tab {
+  --tabs-item-bg-color: #1e232d !important;
+  --tabs-item-fg-color: #8f9da3 !important;
+  --tabs-item-fg-color-hover: #e8eaee !important;
+  background: #1e232d !important;
+  color: #8f9da3 !important;
+}
+
+html body.default .main_ui_ds_layout_tab_switcher__tab:hover {
+  --tabs-item-fg-color: #e8eaee !important;
+  color: #e8eaee !important;
+}
+
+html body.default .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected,
+html body.default .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected:hover {
+  --tabs-item-bg-color: #2d3340 !important;
+  --tabs-item-fg-color: #6b82fe !important;
+  --tabs-item-fg-color-hover: #6b82fe !important;
+  background: #2d3340 !important;
+  color: #6b82fe !important;
+}
+
+html body.default .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected .main_ui_ds_layout_tab_switcher__tab-text,
+html body.default .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected:hover .main_ui_ds_layout_tab_switcher__tab-text {
+  color: #6b82fe !important;
+}
+
+html body.default .main_ui_ds_layout_tab_switcher__tab:focus-visible {
+  --tabs-item-outline-color: #6b82fe !important;
+  outline-color: #6b82fe !important;
+}
+
+/* ── Workspace shell: left / right panels (direct bg — vars alone miss nested .default blocks) ── */
+html body .main_ui_workspace_sidebar__left-settings-bar,
+html body .main_ui_workspace_sidebar__right-settings-bar,
+html body .main_ui_workspace_sidebar__left-header,
+html body .main_ui_workspace_sidebar__settings-bar-content,
+html body .main_ui_workspace_sidebar__settings-bar-inside,
+html body .main_ui_workspace_sidebar__layers-tab,
+html body .main_ui_workspace_sidebar__resize-area-horiz,
+html body .main_ui_workspace_right_header__workspace-header-right,
+html body .main_ui_inspect_left_sidebar__settings-bar-left,
+html body .main_ui_inspect_left_sidebar__settings-bar-inside,
+html body .main_ui_inspect_right_sidebar__settings-bar-right,
+html body .main_ui_inspect_right_sidebar__tool-windows,
+html body .main_ui_workspace_sidebar_options__tool-window,
+html body .main_ui_workspace_sidebar_options__element-options,
+html body .main_ui_workspace_sidebar_options__design-options,
+html body .main_ui_workspace_sidebar_options__interaction-options,
+html body .main_ui_workspace_sidebar_options__content-class {
+  background-color: #1e232d !important;
+}
+
+/* ── Canvas chrome (area around the artboard, rulers gutter) ── */
+html body .main_ui_workspace__workspace,
+html body .main_ui_workspace__workspace-loader,
+html body .main_ui_workspace__workspace-content {
+  background-color: #1e232d !important;
+}
+
+html body.default,
+html body.default [class~="default"] {
+  --color-canvas: #252a36 !important;
+}
+
+/* ── Floating tool toolbar over the canvas ── */
+html body .main_ui_workspace_top_toolbar__main-toolbar {
+  background-color: #1e232d !important;
+  border-color: #2d3340 !important;
+}
+
+html body .main_ui_workspace_top_toolbar__main-toolbar-options-button.main_ui_workspace_top_toolbar__selected,
+html body .main_ui_workspace_top_toolbar__button-icon-selected {
+  background-color: #2d3340 !important;
+  border-color: #2d3340 !important;
+  color: #6b82fe !important;
+}
+
+html body .main_ui_workspace_top_toolbar__main-toolbar-options-button.main_ui_workspace_top_toolbar__selected svg,
+html body .main_ui_workspace_top_toolbar__button-icon-selected svg {
+  stroke: #6b82fe !important;
+}
+
+/* ── Right panel section tabs (Fill, Stroke, …) ── */
+html body .main_ui_workspace_sidebar_options__options-tab-switcher .main_ui_ds_layout_tab_switcher__tab-nav,
+html body .main_ui_workspace_sidebar__left-sidebar-tabs .main_ui_ds_layout_tab_switcher__tab-nav {
+  background-color: #1e232d !important;
+}
+
+html body .main_ui_workspace_sidebar_options__options-tab-switcher .main_ui_ds_layout_tab_switcher__tab,
+html body .main_ui_workspace_sidebar__left-sidebar-tabs .main_ui_ds_layout_tab_switcher__tab {
+  background: #1e232d !important;
+}
+
+html body .main_ui_workspace_sidebar_options__options-tab-switcher .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected,
+html body .main_ui_workspace_sidebar__left-sidebar-tabs .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected {
+  background: #2d3340 !important;
+  color: #6b82fe !important;
+}
+
+html body .main_ui_workspace_sidebar_options__options-tab-switcher .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected .main_ui_ds_layout_tab_switcher__tab-text,
+html body .main_ui_workspace_sidebar__left-sidebar-tabs .main_ui_ds_layout_tab_switcher__tab.main_ui_ds_layout_tab_switcher__selected .main_ui_ds_layout_tab_switcher__tab-text {
+  color: #6b82fe !important;
+}
+
+/* Re-assert tokens on #app so Penpot module-scoped .default blocks cannot win */
+html body.default #app,
+html body.default #app [class~="default"] {
+  --color-background-primary: #1e232d !important;
+  --color-background-default: #1e232d !important;
+  --color-background-secondary: #171b24 !important;
+  --color-background-tertiary: #252a36 !important;
+  --color-background-quaternary: #2d3340 !important;
+  --color-accent-primary: #6b82fe !important;
+  --color-accent-tertiary: #6b82fe !important;
+  --panel-background-color: #1e232d !important;
+  --app-background: #1e232d !important;
+  --button-primary-background-color-rest: #6b82fe !important;
+  --button-primary-border-color-rest: #6b82fe !important;
+  --button-primary-background-color-hover: #8295fe !important;
+  --button-primary-border-color-hover: #8295fe !important;
+  --button-tertiary-foreground-color-hover: #6b82fe !important;
+  --button-icon-foreground-color-selected: #6b82fe !important;
+  --tab-foreground-color-selected: #6b82fe !important;
+}

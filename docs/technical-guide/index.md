@@ -1,6 +1,6 @@
 ---
 title: Technical Guide
-desc: Get self-hosting instructions, integration details, and developer resources. Troubleshoot issues easily. Try Penpot free! See Penpot's technical guide.
+desc: Get self-hosting instructions, integration details, and developer resources. Troubleshoot issues easily. Try Logos free! See Logos's technical guide.
 eleventyNavigation:
   key: Technical Guide
   order: 4
@@ -10,14 +10,17 @@ eleventyNavigation:
   <img src="/img/home-technical-guide.webp" alt="Technical Guide" border="0">
 </div>
 
-# Technical Guide
+# Technical Guide — Logos Community Edition
 
-## Self-hosting Penpot
+Logos Community Edition is the complete, open-source design platform.
+Every feature documented here is available at no cost under the Mozilla Public License 2.0.
 
-This section details everything you need to know to get Penpot up and running in your own
+## Self-hosting Logos
+
+This section details everything you need to know to get Logos up and running in your own
 machine.
 
-* In the [Install with Elestio][1] section, you can find how to open an Elestio account and create your Penpot instance.
+* In the [Install with Elestio][1] section, you can find how to open an Elestio account and create your Logos instance.
 
 * In the [Install with Docker][2] section, you can find the official Docker installation guide.
 
@@ -25,22 +28,22 @@ machine.
 
 * In the [Configuration][3] section, you can find all the customization options you can set up after installing.
 
-* Or you can try other, not supported by Penpot, [Unofficial options][4].
+* Or you can try other, not supported by Logos, [Unofficial options][4].
 
 ## Integration with external apps
 
-The [Integration Guide][5] explains how to connect Penpot with external apps, so they get notified
+The [Integration Guide][5] explains how to connect Logos with external apps, so they get notified
 when certain events occur and may create your own interconnections and collaboration features.
 
-## Developing Penpot
+## Developing Logos
 
 Also, if you are a developer, you can get into the code, to explore it, learn how it is made,
 or extend it and contribute with new functionality. For this, we have a different Docker installation.
 In the [Developer Guide][6] you can find how to setup a development environment and many other dev-oriented documentation.
 
-## Troubleshooting Penpot
+## Troubleshooting Logos
 
-The [Troubleshooting][8] section guides you through the different logs in Penpot so you can easily identify
+The [Troubleshooting][8] section guides you through the different logs in Logos so you can easily identify
 any issue that may arise as well as report it comprehensively.
 
 [1]: /technical-guide/getting-started/#install-with-elestio

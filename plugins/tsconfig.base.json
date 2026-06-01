@@ -15,7 +15,7 @@
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@penpot/plugin-types": ["libs/plugin-types/index.d.ts"],
+      "@logos/plugin-types": ["libs/plugin-types/index.d.ts"],
       "plugins-runtime": ["libs/plugins-runtime/src/index.ts"],
       "plugins-styles/*": ["libs/plugins-styles/src/*"]
     }

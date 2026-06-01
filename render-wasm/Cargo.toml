@@ -2,9 +2,9 @@
 name = "render"
 version = "0.1.0"
 edition = "2021"
-repository = "https://github.com/penpot/penpot"
+repository = "https://github.com/logos/logos"
 license-file = "../LICENSE"
-description = "Wasm-based canvas renderer for Penpot"
+description = "Wasm-based canvas renderer for Logos"
 
 build = "build.rs"
 

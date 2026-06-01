@@ -4,9 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Logos App</title>
+    <script>
+      // Full Penpot editor: boot from workspace.html (not the React dashboard).
+      if (/^#\/workspace(\/|\?)/.test(location.hash)) {
+        location.replace("/workspace.html" + location.hash);
+      }
+    </script>
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { background: #1e1e2e; color: #cdd6f4; font-family: sans-serif; }
+      body { background: #1e232d; color: #e8eaee; font-family: sans-serif; }
     </style>
   </head>
   <body>

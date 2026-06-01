@@ -10,7 +10,7 @@ Logos performance initiative. It ensures that Phase 1 rendering improvements
 
 | File | Purpose |
 |------|---------|
-| `generate_file.clj` | Clojure script that produces `fixtures/large-canvas.penpot` (10,000+ shapes, 5 pages) |
+| `generate_file.clj` | Clojure script that produces `fixtures/large-canvas.logos` (10,000+ shapes, 5 pages) |
 | `memory_profile.js`  | Playwright benchmark: loads fixture, runs undo/redo + page navigation, asserts heap limits |
 | `analyse_snapshot.js`| Heap snapshot parser — reads `.heapsnapshot` JSON, extracts actionable metrics |
 | `deps.edn`           | Clojure deps for the generator (includes `common/` namespaces) |
@@ -33,7 +33,7 @@ Logos performance initiative. It ensures that Phase 1 rendering improvements
 # 1. Generate the benchmark file (one-time, ~30 s)
 cd test/benchmarks
 clojure -M:gen-benchmark
-# → writes fixtures/large-canvas.penpot
+# → writes fixtures/large-canvas.logos
 
 # 2. Install Playwright browsers
 npm install
@@ -69,7 +69,7 @@ Override via environment variables (e.g. `LOGOS_HEAP_LIMIT_MB=400`).
 | `LOGOS_URL` | `http://localhost:3449` | Base URL of the running Logos instance |
 | `LOGOS_EMAIL` | `benchmark@logos.test` | Auth user email |
 | `LOGOS_PASSWORD` | `benchmark123!` | Auth user password |
-| `BENCHMARK_FILE` | `fixtures/large-canvas.penpot` | Path to the .penpot benchmark file |
+| `BENCHMARK_FILE` | `fixtures/large-canvas.logos` | Path to the .logos benchmark file |
 
 ---
 

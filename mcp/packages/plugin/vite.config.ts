@@ -5,7 +5,7 @@ let WS_URI = process.env.WS_URI || "http://localhost:4402";
 let MULTI_USER_MODE = process.env.MULTI_USER_MODE === "true";
 
 console.log("Will define IS_MULTI_USER_MODE as:", JSON.stringify(MULTI_USER_MODE));
-console.log("Will define PENPOT_MCP_WEBSOCKET_URL as:", JSON.stringify(WS_URI));
+console.log("Will define LOGOS_MCP_WEBSOCKET_URL as:", JSON.stringify(WS_URI));
 
 export default defineConfig({
     base: "./",
@@ -38,6 +38,6 @@ export default defineConfig({
     },
     define: {
         IS_MULTI_USER_MODE: JSON.stringify(process.env.MULTI_USER_MODE === "true"),
-        PENPOT_MCP_WEBSOCKET_URL: JSON.stringify(WS_URI),
+        LOGOS_MCP_WEBSOCKET_URL: JSON.stringify(WS_URI),
     },
 });

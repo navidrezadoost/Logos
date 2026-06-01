@@ -4,7 +4,7 @@ import { LogosMcpServer } from "./LogosMcpServer";
 import { createLogger, logFilePath } from "./logger";
 
 /**
- * Entry point for Penpot MCP Server
+ * Entry point for Logos MCP Server
  *
  * Creates and starts the MCP server instance, handling any startup errors
  * gracefully and ensuring proper process termination.

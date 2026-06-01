@@ -18,7 +18,7 @@ import { SvgComponent } from './components/svg.component';
   template: `
     <h1 class="title title-m">Convert your colors assets to Design Tokens</h1>
     <p class="description body-m">
-      A Penpot plugin to generate a JSON file with your color styles in a
+      A Logos plugin to generate a JSON file with your color styles in a
       <a target="_blank" href="https://tr.designtokens.org/format/"
         >Design Token Standard format</a
       >.

@@ -1,0 +1,35 @@
+import React from "react";
+import type { SVGProps } from "react";
+
+export interface StarProps extends SVGProps<SVGSVGElement> {
+  size?: number | string;
+}
+
+const Star = React.forwardRef<SVGSVGElement, StarProps>(
+  ({ size, className, style, ...props }, ref) => {
+    const dimensions = size ? { width: size, height: size } : {
+      width: props.width || 24,
+      height: props.height || 24
+    };
+
+    return (
+      <svg
+        ref={ref}
+        viewBox="0 0 640 640"
+        xmlns="http://www.w3.org/2000/svg"
+        width={dimensions.width}
+        height={dimensions.height}
+        fill={props.fill || "currentColor"}
+        className={className}
+        style={style}
+        {...props}
+      >
+        <path fill="currentColor" d="M320.2 11.2L227.6 192.6L26.5 224.6L170.4 368.7L138.7 569.9L320.2 477.6L501.7 569.9L470 368.7L613.9 224.6L412.8 192.6L320.2 11.2z"/>
+      </svg>
+    );
+  }
+);
+
+Star.displayName = "Star";
+
+export default Star;

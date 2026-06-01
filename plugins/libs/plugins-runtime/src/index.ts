@@ -8,7 +8,7 @@ import {
   ɵunloadPlugin,
 } from './lib/load-plugin.js';
 
-import type { Context } from '@penpot/plugin-types';
+import type { Context } from '@logos/plugin-types';
 
 console.log('%c[PLUGINS] Loading plugin system', 'color: #008d7c');
 

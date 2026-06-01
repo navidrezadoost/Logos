@@ -81,7 +81,7 @@ export interface PendingRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Backward-compat aliases for code that used the old Penpot-style names
+// Backward-compat aliases for code that used the old Logos-style names
 // ---------------------------------------------------------------------------
 
 export type { Shape as PluginShape } from "@logos/plugin-types";

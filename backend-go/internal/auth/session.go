@@ -210,7 +210,7 @@ func SessionID(ctx context.Context) string {
 // Use at the top of any handler that requires authentication.
 func RequireAuth(w http.ResponseWriter, r *http.Request) bool {
 	if ProfileID(r.Context()) == "" {
-		http.Error(w, `{"error":"not authenticated"}`, http.StatusForbidden)
+		http.Error(w, `{"type":"~:authentication","code":"~:not-authenticated","hint":"not-authenticated"}`, http.StatusUnauthorized)
 		return false
 	}
 	return true

@@ -14,6 +14,7 @@
 import { useComponentStore } from "../../stores/componentStore";
 import { useDocumentStore } from "../../stores/documentStore";
 import type { Shape } from "../../types/shapes";
+import { theme } from "../../theme/colors";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Drag payload key shared with Canvas.tsx
@@ -104,8 +105,8 @@ function ComponentRow({
 
 const panelStyle: React.CSSProperties = {
   width: 200,
-  background: "#181825",
-  borderRight: "1px solid #313244",
+  background: theme.panel,
+  borderRight: `1px solid ${theme.border}`,
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
@@ -114,7 +115,7 @@ const panelStyle: React.CSSProperties = {
 
 const headerStyle: React.CSSProperties = {
   padding: "8px 12px",
-  borderBottom: "1px solid #313244",
+  borderBottom: `1px solid ${theme.border}`,
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
@@ -123,7 +124,7 @@ const headerStyle: React.CSSProperties = {
 const headerLabel: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 600,
-  color: "#7f849c",
+  color: theme.textMuted,
   letterSpacing: "0.05em",
   textTransform: "uppercase",
 };
@@ -142,14 +143,14 @@ const rowStyle: React.CSSProperties = {
   gap: 8,
   padding: "6px 12px",
   cursor: "grab",
-  color: "#cdd6f4",
+  color: theme.text,
   fontSize: 12,
   userSelect: "none",
 };
 
 const iconStyle: React.CSSProperties = {
   fontSize: 14,
-  color: "#cba6f7",
+  color: theme.accent,
   flexShrink: 0,
 };
 

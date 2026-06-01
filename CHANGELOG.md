@@ -6,6 +6,53 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: 
 
 ---
 
+## [Unreleased] — 2026-05-30
+
+### Go backend — `go/g4-namespaces-4` (workspace RPC, Transit, Clojure removal)
+
+**Branch**: `go/g4-namespaces-4`
+
+Continues the Go rewrite: broader RPC coverage, Transit+JSON on the wire, and removal of the legacy Clojure backend tree.
+
+#### Added / expanded — `backend-go/`
+
+- **`internal/transit/`** — Transit+JSON encode/decode middleware; keyword/UUID/instant tokens; geometry tags (`~#point`, `~#rect`, `~#matrix`) so Penpot’s frontend decodes `get-file` shapes correctly.
+- **`internal/filedata/`** — empty-file bootstrap, shape geometry normalization (selrect, points, transform matrices).
+- **Handlers** — files (load/dashboard/create/delete), projects (create with starter file), comments, search, flags, onboarding, demo, feedback, management, assets, audit, notifications WebSocket, storage objects, and related tests.
+- **`internal/server/server.go`** — wires new RPC routes and Transit middleware.
+
+#### Removed
+
+- **`backend/`** — Clojure/Penpot JVM backend, migrations, scripts, and bundled assets (superseded by `backend-go`).
+
+---
+
+### logos-app — Penpot workspace shell, dashboard, Move/Hand/Scale tools
+
+**Branch**: `go/g4-namespaces-4`
+
+The React app now hosts auth/dashboard flows and loads the compiled Penpot workspace from a synced `workspace.html` shell.
+
+#### Penpot workspace integration
+
+- **`scripts/sync-penpot-workspace.py`** — builds `dist/workspace.html` / `build/workspace.html`, copies Logos CSS/JS overrides, sets `logos-penpot-shell` cookie for routing.
+- **`scripts/serve-frontend.py`** — serves `build/` with workspace shell detection.
+- **`js/logos-penpot-bridge.js`** — ES module that exposes `$APP` on `globalThis` for classic scripts (store emit, viewport pan).
+- **`js/logos-toolbar-move-tools.js`** — Figma-style Move (V) / Hand (H) / Scale (K) combo on the Penpot Move slot; Hand pans via `$APP.$app$main$data$workspace$viewport$update_viewport_position$$` (build `2026-05-30-figma-combo7`).
+- **`js/logos-toolbar-position.js`**, **`css/logos-toolbar-position.css`**, **`css/logos-toolbar-move-tools.css`** — repositionable toolbar and split combo styling.
+- **`js/logos-workspace-debug.js`** — optional workspace diagnostics (`?logos-debug=1`).
+
+#### Dashboard & routing
+
+- **`src/pages/`**, **`src/api/`**, **`src/components/dashboard/`** — project list, create-project dialog, navigation into Penpot workspace with `team-id` / `file-id` / `page-id` hash params.
+- **`PenpotWorkspaceRedirect.tsx`**, **`LegacyHashRedirect.tsx`** — hash and pathname normalization for Penpot’s `/` + `#/workspace` router.
+
+#### Fixed
+
+- **Hand tool** — no longer blocks canvas input waiting for module-scoped `start_panning` on `globalThis`; pan works once `$APP` is bridged from `shared.js`.
+
+---
+
 ## [Unreleased] — 2026-05-22
 
 ### G2 — Rust-native type system (logos-types crate + TS codegen)

@@ -1,0 +1,35 @@
+import React from "react";
+import type { SVGProps } from "react";
+
+export interface ImageImportProps extends SVGProps<SVGSVGElement> {
+  size?: number | string;
+}
+
+const ImageImport = React.forwardRef<SVGSVGElement, ImageImportProps>(
+  ({ size, className, style, ...props }, ref) => {
+    const dimensions = size ? { width: size, height: size } : {
+      width: props.width || 24,
+      height: props.height || 24
+    };
+
+    return (
+      <svg
+        ref={ref}
+        viewBox="0 0 640 640"
+        xmlns="http://www.w3.org/2000/svg"
+        width={dimensions.width}
+        height={dimensions.height}
+        fill={props.fill || "currentColor"}
+        className={className}
+        style={style}
+        {...props}
+      >
+        <path fill="currentColor" d="M544 96L96 96L96 544L544 544L544 96zM224 176C250.5 176 272 197.5 272 224C272 250.5 250.5 272 224 272C197.5 272 176 250.5 176 224C176 197.5 197.5 176 224 176zM240 336L286.1 405.1L368 272L496 480L144 480L240 336z"/>
+      </svg>
+    );
+  }
+);
+
+ImageImport.displayName = "ImageImport";
+
+export default ImageImport;

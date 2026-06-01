@@ -1,120 +1,273 @@
 ---
 title: 3.06. Backend Guide
-desc: "Penpot Technical Guide: Backend basics - REPL setup, loading fixtures, database migrations, and clj-kondo linting to speed development workflows."
+desc: "Logos Backend Guide: Go server, RPC handlers, database migrations, auth, and file format."
 ---
 
-# Backend guide #
+# Backend Guide
 
-This guide collects some basic information on the backend application.
+The Logos backend is a Go HTTP server located in `backend-go/`. It handles all RPC commands
+from the frontend, manages authentication and sessions, reads/writes PostgreSQL, publishes
+to Redis, and serves the `.logos` file format.
 
-## REPL ##
+---
 
-_Note:_ When in development mode, the backend spins up a traditional nREPL socket on port 6064.
-If you are experimenting locally, you can connect to it using your Clojure editor or
-with `backend/scripts/nrepl`, which starts a [REPLy client](https://github.com/trptcolin/reply),
-[see here][1] for more information.
+## Running the Backend
 
-[1]: /technical-guide/developer/devenv/#backend
-
-In the devenv environment you can execute `backend/scripts/repl` to open a
-Clojure interactive shell ([REPL](https://codewith.mu/en/tutorials/1.0/repl)) (this is not a socket-based
-REPL, but a local, in-process console (over stdin/stdout) with some fancy line-editing and colors). Note
-that the backend must be stopped before executing this script, otherwise it will fail with `Port already
-in use: 9090`.
-
-Once there, you can execute <code class="language-clojure">(restart)</code> to load and execute the backend
-process, or to reload it after making changes to the source code.
-
-Then you have access to all backend code. You can import and use any function
-o read any global variable:
-
-```clojure
-(require '[app.some.namespace :as some])
-(some/your-function arg1 arg2)
-```
-
-There is a specific namespace <code class="language-clojure">app.srepl</code> with some functions useful to be
-executed from the repl and perform some tasks manually. Most of them accept
-a <code class="language-clojure">system</code> parameter. There is a global variable with this name, that contains
-the runtime information and configuration needed for the functions to run.
-
-For example:
-
-```clojure
-(require '[app.srepl.main :as srepl])
-(srepl/send-test-email! system "test@example.com")
-```
-
-
-## Fixtures ##
-
-This is a development feature that allows populating the database with a
-good amount of content (typically used to test the application or to run
-performance tweaks on queries).
-
-In order to load fixtures, enter the REPL environment with the <code class="language-clojure">backend/scripts/repl</code>
-script, and then execute <code class="language-clojure">(app.cli.fixtures/run {:preset :small})</code>.
-
-You also can execute this as a standalone script with:
+### Development mode
 
 ```bash
-clojure -Adev -X:fn-fixtures
+export DATABASE_URL="postgres://logos:logos@localhost:5432/logos"
+export REDIS_URL="redis://localhost:6379"
+export LOGOS_SECRET_KEY="dev-secret-at-least-32-characters"
+
+cd backend-go
+go run ./cmd/server
 ```
 
-_NOTE:_ This is an optional step because the application can start with an
-empty database.
+The server starts on `:6060` by default. Set `BACKEND_GO_ADDR` to change the address.
 
-The above will create several users that can be used to login
-into the application. All of them follow the pattern:
-
-- Username: <code class="language-text">profileN@example.com</code>
-- Password: <code class="language-text">123123</code>
-
-Where <code class="language-text">N</code> is a number from 0 to 5 on the default fixture parameters.
-
-
-## Migrations ##
-
-The database migrations are located in two directories:
-
-- <code class="language-text">src/app/migrations</code> (contains migration scripts in clojure)
-- <code class="language-text">src/app/migrations/sql</code> (contains the pure SQL migrations)
-
-The SQL migration naming consists in the following:
+### Apply database migrations
 
 ```bash
-XXXX-<add|mod|del|drop|[...verb...]>-<table-name>-<any-additional-text>
+go run ./cmd/server -migrate
+```
+
+Migrations are pure SQL files in `backend-go/migrations/`. They run in filename order and
+are idempotent (tracked in a `migrations` table). Never modify an existing migration file —
+add a new one instead.
+
+### Health check
+
+```bash
+curl http://localhost:6060/api/_health
+# → {"status":"ok","version":"dev"}
+```
+
+---
+
+## Project Structure
+
+```
+backend-go/
+├── cmd/
+│   └── server/main.go       # entry point — env config, DB pool, Redis, HTTP server
+├── internal/
+│   ├── auth/
+│   │   ├── issue.go          # JWE token issuance (sessions + API tokens)
+│   │   ├── password.go       # Argon2id hashing (compatible with legacy hashes)
+│   │   └── session.go        # JWE middleware — cookie → profile ID
+│   ├── binfile/
+│   │   ├── v3.go             # .logos / .penpot ZIP export/import
+│   │   └── v3_test.go        # round-trip tests
+│   ├── config/config.go      # env-var configuration struct
+│   ├── db/postgres.go        # pgx/v5 connection pool wrapper
+│   ├── email/email.go        # SMTP client (transactional email)
+│   ├── handler/              # one file per RPC namespace
+│   │   ├── auth.go           # login, register, logout, magic link, recovery
+│   │   ├── access_token.go   # API token CRUD
+│   │   ├── binfile.go        # .logos export/import HTTP handlers
+│   │   ├── comments.go       # comments + threads
+│   │   ├── demo.go           # demo profile creation
+│   │   ├── feedback.go       # user feedback submission
+│   │   ├── files.go          # file CRUD, sharing, viewers
+│   │   ├── files_snapshot.go # labeled version snapshots
+│   │   ├── files_thumbnails.go
+│   │   ├── files_update.go   # OT rebase, Redis broadcast, row-level lock
+│   │   ├── fonts.go          # custom font upload/list/delete
+│   │   ├── management.go     # duplicate project, move files/projects
+│   │   ├── media.go          # media object upload/list/delete
+│   │   ├── profile.go        # profile CRUD
+│   │   ├── projects.go       # project CRUD + pin
+│   │   ├── search.go         # full-text file search
+│   │   ├── teams.go          # team CRUD, members, roles
+│   │   ├── teams_invitations.go
+│   │   ├── verify_token.go   # email/magic-link verification
+│   │   └── webhooks.go       # webhook CRUD + async delivery
+│   ├── perms/perms.go        # team/project/file permission helpers
+│   ├── rebase/               # pure-Go OT rebase engine
+│   │   ├── rebase.go
+│   │   └── rebase_test.go    # 20 test cases (5×5 conflict matrix)
+│   ├── redis/redis.go        # Redis/Valkey client wrapper
+│   ├── server/server.go      # chi router — all 25+ routes wired
+│   └── storage/storage.go   # storage backend (local FS / S3)
+└── migrations/               # SQL migration files
+```
+
+---
+
+## Authentication
+
+### Sessions
+
+Sessions are JWE tokens (alg=A256KW, enc=A256GCM) stored in an HTTP-only cookie named
+`logos-auth`. The token contains:
+
+```
+{iss: "authentication", aud: "logos", sid: <session-id>, uid: <profile-id>, iat: <unix-ts>}
+```
+
+The `JWEMiddleware` in `internal/server/server.go` verifies the token and injects the
+`profileID` into the request context. Handlers access it with `auth.ProfileIDFromContext(ctx)`.
+
+### API Tokens
+
+API tokens are long-lived JWE tokens with `iss: "token"`. They are created via
+`create-access-token` and verified via `verify-token`. They bypass the session cookie
+and are passed as `Authorization: Token <token>`.
+
+### Password Hashing
+
+Passwords are stored as Argon2id PHC strings (memory=32768, time=3, parallelism=2).
+This matches the parameters from the original Clojure backend (`buddy-hashers`), so
+existing password hashes continue to work without re-hashing.
+
+---
+
+## RPC API Pattern
+
+All RPC commands are `POST /api/rpc/command/<name>` with `Content-Type: application/json`.
+
+Request body varies per handler but always goes through `json.NewDecoder(r.Body).Decode(&req)`.
+Response is always JSON. Errors use the standard envelope:
+
+```json
+{"type": "error", "code": "not-found", "hint": "file not found"}
+```
+
+### Adding a New Handler
+
+1. Create `internal/handler/myfeature.go`:
+
+```go
+package handler
+
+func MyFeatureHandler(deps *deps) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        profileID, ok := auth.RequireAuth(w, r)
+        if !ok {
+            return
+        }
+        var req struct {
+            Name string `json:"name"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            writeError(w, http.StatusBadRequest, "invalid request")
+            return
+        }
+        // ... business logic ...
+        writeJSON(w, http.StatusOK, result)
+    }
+}
+```
+
+2. Register in `internal/server/server.go`:
+
+```go
+r.Post("/api/rpc/command/my-feature", h.MyFeatureHandler(deps))
+```
+
+---
+
+## Database Migrations
+
+Migrations live in `backend-go/migrations/`. The naming convention is:
+
+```
+NNNN-<verb>-<table>-<description>.sql
 ```
 
 Examples:
-
-```bash
-0025-del-generic-tokens-table
-0026-mod-profile-table-add-is-active-field
+```
+0025-add-file-thumbnail-table.sql
+0026-mod-profile-add-is-active.sql
+0027-del-deprecated-tokens-table.sql
 ```
 
-**NOTE**: if table name has more than one word, we still use <code class="language-text">-</code> as a separator.
+To create a new migration:
+1. Add `NNNN-description.sql` with the SQL
+2. Run `go run ./cmd/server -migrate`
+3. Include the migration file in your PR
 
-If you need to have a global overview of the all schema of the database you can extract it
-using postgresql:
+**Never modify an existing migration.** If a schema change is needed, add a new migration.
 
-```bash
-# (in the devenv environment)
-pg_dump -h postgres -s  > schema.sql
+---
+
+## File Format (.logos)
+
+The `internal/binfile` package handles `.logos` (formerly `.penpot`) v3 ZIP archives.
+
+```
+myfile.logos        (ZIP)
+├── manifest.json   {"type": "logos/export-files", "version": 1, ...}
+├── files/
+│   └── <file-id>/
+│       ├── attrs.json     file metadata (name, revn, is_shared)
+│       ├── pages.json     ordered page ID list
+│       ├── changes.json   change history rows (Go extension)
+│       └── data.bin       raw file.data blob (when present)
+├── media/
+│   └── <media-id>.json    FileMediaObject row
+└── objects/
+    └── <storage-id>.*     raw media bytes
 ```
 
-## Linter ##
+**Backward compatibility:** `.penpot` files (manifest type `"penpot/export-files"`)
+are accepted on import with a deprecation log message. Both `.logos` and `.penpot`
+file extensions are accepted by the HTTP import handler.
 
-There are no watch process for the linter; you will need to execute it
-manually. We use [clj-kondo][kondo] for linting purposes and the
-repository already comes with base configuration.
+---
 
-[kondo]: https://github.com/clj-kondo/clj-kondo
+## OT Rebase Engine
 
-You can run **clj-kondo** as-is (is included in the devenv image):
+`files_update` is the most performance-critical handler. On every save:
+
+1. Lock the file row (`SELECT ... FOR UPDATE`)
+2. Load competing change-sets written since the client's base revision
+3. Rebase the incoming changes against each competing set (OT)
+4. Insert the rebased change-set
+5. Broadcast a `file-change:<file-id>` event via Redis Pub/Sub
+
+The rebase algorithm is in `internal/rebase/rebase.go`. It handles the 5×5 conflict
+matrix for change types: `add-obj`, `mod-obj`, `del-obj`, `move-obj`, `mov-objects`.
+See `rebase_test.go` for 20 test cases covering every conflict pair.
+
+---
+
+## Testing
 
 ```bash
-cd penpot/backend;
-clj-kondo --lint src
+cd backend-go
+
+# All tests (integration tests skip without TEST_DATABASE_URL)
+go test ./...
+
+# With integration tests
+export TEST_DATABASE_URL="postgres://logos:logos@localhost:5432/logos_test"
+go test ./... -count=1
+
+# Specific packages
+go test ./internal/rebase/...
+go test ./internal/binfile/...
+go test ./internal/handler/... -v
+
+# Race detector
+go test -race ./...
+
+# Benchmarks
+go test -bench=. ./internal/rebase/...
 ```
 
+---
+
+## Benchmark Fixture Generator
+
+```bash
+cd backend-go
+go run ./cmd/gen-benchmark \
+  --output fixtures/large-canvas.logos \
+  --pages 5 \
+  --objects 500
+
+# Use in the benchmark workflow:
+# .github/workflows/benchmark-memory.yml
+```

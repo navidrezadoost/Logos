@@ -1,550 +1,281 @@
-# Logos
+# Logos — Community Edition
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Status-Active_Development-brightgreen.svg" alt="Status">
-  <img src="https://img.shields.io/badge/TypeScript-45%25-3178C6.svg" alt="TypeScript">
-  <img src="https://img.shields.io/badge/Clojure-35%25-5881D8.svg" alt="Clojure">
-  <img src="https://img.shields.io/badge/Rust-15%25-orange.svg" alt="Rust">
-  <img src="https://img.shields.io/badge/Renderer-WGPU_%2F_WebGPU-blue.svg" alt="WGPU">
-  <img src="https://img.shields.io/badge/Collaboration-CRDT_%28yrs%29-purple.svg" alt="CRDT">
+  <img src="https://img.shields.io/badge/Edition-Community-brightgreen.svg" alt="Community Edition">
+  <img src="https://img.shields.io/badge/Status-Stable-blue.svg" alt="Stable">
   <img src="https://img.shields.io/badge/License-MPL--2.0-lightgrey.svg" alt="License">
-  <img src="https://img.shields.io/badge/Tests-676%20passing-success.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/TypeScript-50%25-3178C6.svg" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Go-30%25-00ADD8.svg" alt="Go">
+  <img src="https://img.shields.io/badge/Rust-17%25-orange.svg" alt="Rust">
+  <img src="https://img.shields.io/badge/Renderer-WebGPU-blueviolet.svg" alt="WebGPU">
 </p>
 
+**Logos** is a GPU-accelerated, AI-powered, privacy-first open-source design platform.
+
+The Community Edition is the complete, unrestricted product — every feature built across
+Phases 0–5 is available at no cost, forever, under the Mozilla Public License 2.0.
+
 ---
 
-## What Is Logos?
+## What You Get in the Community Edition
 
-**Logos** is a high-performance, open-source collaborative design tool built entirely in Rust. It is designed to compete with industry-standard tools such as Figma, Sketch, and Adobe XD by combining native GPU rendering, real-time multi-user collaboration, an offline-first architecture, and a sandboxed plugin system — all within a single, unified codebase.
-
-The project targets both a **native desktop application** and a **WebAssembly / WebGPU web target**, sharing the same core engine across both platforms. It is structured as a Cargo workspace with clearly separated crates for rendering, layout, text shaping, collaboration, identity management, and plugin execution.
-
-### Core Design Principles
-
-| Principle | How Logos Achieves It |
+| Capability | Details |
 |---|---|
-| **Performance** | GPU-accelerated rendering via `wgpu`; instance batching; O(delta) incremental updates |
-| **Real-Time Collaboration** | CRDT-based document model (`yrs`); WebSocket sync; offline edit queue with conflict resolution |
-| **Extensibility** | Sandboxed WASM plugin runtime (Wasmtime); TOML manifest with permission model; plugin marketplace |
-| **Privacy and Offline-First** | Local document storage; offline tracker queues edits while disconnected; sync-on-reconnect |
-| **Cross-Platform** | Native desktop (winit + wgpu); WebAssembly target (`wasm32-unknown-unknown`); shared core |
+| **Design canvas** | Infinite canvas, 60fps with WebGPU compute shaders, sub-pixel AA |
+| **Collaboration** | Real-time multi-user editing via OT rebase; attribute-level conflict resolution |
+| **AI assistant** | Dual-path: cloud MCP tools + local LLM inference via WebGPU (privacy-first) |
+| **Design tokens** | DTCG-compliant token runtime with aliasing, modes, and live theme switching |
+| **Dev Mode** | CSS / variables export, redlines, annotation links, REST integration API |
+| **Plugin system** | TypeScript sandbox, `@logos/plugin-types`, hot-reload developer mode |
+| **File import** | Zero-loss migration from Figma, Sketch, Adobe XD, SVG |
+| **File format** | Open `.logos` v3 ZIP archive (SVG/CSS-based; backward-compatible with `.penpot`) |
+| **Self-hosted** | Single Go binary (~20 MB) + static React SPA — no JVM, no Node.js at runtime |
+
+Nothing is paywalled in this edition. There is no feature flag that unlocks paid content.
+SSO/SAML, audit-log retention guarantees, and managed cloud hosting are planned for a future
+Enterprise Edition and will be additive — the Community Edition will not lose features.
 
 ---
 
-## Project Architecture
+## Architecture
 
 ```
-Logos (Cargo Workspace)
-├── logos-core            # Shared types, node model, traits, FFI safety layer
-├── logos-render          # wgpu render pipeline — instance batching, atlas, GPU-driven draw
-├── logos-layout          # Constraint-based layout engine with Taffy (Flexbox/Grid)
-├── logos-text            # Text shaping via cosmic-text; glyph atlas; shaped-run cache
-├── logos-collab          # Real-time collaboration — CRDT sessions, RBAC, REST API, conflict resolution
-├── logos-desktop         # Desktop application — UI state machines, tool FSM, HTTP client
-├── logos-wasm            # WebAssembly editor — egui/eframe UI, Figma-style canvas, trunk build
-├── logos-plugin-system   # Plugin SDK, marketplace client, permission model
-└── logos-plugins         # Built-in and example plugins
+logos/
+├── logos-app/           TypeScript · React 19 · Zustand · Vite
+│   ├── src/             Application source
+│   │   ├── design/      Design canvas (WebGPU renderer bridge)
+│   │   ├── workspace/   Layer panel, properties, design tokens
+│   │   ├── collab/      Real-time collaboration (WebSocket + OT)
+│   │   ├── ai/          AI assistant (cloud MCP + local LLM)
+│   │   └── plugins/     Plugin runtime sandbox
+│   └── workers/         Offscreen GPU, file-processing web workers
+│
+├── backend-go/          Go · chi router · pgx · go-jose
+│   ├── cmd/server/      HTTP/WebSocket server entry point (port 6060)
+│   └── internal/
+│       ├── handler/     25 RPC namespaces (auth, files, teams, media …)
+│       ├── binfile/     .logos v3 ZIP export/import
+│       ├── rebase/      Pure-Go OT rebase engine
+│       └── auth/        Argon2id · JWE sessions · API tokens
+│
+├── rust/                Rust · WASM · WGSL
+│   ├── logos-types/     Canonical domain types → generates TS .d.ts
+│   ├── logos-layout/    Rust-native flex/grid layout engine
+│   ├── logos-rebase/    CRDT operational-transform rebase (rlib)
+│   ├── logos-vector/    Bezier / path computation
+│   └── render-wasm/     WebGPU render pipeline compiled to WASM
+│
+├── mcp/                 TypeScript · Model Context Protocol server
+│   ├── packages/server/ MCP tools (layout, palette, code execution …)
+│   └── packages/plugin/ Logos plugin that bridges the MCP ↔ canvas
+│
+└── plugins/             TypeScript · Plugin SDK + example apps
+    ├── libs/
+    │   ├── plugin-types/      @logos/plugin-types — public API types
+    │   └── plugins-runtime/   Sandboxed plugin execution runtime
+    └── apps/                  Reference plugin implementations
 ```
-
----
-
-## Technology Stack
 
 ### Language Breakdown
 
-| Language | Role | Approx. % |
+| Language | Role | Share |
 |---|---|---|
-| **TypeScript** | Frontend SPA (`logos-app/`), Plugin SDK, MCP server, workers | **~45%** |
-| **Clojure** | Backend API server (`backend/`), shared Malli schemas (`common/`), exporter | **~35%** |
-| **Rust** | Render engine, layout, text, vector graphics, WASM targets | **~15%** |
-| WGSL | WebGPU compute & render shaders | ~3% |
-| SQL | PostgreSQL migrations | ~2% |
+| **TypeScript** | Frontend SPA, Plugin SDK, MCP server, workers | ~50% |
+| **Go** | Backend HTTP/WS, DB, auth, background tasks, file export | ~30% |
+| **Rust** | Layout, vector, CRDT rebase, type codegen, WebGPU WASM | ~17% |
+| WGSL | GPU compute & render shaders | ~2% |
+| SQL | PostgreSQL migrations | ~1% |
 
-> **Schema source of truth:** Malli schemas in `common/src/app/common/types/` are the
-> canonical data type definitions.  TypeScript consumers import auto-generated `.d.ts` files
-> from `logos-app/src/types/generated/` (produced by `bin/generate-types`).
-> Clojure consumers use them natively.  See `ARCHITECTURE.md` for details.
-
-### Core Language and Runtime
-
-| Technology | Version | Role |
-|---|---|---|
-| **Rust** | 2021 Edition (stable) | Primary language — memory safety, zero-cost abstractions, fearless concurrency |
-| **Tokio** | 1.49 | Async runtime — powers collaboration server, HTTP client, background tasks |
-| **Cargo Workspace** | — | Monorepo management; shared dependency resolution across 9+ crates |
-
-### Rendering
-
-| Technology | Role |
-|---|---|
-| **wgpu** | Cross-platform GPU abstraction (Vulkan, Metal, DX12, WebGPU) — render pipeline, shaders, instance batching |
-| **WebGPU** | Web rendering backend via `wasm32-unknown-unknown` target |
-
-### Collaboration and CRDTs
-
-| Technology | Version | Role |
-|---|---|---|
-| **yrs (yjs-rs)** | 0.25.0 | CRDT-based document model; conflict-free merge; awareness/presence |
-| **Axum** | 0.8 | Async HTTP/REST server — 20+ endpoints across auth, companies, projects, sessions, conflicts |
-| **Tower / Tower-HTTP** | 0.5 / 0.6 | Middleware stack: CORS, request tracing, timeout layers |
-| **tokio-tungstenite** | — | WebSocket transport for real-time CRDT sync |
-
-### Networking and HTTP Client
-
-| Technology | Version | Role |
-|---|---|---|
-| **reqwest** | 0.12 | Async HTTP client (rustls-tls); used by `logos-desktop` to communicate with the collab server |
-| **serde / serde_json** | 1 | JSON serialization for all REST DTOs and plugin communication |
-| **bincode** | — | Binary serialization for CRDT deltas and internal wire format |
-
-### Security and Identity
-
-| Technology | Role |
-|---|---|
-| **argon2 (0.5.3)** | Argon2id password hashing with configurable memory/time cost |
-| **hmac + sha2** | HMAC-SHA256 token issuance and verification |
-| **Ed25519** | Asymmetric keypair generation; plugin signature verification; marketplace auth |
-| **JWT** | Session tokens for marketplace API |
-
-### Layout and Text
-
-| Technology | Role |
-|---|---|
-| **Taffy** | Flexbox and CSS Grid layout engine — constraint solving, node tree diffing |
-| **cosmic-text** | Unicode text shaping, font fallback, bidirectional text, glyph atlas management |
-
-### Plugin System
-
-| Technology | Role |
-|---|---|
-| **Wasmtime** | WASM plugin runtime — sandboxed execution with fuel limits and memory caps |
-| **wasm-bindgen** | JS to Rust binding generation for the WebAssembly target |
-| **QuickJS** | JavaScript runtime for lightweight JS plugins |
-
-### Storage and Persistence
-
-| Technology | Role |
-|---|---|
-| **RocksDB** | Optional persistent storage for collaboration sessions (feature-gated `persistent-storage`) |
-| **PostgreSQL** | Marketplace database — 7 tables: publishers, plugins, versions, reviews, downloads, categories, audit_log |
-
-### AI and ML
-
-| Technology | Role |
-|---|---|
-| **ort (ONNX Runtime v2)** | AI inference — layout suggestion, style transfer; FP16 quantized models (6.48 MB to 1.63 MB, -75%) |
-| **Criterion** | Benchmarking harness — CRDT hot path, text shaping, layout diffing, GPU pipeline throughput |
+> **Type source of truth:** Canonical domain types are Rust structs in `rust/logos-types/`.
+> Run `make generate-rust-types` to regenerate `logos-app/src/types/rust-generated/`.
 
 ---
 
-## Feature Flags
+## Quick Start — Build from Source
 
-Logos uses Cargo feature flags to keep build times fast and binaries lean:
+### Prerequisites
 
-| Crate | Feature | What It Enables |
+| Tool | Version | Purpose |
 |---|---|---|
-| `logos-collab` | `http-server` | Axum REST server, Tower middleware, all route handlers |
-| `logos-collab` | `persistent-storage` | RocksDB-backed session persistence |
-| `logos-collab` | `stress` | 50-user concurrent stress test suite |
-| `logos-desktop` | `http-client` | reqwest-based API client, authentication flow |
-| `logos-wasm` | *(default)* | wasm-bindgen exports, WebGPU canvas integration |
+| Go | 1.22+ | Backend |
+| Node.js | 20 LTS | Frontend |
+| Rust + `wasm-pack` | stable | Core engine + WASM |
+| PostgreSQL | 14+ | Database |
+| Redis / Valkey | 7+ | Pub/Sub + cache |
 
----
-
-## Prerequisites
-
-Before building Logos, ensure the following tools are installed.
-
-### Required
-
-**Rust (stable, 1.75 or later)**
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup update stable
-```
-
-**Git**
-
-```bash
-# Debian / Ubuntu
-sudo apt install git
-
-# Arch / Manjaro
-sudo pacman -S git
-
-# macOS
-brew install git
-```
-
-### For WebAssembly Builds
-
-**wasm-pack**
-
-```bash
-cargo install wasm-pack
-rustup target add wasm32-unknown-unknown
-```
-
-### For Marketplace (PostgreSQL Backend)
-
-```bash
-# Debian / Ubuntu
-sudo apt install postgresql postgresql-contrib
-
-# Arch / Manjaro
-sudo pacman -S postgresql
-
-# macOS
-brew install postgresql@14
-```
-
-### For Optional RocksDB Persistent Storage
-
-```bash
-# Debian / Ubuntu
-sudo apt install librocksdb-dev clang
-
-# Arch / Manjaro
-sudo pacman -S rocksdb clang
-```
-
----
-
-## Installation
-
-### 1. Clone the Repository
+### 1 — Clone
 
 ```bash
 git clone https://github.com/navidrezadoost/Logos.git
 cd Logos
 ```
 
-### 2. Build the Core Library
+### 2 — Backend
 
 ```bash
-cargo build -p logos-core
+cd backend-go
+
+# Install dependencies
+go mod download
+
+# Set required environment variables
+export DATABASE_URL="postgres://logos:logos@localhost:5432/logos"
+export REDIS_URL="redis://localhost:6379"
+export LOGOS_SECRET_KEY="change-me-32-bytes-or-longer"
+
+# Run database migrations
+go run ./cmd/server -migrate
+
+# Start the server (port 6060)
+go run ./cmd/server
+
+# Verify
+curl http://localhost:6060/api/_health
+# → {"status":"ok"}
 ```
 
-### 3. Build the Full Workspace
+### 3 — Frontend
 
 ```bash
-cargo build --workspace
+cd logos-app
+
+# Install dependencies
+npm ci
+
+# Development server (hot-reload, proxies API to port 6060)
+npm run dev
+# → http://localhost:3449
+
+# Type-check
+npx tsc --noEmit
+
+# Unit tests
+npx vitest run
 ```
 
-The first build resolves and compiles all dependencies. Expect 3 to 10 minutes on first run.
-
-### 4. Verify the Build
+### 4 — Rust / WASM (optional — pre-built WASM is included)
 
 ```bash
-cargo check --workspace
+# Install Rust target
+rustup target add wasm32-unknown-unknown
+cargo install wasm-pack
+
+# Build the render engine WASM
+cd render-wasm
+wasm-pack build --target web --release
+# Output: pkg/ — automatically picked up by the Vite build
+```
+
+### 5 — MCP Server (optional)
+
+```bash
+cd mcp/packages/server
+npm ci
+npm run dev
+# → http://localhost:7998
 ```
 
 ---
 
-## Running Tests
+## Self-Hosting
 
-```bash
-# All crates, no optional features (fastest)
-cargo test --workspace --no-default-features
+> **Docker images are being prepared** for the community edition release and will be
+> published under the `logos/` Docker Hub namespace. A single `docker compose up` will
+> start the full stack.
+>
+> In the meantime, use the development containers in `docker/devenv/` for a
+> fully-configured local environment, or build directly from source as shown above.
 
-# Collaboration backend only
-cargo test -p logos-collab --no-default-features
-
-# Desktop client only
-cargo test -p logos-desktop --no-default-features
-
-# With HTTP server feature enabled
-cargo test -p logos-collab --features http-server
-```
-
-Expected results:
-
-```
-test result: ok. 676 passed; 0 failed  (logos-collab)
-test result: ok. 279 passed; 0 failed  (logos-desktop)
-```
+For full self-hosting documentation see [docs/technical-guide/getting-started/](./docs/technical-guide/getting-started/).
 
 ---
 
-## Running the Collaboration Server
+## Environment Variables
 
-```bash
-cargo run -p logos-collab --features http-server
-```
-
-The server starts at `http://0.0.0.0:8080`.
-
-### REST API Reference
-
-| Method | Path | Description |
+| Variable | Default | Description |
 |---|---|---|
-| `POST` | `/api/auth/register` | Create a new user account |
-| `POST` | `/api/auth/login` | Authenticate and receive a bearer token |
-| `POST` | `/api/auth/logout` | Revoke the current session token |
-| `GET` | `/api/companies` | List companies for the authenticated user |
-| `POST` | `/api/companies` | Create a new company workspace |
-| `GET` | `/api/companies/:id` | Get company details |
-| `PATCH` | `/api/companies/:id` | Update company metadata |
-| `POST` | `/api/companies/:id/members` | Add a member (`Admin / Editor / Viewer`) |
-| `GET` | `/api/projects` | List projects |
-| `POST` | `/api/projects` | Create a project |
-| `GET` | `/api/projects/:id` | Get project details |
-| `GET` | `/api/projects/:id/sessions` | List active collaboration sessions |
-| `GET` | `/api/sessions/:id` | Get session state |
-| `POST` | `/api/sessions/:id/join` | Join a collaboration session |
-| `POST` | `/api/sessions/:id/leave` | Leave a session |
-| `GET` | `/api/projects/:id/conflicts` | List pending conflicts |
-| `POST` | `/api/projects/:id/conflicts` | Report a new conflict |
-| `GET` | `/api/conflicts/:id` | Get conflict details |
-| `POST` | `/api/conflicts/:id/review` | Assign conflict for review |
-| `POST` | `/api/conflicts/:id/resolve` | Resolve with a chosen strategy |
-| `POST` | `/api/conflicts/:id/reject` | Reject all conflicting versions |
-| `GET` | `/api/projects/:id/sync-status` | Get per-element sync states |
-
-All protected endpoints require:
-
-```
-Authorization: Bearer <token>
-```
+| `DATABASE_URL` | — | PostgreSQL connection string (required) |
+| `REDIS_URL` | — | Redis/Valkey connection string (required) |
+| `LOGOS_SECRET_KEY` | — | Master key for HKDF token derivation (required) |
+| `BACKEND_GO_ADDR` | `:6060` | HTTP listen address |
+| `LOGOS_FLAGS` | — | Feature flags string |
+| `LOGOS_ENABLE_AUDIT_LOG` | `false` | Enable audit event logging |
+| `LOGOS_ENABLE_DEMO_USERS` | `false` | Enable demo account provisioning |
+| `LOGOS_ENABLE_USER_FEEDBACK` | `false` | Enable feedback submission |
+| `LOGOS_SMTP_HOST` | — | SMTP server for transactional email |
+| `STORAGE_BACKEND` | `local` | `local` or `s3` |
+| `STORAGE_LOCAL_DIR` | `./data` | Local storage path |
 
 ---
 
-## Offline Conflict Resolution
-
-Logos handles divergent edits made while a user is disconnected through a structured conflict resolution pipeline.
-
-### Workflow
-
-```
-1. User goes offline
-2. Local edits queued in OfflineTracker (Create / Update / Delete)
-3. User reconnects — queued edits pushed to the server
-4. Server detects divergent versions for the same element
-5. ConflictRecord created with status: Pending
-6. Reviewer assigned — status: UnderReview
-7. Resolution strategy chosen:
-     AcceptLocal   — local version wins
-     AcceptRemote  — remote version wins
-     AcceptBoth    — both versions kept as branches
-     RejectAll     — all conflicting edits discarded
-8. SyncStatusStore updated — element status: Synced
-9. All connected clients notified
-```
-
-### Example API Usage
+## Development
 
 ```bash
-# List conflicts in a project
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8080/api/projects/$PROJECT_ID/conflicts
+# Go backend — build, vet, test
+cd backend-go && go build ./... && go vet ./... && go test ./...
 
-# Assign for review
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8080/api/conflicts/$CONFLICT_ID/review
+# TypeScript frontend — type-check and test
+cd logos-app && npx tsc --noEmit && npx vitest run
 
-# Resolve a conflict
-curl -X POST \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"strategy": "AcceptRemote", "reviewer_id": "'$USER_ID'"}' \
-  http://localhost:8080/api/conflicts/$CONFLICT_ID/resolve
+# Rust crates — format, lint, test
+cd rust && cargo fmt --check && cargo clippy && cargo test --workspace
 
-# Check sync status
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8080/api/projects/$PROJECT_ID/sync-status
-```
-
----
-
-## Building the WebAssembly Editor
-
-The `logos-wasm` crate is the browser-based design editor, built with **egui 0.29 / eframe 0.29** and compiled to WebAssembly via **Trunk**.
-
-```bash
-# Install Trunk (once)
-cargo install trunk
-
-# Development build & dev server (hot-reload)
-cd logos-wasm
-trunk serve
-
-# Production build
-trunk build --release
-# Output in logos-wasm/dist/
-```
-
-Serve the `dist/` directory with any static file server or use `logos-server` which serves it at `http://localhost:8080`.
-
-### Editor Keyboard Shortcuts
-
-| Key | Tool / Action |
-|-----|---------------|
-| `V` | Move tool — select and drag layers |
-| `K` | Scale tool — select with proportional scale intent |
-| `H` | Hand tool — pan canvas (no Space key needed) |
-| `F` | Frame tool |
-| `R` | Rectangle tool |
-| `E` | Ellipse tool |
-| `N` | Polygon tool |
-| `T` | Text tool |
-| `P` | Pen tool |
-| `G` | Toggle grid |
-| `Space + drag` | Temporary pan (any tool) |
-| `Ctrl+Z / Ctrl+Shift+Z` | Undo / Redo |
-| `Ctrl+C / Ctrl+X / Ctrl+V` | Copy / Cut / Paste |
-| `Ctrl+D` | Duplicate selection |
-| `Ctrl+A` | Select all |
-| `Delete / Backspace` | Delete selected layers |
-| `Shift+click` | Toggle multi-select |
-| `Escape` | Clear selection / cancel tool |
-
-### Toolbar Layout
-
-The toolbar floats as a **dark pill at the bottom-centre** of the canvas (Figma-style):
-
-- **Move-mode dropdown** — shows the active move tool (Move / Scale / Hand); click to open a popup and switch modes.
-- **Shape-tool dropdown** — shows the last-used shape tool; click to open a popup listing Frame, Rect, Ellipse, Polygon, Text, Pen.
-- **Zoom controls** — `−` / zoom% / `+`; click the percentage to reset to 100%.
-- **Grid toggle** — `#` / `.`
-- **Fit button** — `[ ]` — fits the canvas to the viewport.
-
-### Alignment (Right Panel → Transform)
-
-Select one or more layers and use the Align buttons:
-
-| Action | Single selection | Multi-selection |
-|--------|-----------------|-----------------|
-| Align Left | Align to page left edge | Align all to the leftmost edge in the group |
-| Center H | Center on page horizontal axis | Center all on group's horizontal midpoint |
-| Align Right | Align to page right edge | Align all to the rightmost edge in the group |
-| Align Top | Align to page top edge | Align all to the topmost edge in the group |
-| Center V | Center on page vertical axis | Center all on group's vertical midpoint |
-| Align Bottom | Align to page bottom edge | Align all to the bottommost edge in the group |
-
----
-
-## Running Benchmarks
-
-```bash
-# CRDT and collaboration benchmarks
-cargo bench -p logos-collab
-
-# Render pipeline benchmarks
-cargo bench -p logos-render
-
-# Layout engine benchmarks
-cargo bench -p logos-layout
-
-# Text shaping benchmarks
-cargo bench -p logos-text
-```
-
-HTML reports are generated in `target/criterion/report/index.html`.
-
-### Known Benchmark Results
-
-| Subsystem | Operation | Result |
-|---|---|---|
-| CRDT | `add_layer_delta` | 24% faster with deferred delta encoding |
-| Batch API | `commit` at N=10 | 50% faster with batch transactions |
-| Atlas | Lookup | 86% faster with O(1) flat-array indexing |
-| Spatial hash | Hit testing | 88% faster with bitflag permissions |
-| Text shaping | Shaping latency | 97.5% reduction via shaped-run cache |
-| AI (ONNX) | Layout generation | 30.9 µs per 10 variations |
-| AI (ONNX) | Style transfer | 32.2 µs per call |
-
----
-
-## Stress Testing
-
-```bash
-cargo test -p logos-collab --no-default-features --features stress -- --nocapture
-```
-
-Simulates 50 concurrent users with randomized edits, network partition, and reconnect. An HTML report is generated at `target/stress-report.html`.
-
----
-
-## Plugin Development
-
-Plugins are compiled WASM modules loaded by the Wasmtime runtime with sandboxed execution.
-
-### Create a Plugin
-
-```bash
-cargo new my-logos-plugin --lib
-```
-
-`Cargo.toml`:
-
-```toml
-[lib]
-crate-type = ["cdylib"]
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-logos-plugin-sdk = { path = "../../logos-plugin-system/sdk" }
-```
-
-`src/lib.rs`:
-
-```rust
-#[no_mangle]
-pub extern "C" fn plugin_init() {
-    logos_plugin_sdk::register_command("insert-rect", on_insert_rect);
-}
-
-fn on_insert_rect() {
-    logos_plugin_sdk::insert_shape("rectangle", 0.0, 0.0, 200.0, 100.0);
-}
-```
-
-`plugin.toml` manifest:
-
-```toml
-[plugin]
-name    = "My Plugin"
-version = "1.0.0"
-author  = "Your Name"
-
-[permissions]
-document_write = true
-selection_read = true
-```
-
-Build and install:
-
-```bash
-cargo build --target wasm32-wasi --release
-cp target/wasm32-wasi/release/my_logos_plugin.wasm ~/.logos/plugins/
-cp plugin.toml ~/.logos/plugins/
+# All together (CI)
+./run-ci.sh
 ```
 
 ---
 
 ## Contributing
 
-Please read [CONTRIBUTING.md](./CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before opening a pull request.
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
 
-All submissions must:
-- Include unit tests for new functionality
-- Pass `cargo fmt --all` and `cargo clippy --workspace -- -D warnings`
-- Update the relevant section of `CHANGELOG.md`
-- Use Conventional Commit messages: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
+The short version:
+- Fork → branch → PR against `main`
+- One PR per logical change; reference the issue
+- `go vet`, `npx tsc --noEmit`, `cargo clippy` must all pass
+- New code needs tests; public APIs need doc comments
+- Commit format: `feat(scope):`, `fix(scope):`, `docs:`, `test:`, `chore:`
+
+See [docs/technical-guide/developer/](./docs/technical-guide/developer/) for architecture
+deep-dives, data model, devenv setup, and subsystem guides.
+
+---
+
+## Roadmap — What's Coming
+
+The Community Edition is feature-complete for the design workflow. The open roadmap items are:
+
+| Area | Status |
+|---|---|
+| Official Docker images (`logos/frontend`, `logos/backend`) | In progress |
+| Helm chart for Kubernetes | Planned |
+| Offline PWA mode (full service-worker) | Planned |
+| Plugin marketplace | Planned |
+| Enterprise Edition (SSO, audit-log retention, managed cloud) | Planned |
 
 ---
 
 ## License
 
-Logos is licensed under the **Mozilla Public License 2.0 (MPL-2.0)**. See [LICENSE](./LICENSE) for the full text.
+Logos is licensed under the **Mozilla Public License 2.0 (MPL-2.0)**.
+See [LICENSE](./LICENSE) for the full text.
+
+MPL-2.0 means: you can use Logos freely, modify it, and redistribute it. If you
+modify an MPL-licensed file you must publish those modifications under MPL-2.0.
+You can combine Logos with proprietary software in the same product as long as
+the MPL-licensed files remain open.
 
 ---
 
 ## Acknowledgements
 
-- [Penpot](https://penpot.app/) — open-source design tool, architectural reference
-- [yjs / yrs](https://github.com/y-crdt/y-crdt) — CRDT engine
+Built on the shoulders of:
+
+- [Penpot](https://penpot.app/) — the open-source design tool this project started from
 - [wgpu](https://github.com/gfx-rs/wgpu) — cross-platform GPU abstraction
-- [Taffy](https://github.com/nickel-lang/taffy) — layout engine
-- [cosmic-text](https://github.com/pop-os/cosmic-text) — text shaping
-- [Axum](https://github.com/tokio-rs/axum) — async web framework
+- [pgx](https://github.com/jackc/pgx) — PostgreSQL driver for Go
+- [go-jose](https://github.com/go-jose/go-jose) — JWE/JWS for Go
+- [chi](https://github.com/go-chi/chi) — lightweight Go router
+- [React](https://react.dev/) + [Zustand](https://github.com/pmndrs/zustand) — frontend framework
+- [Vite](https://vitejs.dev/) — frontend build tooling

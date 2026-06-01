@@ -62,10 +62,12 @@ type SetOp struct {
 type Change struct {
 	Type       Type            `json:"type"`
 	ID         string          `json:"id,omitempty"`
-	PageID     string          `json:"pageId,omitempty"`
-	ParentID   string          `json:"parentId,omitempty"`
+	PageID     string          `json:"page-id,omitempty"`
+	ParentID   string          `json:"parent-id,omitempty"`
 	Index      int             `json:"index,omitempty"`
 	Shapes     []string        `json:"shapes,omitempty"`
+	FrameID   string          `json:"frame-id,omitempty"`
+	AfterShape string         `json:"after-shape,omitempty"`
 	Operations []SetOp         `json:"operations,omitempty"`
 	Obj        json.RawMessage `json:"obj,omitempty"` // opaque add-obj payload
 }

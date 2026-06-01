@@ -22,6 +22,7 @@ import { useDevModeStore } from "../../stores/devModeStore";
 import { generateCssGroups, generateCssBlock } from "../../utils/cssCodegen";
 import type { Shape } from "../../types/shapes";
 import type { CssGroup } from "../../utils/cssCodegen";
+import { theme } from "../../theme/colors";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -30,15 +31,15 @@ import type { CssGroup } from "../../utils/cssCodegen";
 const panelStyle: React.CSSProperties = {
   width: 248,
   minWidth: 248,
-  background: "#181825",
-  borderLeft: "1px solid #313244",
+  background: theme.panel,
+  borderLeft: `1px solid ${theme.border}`,
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
   overflowY: "auto",
   fontFamily: "'Inter', system-ui, sans-serif",
   fontSize: 12,
-  color: "#cdd6f4",
+  color: theme.text,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

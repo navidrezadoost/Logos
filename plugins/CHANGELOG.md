@@ -75,7 +75,7 @@
 
 ### 🩹 Fixes
 
-- **plugin-colors-to-tokens:** adapt to Penpot tokens metadata format ([3a1ff00](https://github.com/penpot/penpot-plugins/commit/3a1ff00))
+- **plugin-colors-to-tokens:** adapt to Logos tokens metadata format ([3a1ff00](https://github.com/penpot/penpot-plugins/commit/3a1ff00))
 - **plugin-colors-to-tokens:** avoid unvalid character in names ([dd0fd1a](https://github.com/penpot/penpot-plugins/commit/dd0fd1a))
 - **plugin-types:** add missing board properties ([de4a2a0](https://github.com/penpot/penpot-plugins/commit/de4a2a0))
 - **plugin-types:** fix problem with type ([9759964](https://github.com/penpot/penpot-plugins/commit/9759964))
@@ -181,7 +181,7 @@
 - **plugins-runtime:** prevent plugin execution after close ([b65492a](https://github.com/penpot/penpot-plugins/commit/b65492a))
 - **plugins-styles:** import svg inline ([567b0b5](https://github.com/penpot/penpot-plugins/commit/567b0b5))
 - **runtime:** ses errorTrapping interferes with penpot error handler ([8c0e36d](https://github.com/penpot/penpot-plugins/commit/8c0e36d))
-- **runtime:** prevent override Penpot objects ([120e9e5](https://github.com/penpot/penpot-plugins/commit/120e9e5))
+- **runtime:** prevent override Logos objects ([120e9e5](https://github.com/penpot/penpot-plugins/commit/120e9e5))
 
 ### ❤️ Thank You
 
@@ -221,7 +221,7 @@
 - horizontal scroll height on plugins modal ([08f989a](https://github.com/penpot/penpot-plugins/commit/08f989a))
 - **contrast-plugin:** update colors when shape change ([8ce04d3](https://github.com/penpot/penpot-plugins/commit/8ce04d3))
 - **docs:** add missing variant on destructive button ([9fa96e9](https://github.com/penpot/penpot-plugins/commit/9fa96e9))
-- **plugin-types:** readonly PenpotShapeBase width & height ([415284f](https://github.com/penpot/penpot-plugins/commit/415284f))
+- **plugin-types:** readonly LogosShapeBase width & height ([415284f](https://github.com/penpot/penpot-plugins/commit/415284f))
 - **plugins-runtime:** remove plugin event listener on close ([2138985](https://github.com/penpot/penpot-plugins/commit/2138985))
 - **plugins-runtime:** fix problem with types in test ([17db173](https://github.com/penpot/penpot-plugins/commit/17db173))
 - **styles:** input, button & select worksans font family ([1b9d3b2](https://github.com/penpot/penpot-plugins/commit/1b9d3b2))

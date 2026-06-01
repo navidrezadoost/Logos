@@ -21,11 +21,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/logos-design/logos/backend-go/internal/auth"
 	"github.com/logos-design/logos/backend-go/internal/db"
+	"github.com/logos-design/logos/backend-go/internal/filedata"
 	"github.com/logos-design/logos/backend-go/internal/perms"
 	"github.com/logos-design/logos/backend-go/internal/storage"
 )
@@ -34,6 +37,57 @@ const (
 	objectThumbnailBucket = "file-object-thumbnail"
 	fileThumbnailBucket   = "file-thumbnail"
 )
+
+// ─── GET /api/rpc/command/get-file-data-for-thumbnail ────────────────────────
+
+// GetFileDataForThumbnailHandler returns page data used to render dashboard thumbnails.
+func GetFileDataForThumbnailHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		profileID := auth.ProfileID(r.Context())
+		if profileID == "" {
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
+			return
+		}
+		fileID := rpcParam(r, "file-id", "fileId")
+		if fileID == "" {
+			writeError(w, http.StatusBadRequest, "file-id required")
+			return
+		}
+		if !perms.CheckFileRead(w, r, pool, profileID, fileID) {
+			return
+		}
+
+		var revn int
+		var features []string
+		err := pool.QueryRow(r.Context(), `
+			SELECT revn, COALESCE(features, '{}')
+			  FROM file
+			 WHERE id = $1 AND deleted_at IS NULL`, fileID).Scan(&revn, &features)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "file-not-found")
+			return
+		}
+		if len(features) == 0 {
+			features = filedata.DefaultFeatures
+		}
+
+		data, err := loadOrInitFileData(r.Context(), pool, fileID, features)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		page := filedata.FirstPage(data)
+		if page == nil {
+			page = map[string]any{}
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"file-id": fileID,
+			"revn":    revn,
+			"page":    page,
+		})
+	}
+}
 
 // ─── GET /api/rpc/command/get-file-object-thumbnails ─────────────────────────
 
@@ -44,11 +98,8 @@ const (
 func GetFileObjectThumbnailsHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
-		fileID := r.URL.Query().Get("file-id")
-		if fileID == "" {
-			fileID = r.URL.Query().Get("fileId")
-		}
-		tag := r.URL.Query().Get("tag") // optional; default is "frame"
+		fileID := rpcParam(r, "file-id", "fileId")
+		tag := rpcParam(r, "tag") // optional; default is "frame"
 
 		if fileID == "" {
 			writeError(w, http.StatusUnprocessableEntity, "file-id is required")
@@ -100,7 +151,9 @@ func GetFileObjectThumbnailsHandler(pool *db.Pool) http.HandlerFunc {
 			result[objectID] = mediaID
 		}
 
-		writeJSON(w, http.StatusOK, result)
+		log.Printf("[get-file-object-thumbnails] file=%s tag=%q profile=%s count=%d",
+			fileID, tag, profileID, len(result))
+		writePlainStringMap(w, http.StatusOK, result)
 	}
 }
 
@@ -119,7 +172,7 @@ func CreateFileObjectThumbnailHandler(pool *db.Pool, store storage.Backend) http
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -163,9 +216,14 @@ func CreateFileObjectThumbnailHandler(pool *db.Pool, store storage.Backend) http
 		}
 
 		mediaID := newUUID()
+		size := int64(buf.Len())
+		if err := insertStorageObject(r.Context(), pool, mediaID, objectThumbnailBucket, mtype, size); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage object insert failed")
+			return
+		}
 		if store != nil {
 			if err := store.Put(r.Context(), objectThumbnailBucket, mediaID,
-				bytes.NewReader(buf.Bytes()), int64(buf.Len()), mtype); err != nil {
+				bytes.NewReader(buf.Bytes()), size, mtype); err != nil {
 				writeError(w, http.StatusInternalServerError, "storage error")
 				return
 			}
@@ -194,32 +252,28 @@ func CreateFileObjectThumbnailHandler(pool *db.Pool, store storage.Backend) http
 
 // ─── DELETE /api/rpc/command/delete-file-object-thumbnail ────────────────────
 
-type deleteObjectThumbnailParams struct {
-	FileID   string `json:"fileId"`
-	ObjectID string `json:"objectId"`
-	Tag      string `json:"tag"`
-}
-
 // DeleteFileObjectThumbnailHandler implements DELETE /api/rpc/command/delete-file-object-thumbnail.
 func DeleteFileObjectThumbnailHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
-		var params deleteObjectThumbnailParams
-		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
+		fileID := rpcParam(r, "file-id", "fileId")
+		objectID := rpcParam(r, "object-id", "objectId")
+		tag := rpcParam(r, "tag")
+		if tag == "" {
+			tag = "frame"
+		}
+		if fileID == "" || objectID == "" {
+			writeError(w, http.StatusBadRequest, "file-id and object-id required")
 			return
 		}
-		if params.Tag == "" {
-			params.Tag = "frame"
-		}
 
-		fp, err := perms.GetFilePermissions(r.Context(), pool, profileID, params.FileID)
-		if err != nil || fp == nil {
+		fp, err := perms.GetFilePermissions(r.Context(), pool, profileID, fileID)
+		if err != nil || fp == nil || !fp.CanEdit {
 			writeError(w, http.StatusForbidden, "insufficient-permissions")
 			return
 		}
@@ -228,7 +282,7 @@ func DeleteFileObjectThumbnailHandler(pool *db.Pool) http.HandlerFunc {
 			`UPDATE file_tagged_object_thumbnail
 			    SET deleted_at = now()
 			  WHERE file_id = $1 AND tag = $2 AND object_id = $3 AND deleted_at IS NULL`,
-			params.FileID, params.Tag, params.ObjectID,
+			fileID, tag, objectID,
 		)
 
 		writeJSON(w, http.StatusOK, map[string]any{})
@@ -249,16 +303,26 @@ func CreateFileThumbnailHandler(pool *db.Pool, store storage.Backend) http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
 		if err := r.ParseMultipartForm(maxMediaUploadBytes); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid multipart body")
-			return
+			// Some clients send thumbnail metadata in the query string with an
+			// empty or non-multipart body.
+			_ = r.ParseForm()
 		}
 
-		fileID := r.FormValue("file-id")
+		fileID := r.URL.Query().Get("file-id")
+		if fileID == "" {
+			fileID = r.URL.Query().Get("fileId")
+		}
+		if fileID == "" {
+			fileID = r.FormValue("file-id")
+		}
+		if fileID == "" {
+			fileID = r.FormValue("fileId")
+		}
 		mtype := r.FormValue("mtype")
 		if fileID == "" {
 			writeError(w, http.StatusUnprocessableEntity, "file-id is required")
@@ -269,12 +333,11 @@ func CreateFileThumbnailHandler(pool *db.Pool, store storage.Backend) http.Handl
 		}
 
 		var revn int64
-		_, _ = readIntForm(r, "revn", (*int)(nil))
-		// Re-read as int64.
-		revnStr := r.FormValue("revn")
-		if revnStr != "" {
+		if revnStr := firstNonEmpty(r.URL.Query().Get("revn"), r.FormValue("revn")); revnStr != "" {
 			var rv int
-			_ = json.Unmarshal([]byte(revnStr), &rv)
+			if err := json.Unmarshal([]byte(revnStr), &rv); err != nil {
+				rv, _ = strconv.Atoi(revnStr)
+			}
 			revn = int64(rv)
 		}
 
@@ -299,9 +362,14 @@ func CreateFileThumbnailHandler(pool *db.Pool, store storage.Backend) http.Handl
 		}
 
 		mediaID := newUUID()
+		size := int64(buf.Len())
+		if err := insertStorageObject(r.Context(), pool, mediaID, fileThumbnailBucket, mtype, size); err != nil {
+			writeError(w, http.StatusInternalServerError, "storage object insert failed")
+			return
+		}
 		if store != nil {
 			if err := store.Put(r.Context(), fileThumbnailBucket, mediaID,
-				bytes.NewReader(buf.Bytes()), int64(buf.Len()), mtype); err != nil {
+				bytes.NewReader(buf.Bytes()), size, mtype); err != nil {
 				writeError(w, http.StatusInternalServerError, "storage error")
 				return
 			}
@@ -321,10 +389,10 @@ func CreateFileThumbnailHandler(pool *db.Pool, store storage.Backend) http.Handl
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"id":      mediaID,
-			"fileId":  fileID,
-			"revn":    revn,
-			"mediaId": mediaID,
+			"id":       mediaID,
+			"file-id":  fileID,
+			"revn":     revn,
+			"media-id": mediaID,
 		})
 	}
 }

@@ -1,6 +1,6 @@
 import { expect, describe, vi } from 'vitest';
 import { createApi } from './index.js';
-import type { File, Page, Shape } from '@penpot/plugin-types';
+import type { File, Page, Shape } from '@logos/plugin-types';
 
 const mockUrl = 'http://fake.fake/';
 
@@ -65,15 +65,15 @@ describe('Plugin api', () => {
         const callback = vi.fn();
 
         expect(() => {
-          api.penpot.on('filechange', callback);
+          api.logos.on('filechange', callback);
         }).toThrow();
 
         expect(() => {
-          api.penpot.on('pagechange', callback);
+          api.logos.on('pagechange', callback);
         }).toThrow();
 
         expect(() => {
-          api.penpot.on('selectionchange', callback);
+          api.logos.on('selectionchange', callback);
         }).toThrow();
       });
     });
@@ -86,7 +86,7 @@ describe('Plugin api', () => {
 
       pluginManager.context.currentPage = examplePage;
 
-      const pageState = api.penpot.currentPage;
+      const pageState = api.logos.currentPage;
 
       expect(pageState).toEqual(examplePage);
     });
@@ -100,7 +100,7 @@ describe('Plugin api', () => {
 
       pluginManager.context.currentFile = exampleFile;
 
-      const fileState = api.penpot.currentFile;
+      const fileState = api.logos.currentFile;
 
       expect(fileState).toEqual(exampleFile);
     });
@@ -113,7 +113,7 @@ describe('Plugin api', () => {
 
       pluginManager.context.selection = selection;
 
-      const currentSelection = api.penpot.selection;
+      const currentSelection = api.logos.selection;
 
       expect(currentSelection).toEqual(selection);
     });

@@ -140,7 +140,7 @@ const log = (message: string, verbose: boolean, forceLog = false): void => {
     const deps = pkg['dependencies'] as Record<string, string> | undefined;
     if (deps && typeof deps === 'object') {
       for (const dep of Object.keys(deps)) {
-        if (dep.startsWith('@penpot/')) {
+        if (dep.startsWith('@logos/')) {
           deps[dep] = `^${newVersion}`;
         }
       }
@@ -158,7 +158,7 @@ const log = (message: string, verbose: boolean, forceLog = false): void => {
   // Build all packages
   if (!args.dryRun) {
     execSync(
-      'pnpm --filter @penpot/plugins-runtime --filter @penpot/plugin-styles --filter @penpot/plugin-types build',
+      'pnpm --filter @logos/plugins-runtime --filter @logos/plugin-styles --filter @logos/plugin-types build',
       {
         cwd: process.cwd(),
         stdio: 'inherit',

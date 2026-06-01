@@ -1,6 +1,6 @@
-# Penpot Docs
+# Logos Docs
 
-Penpot documentation website.
+Logos documentation website.
 
 ## Usage
 

@@ -1,7 +1,7 @@
 ---
 layout: layouts/plugins.njk
 title: 3. Deployment
-desc: Deploy your free Penpot plugins! Learn about Netlify, Cloudflare, Surge & Penpot submission in this guide. Build and share your creations.
+desc: Deploy your free Logos plugins! Learn about Netlify, Cloudflare, Surge & Logos submission in this guide. Build and share your creations.
 ---
 
 # Deployment
@@ -206,20 +206,20 @@ surge
 project: /home/user/example-plugin/dist/
 
 # your domain, surge offers a free .surge.sh domain and free ssl
-domain: https://example-plugin-penpot.surge.sh
+domain: https://example-plugin-logos.surge.sh
 
 upload: [====================] 100% eta: 0.0s (10 files, 305761 bytes)
 CDN: [====================] 100%
 encryption: *.surge.sh, surge.sh (346 days)
 IP: XXX.XXX.XXX.XXX
 
-Success! - Published to example-plugin-penpot.surge.sh
+Success! - Published to example-plugin-logos.surge.sh
 ```
 
 5. Done!
 
-## 3.5. Submitting to Penpot
+## 3.5. Submitting to Logos
 
-To make your finished plugin available in our catalog, submit in on the [plugin submission page](https://penpot.app/penpothub/plugins/create-plugin). Once it becomes available any Penpot user will be able to install and use it.
+To make your finished plugin available in our catalog, submit in on the [plugin submission page](https://logos.app/logoshub/plugins/create-plugin). Once it becomes available any Logos user will be able to install and use it.
 
 

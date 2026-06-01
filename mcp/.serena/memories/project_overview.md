@@ -1,7 +1,7 @@
-# Penpot MCP Project Overview - Updated
+# Logos MCP Project Overview - Updated
 
 ## Purpose
-This project is a Model Context Protocol (MCP) server for Penpot integration. It provides a TypeScript-based server that can be used to extend Penpot's functionality through custom tools with bidirectional WebSocket communication.
+This project is a Model Context Protocol (MCP) server for Logos integration. It provides a TypeScript-based server that can be used to extend Logos's functionality through custom tools with bidirectional WebSocket communication.
 
 ## Tech Stack
 - **Language**: TypeScript
@@ -22,12 +22,12 @@ penpot-mcp/
 ├── mcp-server/                # Main MCP server implementation
 │   ├── src/
 │   │   ├── index.ts           # Main server entry point
-│   │   ├── PenpotMcpServer.ts # Enhanced with request/response correlation
+│   │   ├── LogosMcpServer.ts # Enhanced with request/response correlation
 │   │   ├── PluginTask.ts      # Now supports result promises
 │   │   ├── tasks/             # PluginTask implementations
 │   │   └── tools/             # Tool implementations
 │   └── package.json           # Includes @penpot-mcp/common dependency
-├── penpot-plugin/             # Penpot plugin with response capability
+├── penpot-plugin/             # Logos plugin with response capability
 │   ├── src/
 │   │   ├── main.ts            # Enhanced WebSocket handling with response forwarding
 │   │   └── plugin.ts          # Now sends task responses back to server
@@ -41,7 +41,7 @@ penpot-mcp/
 
 1. Implement the tool class in `mcp-server/src/tools/` following the `Tool` interface. 
    IMPORTANT: Do not catch any exceptions in the `executeCore` method. Let them propagate to be handled centrally.
-2. Register the tool in `PenpotMcpServer`.
+2. Register the tool in `LogosMcpServer`.
 
 Look at `PrintTextTool` as an example.
 
@@ -68,7 +68,7 @@ Many tools are linked to tasks that are handled in the plugin, i.e. they have an
 - **Type Safety**: Shared definitions via @penpot-mcp/common package
 
 ### Core Classes
-- **PenpotMcpServer**: Enhanced with pending task tracking and response handling
+- **LogosMcpServer**: Enhanced with pending task tracking and response handling
 - **PluginTask**: Now creates result promises that resolve when plugin responds
 - **Tool implementations**: Now properly await task completion and report results
 - **Plugin handlers**: Send structured responses back to server
@@ -84,7 +84,7 @@ Many tools are linked to tasks that are handled in the plugin, i.e. they have an
 ## Task Flow
 
 ```
-LLM Tool Call → MCP Server → WebSocket (Request) → Plugin → Penpot API
+LLM Tool Call → MCP Server → WebSocket (Request) → Plugin → Logos API
                     ↑                                  ↓
              Tool Response ← MCP Server ← WebSocket (Response) ← Plugin Result
 ```

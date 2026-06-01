@@ -1,23 +1,23 @@
 import { PluginMessageEvent } from './app/model';
 
-penpot.ui.open('RENAME LAYER PLUGIN', `?theme=${penpot.theme}`, {
+logos.ui.open('RENAME LAYER PLUGIN', `?theme=${logos.theme}`, {
   width: 290,
   height: 550,
 });
 
-penpot.on('themechange', (theme) => {
-  penpot.ui.sendMessage({ type: 'theme', content: theme });
+logos.on('themechange', (theme) => {
+  logos.ui.sendMessage({ type: 'theme', content: theme });
 });
 
-penpot.on('shapechange', () => {
+logos.on('shapechange', () => {
   resetSelection();
 });
 
-penpot.ui.onMessage<PluginMessageEvent>((message) => {
+logos.ui.onMessage<PluginMessageEvent>((message) => {
   if (message.type === 'ready') {
     resetSelection();
   } else if (message.type === 'replace-text') {
-    const blockId = penpot.history.undoBlockBegin();
+    const blockId = logos.history.undoBlockBegin();
 
     const shapes = getShapes();
     const shapesToUpdate = shapes?.filter((shape) => {
@@ -31,11 +31,11 @@ penpot.ui.onMessage<PluginMessageEvent>((message) => {
     });
     updateReplaceTextPreview(message.content.search);
 
-    penpot.history.undoBlockFinish(blockId);
+    logos.history.undoBlockFinish(blockId);
   } else if (message.type === 'preview-replace-text') {
     updateReplaceTextPreview(message.content.search);
   } else if (message.type === 'add-text') {
-    const blockId = penpot.history.undoBlockBegin();
+    const blockId = logos.history.undoBlockBegin();
 
     const currentNames = message.content.map((shape) => shape.current);
     const shapes = getShapes();
@@ -47,20 +47,20 @@ penpot.ui.onMessage<PluginMessageEvent>((message) => {
       return (shape.name = newText?.new ?? shape.name);
     });
 
-    penpot.history.undoBlockFinish(blockId);
+    logos.history.undoBlockFinish(blockId);
 
     resetSelection();
   }
 });
 
 function getShapes() {
-  return penpot.selection.length
-    ? penpot.selection
-    : penpot.currentPage?.findShapes();
+  return logos.selection.length
+    ? logos.selection
+    : logos.currentPage?.findShapes();
 }
 
 function resetSelection() {
-  penpot.ui.sendMessage({
+  logos.ui.sendMessage({
     type: 'selection',
     content: {
       selection: getShapes(),
@@ -74,7 +74,7 @@ function updateReplaceTextPreview(search: string) {
     const shapesToUpdate = shapes?.filter((shape) => {
       return shape.name.includes(search);
     });
-    penpot.ui.sendMessage({
+    logos.ui.sendMessage({
       type: 'selection',
       content: {
         selection: shapesToUpdate,

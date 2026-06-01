@@ -51,17 +51,17 @@ export class LogosMcpServer {
 
     constructor(private isMultiUser: boolean = false) {
         // read port configuration from environment variables
-        this.host = process.env.PENPOT_MCP_SERVER_HOST ?? "0.0.0.0";
-        this.port = parseInt(process.env.PENPOT_MCP_SERVER_PORT ?? "4401", 10);
-        this.webSocketPort = parseInt(process.env.PENPOT_MCP_WEBSOCKET_PORT ?? "4402", 10);
-        this.replPort = parseInt(process.env.PENPOT_MCP_REPL_PORT ?? "4403", 10);
+        this.host = process.env.LOGOS_MCP_SERVER_HOST ?? "0.0.0.0";
+        this.port = parseInt(process.env.LOGOS_MCP_SERVER_PORT ?? "4401", 10);
+        this.webSocketPort = parseInt(process.env.LOGOS_MCP_WEBSOCKET_PORT ?? "4402", 10);
+        this.replPort = parseInt(process.env.LOGOS_MCP_REPL_PORT ?? "4403", 10);
 
         this.configLoader = new ConfigurationLoader(process.cwd());
         this.apiDocs = new ApiDocs();
 
         this.server = new McpServer(
             {
-                name: "penpot-mcp-server",
+                name: "logos-mcp-server",
                 version: "1.0.0",
             },
             {
@@ -89,12 +89,12 @@ export class LogosMcpServer {
      *
      * In remote mode, the server is not assumed to be accessed only by a local user on the same machine,
      * with corresponding limitations being enforced.
-     * Remote mode can be explicitly enabled by setting the environment variable PENPOT_MCP_REMOTE_MODE
+     * Remote mode can be explicitly enabled by setting the environment variable LOGOS_MCP_REMOTE_MODE
      * to "true". Enabling multi-user mode forces remote mode, regardless of the value of the environment
      * variable.
      */
     public isRemoteMode(): boolean {
-        const isRemoteModeRequested: boolean = process.env.PENPOT_MCP_REMOTE_MODE === "true";
+        const isRemoteModeRequested: boolean = process.env.LOGOS_MCP_REMOTE_MODE === "true";
         return this.isMultiUserMode() || isRemoteModeRequested;
     }
 
@@ -258,8 +258,8 @@ export class LogosMcpServer {
      * Gracefully shuts down the REPL server and other components.
      */
     public async stop(): Promise<void> {
-        this.logger.info("Stopping Penpot MCP Server...");
+        this.logger.info("Stopping Logos MCP Server...");
         await this.replServer.stop();
-        this.logger.info("Penpot MCP Server stopped");
+        this.logger.info("Logos MCP Server stopped");
     }
 }

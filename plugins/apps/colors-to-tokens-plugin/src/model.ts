@@ -1,4 +1,4 @@
-import { LibraryColor } from '@penpot/plugin-types';
+import { LibraryColor } from '@logos/plugin-types';
 
 export interface Token {
   $value: string;

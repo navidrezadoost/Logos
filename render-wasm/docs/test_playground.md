@@ -26,7 +26,7 @@ Each HTML file is a separate playground demo. The `js/` directory contains share
 
 ## Shapes Playground
 
-- Run penpot locally
+- Run logos locally
 - Go to http://localhost:3449/wasm-playground/
 - The `index.html` page lists all available playgrounds for easy navigation.
 
@@ -92,4 +92,4 @@ To update the `render-wasm.wasm` and `render-wasm.js` files used by the playgrou
 
 ### How It Works
 
-- The playground integrates the new renderer via the WASM and JS files, allowing you to test text editing, rendering, and styling in isolation from the main Penpot application.
+- The playground integrates the new renderer via the WASM and JS files, allowing you to test text editing, rendering, and styling in isolation from the main Logos application.

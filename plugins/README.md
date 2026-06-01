@@ -1,4 +1,4 @@
-# Penpot Plugins
+# Logos Plugins
 
 ## What can you find here?
 
@@ -10,9 +10,9 @@ There are 2 important folders to keep an eye on: `apps` and `libs`.
 In the `libs` folder you'll find:
 
 - plugins-runtime: here you'll find the code that initializes the plugin and
-  sets a few listeners to know when the penpot page/file/selection changes. It
+  sets a few listeners to know when the logos page/file/selection changes. It
   has its own [README](libs/plugins-runtime/README.md).
-- plugins-styles: basic css library with penpot styles in case you
+- plugins-styles: basic css library with logos styles in case you
   need help for styling your plugins.
 
 In the `apps` folder you'll find some examples that use the libraries mentioned
@@ -30,14 +30,14 @@ pnpm run start:styles-example
 
 Open in your browser: `http://localhost:4202/`
 
-## Run Penpot sample plugins
+## Run Logos sample plugins
 
-This guide will help you launch a Penpot plugin from the penpot-plugins
-repository. Before proceeding, ensure that you have Penpot running locally by
+This guide will help you launch a Logos plugin from the logos-plugins
+repository. Before proceeding, ensure that you have Logos running locally by
 following the [setup
-instructions](https://help.penpot.app/technical-guide/developer/devenv/).
+instructions](https://help.logos.app/technical-guide/developer/devenv/).
 
-In the terminal, navigate to the **penpot-plugins** repository and run `pnpm -r
+In the terminal, navigate to the **logos-plugins** repository and run `pnpm -r
 install` to install the required dependencies. Then, run `pnpm run start` to
 launch the plugins runtime.
 
@@ -78,7 +78,7 @@ is provided below.
 | App             | Description                                                       | PORT | Start command                     | URL                    |
 | --------------- | ----------------------------------------------------------------- | ---- | --------------------------------- | ---------------------- |
 | plugins-runtime | Runtime for the plugins subsystem                                 | 4200 | pnpm run start:app:runtime        |                        |
-| example-styles  | Showcase of some of the Penpot styles that can be used in plugins | 4201 | pnpm run start:app:styles-example | http://localhost:4201/ |
+| example-styles  | Showcase of some of the Logos styles that can be used in plugins | 4201 | pnpm run start:app:styles-example | http://localhost:4201/ |
 
 ## Creating a plugin from scratch
 
@@ -95,4 +95,4 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 Copyright (c) KALEIDOS INC
 ```
 
-Penpot is a Kaleidos’ [open source project](https://kaleidos.net/)
+Logos is a Kaleidos’ [open source project](https://kaleidos.net/)

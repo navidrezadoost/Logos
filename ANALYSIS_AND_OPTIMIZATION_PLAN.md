@@ -53,7 +53,7 @@
 
 ## 1. Project Identity & Purpose
 
-**Logos** (formerly Penpot) is an open-source, browser-based vector design tool built for multi-user real-time collaboration. It is the only design tool in the world whose file format is based on open web standards (SVG/CSS). It runs as a self-hosted application backed by a Clojure API server, served to users as a ClojureScript single-page application.
+**Logos** (formerly Logos) is an open-source, browser-based vector design tool built for multi-user real-time collaboration. It is the only design tool in the world whose file format is based on open web standards (SVG/CSS). It runs as a self-hosted application backed by a Clojure API server, served to users as a ClojureScript single-page application.
 
 Core differentiators:
 - **SVG-native** — all design data is expressed as SVG, no proprietary binary opaque format.
@@ -169,7 +169,7 @@ Backend (Clojure / Integrant)
 
 **`frontend/src/app/main/store.cljs`** — global Reagent atom holding the entire application state.
 
-PTK (Penpot ToolKit) is a custom reactive state library built on top of RxJS. It follows the Elm architecture pattern:
+PTK (Logos ToolKit) is a custom reactive state library built on top of RxJS. It follows the Elm architecture pattern:
 
 ```
 Event dispatched  →  event.prepare()  →  event.handle(state)  →  new state atom
@@ -239,7 +239,7 @@ A dedicated Web Worker isolates CPU-heavy operations from the UI:
 |---|---|
 | `snap.cljs` | Snapping data structure (see §6.6) |
 | `thumbnails.cljs` | Off-thread Canvas 2D thumbnail rendering |
-| `import.cljs` | `.penpot` / `.fig` file ingestion and normalization |
+| `import.cljs` | `.logos` / `.fig` file ingestion and normalization |
 | `selection.cljs` | Hit-testing of shapes against a point/rectangle |
 
 ### 5.5 Plugin System (`frontend/src/app/plugins/`)
@@ -471,7 +471,7 @@ Media objects are referenced by a content-addressed hash (`sha256`). De-duplicat
 
 **`backend/src/app/binfile/`**
 
-Export/import of complete files as a single `.penpot` archive. Three format versions exist:
+Export/import of complete files as a single `.logos` archive. Three format versions exist:
 
 | Version | Format | Notes |
 |---|---|---|
@@ -632,7 +632,7 @@ logos-mcp        → MCP TypeScript server
 - CDN in front of static assets.
 
 **Environment configuration:**
-All runtime configuration flows through environment variables (`PENPOT_*` prefix, e.g. `PENPOT_DATABASE_URI`, `PENPOT_REDIS_URI`, `PENPOT_STORAGE_BACKEND`).
+All runtime configuration flows through environment variables (`LOGOS_*` prefix, e.g. `LOGOS_DATABASE_URI`, `LOGOS_REDIS_URI`, `LOGOS_STORAGE_BACKEND`).
 
 ---
 
@@ -641,7 +641,7 @@ All runtime configuration flows through environment variables (`PENPOT_*` prefix
 ### 12.1 Strengths
 
 1. **Pure functional core** — The common library is entirely pure functions on immutable data. Testing, reasoning, and refactoring are easier than in mutable OOP equivalents.
-2. **Open file format** — SVG-based file format prevents vendor lock-in. `.penpot` archives are inspectable and portable.
+2. **Open file format** — SVG-based file format prevents vendor lock-in. `.logos` archives are inspectable and portable.
 3. **Real-time collaboration** — The Redis PubSub + CRDT change-set model works well at moderate concurrency.
 4. **GPU renderer** — The WASM/Skia renderer provides high fidelity output and is significantly faster than Canvas 2D for complex scenes.
 5. **Plugin ecosystem** — The isolated sandboxed plugin model is secure and extensible.
@@ -662,7 +662,7 @@ All runtime configuration flows through environment variables (`PENPOT_*` prefix
 | B7 | Font loading | Fonts are loaded lazily and synchronously block text rendering until available. No preloading heuristic. | LOW-MEDIUM |
 | B8 | Thumbnail generation | Thumbnails re-generated on every change, even for off-screen frames. No debounce or dirty-bit per frame. | LOW |
 | B9 | Plugin API surface undocumented | Many plugin capabilities are inferred from source code rather than a formal spec. | LOW |
-| B10 | Environment variable naming | All env vars still use `PENPOT_` prefix despite branding as Logos. | LOW |
+| B10 | Environment variable naming | All env vars still use `LOGOS_` prefix despite branding as Logos. | LOW |
 | B11 | Build tooling fragmentation | Three separate package managers (Clojure `deps.edn`, `pnpm`, `Cargo) require different workflows per module. | LOW |
 | B12 | No caching layer on RPC reads | Database queries for hot paths (get-file, get-profile) run on every request with no memoization or HTTP cache headers. | MEDIUM |
 
@@ -680,8 +680,8 @@ Goal: Zero technical debt blockers, correct naming, reproducible builds.
 
 | ID | Task | Owner Area | Effort |
 |---|---|---|---|
-| P0.1 | Rename all `PENPOT_*` environment variables to `LOGOS_*` with backward-compatible aliases in `config.clj`. Update `docker-compose.yaml`, Helm values, and docs. | Backend/Infra | 1 day |
-| P0.2 | Rename internal JS globals (`penpotVersion` → `logosVersion`, etc.) in `index.html` and all ClojureScript callers. Update the global `js/penpotVersion` reads to `js/logosVersion`. | Frontend | 0.5 day |
+| P0.1 | Rename all `LOGOS_*` environment variables to `LOGOS_*` with backward-compatible aliases in `config.clj`. Update `docker-compose.yaml`, Helm values, and docs. | Backend/Infra | 1 day |
+| P0.2 | Rename internal JS globals (`logosVersion` → `logosVersion`, etc.) in `index.html` and all ClojureScript callers. Update the global `js/logosVersion` reads to `js/logosVersion`. | Frontend | 0.5 day |
 | P0.3 | Add `target/` and `node_modules/` to all sub-project `.gitignore` files to prevent accidental staging. | All | 0.5 day |
 | P0.4 | Pin all dependency versions: lock Clojure deps via `deps-lock.edn`, upgrade `pnpm` lockfiles to v9. | All | 1 day |
 | P0.5 | Add a top-level `Makefile` / `manage.sh` command: `make dev` starts all services in correct order. | Infra | 1 day |
@@ -978,12 +978,12 @@ Phase 0 of the technical analysis covers internal hygiene (P0.1–P0.6). The fol
 
 | # | Action | Implementation Status |
 |---|--------|-----------------------|
-| 15.1 | **Environment variables** — Rename `PENPOT_*` → `LOGOS_*` across all config, Docker Compose, and Helm charts. Backward-compatible `PENPOT_*` aliases preserved in `read-config` (config.clj) for one full release cycle. | ✅ **Done** — `docker/images/docker-compose.yaml`, `backend/src/app/config.clj` updated |
-| 15.2 | **Global JS namespace** — Replace `globalThis.penpotVersion`, `penpotBuildDate`, `penpotWorkerURI`, `penpotFlags`, `penpotPublicURI` etc. in all HTML templates and ClojureScript config readers. | ✅ **Done** — `index.html`, `index.mustache`, `rasterizer.mustache`, `render.mustache`, `config.cljs`, `notifications.cljs` updated |
-| 15.3 | **Repository docs** — Update `CONTRIBUTING.md` help-center links. `README.md` retains "formerly Penpot" notice. | ✅ **Done** |
+| 15.1 | **Environment variables** — Rename `LOGOS_*` → `LOGOS_*` across all config, Docker Compose, and Helm charts. Backward-compatible `LOGOS_*` aliases preserved in `read-config` (config.clj) for one full release cycle. | ✅ **Done** — `docker/images/docker-compose.yaml`, `backend/src/app/config.clj` updated |
+| 15.2 | **Global JS namespace** — Replace `globalThis.logosVersion`, `logosBuildDate`, `logosWorkerURI`, `logosFlags`, `logosPublicURI` etc. in all HTML templates and ClojureScript config readers. | ✅ **Done** — `index.html`, `index.mustache`, `rasterizer.mustache`, `render.mustache`, `config.cljs`, `notifications.cljs` updated |
+| 15.3 | **Repository docs** — Update `CONTRIBUTING.md` help-center links. `README.md` retains "formerly Logos" notice. | ✅ **Done** |
 | 15.4 | **Build identifiers** — SMTP from/reply-to names, telemetry URI, default database names updated to Logos. | ✅ **Done** — `backend/src/app/config.clj` defaults updated |
 | 15.5 | **Database & Redis keys** — No data migration needed; key prefixes are internal. A `branding` metadata entry will be written in an upcoming migration. | 📋 Scheduled for next migration slot |
-| 15.6 | **MCP TypeScript files** — Renamed: `PenpotMcpServer` → `LogosMcpServer`, `PenpotApiInfoTool` → `LogosApiInfoTool`, `PenpotUtils` → `LogosUtils`. | ✅ **Done** (previous session) |
+| 15.6 | **MCP TypeScript files** — Renamed: `LogosMcpServer` → `LogosMcpServer`, `LogosApiInfoTool` → `LogosApiInfoTool`, `LogosUtils` → `LogosUtils`. | ✅ **Done** (previous session) |
 
 **Deliverable:** `v0.1.0` — a clean `main` branch that boots, serves, and self-identifies as **Logos**.
 

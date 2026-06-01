@@ -1,7 +1,7 @@
 import { WebSocket, WebSocketServer } from "ws";
 import * as http from "http";
 import { PluginTask } from "./PluginTask";
-import { PluginTaskResponse, PluginTaskResult } from "@penpot/mcp-common";
+import { PluginTaskResponse, PluginTaskResult } from "@logos/mcp-common";
 import { createLogger } from "./logger";
 import type { LogosMcpServer } from "./LogosMcpServer";
 
@@ -11,7 +11,7 @@ interface ClientConnection {
 }
 
 /**
- * Manages WebSocket connections to Penpot plugin instances and handles plugin tasks
+ * Manages WebSocket connections to Logos plugin instances and handles plugin tasks
  * over these connections.
  */
 export class PluginBridge {
@@ -35,7 +35,7 @@ export class PluginBridge {
      * Sets up WebSocket connection handlers for plugin communication.
      *
      * Manages client connections and provides bidirectional communication
-     * channel between the MCP mcpServer and Penpot plugin instances.
+     * channel between the MCP mcpServer and Logos plugin instances.
      */
     private setupWebSocketHandlers(): void {
         this.wsServer.on("connection", (ws: WebSocket, request: http.IncomingMessage) => {
@@ -163,12 +163,12 @@ export class PluginBridge {
             // single-user mode: return the single connected client
             if (this.connectedClients.size === 0) {
                 throw new Error(
-                    `No Penpot plugin instances are currently connected. Please ensure the plugin is running and connected.`
+                    `No Logos plugin instances are currently connected. Please ensure the plugin is running and connected.`
                 );
             }
             if (this.connectedClients.size > 1) {
                 throw new Error(
-                    `Multiple (${this.connectedClients.size}) Penpot MCP Plugin instances are connected. ` +
+                    `Multiple (${this.connectedClients.size}) Logos MCP Plugin instances are connected. ` +
                         `Ask the user to ensure that only one instance is connected at a time.`
                 );
             }

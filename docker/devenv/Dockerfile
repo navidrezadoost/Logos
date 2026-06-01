@@ -92,43 +92,33 @@ RUN set -eux; \
     rm -rf /tmp/caddy;
 
 ################################################################################
-## JVM SETUP
+## GO SETUP
 ################################################################################
 
-FROM base AS setup-jvm
+FROM base AS setup-go
 
-# https://clojure.org/releases/tools
-ENV CLOJURE_VERSION=1.12.4.1602
+ENV GO_VERSION=1.23.8 \
+    PATH=/opt/go/bin:/root/go/bin:$PATH
 
 RUN set -eux; \
     ARCH="$(dpkg --print-architecture)"; \
     case "${ARCH}" in \
        aarch64|arm64) \
-         ESUM='9903c6b19183a33725ca1dfdae5b72400c9d00995c76fafc4a0d31c5152f33f7'; \
-         BINARY_URL='https://cdn.azul.com/zulu/bin/zulu25.32.21-ca-jdk25.0.2-linux_aarch64.tar.gz'; \
+         BINARY_URL="https://go.dev/dl/go${GO_VERSION}.linux-arm64.tar.gz"; \
          ;; \
        amd64|x86_64) \
-         ESUM='946ad9766d98fc6ab495a1a120072197db54997f6925fb96680f1ecd5591db4e'; \
-         BINARY_URL='https://cdn.azul.com/zulu/bin/zulu25.32.21-ca-jdk25.0.2-linux_x64.tar.gz'; \
+         BINARY_URL="https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"; \
          ;; \
        *) \
          echo "Unsupported arch: ${ARCH}"; \
          exit 1; \
          ;; \
     esac; \
-    curl -LfsSo /tmp/openjdk.tar.gz ${BINARY_URL}; \
-    echo "${ESUM} */tmp/openjdk.tar.gz" | sha256sum -c -; \
-    mkdir -p /opt/jdk; \
-    cd /opt/jdk; \
-    tar -xf /tmp/openjdk.tar.gz --strip-components=1; \
-    rm -rf /tmp/openjdk.tar.gz;
-
-RUN set -ex; \
-    curl -LfsSo /tmp/clojure.sh https://download.clojure.org/install/linux-install-$CLOJURE_VERSION.sh; \
-    chmod +x /tmp/clojure.sh; \
-    mkdir -p /opt/clojure; \
-    /tmp/clojure.sh --prefix /opt/clojure; \
-    rm -rf /tmp/clojure.sh;
+    curl -LfsSo /tmp/go.tar.gz ${BINARY_URL}; \
+    mkdir -p /opt; \
+    tar -C /opt -xf /tmp/go.tar.gz; \
+    rm -rf /tmp/go.tar.gz; \
+    /opt/go/bin/go version;
 
 ################################################################################
 ## RUST SETUP
@@ -180,51 +170,7 @@ RUN set -eux; \
 
 FROM base AS setup-utils
 
-ENV CLJKONDO_VERSION=2026.01.19 \
-    BABASHKA_VERSION=1.12.208 \
-    CLJFMT_VERSION=0.15.6 \
-    PIXI_VERSION=0.63.2
-
-RUN set -ex; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "${ARCH}" in \
-       aarch64|arm64) \
-         BINARY_URL="https://github.com/clj-kondo/clj-kondo/releases/download/v$CLJKONDO_VERSION/clj-kondo-$CLJKONDO_VERSION-linux-aarch64.zip"; \
-         ;; \
-       amd64|x86_64) \
-         BINARY_URL="https://github.com/clj-kondo/clj-kondo/releases/download/v$CLJKONDO_VERSION/clj-kondo-$CLJKONDO_VERSION-linux-amd64.zip"; \
-         ;; \
-       *) \
-         echo "Unsupported arch: ${ARCH}"; \
-         exit 1; \
-         ;; \
-    esac; \
-    cd /tmp; \
-    curl -LfsSo /tmp/clj-kondo.zip ${BINARY_URL}; \
-    mkdir -p /opt/utils/bin; \
-    cd /opt/utils/bin; \
-    unzip /tmp/clj-kondo.zip; \
-    rm -rf /tmp/clj-kondo.zip;
-
-RUN set -ex; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "${ARCH}" in \
-       aarch64|arm64) \
-         BINARY_URL="https://github.com/babashka/babashka/releases/download/v$BABASHKA_VERSION/babashka-$BABASHKA_VERSION-linux-aarch64-static.tar.gz"; \
-         ;; \
-       amd64|x86_64) \
-         BINARY_URL="https://github.com/babashka/babashka/releases/download/v$BABASHKA_VERSION/babashka-$BABASHKA_VERSION-linux-amd64-static.tar.gz"; \
-         ;; \
-       *) \
-         echo "Unsupported arch: ${ARCH}"; \
-         exit 1; \
-         ;; \
-    esac; \
-    cd /tmp; \
-    curl -LfsSo /tmp/babashka.tar.gz ${BINARY_URL}; \
-    cd /opt/utils/bin; \
-    tar -xf /tmp/babashka.tar.gz; \
-    rm -rf /tmp/babashka.tar.gz;
+ENV PIXI_VERSION=0.63.2
 
 RUN set -ex; \
     ARCH="$(dpkg --print-architecture)"; \
@@ -242,29 +188,10 @@ RUN set -ex; \
     esac; \
     cd /tmp; \
     curl -LfsSo /tmp/pixi.tar.gz ${BINARY_URL}; \
+    mkdir -p /opt/utils/bin; \
     cd /opt/utils/bin; \
     tar -xf /tmp/pixi.tar.gz; \
     rm -rf /tmp/pixi.tar.gz;
-
-RUN set -ex; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "${ARCH}" in \
-       aarch64|arm64) \
-         BINARY_URL="https://github.com/weavejester/cljfmt/releases/download/${CLJFMT_VERSION}/cljfmt-${CLJFMT_VERSION}-linux-aarch64.tar.gz"; \
-         ;; \
-       amd64|x86_64) \
-         BINARY_URL="https://github.com/weavejester/cljfmt/releases/download/${CLJFMT_VERSION}/cljfmt-${CLJFMT_VERSION}-linux-amd64.tar.gz"; \
-         ;; \
-       *) \
-         echo "Unsupported arch: ${ARCH}"; \
-         exit 1; \
-         ;; \
-    esac; \
-    cd /tmp; \
-    curl -LfsSo /tmp/cljfmt.tar.gz ${BINARY_URL}; \
-    cd /opt/utils/bin; \
-    tar -xf /tmp/cljfmt.tar.gz; \
-    rm -rf /tmp/cljfmt.tar.gz;
 
 # Install minio client
 RUN set -ex; \
@@ -293,9 +220,9 @@ RUN set -ex; \
 FROM base AS devenv-base
 
 RUN set -ex; \
-    usermod -l penpot -d /home/penpot -G users -s /bin/bash ubuntu; \
-    passwd penpot -d; \
-    echo "penpot ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+    usermod -l logos -d /home/logos -G users -s /bin/bash ubuntu; \
+    passwd logos -d; \
+    echo "logos ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 RUN set -ex; \
     apt-get -qq update; \
@@ -387,19 +314,19 @@ RUN set -ex; \
 ################################################################################
 
 FROM devenv-base AS devenv
-LABEL maintainer="Penpot <docker@penpot.app>"
+LABEL maintainer="Logos <docker@logos.app>"
 
 ENV LANG='C.UTF-8' \
     LC_ALL='C.UTF-8' \
     DEBIAN_FRONTEND="noninteractive" \
-    JAVA_HOME="/opt/jdk" \
     CARGO_HOME="/opt/cargo" \
     RUSTUP_HOME="/opt/rustup" \
-    PATH="/opt/jdk/bin:/opt/utils/bin:/opt/clojure/bin:/opt/node/bin:/opt/imagick/bin:/opt/cargo/bin:$PATH"
+    GOROOT="/opt/go" \
+    PATH="/opt/go/bin:/root/go/bin:/opt/utils/bin:/opt/node/bin:/opt/imagick/bin:/opt/cargo/bin:$PATH"
 
+# TODO: publish logos/imagemagick and update this reference
 COPY --from=penpotapp/imagemagick:7.1.2-13 /opt/imagick /opt/imagick
-COPY --from=setup-jvm /opt/jdk /opt/jdk
-COPY --from=setup-jvm /opt/clojure /opt/clojure
+COPY --from=setup-go /opt/go /opt/go
 COPY --from=setup-node /opt/node /opt/node
 COPY --from=setup-utils /opt/utils /opt/utils
 COPY --from=setup-rust /opt/cargo /opt/cargo

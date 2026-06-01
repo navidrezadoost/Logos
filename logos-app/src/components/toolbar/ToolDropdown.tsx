@@ -12,6 +12,8 @@
  */
 
 import React, { useEffect, useRef } from "react";
+import { theme } from "../../theme/colors";
+import { ToolbarIcon } from "./toolbarIcons";
 import type { ToolDef } from "../../stores/toolbarStore";
 import type { Tool } from "../../stores/uiStore";
 
@@ -55,8 +57,8 @@ export function ToolDropdown({
         left: 52,          // just to the right of the 48px-wide toolbar
         top: topOffset,
         width: 200,
-        background: "#1e1e2e",
-        border: "1px solid #313244",
+        background: theme.panel,
+        border: `1px solid ${theme.border}`,
         borderRadius: 8,
         boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
         padding: "4px 0",
@@ -83,16 +85,31 @@ export function ToolDropdown({
               padding: "0 12px",
               height: 32,
               border: "none",
-              background: isActive ? "rgba(203,166,247,0.15)" : "transparent",
-              color: isActive ? "#cba6f7" : "#cdd6f4",
+              background: isActive ? theme.accentMuted : "transparent",
+              color: isActive ? theme.accent : theme.text,
               fontSize: 13,
               cursor: "pointer",
               textAlign: "left",
             }}
           >
-            {/* Icon slot */}
-            <span style={{ width: 20, textAlign: "center", fontSize: 15, flexShrink: 0 }}>
-              {tool.icon}
+            {/* Checkmark when active (Figma-style) */}
+            <span
+              style={{
+                width: 14,
+                display: "flex",
+                justifyContent: "center",
+                flexShrink: 0,
+                fontSize: 12,
+                color: theme.accent,
+              }}
+              aria-hidden
+            >
+              {isActive ? "✓" : ""}
+            </span>
+
+            {/* Icon */}
+            <span style={{ width: 20, display: "flex", justifyContent: "center", flexShrink: 0 }}>
+              <ToolbarIcon name={tool.icon} size={16} />
             </span>
 
             {/* Label */}
@@ -103,18 +120,13 @@ export function ToolDropdown({
               <span
                 style={{
                   fontSize: 11,
-                  color: "#585b70",
+                  color: theme.textDim,
                   fontFamily: "monospace",
                   flexShrink: 0,
                 }}
               >
                 {tool.shortcut}
               </span>
-            )}
-
-            {/* Active indicator */}
-            {isActive && (
-              <span style={{ fontSize: 10, color: "#cba6f7", marginLeft: 4 }}>●</span>
             )}
           </button>
         );

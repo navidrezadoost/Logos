@@ -10,7 +10,7 @@ The tests are located in their own Playwright project, `render-wasm`.
 To run them, go to the `frontend` dir and execute Playwright passing the `--project` flag. To run them using the `--ui` flag, run the tests **out of the tmux window**. 
 
 ```zsh
-cd penpot/frontend
+cd logos/frontend
 npx playwright test --ui --project=render-wasm
 ```
 
@@ -18,7 +18,7 @@ npx playwright test --ui --project=render-wasm
 
 You need to add a new spec file to `frontend/playwright/ui/render-wasm-specs` or add a test to one of the existing specs. You can use `shapes.spec.js` as reference.
 
-Writing the tests is very similar to write any other test for Penpot. However, some helpers have been added to address some issues specific to the new render engine.
+Writing the tests is very similar to write any other test for Logos. However, some helpers have been added to address some issues specific to the new render engine.
 
 ### Step 1: Initialize the page
 

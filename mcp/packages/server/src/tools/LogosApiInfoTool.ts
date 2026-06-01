@@ -9,7 +9,7 @@ import { ApiDocs } from "../ApiDocs";
 /**
  * Arguments class for the LogosApiInfoTool
  */
-export class PenpotApiInfoArgs {
+export class LogosApiInfoArgs {
     static schema = {
         type: z.string().min(1, "Type name cannot be empty"),
         member: z.string().optional(),
@@ -27,37 +27,37 @@ export class PenpotApiInfoArgs {
 }
 
 /**
- * Tool for retrieving Penpot API documentation information.
+ * Tool for retrieving Logos API documentation information.
  *
  * This tool provides access to API type documentation loaded from YAML files,
  * allowing retrieval of either full type documentation or specific member details.
  */
-export class LogosApiInfoTool extends Tool<PenpotApiInfoArgs> {
+export class LogosApiInfoTool extends Tool<LogosApiInfoArgs> {
     private static readonly MAX_FULL_TEXT_CHARS = 2000;
     private readonly apiDocs: ApiDocs;
 
     /**
-     * Creates a new PenpotApiInfo tool instance.
+     * Creates a new LogosApiInfo tool instance.
      *
      * @param mcpServer - The MCP server instance
      */
     constructor(mcpServer: LogosMcpServer, apiDocs: ApiDocs) {
-        super(mcpServer, PenpotApiInfoArgs.schema);
+        super(mcpServer, LogosApiInfoArgs.schema);
         this.apiDocs = apiDocs;
     }
 
     public getToolName(): string {
-        return "penpot_api_info";
+        return "logos_api_info";
     }
 
     public getToolDescription(): string {
         return (
-            "Retrieves Penpot API documentation for types and their members." +
-            "Be sure to read the 'Penpot High-Level Overview' first."
+            "Retrieves Logos API documentation for types and their members." +
+            "Be sure to read the 'Logos High-Level Overview' first."
         );
     }
 
-    protected async executeCore(args: PenpotApiInfoArgs): Promise<ToolResponse> {
+    protected async executeCore(args: LogosApiInfoArgs): Promise<ToolResponse> {
         const apiType = this.apiDocs.getType(args.type);
 
         if (!apiType) {

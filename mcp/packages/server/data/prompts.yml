@@ -1,34 +1,34 @@
-# Prompts configuration for Penpot MCP Server
+# Prompts configuration for Logos MCP Server
 # This file contains various prompts and instructions that can be used by the server
 
 initial_instructions: |
-  You have access to Penpot tools in order to interact with a Penpot design project directly.
-  As a precondition, the user must connect the Penpot design project to the MCP server using the Penpot MCP Plugin.
+  You have access to Logos tools in order to interact with a Logos design project directly.
+  As a precondition, the user must connect the Logos design project to the MCP server using the Logos MCP Plugin.
 
-  IMPORTANT: When transferring styles from a Penpot design to code, make sure that you strictly adhere to the design.
+  IMPORTANT: When transferring styles from a Logos design to code, make sure that you strictly adhere to the design.
     NEVER make assumptions about missing values and don't get overly creative (e.g. don't pick your own colours and stick to
     non-creative defaults such as white/black if you are lacking information).
 
   # Executing Code
 
-  One of your key tools is the `execute_code` tool, which allows you to run JavaScript code using the Penpot Plugin API
+  One of your key tools is the `execute_code` tool, which allows you to run JavaScript code using the Logos Plugin API
   directly in the connected project.
 
   VERY IMPORTANT: When writing code, NEVER LOG INFORMATION YOU ARE ALSO RETURNING. It would duplicate the information you receive!
 
-  To execute code correctly, you need to understand the Penpot Plugin API. You can retrieve API documentation via 
-  the `penpot_api_info` tool.
+  To execute code correctly, you need to understand the Logos Plugin API. You can retrieve API documentation via 
+  the `logos_api_info` tool.
 
-  This is the full list of types/interfaces in the Penpot API: $api_types
+  This is the full list of types/interfaces in the Logos API: $api_types
 
   You use the `storage` object extensively to store data and utility functions you define across tool calls.
   This allows you to inspect intermediate results while still being able to build on them in subsequent code executions.
 
-  # The Structure of Penpot Designs
+  # The Structure of Logos Designs
 
-  A Penpot design ultimately consists of shapes. 
+  A Logos design ultimately consists of shapes. 
   The type `Shape` is a union type, which encompasses both containers and low-level shapes.
-  Shapes in a Penpot design are organized hierarchically.
+  Shapes in a Logos design are organized hierarchically.
   At the top level, a design project contains one or more `Page` objects.
   Each `Page` contains a tree of elements. For a given instance `page`, its root shape is `page.root`.
   A Page is frequently structured into boards. A `Board` is a high-level grouping element.
@@ -45,7 +45,7 @@ initial_instructions: |
     * The location properties `x` and `y` refer to the top left corner of a shape's bounding box in the absolute (Page) coordinate system.
       These are writable - set them directly to position shapes.
     * `parentX` and `parentY` (as well as `boardX` and `boardY`) are READ-ONLY computed properties showing position relative to parent/board.
-      To position relative to parent, use `penpotUtils.setParentXY(shape, parentX, parentY)` or manually set `shape.x = parent.x + parentX`.
+      To position relative to parent, use `logosUtils.setParentXY(shape, parentX, parentY)` or manually set `shape.x = parent.x + parentX`.
     * `width` and `height` are READ-ONLY. Use `resize(width, height)` method to change dimensions.
     * `bounds` is a READ-ONLY property. Use `x`, `y` with `resize()` to modify shape bounds.
 
@@ -75,7 +75,7 @@ initial_instructions: |
       - NEVER use `parent.appendChild(shape)` as it is BROKEN and will not insert in a predictable place (except in flex layout boards)
     * Reparenting: `newParent.appendChild(shape)` or `newParent.insertChild(index, shape)` will move a shape to new parent
       - Automatically removes the shape from its old parent
-      - Absolute x/y positions are preserved (use `penpotUtils.setParentXY` to adjust relative position)
+      - Absolute x/y positions are preserved (use `logosUtils.setParentXY` to adjust relative position)
 
   # Images
 
@@ -114,7 +114,7 @@ initial_instructions: |
         or dir="row".
       - Add to a board with `board.addFlexLayout(): FlexLayout`; instance then accessible via `board.flex`.
         IMPORTANT: When adding a flex layout to a container that already has children, 
-        use `penpotUtils.addFlexLayout(container, dir)` instead! This preserves the existing visual order of children.
+        use `logosUtils.addFlexLayout(container, dir)` instead! This preserves the existing visual order of children.
         Otherwise, children will be arbitrarily reordered when the children order suddenly determines the display order. 
       - Check with: `if (board.flex) { ... }`
     
@@ -141,20 +141,20 @@ initial_instructions: |
   `resize` always sets `growType` to "fixed", so ALWAYS set it back to "auto-*" if you want automatic sizing - otherwise the bounding box will be meaningless, with the text overflowing!
   The auto-sizing is not immediate; sleep for a short time (100ms) if you want to read the updated bounding box.
 
-  # The `penpot` and `penpotUtils` Objects, Exploring Designs
+  # The `logos` and `logosUtils` Objects, Exploring Designs
 
-  A key object to use in your code is the `penpot` object (which is of type `Penpot`):
-    * `penpot.selection` provides the list of shapes the user has selected in the Penpot UI.
+  A key object to use in your code is the `logos` object (which is of type `Logos`):
+    * `logos.selection` provides the list of shapes the user has selected in the Logos UI.
        If it is unclear which elements to work on, you can ask the user to select them for you.
        ALWAYS immediately copy the selected shape(s) into `storage`! Do not assume that the selection remains unchanged.
-    * `penpot.root` provides the root shape of the currently active page.
-    * Generation of CSS content for elements via `penpot.generateStyle`
-    * Generation of HTML/SVG content for elements via `penpot.generateMarkup`
+    * `logos.root` provides the root shape of the currently active page.
+    * Generation of CSS content for elements via `logos.generateStyle`
+    * Generation of HTML/SVG content for elements via `logos.generateMarkup`
 
   For example, to generate CSS for the currently selected elements, you can execute this:
-      return penpot.generateStyle(penpot.selection, { type: "css", withChildren: true });
+      return logos.generateStyle(logos.selection, { type: "css", withChildren: true });
 
-  CRITICAL: The `penpotUtils` object provides essential utilities - USE THESE INSTEAD OF WRITING YOUR OWN:
+  CRITICAL: The `logosUtils` object provides essential utilities - USE THESE INSTEAD OF WRITING YOUR OWN:
     * getPages(): { id: string; name: string }[]
     * getPageById(id: string): Page | null
     * getPageByName(name: string): Page | null
@@ -176,37 +176,37 @@ initial_instructions: |
       Calls evaluator on each descendant; collects non-null/undefined results
       Powerful pattern: evaluator can return corrector functions or diagnostic data
 
-  General pointers for working with Penpot designs:
-    * Prefer `penpotUtils` helper functions — avoid reimplementing shape searching.
-    * To get an overview of a single page, use `penpotUtils.shapeStructure(page.root, 3)`. 
-      Note that `penpot.root` refers to the current page only. When working across pages, first determine the relevant page(s).
-    * Use `penpotUtils.findShapes()` or `penpotUtils.findShape()` with predicates to locate elements efficiently.
+  General pointers for working with Logos designs:
+    * Prefer `logosUtils` helper functions — avoid reimplementing shape searching.
+    * To get an overview of a single page, use `logosUtils.shapeStructure(page.root, 3)`. 
+      Note that `logos.root` refers to the current page only. When working across pages, first determine the relevant page(s).
+    * Use `logosUtils.findShapes()` or `logosUtils.findShape()` with predicates to locate elements efficiently.
 
-  Common tasks - Quick Reference (ALWAYS use penpotUtils for these):
+  Common tasks - Quick Reference (ALWAYS use logosUtils for these):
     * Find all images:
-        const images = penpotUtils.findShapes(
+        const images = logosUtils.findShapes(
           shape => shape.type === 'image' || shape.fills?.some(fill => fill.fillImage),
-          penpot.root
+          logos.root
         );
     * Find text elements:
-        const texts = penpotUtils.findShapes(shape => shape.type === 'text', penpot.root);
+        const texts = logosUtils.findShapes(shape => shape.type === 'text', logos.root);
     * Find (the first) shape with a given name:
-        const shape = penpotUtils.findShape(shape => shape.name === 'MyShape');
+        const shape = logosUtils.findShape(shape => shape.name === 'MyShape');
     * Get structure of current selection:
-        const structure = penpotUtils.shapeStructure(penpot.selection[0]);
+        const structure = logosUtils.shapeStructure(logos.selection[0]);
     * Find shapes in current selection/board:
-        const shapes = penpotUtils.findShapes(predicate, penpot.selection[0] || penpot.root);
+        const shapes = logosUtils.findShapes(predicate, logos.selection[0] || logos.root);
     * Validate/analyze descendants (returning corrector functions):
-        const fixes = penpotUtils.analyzeDescendants(board, (root, shape) => {
+        const fixes = logosUtils.analyzeDescendants(board, (root, shape) => {
           const xMod = shape.parentX % 4;
           if (xMod !== 0) {
-            return () => penpotUtils.setParentXY(shape, Math.round(shape.parentX / 4) * 4, shape.parentY);
+            return () => logosUtils.setParentXY(shape, Math.round(shape.parentX / 4) * 4, shape.parentY);
           }
         });
         fixes.forEach(f => f.result()); // Apply all fixes
     * Find containment violations:
-        const violations = penpotUtils.analyzeDescendants(board, (root, shape) => {
-          return !penpotUtils.isContainedIn(shape, root) ? 'outside-bounds' : null;
+        const violations = logosUtils.analyzeDescendants(board, (root, shape) => {
+          return !logosUtils.isContainedIn(shape, root) ? 'outside-bounds' : null;
         });
         Always validate against the root container that is supposed to contain the shapes.
 
@@ -225,15 +225,15 @@ initial_instructions: |
 
   # Asset Libraries
     
-  Libraries in Penpot are collections of reusable design assets (components, colors, and typographies) that can be shared across files. 
+  Libraries in Logos are collections of reusable design assets (components, colors, and typographies) that can be shared across files. 
   They enable design systems and consistent styling across projects.
-  Each Penpot file has its own local library and can connect to external shared libraries.
+  Each Logos file has its own local library and can connect to external shared libraries.
     
-  Accessing libraries: via `penpot.library` (type: `LibraryContext`):
-    * `penpot.library.local` (type: `Library`) - The current file's own library
-    * `penpot.library.connected` (type: `Library[]`) - Array of already-connected external libraries
-    * `penpot.library.availableLibraries()` (returns: `Promise<LibrarySummary[]>`) - Libraries available to connect
-    * `penpot.library.connectLibrary(libraryId: string)` (returns: `Promise<Library>`) - Connect a new library
+  Accessing libraries: via `logos.library` (type: `LibraryContext`):
+    * `logos.library.local` (type: `Library`) - The current file's own library
+    * `logos.library.connected` (type: `Library[]`) - Array of already-connected external libraries
+    * `logos.library.availableLibraries()` (returns: `Promise<LibrarySummary[]>`) - Libraries available to connect
+    * `logos.library.connectLibrary(libraryId: string)` (returns: `Promise<Library>`) - Connect a new library
     
   Each `Library` object has:
     * `id: string`
@@ -253,15 +253,15 @@ initial_instructions: |
         const mainShape: Shape = component.mainInstance();
     
   Adding assets to a library:
-    * const newColor: LibraryColor = penpot.library.local.createColor();
+    * const newColor: LibraryColor = logos.library.local.createColor();
       newColor.name = 'Brand Primary';
       newColor.color = '#0066FF';
-    * const newTypo: LibraryTypography = penpot.library.local.createTypography();
+    * const newTypo: LibraryTypography = logos.library.local.createTypography();
       newTypo.name = 'Heading Large';
       // Set typography properties...
     * const shapes: Shape[] = [shape1, shape2]; // shapes to include
-      const newComponent: LibraryComponent = penpot.library.local.createComponent(shapes);
+      const newComponent: LibraryComponent = logos.library.local.createComponent(shapes);
       newComponent.name = 'My Button';
     
   --
-  You have hereby read the 'Penpot High-Level Overview' and need not use a tool to read it again.
+  You have hereby read the 'Logos High-Level Overview' and need not use a tool to read it again.

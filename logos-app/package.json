@@ -6,8 +6,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "icons:sync": "bash scripts/link-toolbar-icons.sh && bash scripts/link-system-icons.sh",
+    "icons:build": "svger-cli build ./src/icons/toolbar ./src/components/icons --framework react --typescript && svger-cli build ./src/icons/system ./src/components/icons/system --framework react --typescript",
+    "icons:workspace": "python scripts/build-workspace-icons.py",
+    "icons": "npm run icons:sync && npm run icons:build && npm run icons:workspace",
+    "build": "npm run icons:build && tsc -b && vite build",
+    "build:spa": "vite build && python scripts/sync-spa-to-dist.py",
+    "penpot:shell": "python scripts/sync-penpot-workspace.py",
+    "preview": "vite preview --port 8888 --host 127.0.0.1",
+    "serve": "npm run build:spa && python scripts/serve-frontend.py",
+    "serve:stop": "pkill -f '[p]ython scripts/serve-frontend.py' 2>/dev/null || true; fuser -k 8888/tcp 2>/dev/null || true",
+    "serve:restart": "npm run serve:stop && npm run serve"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.24",
@@ -15,6 +24,7 @@
     "nanoid": "^5.1.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.4",
     "react-window": "^2.2.7",
     "zustand": "^5.0.13"
   },
@@ -23,6 +33,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.3.4",
+    "svger-cli": "^4.0.8",
     "typescript": "^5.7.2",
     "vite": "^6.3.5"
   }

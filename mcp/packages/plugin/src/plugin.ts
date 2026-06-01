@@ -11,10 +11,10 @@ declare const IS_MULTI_USER_MODE: boolean;
 const isMultiUserMode = typeof IS_MULTI_USER_MODE !== "undefined" ? IS_MULTI_USER_MODE : false;
 
 // Open the plugin UI (main.ts)
-penpot.ui.open("Penpot MCP Plugin", `?theme=${penpot.theme}&multiUser=${isMultiUserMode}`, { width: 158, height: 200 });
+logos.ui.open("Logos MCP Plugin", `?theme=${logos.theme}&multiUser=${isMultiUserMode}`, { width: 158, height: 200 });
 
 // Handle messages
-penpot.ui.onMessage<string | { id: string; task: string; params: any }>((message) => {
+logos.ui.onMessage<string | { id: string; task: string; params: any }>((message) => {
     // Handle plugin task requests
     if (typeof message === "object" && message.task && message.id) {
         handlePluginTaskRequest(message).catch((error) => {
@@ -60,9 +60,9 @@ async function handlePluginTaskRequest(request: { id: string; task: string; para
 }
 
 // Handle theme change in the iframe
-penpot.on("themechange", (theme) => {
-    penpot.ui.sendMessage({
-        source: "penpot",
+logos.on("themechange", (theme) => {
+    logos.ui.sendMessage({
+        source: "logos",
         type: "themechange",
         theme,
     });

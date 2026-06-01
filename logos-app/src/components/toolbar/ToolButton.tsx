@@ -1,18 +1,15 @@
 /**
  * components/toolbar/ToolButton.tsx
  *
- * A single toolbar button.
- *
- * - When `hasDropdown` is true, renders a small ▾ chevron in the bottom-right
- *   corner to signal that clicking opens a dropdown of related tools.
- * - `active` — whether this button's tool is the currently selected tool.
- * - `onClick` — called when the main button area is clicked.
+ * A single toolbar button with an svger-cli SVG icon.
  */
 
 import React from "react";
+import { theme } from "../../theme/colors";
+import { ToolbarIcon, type ToolbarIconName } from "./toolbarIcons";
 
 interface ToolButtonProps {
-  icon: string;
+  icon: ToolbarIconName;
   label: string;
   shortcut?: string;
   active?: boolean;
@@ -40,9 +37,8 @@ export function ToolButton({
         height: 36,
         borderRadius: 6,
         border: "none",
-        background: active ? "#cba6f7" : "transparent",
-        color: active ? "#1e1e2e" : "#cdd6f4",
-        fontSize: 16,
+        background: active ? theme.accent : "transparent",
+        color: active ? theme.onAccent : theme.text,
         cursor: "pointer",
         display: "flex",
         alignItems: "center",
@@ -51,22 +47,21 @@ export function ToolButton({
         flexShrink: 0,
       }}
     >
-      {icon}
+      <ToolbarIcon name={icon} size={18} />
       {hasDropdown && (
         <span
           aria-hidden
           style={{
             position: "absolute",
-            bottom: 3,
-            right: 3,
-            fontSize: 6,
+            bottom: 2,
+            right: 2,
             lineHeight: 1,
-            color: active ? "#1e1e2e" : "#6c7086",
+            color: active ? theme.onAccent : theme.textDim,
             pointerEvents: "none",
             userSelect: "none",
           }}
         >
-          ▾
+          <ToolbarIcon name="chevronDown" size={8} />
         </span>
       )}
     </button>

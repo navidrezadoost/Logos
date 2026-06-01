@@ -210,7 +210,7 @@ func TestV3ManifestFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadZIP: %v", err)
 	}
-	if got.Manifest.Type != "penpot/export-files" {
+	if got.Manifest.Type != "logos/export-files" {
 		t.Errorf("manifest type: %s", got.Manifest.Type)
 	}
 	if got.Manifest.Version != 1 {

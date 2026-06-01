@@ -1,6 +1,6 @@
-# Penpot MCP Server
+# Logos MCP Server
 
-A Model Context Protocol (MCP) server that provides Penpot integration
+A Model Context Protocol (MCP) server that provides Logos integration
 capabilities for AI clients supporting the model context protocol (MCP).
 
 ## Setup
@@ -18,7 +18,7 @@ capabilities for AI clients supporting the model context protocol (MCP).
         pnpm run start
 
 
-## Penpot Plugin API REPL
+## Logos Plugin API REPL
 
-The MCP server includes a REPL interface for testing Penpot Plugin API calls.
+The MCP server includes a REPL interface for testing Logos Plugin API calls.
 To use it, connect to the URL reported at startup.

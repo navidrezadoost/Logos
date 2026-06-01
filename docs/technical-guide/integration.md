@@ -1,11 +1,11 @@
 ---
 title: 4. Integration Guide
-desc: Connect Penpot with other apps using webhooks and access tokens! Learn from Penpot's integration guide for seamless workflows. Try Penpot - It's free.
+desc: Connect Logos with other apps using webhooks and access tokens! Learn from Logos's integration guide for seamless workflows. Try Logos - It's free.
 ---
 
 # Integration Guide
 
-This section explains how to interconnect Penpot with other applications, so
+This section explains how to interconnect Logos with other applications, so
 they can collaborate and create new kinds of features, or integrate in DesignOps
 or GitOps workflows.
 
@@ -13,12 +13,12 @@ The system is relatively simple for now, but expect more functions in the future
 
 ## Webhooks
 
-Outbound webhooks are event calls from Penpot to other applications, that
+Outbound webhooks are event calls from Logos to other applications, that
 notifiy some particular event has occured (e.g. a file has been created or
 updated, a comment has been added, etc.).
 
 #### Webhooks managament
-In Penpot, webhooks are configured at Team level-
+In Logos, webhooks are configured at Team level-
 
 ![Webhooks area](/img/tech-guide/webhooks.webp)
 
@@ -38,16 +38,15 @@ information and enriches the content with semantic information.
 ### Events list
 
 Unfortunately, we do not have any specific documentation for the webhooks yet.
-For the moment you can use the <a href="https://design.penpot.app/api/_doc"
+For the moment you can use the <a href="https://design.logos.app/api/_doc"
 target="_blank">backend API documentation</a>, generated automatically from <a
-href="https://github.com/penpot/penpot/tree/main/backend/src/app/rpc"
+href="https://github.com/logos/logos/tree/main/backend/src/app/rpc"
 target="_blank">source code</a>, as a guide.
 
 All backend RPC calls labelled as <code class="language-bash">WEBHOOK</code> trigger webhook calls, if
 appropriate, with an equivalent payload.
 
-The payload content is specified as <a href="https://clojure.org/guides/spec"
-target="_blank">Clojure Spec</a> predicates:
+The payload content follows the same JSON structure as the RPC command parameters:
 
 ![Example of a RPC call](/img/tech-guide/webhook-call.webp)
 
@@ -57,17 +56,17 @@ The listed spec details all required (<code class="language-bash">:req</code> or
 The payload of the webhook is similar, but there may be some changes (some
 parameters ommited or others added). The recommended way of understanding the
 webhook calls is by using <a href="https://webhook.site/" target="_blank">Webhook.site</a>.
-Generate a site URL and set it into Penpot. Then you can inspect the calls received.
+Generate a site URL and set it into Logos. Then you can inspect the calls received.
 
 
 ## Access tokens
 
-Personal access tokens function like an alternative to our login/password authentication system and can be used to allow an application to access the internal Penpot API.
+Personal access tokens function like an alternative to our login/password authentication system and can be used to allow an application to access the internal Logos API.
 
 <p class="advice"><strong>Important:</strong> Treat your access tokens like passwords as they provide access to our account.</p>
 
 ### Manage access tokens
-In Penpot, access tokens are configured at user account level. To manage your access tokens, go to Your account > Access tokens.
+In Logos, access tokens are configured at user account level. To manage your access tokens, go to Your account > Access tokens.
 
 ![Access tokens](/img/tech-guide/access-tokens.webp)
 
@@ -96,8 +95,8 @@ You can delete tokens anytime. You'll find the option at the menu at the right s
 
 Having a personal token will allow you to use it instead of your password.
 
-This is an example of a curl command that you can run at the console to access your Penpot profile using an access token:
+This is an example of a curl command that you can run at the console to access your Logos profile using an access token:
 
 ```bash
-curl -H "Authorization: Token <replace-this-with-token>" https://design.penpot.app/api/rpc/command/get-profile
+curl -H "Authorization: Token <replace-this-with-token>" https://design.logos.app/api/rpc/command/get-profile
 ```

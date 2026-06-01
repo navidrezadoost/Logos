@@ -21,6 +21,7 @@ import (
 	"github.com/logos-design/logos/backend-go/internal/auth"
 	"github.com/logos-design/logos/backend-go/internal/db"
 	"github.com/logos-design/logos/backend-go/internal/perms"
+	"github.com/logos-design/logos/backend-go/internal/transit"
 )
 
 // teamCacheKey returns the Redis key for a cached team.
@@ -33,22 +34,22 @@ const teamCacheTTL = 5 * time.Minute
 
 // TeamPermissions is the nested permissions map returned to clients.
 type TeamPermissions struct {
-	Type    string `json:"type"`
-	IsOwner bool   `json:"isOwner"`
-	IsAdmin bool   `json:"isAdmin"`
-	CanEdit bool   `json:"canEdit"`
+	Type    transit.Keyword `json:"type"`
+	IsOwner bool            `json:"is-owner"`
+	IsAdmin bool            `json:"is-admin"`
+	CanEdit bool            `json:"can-edit"`
 }
 
 // Team is the full team record returned to authenticated callers.
 type Team struct {
 	ID           string          `json:"id"`
 	Name         string          `json:"name"`
-	PhotoID      *string         `json:"photoId,omitempty"`
-	IsDefault    bool            `json:"isDefault"`
+	PhotoID      *string         `json:"photo-id,omitempty"`
+	IsDefault    bool            `json:"is-default"`
 	Features     []string        `json:"features"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	ModifiedAt   time.Time       `json:"modifiedAt"`
-	IsDefaultRef bool            `json:"isDefaultTeam,omitempty"`
+	CreatedAt    time.Time       `json:"created-at"`
+	ModifiedAt   time.Time       `json:"modified-at"`
+	IsDefaultRef bool            `json:"is-default-team,omitempty"`
 	Permissions  TeamPermissions `json:"permissions"`
 }
 
@@ -85,7 +86,11 @@ func GetTeamsHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			// Anonymous callers get an empty list (mirrors get-profile returning
+			// the anonymous profile).  The frontend bootstrap loads get-profile
+			// then get-teams; returning 401 here triggers an error toast before
+			// the login redirect can run.
+			writeJSON(w, http.StatusOK, []*Team{})
 			return
 		}
 
@@ -140,7 +145,7 @@ func GetTeamHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -175,6 +180,41 @@ func GetTeamHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, team)
+	}
+}
+
+// TeamInfo is the minimal public team record returned by get-team-info.
+type TeamInfo struct {
+	ID        string   `json:"id"`
+	IsDefault bool     `json:"is-default"`
+	Features  []string `json:"features"`
+}
+
+// ─── GET /api/rpc/command/get-team-info ──────────────────────────────────────
+
+// GetTeamInfoHandler returns minimal team metadata. No authentication required.
+func GetTeamInfoHandler(pool *db.Pool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		teamID := rpcParam(r, "id", "team-id", "teamId")
+		if teamID == "" {
+			teamID = r.URL.Query().Get("id")
+		}
+		if teamID == "" {
+			writeError(w, http.StatusBadRequest, "id required")
+			return
+		}
+
+		var info TeamInfo
+		err := pool.QueryRow(r.Context(),
+			`SELECT id, is_default, COALESCE(features, '{}')
+			   FROM team
+			  WHERE id = $1 AND deleted_at IS NULL`, teamID).
+			Scan(&info.ID, &info.IsDefault, &info.Features)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "team-does-not-exist")
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
 	}
 }
 
@@ -222,10 +262,10 @@ func GetTeamMembersHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
-		teamID := r.URL.Query().Get("team-id")
+		teamID := rpcParam(r, "team-id", "teamId")
 		if teamID == "" {
 			writeError(w, http.StatusBadRequest, "team-id required")
 			return
@@ -282,10 +322,10 @@ func GetTeamStatsHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
-		teamID := r.URL.Query().Get("team-id")
+		teamID := rpcParam(r, "team-id", "teamId")
 		if teamID == "" {
 			writeError(w, http.StatusBadRequest, "team-id required")
 			return
@@ -320,10 +360,10 @@ func GetTeamInvitationsHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
-		teamID := r.URL.Query().Get("team-id")
+		teamID := rpcParam(r, "team-id", "teamId")
 		if teamID == "" {
 			writeError(w, http.StatusBadRequest, "team-id required")
 			return
@@ -376,7 +416,7 @@ func CreateTeamHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -405,7 +445,7 @@ func CreateTeamHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 
 		// Insert team.
 		if _, err = tx.Exec(r.Context(),
-			`INSERT INTO team (id, name, photo, is_default) VALUES ($1, $2, '', false)`,
+			`INSERT INTO team (id, name, is_default) VALUES ($1, $2, false)`,
 			teamID, params.Name); err != nil {
 			writeError(w, http.StatusInternalServerError, "create team failed")
 			return
@@ -458,7 +498,7 @@ func UpdateTeamHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -496,7 +536,7 @@ func DeleteTeamHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -542,7 +582,7 @@ func LeaveTeamHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -620,7 +660,7 @@ func UpdateTeamMemberRoleHandler(pool *db.Pool, rdb *redis.Client) http.HandlerF
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -701,7 +741,7 @@ func DeleteTeamMemberHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc 
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -759,7 +799,7 @@ func scanTeamRow(row interface {
 		t.Features = features
 	}
 	t.Permissions = TeamPermissions{
-		Type:    "membership",
+		Type:    transit.Keyword("membership"),
 		IsOwner: isOwner,
 		IsAdmin: isOwner || isAdmin,
 		CanEdit: isOwner || isAdmin || canEdit,

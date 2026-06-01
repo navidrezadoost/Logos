@@ -1,4 +1,4 @@
-// Package handler — .penpot file export/import handlers.
+// Package handler — .logos file export/import handlers.
 //
 // Ported from app.rpc.commands.binfile in the Clojure backend.
 //
@@ -65,13 +65,13 @@ type exportBinfileParams struct {
 
 // ExportBinfileHandler implements POST /api/rpc/command/export-binfile.
 //
-// Returns the .penpot ZIP directly as the response body
+// Returns the .logos ZIP directly as the response body
 // (Content-Type: application/zip).
 func ExportBinfileHandler(pool *db.Pool, store storage.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -196,7 +196,7 @@ func ExportBinfileHandler(pool *db.Pool, store storage.Backend) http.HandlerFunc
 			return
 		}
 
-		filename := sanitizeFilename(attrs.Name) + ".penpot"
+		filename := sanitizeFilename(attrs.Name) + ".logos"
 		w.Header().Set("Content-Type", "application/zip")
 		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", buf.Len()))
@@ -214,12 +214,12 @@ func ExportBinfileHandler(pool *db.Pool, store storage.Backend) http.HandlerFunc
 //	project-id  — destination project UUID
 //	name        — override file name (optional; uses name from manifest if absent)
 //	version     — format version (1 or 3; default 3)
-//	file        — the .penpot binary (multipart part name "file")
+//	file        — the .logos binary (multipart part name "file")
 func ImportBinfileHandler(pool *db.Pool, store storage.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -271,7 +271,7 @@ func ImportBinfileHandler(pool *db.Pool, store storage.Backend) http.HandlerFunc
 		// Parse ZIP.
 		payload, err := binfile.ReadZIP(data)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid .penpot file: %v", err))
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid .logos file: %v", err))
 			return
 		}
 		if len(payload.Files) == 0 {

@@ -1,17 +1,17 @@
 import type { PluginMessageEvent, PluginUIEvent } from './model.js';
 
-penpot.ui.open('CONTRAST PLUGIN', `?theme=${penpot.theme}`, {
+logos.ui.open('CONTRAST PLUGIN', `?theme=${logos.theme}`, {
   width: 285,
   height: 525,
 });
 
-penpot.ui.onMessage<PluginUIEvent>((message) => {
+logos.ui.onMessage<PluginUIEvent>((message) => {
   if (message.type === 'ready') {
     sendMessage({
       type: 'init',
       content: {
-        theme: penpot.theme,
-        selection: penpot.selection,
+        theme: logos.theme,
+        selection: logos.selection,
       },
     });
 
@@ -19,8 +19,8 @@ penpot.ui.onMessage<PluginUIEvent>((message) => {
   }
 });
 
-penpot.on('selectionchange', () => {
-  const shapes = penpot.selection;
+logos.on('selectionchange', () => {
+  const shapes = logos.selection;
   sendMessage({ type: 'selection', content: shapes });
 
   initEvents();
@@ -30,14 +30,14 @@ let listeners: symbol[] = [];
 
 function initEvents() {
   listeners.forEach((listener) => {
-    penpot.off(listener);
+    logos.off(listener);
   });
 
-  listeners = penpot.selection.map((shape) => {
-    return penpot.on(
+  listeners = logos.selection.map((shape) => {
+    return logos.on(
       'shapechange',
       () => {
-        const shapes = penpot.selection;
+        const shapes = logos.selection;
         sendMessage({ type: 'selection', content: shapes });
       },
       { shapeId: shape.id },
@@ -45,11 +45,11 @@ function initEvents() {
   });
 }
 
-penpot.on('themechange', () => {
-  const theme = penpot.theme;
+logos.on('themechange', () => {
+  const theme = logos.theme;
   sendMessage({ type: 'theme', content: theme });
 });
 
 function sendMessage(message: PluginMessageEvent) {
-  penpot.ui.sendMessage(message);
+  logos.ui.sendMessage(message);
 }

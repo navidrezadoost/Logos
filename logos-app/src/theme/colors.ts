@@ -1,0 +1,20 @@
+/** Logos UI theme — panel/tool surfaces and accent (selection, activation). */
+export const theme = {
+  panel: "#1e232d",
+  panelHover: "#252a36",
+  surface: "#252a36",
+  surfaceElevated: "#2d3340",
+  border: "#2d3340",
+  borderStrong: "#3d4555",
+  appBg: "#171b24",
+  text: "#e8eaee",
+  textSecondary: "#a6adc8",
+  textMuted: "#8f9da3",
+  textDim: "#6c7086",
+  accent: "#6b82fe",
+  accentMuted: "rgba(107, 130, 254, 0.15)",
+  onAccent: "#ffffff",
+  error: "#f38ba8",
+  success: "#a6e3a1",
+  canvas: "#2d3340",
+} as const;

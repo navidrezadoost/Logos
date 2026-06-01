@@ -44,17 +44,17 @@ var validFontWeights = map[int]bool{
 // FontVariant is the public representation of a team_font_variant row.
 type FontVariant struct {
 	ID          string    `json:"id"`
-	TeamID      string    `json:"teamId"`
-	FontID      string    `json:"fontId"`
-	FontFamily  string    `json:"fontFamily"`
-	FontWeight  int       `json:"fontWeight"`
-	FontStyle   string    `json:"fontStyle"`
-	Woff1FileID *string   `json:"woff1FileId,omitempty"`
-	Woff2FileID *string   `json:"woff2FileId,omitempty"`
-	OtfFileID   *string   `json:"otfFileId,omitempty"`
-	TtfFileID   *string   `json:"ttfFileId,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	ModifiedAt  time.Time `json:"modifiedAt"`
+	TeamID      string    `json:"team-id"`
+	FontID      string    `json:"font-id"`
+	FontFamily  string    `json:"font-family"`
+	FontWeight  int       `json:"font-weight"`
+	FontStyle   string    `json:"font-style"`
+	Woff1FileID *string   `json:"woff1-file-id,omitempty"`
+	Woff2FileID *string   `json:"woff2-file-id,omitempty"`
+	OtfFileID   *string   `json:"otf-file-id,omitempty"`
+	TtfFileID   *string   `json:"ttf-file-id,omitempty"`
+	CreatedAt   time.Time `json:"created-at"`
+	ModifiedAt  time.Time `json:"modified-at"`
 }
 
 // ─── GET /api/rpc/command/get-font-variants ───────────────────────────────────
@@ -64,10 +64,7 @@ type FontVariant struct {
 func GetFontVariantsHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
-		teamID := r.URL.Query().Get("team-id")
-		if teamID == "" {
-			teamID = r.URL.Query().Get("teamId")
-		}
+		teamID := rpcParam(r, "team-id", "teamId")
 		if teamID == "" {
 			writeError(w, http.StatusUnprocessableEntity, "team-id is required")
 			return
@@ -130,7 +127,7 @@ func CreateFontVariantHandler(pool *db.Pool, store storage.Backend) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -271,7 +268,7 @@ func UpdateFontHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -317,7 +314,7 @@ func DeleteFontHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 
@@ -363,7 +360,7 @@ func DeleteFontVariantHandler(pool *db.Pool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
+			writeAuthError(w, http.StatusUnauthorized, "not-authenticated")
 			return
 		}
 

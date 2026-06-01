@@ -1,12 +1,12 @@
 ---
 title: 3. Developer Guide
-desc: Dive into architecture, data models, and more. Start building today! See Penpot's technical guide for self-hosting, configuration, and developer insights.
+desc: Dive into architecture, data models, and more. Start building today! See Logos's technical guide for self-hosting, configuration, and developer insights.
 ---
 
 # Developer Guide
 
 This section is intended for people wanting to mess with the code or the inners
-of Penpot application.
+of Logos application.
 
 The [Architecture][1] and [Data model][2] sections provide a bird's eye view of
 the whole system, to better understand how is structured.

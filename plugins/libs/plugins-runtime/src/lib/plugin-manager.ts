@@ -1,4 +1,4 @@
-import type { Context, Theme } from '@penpot/plugin-types';
+import type { Context, Theme } from '@logos/plugin-types';
 
 import { getValidUrl, loadManifestCode } from './parse-manifest.js';
 import { Manifest } from './models/manifest.model.js';
@@ -107,7 +107,7 @@ export async function createPluginManager(
     const id = context.addListener(
       type,
       (...params) => {
-        // penpot has a debounce to run the events, so some events can be triggered after the plugin is closed
+        // logos has a debounce to run the events, so some events can be triggered after the plugin is closed
         if (destroyed) {
           return;
         }

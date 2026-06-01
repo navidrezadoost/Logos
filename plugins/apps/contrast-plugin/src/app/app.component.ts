@@ -13,7 +13,7 @@ import type {
 } from '../model';
 import { filter, fromEvent, map, merge, take } from 'rxjs';
 import { CommonModule } from '@angular/common';
-import { Shape } from '@penpot/plugin-types';
+import { Shape } from '@logos/plugin-types';
 
 @Component({
   imports: [CommonModule],
