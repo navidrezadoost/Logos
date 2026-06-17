@@ -9,7 +9,7 @@
  * Prerequisites:
  *   1. Logos running at LOGOS_URL (default: http://localhost:3449)
  *   2. A test user available via LOGOS_EMAIL / LOGOS_PASSWORD env vars.
- *   3. The benchmark .penpot file available at BENCHMARK_FILE.
+ *   3. The benchmark .logos file available at BENCHMARK_FILE.
  *      Generate it with: cd test/benchmarks && clojure -M:gen-benchmark
  *
  * Usage:
@@ -40,7 +40,7 @@ const LOGOS_URL      = process.env.LOGOS_URL      || "http://localhost:3449";
 const LOGOS_EMAIL    = process.env.LOGOS_EMAIL    || "benchmark@logos.test";
 const LOGOS_PASSWORD = process.env.LOGOS_PASSWORD || "benchmark123!";
 const BENCHMARK_FILE = process.env.BENCHMARK_FILE ||
-                       path.join(__dirname, "fixtures", "large-canvas.penpot");
+                       path.join(__dirname, "fixtures", "large-canvas.logos");
 const SNAPSHOTS_DIR  = path.join(__dirname, "snapshots");
 const HEADLESS       = !process.argv.includes("--no-headless");
 
@@ -131,7 +131,7 @@ async function loginStep(page) {
   console.log("      Login successful.");
 }
 
-/** Upload the benchmark .penpot file via the dashboard import API. */
+/** Upload the benchmark .logos file via the dashboard import API. */
 async function importFileStep(page) {
   console.log("[2/6] Importing benchmark file …");
 

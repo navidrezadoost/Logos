@@ -143,7 +143,7 @@ Authorization: Token <token>
 | Command | Auth | Description |
 |---|---|---|
 | `export-binfile` | required | Export file as `.logos` ZIP (streaming download) |
-| `import-binfile` | required | Import a `.logos` or `.penpot` file (multipart upload) |
+| `import-binfile` | required | Import a `.logos` or `.logos` file (multipart upload) |
 
 ### Comments
 

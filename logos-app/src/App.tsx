@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { getProfile } from "./api/client";
 import { LegacyHashRedirect } from "./LegacyHashRedirect";
-import { PenpotWorkspaceRedirect } from "./PenpotWorkspaceRedirect";
+import { WorkspaceRedirect } from "./WorkspaceRedirect";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { theme } from "./theme/colors";
@@ -74,7 +74,7 @@ export default function App(): React.ReactElement {
       />
       <Route
         path="/workspace/:projectId/:fileId"
-        element={<PenpotWorkspaceRedirect />}
+        element={<WorkspaceRedirect />}
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

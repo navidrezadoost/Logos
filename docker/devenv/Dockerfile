@@ -325,7 +325,7 @@ ENV LANG='C.UTF-8' \
     PATH="/opt/go/bin:/root/go/bin:/opt/utils/bin:/opt/node/bin:/opt/imagick/bin:/opt/cargo/bin:$PATH"
 
 # TODO: publish logos/imagemagick and update this reference
-COPY --from=penpotapp/imagemagick:7.1.2-13 /opt/imagick /opt/imagick
+COPY --from=logosapp/imagemagick:7.1.2-13 /opt/imagick /opt/imagick
 COPY --from=setup-go /opt/go /opt/go
 COPY --from=setup-node /opt/node /opt/node
 COPY --from=setup-utils /opt/utils /opt/utils

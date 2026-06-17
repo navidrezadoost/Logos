@@ -12,7 +12,7 @@
     "icons": "npm run icons:sync && npm run icons:build && npm run icons:workspace",
     "build": "npm run icons:build && tsc -b && vite build",
     "build:spa": "vite build && python scripts/sync-spa-to-dist.py",
-    "penpot:shell": "python scripts/sync-penpot-workspace.py",
+    "logos:shell": "python scripts/sync-logos-workspace.py",
     "preview": "vite preview --port 8888 --host 127.0.0.1",
     "serve": "npm run build:spa && python scripts/serve-frontend.py",
     "serve:stop": "pkill -f '[p]ython scripts/serve-frontend.py' 2>/dev/null || true; fuser -k 8888/tcp 2>/dev/null || true",

@@ -53,7 +53,7 @@ ls snapshots/
 
 | Metric | Limit | Rationale |
 |--------|-------|-----------|
-| Heap size after scenario | ≤ 300 MB | Figma ≈ 350–500 MB on comparable files; we target better. |
+| Heap size after scenario | ≤ 300 MB | external design tool ≈ 350–500 MB on comparable files; we target better. |
 | Retained size growth (final − baseline) | ≤ 50 MB | Undo/redo and page nav should not leak retained memory. |
 | Detached DOM nodes | ≤ 100 | Indicates component teardown failures. |
 | ArrayBuffer count growth | ≤ 10 | Indicates buffer leaks in serialisation or WASM transfers. |

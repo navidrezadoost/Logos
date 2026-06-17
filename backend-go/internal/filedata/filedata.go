@@ -1,4 +1,4 @@
-// Package filedata builds Penpot-compatible empty file/page structures for the
+// Package filedata builds Logos-compatible empty file/page structures for the
 // Go backend when creating files or repairing rows that have metadata only.
 package filedata
 
@@ -43,13 +43,13 @@ func newUUID() string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-// Kw returns a Transit keyword token for Penpot enum fields (e.g. :frame).
+// Kw returns a Transit keyword token for Logos enum fields (e.g. :frame).
 // Plain JSON strings like "frame" are not decoded as keywords by the frontend.
 func Kw(name string) string { return "~:" + name }
 
 func kw(name string) string { return Kw(name) }
 
-// BuildEmptyData returns a Penpot file-data map with one empty page and root frame.
+// BuildEmptyData returns a Logos file-data map with one empty page and root frame.
 func BuildEmptyData(fileID, pageID string) map[string]any {
 	if pageID == "" {
 		pageID = NewPageID()
@@ -105,7 +105,7 @@ func FirstPage(data map[string]any) map[string]any {
 	return page
 }
 
-// NormalizeFileData repairs Penpot file blobs produced by earlier Go versions.
+// NormalizeFileData repairs Logos file blobs produced by earlier Go versions.
 // Returns true when data was modified and should be persisted.
 func NormalizeFileData(data map[string]any) bool {
 	if data == nil {
@@ -143,12 +143,12 @@ func NormalizeFileData(data map[string]any) bool {
 	return changed
 }
 
-// NormalizeShapeKeywords ensures Penpot enum fields on a shape use Transit keyword tokens.
+// NormalizeShapeKeywords ensures Logos enum fields on a shape use Transit keyword tokens.
 func NormalizeShapeKeywords(shape map[string]any) bool {
 	return normalizeShapeKeywords(shape)
 }
 
-// normalizeShapeKeywords ensures Penpot enum fields use Transit keyword tokens (~:…).
+// normalizeShapeKeywords ensures Logos enum fields use Transit keyword tokens (~:…).
 // Without this, get-file returns plain strings and the editor treats shapes as rects.
 func normalizeShapeKeywords(shape map[string]any) bool {
 	if shape == nil {

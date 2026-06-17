@@ -1,5 +1,5 @@
 /**
- * Figma-style grouped tool button: one visible icon + subtle chevron.
+ * grouped grouped tool button: one visible icon + subtle chevron.
  *
  * - Click icon area → activate the currently displayed tool.
  * - Click chevron → open the tool list.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build js/logos-workspace-icons.js from src/icons/system/*.svg for Penpot workspace."""
+"""Build js/logos-workspace-icons.js from src/icons/system/*.svg for Logos workspace."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ SRC = ROOT / "src" / "icons" / "system"
 TOOLBAR = ROOT / "src" / "icons" / "toolbar"
 OUT = ROOT / "js" / "logos-workspace-icons.js"
 
-# Toolbar SVGs reused in Penpot workspace scripts (key → filename stem).
+# Toolbar SVGs reused in Logos workspace scripts (key → filename stem).
 TOOLBAR_ALIASES = {
     "move": "select",
 }
@@ -88,7 +88,7 @@ def main() -> int:
     body = "\n".join(
         [
             "/**",
-            " * Logos system icons for Penpot workspace (Font Awesome sharp-solid).",
+            " * Logos system icons for Logos workspace (Font Awesome sharp-solid).",
             " * AUTO-GENERATED — run: python scripts/build-workspace-icons.py",
             " */",
             "(function (global) {",

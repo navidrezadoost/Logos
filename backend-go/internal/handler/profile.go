@@ -52,7 +52,7 @@ type Profile struct {
 var epoch = time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // anonymousProfile is returned when no authenticated session is present.
-// Mirrors the shape Penpot's Clojure backend returns for anonymous callers.
+// Mirrors the shape Logos's Clojure backend returns for anonymous callers.
 var anonymousProfile = Profile{
 	ID:         "00000000-0000-0000-0000-000000000000",
 	FullName:   "Anonymous User",
@@ -67,7 +67,7 @@ var anonymousProfile = Profile{
 	ModifiedAt: epoch,
 }
 
-// apiError is a Penpot-compatible error response.
+// apiError is a Logos-compatible error response.
 // Using transit.Keyword for Type and Code causes them to be serialised as
 // Transit keywords ("~:error", "~:not-found", …) by the Transit middleware.
 type apiError struct {
@@ -83,7 +83,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writePlainStringMap writes a Penpot [:map-of string string] RPC result.
+// writePlainStringMap writes a Logos [:map-of string string] RPC result.
 // Keys and values remain plain strings in Transit (object-id → media-id).
 func writePlainStringMap(w http.ResponseWriter, status int, m map[string]string) {
 	if m == nil {
@@ -106,7 +106,7 @@ func writePlainStringMap(w http.ResponseWriter, status int, m map[string]string)
 	}
 }
 
-// writeError writes a Penpot-style error response compatible with Transit
+// writeError writes a Logos-style error response compatible with Transit
 // decoding on the ClojureScript side.
 func writeError(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -131,7 +131,7 @@ func writeAuthError(w http.ResponseWriter, status int, code string) {
 	})
 }
 
-// RPCNotFoundHandler returns a Penpot-compatible JSON 404 for unknown RPC methods.
+// RPCNotFoundHandler returns a Logos-compatible JSON 404 for unknown RPC methods.
 func RPCNotFoundHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "method-not-found")

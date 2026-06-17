@@ -27,7 +27,7 @@ backend-go/
 │   └── gen-benchmark/   — CLI tool: generate .logos fixture files for CI
 ├── internal/
 │   ├── auth/            — Argon2id hashing, JWE token issuance/verification
-│   ├── binfile/         — .logos v3 ZIP export/import (backward-compat with .penpot)
+│   ├── binfile/         — .logos v3 ZIP export/import (backward-compat with .logos)
 │   ├── config/          — env-var configuration
 │   ├── db/              — pgx connection pool wrapper
 │   ├── email/           — transactional email (SMTP)
@@ -56,7 +56,7 @@ All 25 Clojure namespaces are ported. Every endpoint is a `POST /api/rpc/command
 | `comments` | CRUD comments, threads | `handler/comments.go` |
 | `media` | upload/list/delete media objects | `handler/media.go` |
 | `fonts` | upload/list/delete custom fonts | `handler/fonts.go` |
-| `binfile` | export `.logos` ZIP, import `.logos` / `.penpot` | `handler/binfile.go` |
+| `binfile` | export `.logos` ZIP, import `.logos` / `.logos` | `handler/binfile.go` |
 | `auth` | login, register, logout, recovery, magic link | `handler/auth.go` |
 | `ldap` | LDAP authentication | `handler/auth.go` |
 | `access_token` | create/list/delete API tokens | `handler/access_token.go` |
@@ -159,11 +159,11 @@ providing a safe migration window for databases that still contain Clojure-era d
 ### File Format Backward Compatibility
 
 The `binfile` package writes `"logos/export-files"` as the manifest type in new `.logos`
-archives. It accepts `"penpot/export-files"` on import and logs a deprecation message.
-Both `.logos` and `.penpot` file extensions are accepted by the import handler.
+archives. It accepts `"logos/export-files"` on import and logs a deprecation message.
+Both `.logos` and `.logos` file extensions are accepted by the import handler.
 
 ### Token Compatibility
 
 JWE session tokens issued by the Go backend use `Aud: "logos"`. Legacy tokens issued
-by the Clojure backend with `Aud: "penpot"` continue to decrypt correctly — the Go
+by the Clojure backend with `Aud: "logos"` continue to decrypt correctly — the Go
 verifier does not assert the audience value, only decrypts and reads it.

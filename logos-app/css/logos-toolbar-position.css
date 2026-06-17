@@ -2,7 +2,7 @@
  * Logos — workspace toolbar placement (bottom / top / left / right).
  */
 
-/* ── No collapse strip — toolbar stays fully open (Figma-style) ── */
+/* ── No collapse strip — toolbar stays fully open (grouped) ── */
 
 html body .main_ui_workspace_top_toolbar__toolbar-handler {
   display: none !important;
@@ -58,7 +58,7 @@ html body .main_ui_workspace_top_toolbar__main-toolbar.logos-toolbar-position-to
   align-self: center !important;
 }
 
-/* Default: bottom (Figma-style) until JS assigns an explicit position class */
+/* Default: bottom (grouped) until JS assigns an explicit position class */
 html body .main_ui_workspace_top_toolbar__main-toolbar:not([class*="logos-toolbar-position-"]) {
   top: auto !important;
   bottom: 1rem !important;
@@ -71,7 +71,7 @@ html body .main_ui_workspace_top_toolbar__main-toolbar:not([class*="logos-toolba
   bottom: 0.5rem !important;
 }
 
-/* ── Anchor positions (override Penpot top-center default) ── */
+/* ── Anchor positions (override workspace top-center default) ── */
 
 html body .main_ui_workspace_top_toolbar__main-toolbar.logos-toolbar-position-bottom {
   top: auto !important;

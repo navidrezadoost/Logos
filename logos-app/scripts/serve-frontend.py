@@ -167,17 +167,17 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
     def _proxy_api(self) -> None:
         self._proxy_backend()
 
-    def _penpot_shell_cookie(self) -> bool:
-        """Set by workspace.html when the Penpot editor is active in this tab."""
-        return "logos-penpot-shell=1" in self.headers.get("Cookie", "")
+    def _workspace_shell_cookie(self) -> bool:
+        """Set by workspace.html when the workspace editor is active in this tab."""
+        return "logos-workspace-shell=1" in self.headers.get("Cookie", "")
 
     def _spa_path(self) -> str:
         """Return index.html for client-side routes (React Router)."""
         path_only = self.path.split("?", 1)[0]
         if path_only in ("", "/"):
             # Reload of http://host:8888/#/workspace?… only requests GET / (hash is not sent).
-            # Serve the Penpot shell directly when this tab previously opened the editor.
-            if self._penpot_shell_cookie():
+            # Serve the workspace shell directly when this tab previously opened the editor.
+            if self._workspace_shell_cookie():
                 return "/workspace.html"
             return self.path
         if "." in Path(path_only).name:

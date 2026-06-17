@@ -57,7 +57,7 @@ backend-go/
 │   │   ├── password.go       # Argon2id hashing (compatible with legacy hashes)
 │   │   └── session.go        # JWE middleware — cookie → profile ID
 │   ├── binfile/
-│   │   ├── v3.go             # .logos / .penpot ZIP export/import
+│   │   ├── v3.go             # .logos / .logos ZIP export/import
 │   │   └── v3_test.go        # round-trip tests
 │   ├── config/config.go      # env-var configuration struct
 │   ├── db/postgres.go        # pgx/v5 connection pool wrapper
@@ -194,7 +194,7 @@ To create a new migration:
 
 ## File Format (.logos)
 
-The `internal/binfile` package handles `.logos` (formerly `.penpot`) v3 ZIP archives.
+The `internal/binfile` package handles `.logos` (formerly `.logos`) v3 ZIP archives.
 
 ```
 myfile.logos        (ZIP)
@@ -211,8 +211,8 @@ myfile.logos        (ZIP)
     └── <storage-id>.*     raw media bytes
 ```
 
-**Backward compatibility:** `.penpot` files (manifest type `"penpot/export-files"`)
-are accepted on import with a deprecation log message. Both `.logos` and `.penpot`
+**Backward compatibility:** `.logos` files (manifest type `"logos/export-files"`)
+are accepted on import with a deprecation log message. Both `.logos` and `.logos`
 file extensions are accepted by the HTTP import handler.
 
 ---

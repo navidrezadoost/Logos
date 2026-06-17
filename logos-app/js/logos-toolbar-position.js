@@ -1,5 +1,5 @@
 /**
- * Logos — repositionable Penpot workspace toolbar (bottom default, Figma-style).
+ * Logos — repositionable Logos workspace toolbar (bottom default, grouped).
  * Icons: LogosSystemIcons (Font Awesome sharp-solid via logos-workspace-icons.js).
  */
 (function () {
@@ -88,7 +88,7 @@
     keepToolbarExpanded(toolbar);
   }
 
-  /** Penpot collapse strip is disabled — always show full toolbar. */
+  /** workspace collapse strip is disabled — always show full toolbar. */
   function keepToolbarExpanded(toolbar) {
     if (!toolbar) return;
     toolbar.classList.remove("main_ui_workspace_top_toolbar__main-toolbar-hidden");
@@ -283,7 +283,7 @@
     observeTarget();
   }
 
-  /** Wait until Penpot drops the workspace loader before touching the DOM tree. */
+  /** Wait until workspace drops the workspace loader before touching the DOM tree. */
   function startWhenWorkspaceReady() {
     var attempts = 0;
     function tick() {

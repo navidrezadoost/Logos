@@ -1,68 +1,54 @@
 # Changelog
-
 All notable changes to the **Logos** project are documented in this file.
-
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-
 ---
-
+## [Unreleased] — 2026-06-17
+### Logos workspace cleanup and toolbar fixes
+#### Changed
+- Renamed the Logos-owned workspace bridge, shell sync scripts, config shim, and route redirect files so project source no longer carries old external product names.
+- Updated workspace toolbar Move / Hand / Scale code to use Logos workspace naming and safer runtime helpers.
+- Made the Move tool chevron permanently visible with its active hover styling.
+#### Fixed
+- Fixed Hand tool canvas behavior so it captures panning without leaking drag events into object selection or move logic.
+- Fixed Scale tool activation by using the correct ClojureScript map constructor from the workspace runtime.
+- Prevented the Scale tool path from crashing the workspace error panel if the runtime map API is not ready.
+#### Removed
+- Removed the external design-tool importer/plugin source, related UI tabs, stale docs, generated cache files, old logo assets, and obsolete helper scripts.
+- Moved shared token import types into `logos-app/src/migration/tokens/` so Sketch and Adobe XD imports no longer depend on the removed importer module.
+---
 ## [Unreleased] — 2026-05-30
-
 ### Go backend — `go/g4-namespaces-4` (workspace RPC, Transit, Clojure removal)
-
 **Branch**: `go/g4-namespaces-4`
-
 Continues the Go rewrite: broader RPC coverage, Transit+JSON on the wire, and removal of the legacy Clojure backend tree.
-
 #### Added / expanded — `backend-go/`
-
-- **`internal/transit/`** — Transit+JSON encode/decode middleware; keyword/UUID/instant tokens; geometry tags (`~#point`, `~#rect`, `~#matrix`) so Penpot’s frontend decodes `get-file` shapes correctly.
+- **`internal/transit/`** — Transit+JSON encode/decode middleware; keyword/UUID/instant tokens; geometry tags (`~#point`, `~#rect`, `~#matrix`) so Logos’s frontend decodes `get-file` shapes correctly.
 - **`internal/filedata/`** — empty-file bootstrap, shape geometry normalization (selrect, points, transform matrices).
 - **Handlers** — files (load/dashboard/create/delete), projects (create with starter file), comments, search, flags, onboarding, demo, feedback, management, assets, audit, notifications WebSocket, storage objects, and related tests.
 - **`internal/server/server.go`** — wires new RPC routes and Transit middleware.
-
 #### Removed
-
-- **`backend/`** — Clojure/Penpot JVM backend, migrations, scripts, and bundled assets (superseded by `backend-go`).
-
+- **`backend/`** — Clojure/Logos JVM backend, migrations, scripts, and bundled assets (superseded by `backend-go`).
 ---
-
-### logos-app — Penpot workspace shell, dashboard, Move/Hand/Scale tools
-
+### logos-app — Logos workspace shell, dashboard, Move/Hand/Scale tools
 **Branch**: `go/g4-namespaces-4`
-
-The React app now hosts auth/dashboard flows and loads the compiled Penpot workspace from a synced `workspace.html` shell.
-
-#### Penpot workspace integration
-
-- **`scripts/sync-penpot-workspace.py`** — builds `dist/workspace.html` / `build/workspace.html`, copies Logos CSS/JS overrides, sets `logos-penpot-shell` cookie for routing.
+The React app now hosts auth/dashboard flows and loads the compiled Logos workspace from a synced `workspace.html` shell.
+#### Logos workspace integration
+- **`scripts/sync-logos-workspace.py`** — builds `dist/workspace.html` / `build/workspace.html`, copies Logos CSS/JS overrides, sets `logos-logos-shell` cookie for routing.
 - **`scripts/serve-frontend.py`** — serves `build/` with workspace shell detection.
-- **`js/logos-penpot-bridge.js`** — ES module that exposes `$APP` on `globalThis` for classic scripts (store emit, viewport pan).
-- **`js/logos-toolbar-move-tools.js`** — Figma-style Move (V) / Hand (H) / Scale (K) combo on the Penpot Move slot; Hand pans via `$APP.$app$main$data$workspace$viewport$update_viewport_position$$` (build `2026-05-30-figma-combo7`).
+- **`js/logos-logos-bridge.js`** — ES module that exposes `$APP` on `globalThis` for classic scripts (store emit, viewport pan).
+- **`js/logos-toolbar-move-tools.js`** — external design tool-style Move (V) / Hand (H) / Scale (K) combo on the Logos Move slot; Hand pans via `$APP.$app$main$data$workspace$viewport$update_viewport_position$$` (build `2026-05-30-external-design-tool-combo7`).
 - **`js/logos-toolbar-position.js`**, **`css/logos-toolbar-position.css`**, **`css/logos-toolbar-move-tools.css`** — repositionable toolbar and split combo styling.
 - **`js/logos-workspace-debug.js`** — optional workspace diagnostics (`?logos-debug=1`).
-
 #### Dashboard & routing
-
-- **`src/pages/`**, **`src/api/`**, **`src/components/dashboard/`** — project list, create-project dialog, navigation into Penpot workspace with `team-id` / `file-id` / `page-id` hash params.
-- **`PenpotWorkspaceRedirect.tsx`**, **`LegacyHashRedirect.tsx`** — hash and pathname normalization for Penpot’s `/` + `#/workspace` router.
-
+- **`src/pages/`**, **`src/api/`**, **`src/components/dashboard/`** — project list, create-project dialog, navigation into Logos workspace with `team-id` / `file-id` / `page-id` hash params.
+- **`LogosWorkspaceRedirect.tsx`**, **`LegacyHashRedirect.tsx`** — hash and pathname normalization for Logos’s `/` + `#/workspace` router.
 #### Fixed
-
 - **Hand tool** — no longer blocks canvas input waiting for module-scoped `start_panning` on `globalThis`; pan works once `$APP` is bridged from `shared.js`.
-
 ---
-
 ## [Unreleased] — 2026-05-22
-
 ### G2 — Rust-native type system (logos-types crate + TS codegen)
-
 **Branches**: `main` / `go/g4-namespaces-2`
-
 A new `rust/logos-types` crate provides the canonical Rust definitions for every domain type (shapes, fills, strokes, colors, geometry, shadows, blur, tokens). A companion build step generates TypeScript `.d.ts` files under `logos-app/src/types/rust-generated/` from the same source of truth, eliminating the previous hand-maintained Malli → TS pipeline.
-
 #### New crate — `rust/logos-types/`
-
 - **`src/lib.rs`** — re-exports all modules.
 - **`src/shape.rs`** — `Shape`, `ShapeType`, `FrameClip` and all sub-shapes (rect, path, text, frame, group, boolean, svg-raw, component-instance, component-set).
 - **`src/geometry.rs`** — `Rect`, `Point`, `Matrix`, `Selrect`, `Transform`.
@@ -74,26 +60,16 @@ A new `rust/logos-types` crate provides the canonical Rust definitions for every
 - **`src/token.rs`** — `DesignToken`, `TokenType`, `TokenValue`.
 - **`src/compat.rs`** — `ChangeSet`, `Change`, `ChangeOp` for CRDT compatibility shim.
 - **`rust/Cargo.toml`** — added `logos-types` as a workspace member.
-
 #### TypeScript codegen output — `logos-app/src/types/rust-generated/`
-
 Auto-generated from Rust source via `bin/generate-types` replacement pipeline:
 `blur.ts`, `color.ts`, `compat.ts`, `fill.ts`, `geometry.ts`, `index.ts`, `shadow.ts`, `shape.ts`, `stroke.ts`, `token.ts`.
-
 #### Updated — `logos-app/src/types/shapes.ts`
-
 Re-wired to import from `./rust-generated/index` instead of the old `./generated/` directory. The deleted `logos-app/src/types/generated/` hand-maintained files (`changes.d.ts`, `index.d.ts`, `shapes.d.ts`) are removed. The old `bin/generate-types` Babashka script is removed.
-
 ---
-
 ### G3 + G4 — Go backend skeleton + profile namespace
-
 **Branches**: `go/g4-namespaces-1`, `go/g4-namespaces-2`
-
 Foundation layer for the Go rewrite of the Clojure RPC backend. Implements the full `profile` namespace (auth middleware, storage abstraction, full CRUD) and scaffolds the server, connection pool, Redis client, and S3-compatible storage abstraction.
-
 #### New — `backend-go/`
-
 - **`go.mod` / `go.sum`** — module `github.com/logos-design/logos/backend-go`, Go 1.22. Dependencies: `pgx/v5`, `go-chi/chi/v5`, `go-jose/go-jose/v3`, `go-redis/redis/v9`.
 - **`cmd/server/main.go`** — entry point: loads config, opens DB pool, connects Redis, initialises storage, builds `server.Deps`, starts HTTP server on `$PORT` (default 6060).
 - **`internal/config/config.go`** — env-var driven config: `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `STORAGE_BACKEND`, `STORAGE_LOCAL_DIR`, `S3_BUCKET/REGION/ENDPOINT`, `COOKIE_NAME`.
@@ -106,57 +82,37 @@ Foundation layer for the Go rewrite of the Clojure RPC backend. Implements the f
 - **`internal/handler/profile_test.go`** — integration tests (skipped without `TEST_DATABASE_URL`).
 - **`migrations/`** — SQL migration files matching the Clojure backend schema.
 - **`README.md`** — build + run instructions.
-
 #### Makefile updates
-
 - Added `go-build`, `go-run`, `go-test`, `go-vet` targets using `flatpak-spawn --host go`.
-
 ---
-
-### logos-app — Migration importers, Figma plugin, toolbar components
-
+### logos-app — Migration importers, external design tool plugin, toolbar components
 **Branch**: `go/g4-namespaces-2`
-
 New first-class features in the `logos-app` companion application.
-
 #### Migration importers — `logos-app/src/migration/`
-
-Three importers that allow opening Figma, Sketch, and Adobe XD files directly in Logos:
-
-- **`figma/figma-importer.ts`** — walks a Figma JSON tree, converts nodes to `Shape` objects using `figma-shape-converter.ts` and `figma-token-converter.ts`.
+Three importers that allow opening external design tool, Sketch, and Adobe XD files directly in Logos:
+- **`external-design-tool/external-design-tool-importer.ts`** — walks a external design tool JSON tree, converts nodes to `Shape` objects using `external-design-tool-shape-converter.ts` and `external-design-tool-token-converter.ts`.
 - **`sketch/sketch-importer.ts`** — parses Sketch `.sketch` bundle (unzipped JSON). Converters in `sketch-shape-converter.ts` / `sketch-token-converter.ts`.
 - **`xd/xd-importer.ts`** — parses Adobe XD `.xd` manifest JSON. Converters in `xd-shape-converter.ts` / `xd-shape-converter.ts`.
 - **`README.md`** — Format coverage documentation.
-
-#### Figma plugin — `logos-app/figma-plugin/`
-
-A standalone Figma plugin that exports the current selection to the Logos format:
+#### external design tool plugin — `logos-app/external-design-tool-plugin/`
+A standalone external design tool plugin that exports the current selection to the Logos format:
 - **`manifest.json`** — plugin ID and permissions.
-- **`code.ts`** — Figma plugin code (`figma.showUI` + traversal logic). 
+- **`code.ts`** — external design tool plugin code (`external-design-tool.showUI` + traversal logic).
 - **`ui.html`** — simple plugin UI with Export button.
 - **`package.json` / `tsconfig.json`** — TypeScript compilation config.
-
 #### New UI components
-
 - **`logos-app/src/components/toolbar/ToolButton.tsx`** — generic icon button for the toolbar, supports active/disabled/tooltip.
 - **`logos-app/src/components/toolbar/ToolDropdown.tsx`** — dropdown panel for grouped tool options (e.g. shape sub-tools).
-- **`logos-app/src/components/ui/ImportMigrationDialog.tsx`** — modal dialog for selecting and loading a Figma/Sketch/XD file. Calls the appropriate importer and emits the resulting shape tree.
+- **`logos-app/src/components/ui/ImportMigrationDialog.tsx`** — modal dialog for selecting and loading a external design tool/Sketch/XD file. Calls the appropriate importer and emits the resulting shape tree.
 - **`logos-app/src/stores/tokenStore.ts`** — Zustand store for design tokens (CRUD + import from migration).
 - **`logos-app/src/stores/toolbarStore.ts`** — Zustand store for active tool, tool options, and toolbar position state.
 - **`logos-app/src/components/toolbar/Toolbar.tsx`** — extended with `ToolButton`/`ToolDropdown` usage, import trigger, and `toolbarStore` wiring.
 - **`logos-app/src/components/canvas/Canvas.tsx`** — extended with migration shape rendering and token application.
 - **`logos-app/src/App.tsx`** — wired `ImportMigrationDialog` and token/toolbar stores at root level.
-
 ---
-
-
-
 ### Workspace toolbar — repositionable position & design polish
-
 **Context**: The main workspace toolbar can now be moved to any of the four screen edges (top, bottom, left, right). A compact popup triggered by the new Position button shows the three non-current positions as icon + label rows. When placed on the left or right the toolbar switches to a vertical column layout automatically.
-
 #### Frontend — `frontend/src/app/main/`
-
 - **`data/workspace/common.cljs`** — Added `set-toolbar-position [position]` event. Validates input against `#{:top :bottom :left :right}` and stores the value in `[:workspace-local :toolbar-position]`.
 - **`ui/workspace/top_toolbar.cljs`**
   - Added `toolbar-position-ref` lens (defaults to `:bottom`).
@@ -169,33 +125,20 @@ A standalone Figma plugin that exports the current selection to the Logos format
   - `.main-toolbar-vertical` — column layout, `height: auto`, `width: $s-56`.
   - `.toolbar-position-menu` — dark-themed floating panel with shadow and `z-index-4`.
   - `.pos-row`, `.pos-btn`, `.pos-label` — new styles for the position popup rows.
-
 ### Radius drag handles on shape corners
-
 **Context**: Individual and uniform corner-radius values can now be adjusted by dragging the circular handles on each corner of a selected rectangle.
-
 #### Frontend — `frontend/src/app/main/`
-
 - **`data/workspace/transforms.cljs`** — Added `start-radius-drag [shape-id corner]` event. Per-corner inward diagonal projection converts drag displacement into a clamped radius delta. Ctrl → single corner; no modifier → all four corners. Single undo transaction wraps the entire drag.
 - **`ui/workspace/sidebar/options/menus/border_radius.cljs`** — Receives `shapes` prop; computes `hide-handles?` from the full shape list.
 - **`ui/workspace/viewport/selection.cljs`** — Renders per-corner radius drag handles for selected rectangles; dispatches `start-radius-drag` on `mousedown`.
-
 ---
-
-
 ## [Unreleased] — 2026-05-19
-
 ### P4.2 V4 — WASM Bridge (`phase4/vector-networks-v4`)
-
 **Context**: Exposes the V3 Greiner-Hormann boolean ops and the V2 DCEL region-detection to the React frontend via a C-ABI WASM binary. Mirrors the `logos-layout-wasm` architecture exactly: JSON-in / JSON-out over a manual alloc/free memory protocol, no wasm-bindgen dependency.
-
 **Branch**: `phase4/vector-networks-v4`
-
 #### New crate — `rust/logos-vector-wasm`
-
 - **`Cargo.toml`** — `crate-type = ["cdylib", "rlib"]`; depends on `logos-vector` + `logos-vector-ops` + `serde` + `serde_json`
 - **`src/lib.rs`** — Complete C-ABI bridge (≈ 290 lines)
-
   **Memory management (identical protocol to `logos-layout-wasm`)**
   | Symbol | Description |
   |---|---|
@@ -203,24 +146,19 @@ A standalone Figma plugin that exports the current selection to the Logos format
   | `logos_vn_free_input(ptr, len)` | Free input buffer |
   | `logos_vn_output_ptr() → ptr` | Pointer to last output JSON |
   | `logos_vn_free_output()` | Release output buffer |
-
   **Operations**
   | Symbol | Input JSON | Output JSON |
   |---|---|---|
   | `logos_vn_boolean_op(ptr, len) → outLen` | `{ net_a, net_b, region_a, region_b, op }` | `{ ok, anchors, segments, regions }` |
   | `logos_vn_find_regions(ptr, len) → outLen` | `{ net }` | `{ ok, regions }` |
-
   **JSON schema** — `VNAnchor { x, y, hi?, ho? }`, `VNSegment { s, e, c1?, c2? }`, `VNNetwork { anchors, segments }`. All control points are absolute `[x, y]` pairs, matching Logos canvas coordinates.
-
 - **5 unit tests** — full round-trip through the C-ABI on native (x86/aarch64):
   - `union_two_squares_via_abi` — alloc/encode/call/decode/free cycle
   - `intersect_two_squares_via_abi`
   - `find_regions_triangle` — closed triangle → 1 region
   - `unknown_op_returns_error` — `ok: false` + `error` field
   - `alloc_free_roundtrip` — memory safety smoke test
-
 #### New TypeScript files — `logos-app/src/worker/`
-
 - **`vector-network.types.ts`** — typed protocol definitions mirroring the Rust structs:
   - `VNAnchor`, `VNSegment`, `VNNetwork`
   - `BoolOpRequest`, `BoolOpResult` (`BoolOpSuccess | BoolOpError`), `BoolOp`
@@ -231,13 +169,9 @@ A standalone Figma plugin that exports the current selection to the Logos format
   - `callWasm<T>()` helper: encode JSON → `logos_vn_alloc` → write → call → read from `memory.buffer` → decode → free
   - **Pure-TS fallback**: geometric approximation (`tsFallbackBoolOp`, `tsFallbackFindRegions`) keeps UI functional during development before WASM is compiled
   - Handles `BOOL_OP` and `FIND_REGIONS` messages; posts `BOOL_OP_RESULT`, `FIND_REGIONS_RESULT`, `ERROR`, `READY`
-
 #### Workspace change
-
 - **`rust/Cargo.toml`**: `"logos-vector-wasm"` added to `members`
-
 #### Build instructions (V4 WASM compilation)
-
 ```bash
 # Requires wasm-pack: cargo install wasm-pack
 wasm-pack build rust/logos-vector-wasm --target web --out-dir ../../logos-app/src/render-wasm/logos-vector-wasm
@@ -245,23 +179,15 @@ wasm-pack build rust/logos-vector-wasm --target web --out-dir ../../logos-app/sr
 cd rust/logos-vector-wasm && wasm-pack build --target web
 cd logos-app && pnpm add ../rust/logos-vector-wasm/pkg
 ```
-
 #### Architecture notes
-
 - Zero wasm-bindgen — pure `#[no_mangle] extern "C"` ABI, callable from any `WebAssembly.instantiate` host
 - Worker thread is isolated from the render loop — boolean ops run concurrently with rendering
 - TS fallback ensures the feature degrades gracefully without the WASM binary
-
 ---
-
 ### P4.2 V3 — Vector Network Boolean Operations (`phase4/vector-networks-v3`)
-
 **Context**: Adds `logos-vector-ops`, a new crate in the Rust sub-workspace, implementing the four standard boolean set operations (union, intersection, subtraction, exclusive-or) on closed `Region` pairs from a `VectorNetwork`. Uses a pure-Rust Greiner-Hormann polygon clipping engine as the default backend; a `skia` Cargo feature flag is reserved for the Skia PathOp backend to be wired in during V4 WASM integration.
-
 **Branch**: `phase4/vector-networks-v3` · **Commit**: `5a028dd8`
-
 #### New crate — `rust/logos-vector-ops`
-
 - **`Cargo.toml`** — workspace member; depends on `logos-vector` (path dep); `skia` feature declared as a placeholder for downstream `skia-safe` wiring
 - **`src/boolean.rs`** — Greiner-Hormann polygon clipping (≈ 420 lines)
   - **Phase 1**: intrinsic edge-vs-edge intersection search over all A×B edge pairs; intersection vertices inserted into both doubly-linked vertex rings; sorted by alpha parameter along each original edge
@@ -275,13 +201,9 @@ cd logos-app && pnpm add ../rust/logos-vector-wasm/pkg
 - **`src/ops.rs`** — public API: `BoolOp` enum (`Union | Intersect | Subtract | Exclude`), `BoolResult { network, regions }`, `boolean_op(net_a, ra, net_b, rb, op) → BoolResult`; `BoolResult::total_area()` and `region_count()` helpers
 - **`src/skia_ops.rs`** — stub module, compiled only under `--features skia`
 - **`src/lib.rs`** — re-exports `boolean_op`, `BoolOp`, `BoolResult`; `no_run` doc-example
-
 #### Workspace change
-
 - **`rust/Cargo.toml`**: `"logos-vector-ops"` added to `members`
-
 #### Tests — 14/14 green
-
 | Test | Coverage |
 |---|---|
 | `union_idempotent` | A ∪ A area ≈ A |
@@ -298,45 +220,30 @@ cd logos-app && pnpm add ../rust/logos-vector-wasm/pkg
 | `subtract_overlapping` | 3×3 sq − 1×5 rect → area ≈ 6 |
 | `subtract_contained` | outer rect − inner square → hole, area ≥ 1 |
 | *(doc-test)* | `lib.rs` example compiles |
-
 #### Architecture notes
-
 - **`logos-vector` stays zero-dependency pure Rust** — no Skia, no WASM-specific code; V1 + V2 (slot-map graph + DCEL cycle detection) are not touched
 - **Bézier accuracy**: 8 samples per cubic segment gives < 0.5 px error at typical canvas scales (0–4096); reconfigurable via `BEZIER_STEPS` constant
 - **Output**: result region coordinates are stored in a fresh `VectorNetwork` as straight-line polylines; curve-fitting (V5) will restore Bézier handles where possible
-
 ---
-
 ### M5 — ClojureScript Frontend Removal (`phase3/m5-cljs-removal`)
-
 **Context**: Migration complete. The ClojureScript SPA (`frontend/`) has been retired from the build pipeline. `logos-app/` (Vite + React 18 + TypeScript 5) is now the sole frontend.
-
 #### Build system
 - **`Makefile`**: `WASM_OUT` now targets `logos-app/public/logos-layout/`; added `build-app` target; `clean` removes `logos-app/dist`
 - **`run-ci.sh`**: Replaced `frontend/` ClojureScript CI block with `logos-app` TypeScript check + vitest
 - **`logos.toml`**: `assets_dir` updated to `./logos-app/dist`
-
 #### Docker
-- **`docker/images/Dockerfile.frontend`**: Replaced Penpot upstream image with a two-stage build (Node 20 builder → nginx 1.27 static server, SPA fallback, immutable-hash asset caching)
+- **`docker/images/Dockerfile.frontend`**: Replaced Logos upstream image with a two-stage build (Node 20 builder → nginx 1.27 static server, SPA fallback, immutable-hash asset caching)
 - **`docker/images/docker-compose.yaml`**: `logos-frontend` service now uses locally built `logos-frontend` image
-
 #### CI
 - **`.github/workflows/logos-app.yml`** *(new)*: Three-job workflow — `typecheck-and-test` (tsc + vitest), `lint` (ESLint), `build` (Vite prod + artifact upload)
 - **`.github/workflows/benchmark-memory.yml`**: Cache key updated from `frontend/deps.edn` to `logos-app/package.json`
-
 #### Documentation
 - **`ARCHITECTURE.md`**: Section 2 fully rewritten to describe the React/TypeScript stack (Zustand, workers, plugin bridge, WASM ABI)
-
 ---
-
 ## [Unreleased] — 2026-05-17
-
 ### Rust Geometry & Layout Foundation (Phase 3.0)
-
 **Context**: Rust pivot — porting geometry and layout primitives from ClojureScript/Clojure to Rust for zero-copy WASM interop with the Skia renderer.
-
 **Branches**: `rust/r1-matrix`, `rust/r2-flex`
-
 #### R1 — Matrix Engine (`56be234`)
 - **`rust/logos-layout/src/matrix.rs`** — full 2D affine transform port of `common/src/app/common/geom/matrix.cljc` (430+ lines)
 - **Column-major affine matrix `[a, b, c, d, e, f]`** — matches CSS/SVG `matrix(a,b,c,d,e,f)` convention
@@ -351,7 +258,6 @@ cd logos-app && pnpm add ../rust/logos-vector-wasm/pkg
 - **C-ABI exports** (JNI interop): `logos_matrix_inverse(a..f, out: *mut [f64;6]) -> bool`, `logos_matrix_multiply(..., out)`, `logos_matrix_transform_point(..., out_x, out_y)`
 - **35 unit tests + 1 doc-test** — translate-invert, rotate-360, scale-double-half, decompose-round-trip
 - **Total suite**: 78 unit tests + 2 doc-tests = **80/80 green**
-
 #### R2 — Flex Layout Params (`18f3a4a`)
 - **`rust/logos-layout/src/flex/params.rs`** — flex container property parser (498 lines)
 - **Input gate for flex layout pipeline**: parses shape properties into typed Rust enums, no tree traversal, zero allocation beyond the struct itself
@@ -369,7 +275,6 @@ cd logos-app && pnpm add ../rust/logos-vector-wasm/pkg
   - All defaults match CSS flexbox spec and Logos serializer conventions (`frontend/src/app/render_wasm/serializers.cljs`)
 - **14 unit tests + 4 doc-tests** — parsing, defaults, full/partial option sets
 - **Total suite**: 58 unit tests + 5 doc-tests = **63/63 green**
-
 #### Architecture
 - **Rust workspace** at `rust/Cargo.toml` with three members:
   - `logos-layout`: geometry & layout primitives (cdylib + rlib)
@@ -380,105 +285,79 @@ cd logos-app && pnpm add ../rust/logos-vector-wasm/pkg
   - **WASM** (`wasm32-unknown-unknown`): `wasm-pack` output consumed by frontend renderer, zero serialization overhead when paired with Phase 1.1 binary buffer
 - **Makefile targets**: `make build-rust`, `make build-wasm`, `make test`, `make fmt`, `make lint`, `make clean`
 - **Module structure**: `lib.rs` → `point.rs` (R0, prior session), `matrix.rs` (R1), `flex/mod.rs` + `flex/params.rs` (R2)
-
 #### Why This Matters
 - **Every shape in Logos stores a 3×3 affine matrix** — mouse drag, resize, rotation, layout computation all hit this code
 - **Moving transforms to Rust** means stack-allocated struct operations with no GC pressure
 - **WASM compilation pairs with the Phase 1.1 binary serialization buffer** — entire transform pipeline runs in the same memory space as the Skia renderer; no ClojureScript→JS→WASM boundary crossings, no JSON serialization
 - **Flex layout params are the input gate** for the full flexbox engine (Phase 3.1); next steps: `layout_data.rs` (child sizing: min/max, fill, auto), `positions.rs` (main/cross axis), `modifiers.rs` (emit geometry)
-
 #### Testing
 - **R1**: 80/80 green (78 unit + 2 doc-tests) — matrix multiply, inverse, decompose, transform_point
 - **R2**: 63/63 green (58 unit + 5 doc-tests) — enum parsing, defaults, container construction
 - **Zero test regressions** across both work packages
-
 ---
-
 ## [Unreleased] — 2026-05-16
-
 ### Logos Branding, Auth & Dev Infrastructure
-
 #### Branding
-- Replaced all Penpot logo references on login and static error pages with the Logos PNG (`frontend/resources/public/images/logos-logo.png`)
+- Replaced all Logos logo references on login and static error pages with the Logos PNG (`frontend/resources/public/images/logos-logo.png`)
 - Updated `auth.cljs` to render `<img src="images/logos-logo.png">` in place of the deprecated SVG icon
 - Added `.logos-logo` CSS class in `auth.scss` for proper image sizing
 - Updated `static.cljs` login modal and error container headers to use the Logos image
-- Updated English translations (`translations/en.po` and pre-compiled `translation.en.js`) — page title, login tagline, not-found strings, and dashboard references now say "Logos" instead of "Penpot"
-
+- Updated English translations (`translations/en.po` and pre-compiled `translation.en.js`) — page title, login tagline, not-found strings, and dashboard references now say "Logos" instead of "Logos"
 #### CORS & Session Fixes
 - Added `x-external-session-id`, `x-event-origin`, and `x-client` to `access-control-allow-headers` in `backend/src/app/http/middleware.clj` — eliminates CORS preflight failures from the frontend
 - Fixed session cookie `SameSite` logic in `backend/src/app/http/session.clj`: only set `SameSite=None` when both `cors` flag **and** `secure-session-cookies` flag are active; otherwise falls back to `Lax` — resolves cross-origin cookie rejection in HTTP-only local dev where `SameSite=None` requires `Secure`
-
 #### Rasterizer Fix
 - Patched `frontend/src/app/main/rasterizer.cljs` to HEAD `origin` (pointing to `rasterizer.html`) instead of `cf/rasterizer-uri` root (`/`) which returns 404 under shadow-cljs dev server — eliminates the adblocker-detection false positive and rasterizer fallback loop
-
 #### Local Dev Infrastructure
 - Added `backend/scripts/start-dev-local` — single-command backend launcher using `flatpak-spawn --host` to run Clojure in the host JVM from inside a Flatpak container
 - Added `backend/scripts/_env.local` — local environment overrides: PostgreSQL on `127.0.0.1:5432`, Redis on `127.0.0.1:6379`, filesystem storage (no Minio), correct `PENPOT_PUBLIC_URI`, and `enable-cors` flag with `PENPOT_CORS_ALLOWED_ORIGINS=http://localhost:8888`
 - Added Duotone icon assets (`frontend/resources/images/icons/duotone/`) and supporting ClojureScript component (`duotone_icon.cljs`, `duotone_icon.scss`)
-
 #### User Account Bootstrap
 - Created initial admin account (`admin@logos.app`) via the two-step registration API and activated it directly in PostgreSQL — ready for immediate login at `http://localhost:8888`
-
 ---
-
 ## [Unreleased] — 2026-05-10
-
 ### 2026-05-09 — Major Frames & Hierarchy System (d2053a6)
-
-**Identity**: navidrezadoost / navidrezadoost07@gmail.com  
+**Identity**: navidrezadoost / navidrezadoost07@gmail.com
 **Push**: `d2053a6` to navidrezadoost/Logos (no proxy used)
-
 #### Core Architecture
 - Full hierarchical layer system with `LayerRecord.parent_id: Option<Uuid>`
 - Local coordinate system for all children (positions relative to parent)
 - Recursive child handling and traversal helpers
-
-#### Figma-Style Frames
+#### external design tool-Style Frames
 - `Frame` layer type with `clip_content` (default `true`), `frame_expanded`, corner radius, fill, stroke, etc.
-- Hierarchical rendering with optional clipping, frame name label (Figma-style), parent chain tint, and dashed overflow indicator
+- Hierarchical rendering with optional clipping, frame name label (external design tool-style), parent chain tint, and dashed overflow indicator
 - Frame helpers: `wrap_in_frame()`, `ungroup_frame()`, `resize_frame_to_fit()`, `frame_children()`
-
 #### Auto Layout & Constraints
 - `AutoLayout` struct (direction, padding, gap, sizing modes: Hug/Fixed/Fill)
 - `Constraints` struct for regular frames
 - Full right-panel controls and layout pre-pass
-
 #### Drag, Drop & Reparenting
 - Canvas auto-reparenting when dropping layers into frames (Spacebar to suppress)
 - Layers panel tree drag & drop with indentation and insertion preview
 - When a frame is dragged, all children move together maintaining their local position relative to the frame
-
 #### UI/UX Improvements
 - Unicode icon system for tools and layer types
 - Layers panel: DFS tree, expand/collapse, context menu, visibility toggles
 - Right panel Frame section with Clip Content + Auto Layout controls
 - Keyboard shortcuts: `Ctrl+Alt+G` (wrap in frame), `Shift+Ctrl+G` (ungroup), `Enter` (drill in), `Shift+Enter` (select parent)
 - Effects system (7 types) + Blend Modes (18 CSS Compositing Level 1 modes) with hover preview
-
-This update establishes a solid, Figma-like foundation for hierarchy, frames, and responsive layout capabilities.
-
+This update establishes a solid, external design tool-like foundation for hierarchy, frames, and responsive layout capabilities.
 ---
-
 ## [Unreleased] — 2026-05-09
-
-### Added — `logos-wasm` editor (Figma-style Frames, Auto Layout, interaction polish)
-
+### Added — `logos-wasm` editor (external design tool-style Frames, Auto Layout, interaction polish)
 #### Unicode Icon System
 - **All toolbar tool icons** replaced with meaningful Unicode symbols: `↖` (Move), `⤡` (Scale), `#` (Frame), `▭` (Rect), `◯` (Ellipse), `⬡` (Polygon), `T` (Text), `✎` (Pen), `✋` (Pan), `╱` (Line), `→` (Arrow), `★` (Star).
 - **Layer type icons** in both the Layers panel tree and the right-panel header badge updated to match: `▭`, `#`, `T`, `◯`, `✎`, `⊞`, `⬡`, `╱`, `→`, `★`.
 - All icons derived from egui's built-in NotoEmoji range; no external font required.
-
-#### Figma-Style Frame Layer System
+#### external design tool-Style Frame Layer System
 - **`parent_id: Option<Uuid>`** — each layer now tracks its parent frame, enabling true hierarchical containment.
-- **`clip_content: bool`** — frames clip child layers to their bounds by default (matching Figma). Togglable in the right panel.
+- **`clip_content: bool`** — frames clip child layers to their bounds by default (matching external design tool). Togglable in the right panel.
 - **`frame_expanded: bool`** — controls expand/collapse state in the Layers panel tree.
 - **`LayerRecord::new_frame()`** — sets `clip_content = true` and white fill by default.
 - **Frame name label** — rendered above the frame on canvas, but only when the frame is selected or hovered (not always-on). Accent-purple when selected, gray when hovered.
 - **Parent chain tint** — when a child inside a frame is selected, the parent frame's border softens to accent purple at 30 % opacity, visualising containment hierarchy.
 - **Dashed overflow outline** — when `clip_content = false` and the frame has children, a hand-crafted dashed border is drawn around the frame to signal that children may overflow.
 - **Hierarchical rendering** — root-level render loop skips layers that have a `parent_id`; frame render arm draws its own background, then iterates and renders all children inside a clipped (or unclipped) `Painter` scope.
-
 #### Auto Layout (Horizontal / Vertical)
 - **`AutoLayout` struct** — `direction`, `gap`, `padding` (per-side), `gap_auto`, `sizing_h`, `sizing_v`, `align`.
 - **`SizingMode`** — `Fixed`, `HugContents`, `FillContainer`.
@@ -494,15 +373,12 @@ This update establishes a solid, Figma-like foundation for hierarchy, frames, an
   - Width / Height sizing (Fixed / Hug / Fill) segmented control.
   - Alignment picker (⇤ start / ⟺ center / ⇥ end).
   - **⟳ Apply Layout** button for one-shot repositioning with history push.
-
 #### Constraints
 - **`Constraints { horizontal: ConstraintType, vertical: ConstraintType }`** — five horizontal variants (Left, Right, LeftRight, Center, Scale) and vertical equivalents. Added to `LayerRecord`; defaults to `Left` / `Left`.
-
 #### Canvas Auto-Reparenting on Drop
-- When a move-drag ends **without Spacebar held**: finds the smallest (deepest) frame that fully contains the bounding box of each dropped layer and sets its `parent_id` accordingly — automatic nesting, matching Figma's default drag-onto-frame behaviour.
-- **Spacebar suppresses auto-reparenting** (hold before or during drag) — exact parity with Figma's power-user modifier.
+- When a move-drag ends **without Spacebar held**: finds the smallest (deepest) frame that fully contains the bounding box of each dropped layer and sets its `parent_id` accordingly — automatic nesting, matching external design tool's default drag-onto-frame behaviour.
+- **Spacebar suppresses auto-reparenting** (hold before or during drag) — exact parity with external design tool's power-user modifier.
 - Works per-layer across multi-selection drags.
-
 #### Frame Helpers (state.rs)
 - **`frame_children(frame_id)`** — returns ordered children of a frame from the page list.
 - **`reparent_layer(layer_id, Option<Uuid>)`** — sets `parent_id`; pass `None` to detach.
@@ -510,7 +386,6 @@ This update establishes a solid, Figma-like foundation for hierarchy, frames, an
 - **`ungroup_frame(frame_id)`** — removes a frame but keeps all children in place (they become top-level siblings at the frame's former page position, preserving absolute world-space positions). Undo-able.
 - **`resize_frame_to_fit(frame_id, padding)`** — shrinks/grows a frame to tightly wrap its visible children + specified padding. Undo-able.
 - **`remove_layer()`** — now recursively removes all children when a frame is deleted.
-
 #### Keyboard Shortcuts
 | Shortcut | Action |
 |---|---|
@@ -518,7 +393,6 @@ This update establishes a solid, Figma-like foundation for hierarchy, frames, an
 | `Shift + Ctrl + G` | Unwrap / Ungroup selected Frame |
 | `Enter` | Drill into selected Frame (select first child) |
 | `Shift + Enter` | Select parent of selected layer |
-
 #### Layers Panel Tree View
 - **Hierarchical DFS tree** — root layers at top level; children indented 16 px per nesting depth. Iterative DFS using a stack ensures stable ordering without recursion depth limits.
 - **Expand / collapse triangles** (`▸` / `▾`) on non-empty frames; toggle stored in `frame_expanded`.
@@ -528,19 +402,16 @@ This update establishes a solid, Figma-like foundation for hierarchy, frames, an
   - "Unwrap Frame (Shift+Ctrl+G)" → `ungroup_frame()`, children preserved in place.
   - "Resize to Fit Contents" → `resize_frame_to_fit(16.0)`.
   - "Wrap in Frame (Ctrl+Alt+G)" → `wrap_in_frame()`.
-
 #### Right Panel Frame Section
 - Visible **only** when a single Frame layer is selected.
 - **Clip Content** checkbox (live-togglable, writes to history on change).
 - Full **Auto Layout** sub-section (see above).
 - **Resize to Fit** and **Unwrap** quick-action buttons.
-
 #### Interaction Improvements
 - **Shift + axis lock** during move drag — locks movement to the dominant axis (horizontal or vertical) once the pointer moves more than 2 px.
 - **Alt + drag clone** — duplicates all selected layers in-place when Alt is held at drag start; the drag then moves the clones, leaving originals intact.
 - **Rotation-parallel edge snap** — during move drag, detects other layers' rotation angles; snaps the dragged layer's rotation and flushes perpendicular edges when within 15 ° (mod π). Draws a guide line along the snapped edge.
 - **Alt cursor** — `CursorIcon::Copy` shown when hovering an unlocked layer with Alt held.
-
 #### Effects & Blend Mode System
 - **`BlendMode` enum** — 18 modes in 5 groups (Normal, Darken, Multiply, PlusDarker, ColorBurn, Lighten, Screen, PlusLighter, ColorDodge, Overlay, SoftLight, HardLight, Difference, Exclusion, Hue, Saturation, Color, Luminosity).
 - **`EffectKind` enum** — 7 types: Drop Shadow, Inner Shadow, Layer Blur, Background Blur, Noise, Texture, Glass. Each has capability flags (`has_offset`, `has_blur`, `has_spread`, `has_color`, `has_amount`).
@@ -549,71 +420,52 @@ This update establishes a solid, Figma-like foundation for hierarchy, frames, an
 - **`LayerRecord.blend_mode: BlendMode`** — layer-level blend mode.
 - **CSS Compositing Level 1 math** implemented entirely in Rust: `blend_channel`, `blend_rgb`, `rgb_to_hsl`, `hsl_to_rgb`, `blend_effect_color`, `apply_layer_blend` — all 18 modes for both layer fill and every effect.
 - **Hover-preview for blend modes** — `EditorState.blend_preview: Option<(Uuid, usize, BlendMode)>` cleared every frame; set on ComboBox hover; read by renderer before committed value — live canvas preview while the user browses, commit on click.
-- **Blend mode inside Effects section** — layer-level blend appears as the first row inside the Effects collapsible section (not as a standalone panel), matching Figma's panel structure.
+- **Blend mode inside Effects section** — layer-level blend appears as the first row inside the Effects collapsible section (not as a standalone panel), matching external design tool's panel structure.
 - **Right panel Effects section** — multi-row effect list; per-effect enable/disable checkbox, all parameter controls conditional on `EffectKind` flags; "Add Effect" combo.
-
 ### Changed — `logos-wasm`
 - `type_icon()` returns Unicode glyphs instead of ASCII bracket codes (`[R]` → `▭`, `[F]` → `#`, etc.).
 - `Tool::icon()` updated to Unicode set.
 - Right-panel header badge now calls `rec.type_icon()` directly instead of a local match arm.
 - Frame auto-reparenting replaces the old "always top-level on canvas" behaviour.
 - `remove_layer()` now recursively removes all descendants of a frame.
-
 ---
-
-
-
-### Added — `logos-wasm` editor (Figma-style toolbar & interaction improvements)
-
+### Added — `logos-wasm` editor (external design tool-style toolbar & interaction improvements)
 #### Toolbar
-- **Floating bottom-centre toolbar** — `TopBottomPanel::top` removed; toolbar now renders as a dark rounded pill anchored to `Align2::CENTER_BOTTOM` (20 px from bottom edge), matching Figma's layout exactly.
-- **Move-mode dropdown** — Replaces the flat Select + Pan buttons with a single Figma-style dropdown button showing the active tool icon + chevron. Opens upward with a dark popup listing all three move tools:
+- **Floating bottom-centre toolbar** — `TopBottomPanel::top` removed; toolbar now renders as a dark rounded pill anchored to `Align2::CENTER_BOTTOM` (20 px from bottom edge), matching external design tool's layout exactly.
+- **Move-mode dropdown** — Replaces the flat Select + Pan buttons with a single external design tool-style dropdown button showing the active tool icon + chevron. Opens upward with a dark popup listing all three move tools:
   - **Move** (`V`) — select and drag layers
   - **Scale** (`K`) — select with proportional-scale intent (new `Tool::Scale` variant)
   - **Hand** (`H`) — persistent pan mode; no Space key required
 - **Shape-tool dropdown** — popup now opens upward (was downward); `pivot(Align2::LEFT_BOTTOM)` applied.
 - **Logo label** removed from toolbar; toolbar now contains only interaction tools, zoom controls, grid toggle, and fit button.
-
 #### Hand tool (H)
 - **Persistent pan mode** — `Tool::Pan` now works exactly like Space+drag but without holding any key. Open hand (`Grab`) cursor shown when hovering; closed fist (`Grabbing`) cursor shown while dragging.
 - **No accidental selection** — single-click and drag-start selection logic explicitly skipped when Hand tool is active.
-
 #### Scale tool (K)
 - New `Tool::Scale` variant added to `tools.rs` with icon `K`, label `Scale`, shortcut `K`.
 - Keyboard shortcut `K` registered in tool-input handler.
 - Canvas drag-start and hover-pos match arms extended to `Tool::Select | Tool::Scale` so scale mode participates in the full selection/resize interaction.
-
 #### Alignment fixes (multi-selection)
 - **Root cause fixed** — alignment actions previously only moved `selection[0]`, leaving all other selected layers untouched.
 - **Single selection** — aligns against page/canvas bounds (unchanged behaviour).
 - **Multi-selection** — computes the union bounding box of all selected layers; each layer is moved so its edge/center aligns to the group's collective edge/center. All 6 alignment operations (left, center-H, right, top, center-V, bottom) now work correctly on any number of simultaneously selected layers.
-
 ### Changed — `logos-wasm`
-- `Tool::Select.label()` renamed `"Select"` → `"Move"` to match Figma terminology.
-- `Tool::Pan.label()` renamed `"Pan"` → `"Hand"` to match Figma terminology.
-
+- `Tool::Select.label()` renamed `"Select"` → `"Move"` to match external design tool terminology.
+- `Tool::Pan.label()` renamed `"Pan"` → `"Hand"` to match external design tool terminology.
 ### Removed
 - `CHANGES.md` — duplicate changelog, deleted.
 - `PHASE5_ISSUE_STATUS.md` — stale issue tracker snapshot, deleted.
 - `PROJECT_REPORT.md` — outdated v2.0.0 report, deleted.
-
 ---
-
 ## [v3.0.0] — 2026-04-22
-
 ### Summary
-
 Five focused engineering sprints completing the full collaborative backend stack:
 multi-tenant identity, desktop UI state, HTTP client networking, Axum REST server,
 and offline conflict resolution. Total test suite: **676 passing** in `logos-collab`,
 **279 passing** in `logos-desktop`, 0 failures.
-
 ---
-
 ### Sprint 5 — Offline Conflict Resolution (commit `465ac35`) — 2026-04-22
-
 #### Added — `logos-collab`
-
 - **`conflict.rs`** — `ConflictStore` with full lifecycle management
   - `ElementVersion` — captures editor metadata, element type, JSON properties, parent version
   - `ResolutionStrategy` — `AcceptLocal | AcceptRemote | AcceptBoth | RejectAll`
@@ -645,22 +497,16 @@ and offline conflict resolution. Total test suite: **676 passing** in `logos-col
   - 10 integration tests (CW-01..CW-10)
 - `AppState` extended with `conflicts: Arc<RwLock<ConflictStore>>` and `sync_status: Arc<RwLock<SyncStatusStore>>`
 - 7 new REST routes registered in `routes.rs`
-
 #### Added — `logos-desktop`
-
 - **`conflict_reviewer.rs`** — `ConflictReviewer` state machine for split-screen review UX
   - `ConflictReviewerState` — `Idle | FetchingConflicts | ConflictList | ReviewingConflict | SubmittingResolution | ResolutionComplete | Error`
   - `ConflictReviewerEvent` — `Open | ConflictsFetched | SelectConflict | ConflictDetailsFetched | SelectStrategy | SubmitResolution | ResolutionSuccess | Error | Close`
   - `ConflictSummary` and `ElementVersionPreview` for UI data binding
   - `can_submit()` guard; `transition()` with exhaustive state-event handling
   - 10 unit tests (CR-01..CR-10)
-
 ---
-
 ### Sprint 4 — Axum REST Server (commit `2c1b6c7`) — 2026-04-21
-
 #### Added — `logos-collab` (feature: `http-server`)
-
 - `AppState` — shared Arc state holding all domain stores (company, project, user, session, collab)
 - `app_router()` — Axum 0.8 router with Tower CORS + tracing middleware
 - **13 REST endpoints** across 4 handler modules:
@@ -671,13 +517,9 @@ and offline conflict resolution. Total test suite: **676 passing** in `logos-col
 - Axum extractors: `Path`, `Json`, `State`; unified `ApiError` → HTTP status mapping
 - 4 integration tests against live Axum router (AT-01..AT-04)
 - Feature-gated Cargo deps: `axum 0.8`, `tower 0.5`, `tower-http 0.6`
-
 ---
-
 ### Sprint 3 — Network Layer / HTTP Client (commit `cf228fd`) — 2026-04-20
-
 #### Added — `logos-desktop` (feature: `http-client`)
-
 - `network/client.rs` — `LogosClient` async HTTP client wrapping `reqwest 0.12` + rustls-tls
   - `login()`, `register()`, `get_projects()`, `create_project()`, `join_session()`, `leave_session()`
   - Bearer token auth; configurable base URL; `ClientError` with `Unauthorized | NotFound | ServerError | Network | Parse`
@@ -686,13 +528,9 @@ and offline conflict resolution. Total test suite: **676 passing** in `logos-col
   - `LoginRequest/Response`, `RegisterRequest`, `ProjectDto`, `CreateProjectRequest`, `SessionDto`, `JoinSessionRequest`, `ApiErrorResponse`
   - Full `serde` derives; `#[serde(rename_all = "camelCase")]` for JS interop
   - 3 unit tests (DT-01..DT-03)
-
 ---
-
 ### Sprint 2 — Desktop UI State Layer (commit `c30fe61`) — 2026-04-19
-
 #### Added — `logos-desktop`
-
 - **`app_state.rs`** — `AppState` central store (selected tool, active layer, zoom, theme, modal stack)
   - 8 unit tests (AS-01..AS-08)
 - **`tool_state.rs`** — `ToolState` FSM: `Idle → Active → Dragging → Committed`
@@ -707,13 +545,9 @@ and offline conflict resolution. Total test suite: **676 passing** in `logos-col
 - **`viewport_state.rs`** — `ViewportState` with pan, zoom (0.1×–32×), fit-to-canvas
   - 7 unit tests (VS-01..VS-07)
 - Total: 45 new unit tests across 6 state modules
-
 ---
-
 ### Sprint 1 — Multi-Tenant Identity & Desktop Sync (commit `0b379ca`) — 2026-04-18
-
 #### Added — `logos-collab`
-
 - **`company.rs`** — `CompanyStore` multi-tenant container
   - `Company::new(name, owner_id)` auto-enrolls creator as `CompanyRole::Admin`
   - Roles: `Admin | Editor | Viewer`; `add_member`, `remove_member`, `change_role`, `list_members`
@@ -731,15 +565,10 @@ and offline conflict resolution. Total test suite: **676 passing** in `logos-col
 - **Stress test suite** — 50-user concurrent simulation (`logos-collab/tests/stress/`)
   - Metrics: operations/sec, conflict rate, sync latency percentiles (p50/p95/p99)
   - HTML report generation
-
 ---
-
 ## [v2.0.0-rc.1] — 2026-02-16
-
 25 commits across 16 feature branches. All 19 workspace crates compile. **2,007 tests pass**.
-
 ### Performance
-
 - CRDT hot path 24% faster — deferred delta encoding (`d30e153`)
 - Batch transaction API 50% faster at N=10 (`858d046`)
 - Atlas lookup 86% faster with O(1) flat-array indexing (`c9f250a`)
@@ -748,67 +577,49 @@ and offline conflict resolution. Total test suite: **676 passing** in `logos-col
 - Layout diffing — FxHashMap + reusable buffers (`008acc1`)
 - Frame coherence — retained instance buffer with O(Δ) incremental updates (`c12ecf0`)
 - GPU-driven rendering — partial buffer uploads + draw indirect + dirty-slot tracking (`2260724`)
-
 ### Added — Web Platform
-
 - WASM + WebGPU target compiled to `wasm32-unknown-unknown` (`058dbf4`)
 - 23 JS-exported methods via `wasm-bindgen`
 - Camera module: pan, zoom, screen-to-world coordinate mapping
-
 ### Added — Plugin System
-
 - Wasmtime WASM runtime — sandboxed execution with fuel and memory limits (`a79a5a9`)
 - 21 host functions across 6 categories: document, selection, viewport, UI, lifecycle, state (`cd208ec`)
 - TOML manifest with permission declarations (`7d2dfbf`)
 - Ed25519 signature verification — cryptographic plugin signing
 - Marketplace HTTP client — search, download, publish, rate, review with caching
 - 3 example plugins: hello-world, shape-generator, color-palette
-
 ### Added — Desktop UI
-
 - Command system — 60+ command variants, `CommandRegistry`, `CommandHistory` (`80194ef`)
-- Shortcut registry — Figma-compatible tool shortcuts (V/R/O/T/P/H/Z/F/L/I)
+- Shortcut registry — external design tool-compatible tool shortcuts (V/R/O/T/P/H/Z/F/L/I)
 - Toolbar — 3 preset toolbars with layout-computed hit testing
 - Panel manager — 7 dockable panels (Layers, Properties, Library, History, Color, Typography, Export)
 - Command palette — fuzzy-search with MRU tracking and category filtering
 - Tab bar — multi-document tabs with dirty indicators, pinning, and reorder
-
 ### Added — File Format Importers
-
-- Figma (.fig) — binary parser, 20 node types (`16983d8`)
+- external design tool (.fig) — binary parser, 20 node types (`16983d8`)
 - SVG — dependency-free XML parser with full path data support (`b00f858`)
 - Sketch — ZIP extraction + JSON model mapping
 - PDF — content stream tokenizer + page extraction
 - Adobe XD — ZIP/AGC extraction + artboard mapping
 - Canva — JSON template parser + element conversion
-
 ### Added — Marketplace
-
 - `logos-marketplace-auth` — Ed25519 keypair generation, JWT sessions, permission scoping (`b4795cb`)
 - `logos-marketplace-db` — PostgreSQL schema, 7 tables (publishers, plugins, versions, reviews, downloads, categories, audit_log)
 - `logos-marketplace-api` — REST server, 18+ routes for publishing, search, review, admin
 - Marketplace UI — 6-step publisher onboarding, plugin submission, gallery, analytics, moderation (`9bce46a`)
-
 ### Added — AI Engine
-
 - ONNX Runtime integration — real inference via `ort` v2 (`4c57e96`)
 - Model quantization — FP32 → FP16 compression, 6.48 MB → 1.63 MB (-75%) (`1b015bf`)
 - Embedding pipeline — style extraction and layout suggestion via quantized models
 - Criterion benchmarks — layout generation 30.9 µs/10 variations, style transfer 32.2 µs, asset decoding 8.6 µs (`9b57791`)
-
 ---
-
 ## [v1.1.0] — 2026-02-16
-
 - AI engine scaffolding — `logos-ai` crate with simulated ONNX inference (`e6c499b`)
 - ONNX Runtime real inference backend via `ort` v2 (`8957548`)
 - AI benchmarks — Criterion suite for inference latency (`569cedd`)
 - Merged `release/v1.0.0-rc.1` into main (`24319e5`)
-
 ---
-
 ## [v1.0.0-rc.1] — 2026-02-10
-
 - Core engine — CRDT-based document model with operational transform
 - Layout engine — constraint-based layout with Taffy integration
 - Render pipeline — wgpu-based GPU rendering with instance batching
@@ -818,9 +629,7 @@ and offline conflict resolution. Total test suite: **676 passing** in `logos-col
 - Desktop shell — winit 0.30 window with mouse/keyboard input and GPU surface
 - WASM target — `logos-wasm` crate for WebAssembly compilation
 - CI pipeline — GitHub Actions with build, test, and WASM verification
-
 ---
-
 [v3.0.0]: https://github.com/navidrezadoost/Logos/compare/v2.0.0-rc.1...v3.0.0
 [v2.0.0-rc.1]: https://github.com/navidrezadoost/Logos/compare/v1.1.0...v2.0.0-rc.1
 [v1.1.0]: https://github.com/navidrezadoost/Logos/compare/v1.0.0-rc.1...v1.1.0

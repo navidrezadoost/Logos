@@ -4,8 +4,8 @@
  * Phase IM1 — Zustand store for the Logos token runtime.
  *
  * Holds:
- *   sets    — TokenSet per Figma collection (or manually created)
- *   themes  — TokenTheme per Figma mode (or manually created)
+ *   sets    — TokenSet per imported source (or manually created)
+ *   themes  — TokenTheme per imported source (or manually created)
  *   active  — the currently active theme IDs (one per collection group)
  *
  * After import the resolved token map is lazily computed so consumers can
@@ -15,7 +15,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { LogosTokenSet, LogosTokenTheme, LogosToken } from "../migration/figma/figma-token-converter";
+import type { LogosTokenSet, LogosTokenTheme, LogosToken } from "../migration/tokens/token-types";
 
 // Re-export so UI code doesn't need to reach into migration/
 export type { LogosToken, LogosTokenSet, LogosTokenTheme };
@@ -36,7 +36,7 @@ interface TokenState {
   // ── Actions ─────────────────────────────────────────────────────────────
 
   /**
-   * Load the result of a Figma import (or any other source).
+   * Load the result of a token import.
    * Merges into existing token data — tokens from different imports coexist.
    */
   loadImport: (sets: LogosTokenSet[], themes: LogosTokenTheme[]) => void;

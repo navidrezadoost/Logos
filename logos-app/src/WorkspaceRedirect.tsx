@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { getProfile, penpotWorkspaceURL } from "./api/client";
+import { getProfile, workspaceURL } from "./api/client";
 
 /**
- * Old React /workspace/* links → full Penpot editor at /workspace.html#/workspace?…
+ * Old React /workspace/* links go to the full Loogs editor.
  */
-export function PenpotWorkspaceRedirect(): null {
+export function WorkspaceRedirect(): null {
   const { projectId, fileId } = useParams<{ projectId: string; fileId: string }>();
   const [searchParams] = useSearchParams();
   const pageId = searchParams.get("page-id") ?? "";
@@ -15,7 +15,7 @@ export function PenpotWorkspaceRedirect(): null {
     void getProfile().then((profile) => {
       const teamId = profile["default-team-id"];
       if (teamId) {
-        window.location.replace(penpotWorkspaceURL(teamId, fileId, pageId));
+        window.location.replace(workspaceURL(teamId, fileId, pageId));
       }
     });
   }, [projectId, fileId, pageId]);

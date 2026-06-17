@@ -4,7 +4,7 @@
 
     const getRepoStars = async () => {
       try {
-        const response = await fetch("https://api.github.com/repos/penpot/penpot");
+        const response = await fetch("https://api.github.com/repos/logos/logos");
         const data = await response.json();
         return data.stargazers_count;
       } catch (error) {

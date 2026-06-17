@@ -1,7 +1,7 @@
-# Figma Move Tools — Specification (Logos implementation reference)
+# external design tool Move Tools — Specification (Logos implementation reference)
 
 This document defines how the **Move tool group** (Move, Hand, Scale) behaves in Logos.
-It mirrors Figma’s toolbar presentation and interaction model.
+It mirrors external design tool’s toolbar presentation and interaction model.
 
 ---
 
@@ -135,7 +135,7 @@ Only one tool active globally. Activating any move tool deactivates drawing, tex
 | File | Role |
 |------|------|
 | `src/components/toolbar/ToolGroupButton.tsx` | Split hit targets: icon vs chevron |
-| `src/components/toolbar/ToolDropdown.tsx` | Figma-style menu rows |
+| `src/components/toolbar/ToolDropdown.tsx` | external design tool-style menu rows |
 | `src/components/toolbar/Toolbar.tsx` | Groups, shortcuts, wiring |
 | `src/stores/toolbarStore.ts` | `TOOL_GROUPS`, `activeToolInGroup` |
 | `src/stores/uiStore.ts` | `activeTool` ground truth |
@@ -144,7 +144,7 @@ Only one tool active globally. Activating any move tool deactivates drawing, tex
 
 ## 10. Differences from legacy Logos toolbar
 
-| Before | After (Figma-aligned) |
+| Before | After (external design tool-aligned) |
 |--------|----------------------|
 | Entire group button opened dropdown | Icon activates tool; chevron opens menu |
 | Same UX, less precise | Right-click opens menu |

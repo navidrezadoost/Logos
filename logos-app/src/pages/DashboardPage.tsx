@@ -3,7 +3,7 @@ import {
   createProject,
   getProfile,
   getProjects,
-  openPenpotWorkspace,
+  openWorkspace,
   projectPhotoUrl,
   resolveProjectDesign,
 } from "../api/client";
@@ -65,7 +65,7 @@ export function DashboardPage(): React.ReactElement {
       const fileId = created["file-id"];
       const pageId = created.pages?.[0];
       if (fileId && pageId) {
-        openPenpotWorkspace(teamId, fileId, pageId);
+        openWorkspace(teamId, fileId, pageId);
         return;
       }
       await load();
@@ -85,7 +85,7 @@ export function DashboardPage(): React.ReactElement {
         throw new Error("No team found for your account.");
       }
       const { fileId, pageId } = await resolveProjectDesign(project);
-      openPenpotWorkspace(teamId, fileId, pageId);
+      openWorkspace(teamId, fileId, pageId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to open project");
     } finally {

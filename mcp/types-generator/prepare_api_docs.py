@@ -15,9 +15,9 @@ import sys
 
 log = logging.getLogger(__name__)
 
-class PenpotAPIContentMarkdownConverter(MarkdownConverter):
+class LogosAPIContentMarkdownConverter(MarkdownConverter):
     """
-    Markdown converter for Penpot API docs, specifically for the .col-content element
+    Markdown converter for Logos API docs, specifically for the .col-content element
     (and sub-elements thereof)
     """
     def process_tag(self, node, parent_tags=None):
@@ -134,9 +134,9 @@ class YamlConverter:
             self.yaml.dump(processed_data, f)
 
 
-class PenpotAPIDocsProcessor:
+class LogosAPIDocsProcessor:
     def __init__(self, url=None):
-        self.md_converter = PenpotAPIContentMarkdownConverter()
+        self.md_converter = LogosAPIContentMarkdownConverter()
         self.base_url = url
         self.types: dict[str, TypeInfo] = {}
         self.type_referenced_by: dict[str, set[str]] = collections.defaultdict(set)
@@ -244,7 +244,7 @@ def main():
     url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_API_DOCS_URL
 
     print("Fetching plugin data from: {}".format(url))
-    PenpotAPIDocsProcessor(url).run(target_dir=str(target_dir))
+    LogosAPIDocsProcessor(url).run(target_dir=str(target_dir))
 
 
 def debug_type_conversion(rel_url: str):
@@ -255,7 +255,7 @@ def debug_type_conversion(rel_url: str):
     :param rel_url: relative URL of the type page (e.g., "interfaces/ShapeBase")
     """
     type_name = rel_url.split("/")[-1]
-    processor = PenpotAPIDocsProcessor()
+    processor = LogosAPIDocsProcessor()
     type_info = processor.process_page(rel_url, type_name)
     print(f"--- overview ---\n{type_info.overview}\n")
     for member_type, members in type_info.members.items():

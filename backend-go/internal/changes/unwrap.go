@@ -2,7 +2,7 @@ package changes
 
 import "strings"
 
-// Unwrap expands Penpot Transit tagged values (~#shape, ~#matrix, ~#point, …)
+// Unwrap expands Logos Transit tagged values (~#shape, ~#matrix, ~#point, …)
 // into plain JSON maps and slices suitable for storage in file.data.
 func Unwrap(v any) any {
 	switch val := v.(type) {

@@ -10,7 +10,7 @@
  *
  * Each source maps to a separate LogosTokenSet.
  * A single "XD Default" theme is emitted for consistency with the
- * Figma/Sketch token model.
+ * shared token model.
  */
 
 import type {
@@ -28,7 +28,7 @@ import type {
   LogosTokenSet,
   LogosTokenTheme,
   LogosToken,
-} from "../figma/figma-token-converter";
+} from "../tokens/token-types";
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 

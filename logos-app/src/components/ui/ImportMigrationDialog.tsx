@@ -1,25 +1,22 @@
 /**
  * components/ui/ImportMigrationDialog.tsx
  *
- * Phase IM1/IM3/IM4 — Modal dialog for importing design files from Figma, Sketch, and Adobe XD.
+ * Modal dialog for importing design files from Sketch and Adobe XD.
  *
  * Supported sources:
- *   - Figma plugin JSON export (.logos-figma.json)
- *   - Figma REST API (file key + personal access token)
- *   - Sketch (.sketch archive)  ← IM3
- *   - Adobe XD (.xd archive)    ← IM4
+ *   - Sketch (.sketch archive)
+ *   - Adobe XD (.xd archive)
  *
  * Usage:
  *   <ImportMigrationDialog open={open} onClose={() => setOpen(false)} />
  */
 
 import React, { useCallback, useRef, useState } from "react";
-import { importFigmaTokenFile } from "../../migration/figma/figma-importer";
 import { useTokenStore } from "../../stores/tokenStore";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ImportSource = "figma-plugin" | "figma-api" | "sketch" | "xd";
+type ImportSource = "sketch" | "xd";
 
 interface ImportMigrationDialogProps {
   open: boolean;
@@ -47,60 +44,21 @@ type Phase =
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ImportMigrationDialog({ open, onClose }: ImportMigrationDialogProps) {
-  const [source, setSource] = useState<ImportSource>("figma-plugin");
-  const [apiKey, setApiKey] = useState("");
-  const [fileKey, setFileKey] = useState("");
+  const [source, setSource] = useState<ImportSource>("sketch");
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const sketchFileInputRef = useRef<HTMLInputElement>(null);
   const xdFileInputRef = useRef<HTMLInputElement>(null);
   const loadImport = useTokenStore((s) => s.loadImport);
 
   const reset = useCallback(() => {
     setPhase({ kind: "idle" });
-    setApiKey("");
-    setFileKey("");
   }, []);
 
   const handleClose = useCallback(() => {
     reset();
     onClose();
   }, [reset, onClose]);
-
-  const handleFilePick = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setPhase({ kind: "loading" });
-    const result = await importFigmaTokenFile(file);
-
-    if (!result.ok) {
-      setPhase({ kind: "error", message: result.error });
-      return;
-    }
-
-    loadImport(result.conversion.sets, result.conversion.themes);
-
-    const tokenCount = result.conversion.sets.reduce(
-      (acc, s) => acc + s.tokens.length, 0
-    );
-    setPhase({
-      kind: "success",
-      tokenCount,
-      themeCount: result.conversion.themes.length,
-      warnings: [
-        ...result.conversion.warnings,
-        ...(result.shapeConversion?.warnings ?? []),
-      ],
-      documentName: result.documentName,
-      shapeCount: result.shapeConversion?.shapes.length,
-      pageCount: result.shapeConversion?.pageRoots.length,
-    });
-
-    // Reset file input so the same file can be re-imported if needed
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, [loadImport]);
 
   const handleSketchFilePick = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -171,32 +129,6 @@ export function ImportMigrationDialog({ open, onClose }: ImportMigrationDialogPr
     if (xdFileInputRef.current) xdFileInputRef.current.value = "";
   }, [loadImport]);
 
-  const handleApiImport = useCallback(async () => {
-    if (!apiKey.trim() || !fileKey.trim()) return;
-
-    setPhase({ kind: "loading" });
-    const { importFigmaViaApi } = await import("../../migration/figma/figma-importer");
-    const result = await importFigmaViaApi(fileKey.trim(), apiKey.trim());
-
-    if (!result.ok) {
-      setPhase({ kind: "error", message: result.error });
-      return;
-    }
-
-    loadImport(result.conversion.sets, result.conversion.themes);
-
-    const tokenCount = result.conversion.sets.reduce(
-      (acc, s) => acc + s.tokens.length, 0
-    );
-    setPhase({
-      kind: "success",
-      tokenCount,
-      themeCount: result.conversion.themes.length,
-      warnings: result.conversion.warnings,
-      documentName: result.documentName,
-    });
-  }, [apiKey, fileKey, loadImport]);
-
   if (!open) return null;
 
   return (
@@ -230,25 +162,6 @@ export function ImportMigrationDialog({ open, onClose }: ImportMigrationDialogPr
 
         {/* Body */}
         <div style={styles.body}>
-          {source === "figma-plugin" && (
-            <FigmaPluginPanel
-              phase={phase}
-              fileInputRef={fileInputRef}
-              onFilePick={handleFilePick}
-              onRetry={reset}
-            />
-          )}
-          {source === "figma-api" && (
-            <FigmaApiPanel
-              phase={phase}
-              apiKey={apiKey}
-              fileKey={fileKey}
-              onApiKeyChange={setApiKey}
-              onFileKeyChange={setFileKey}
-              onImport={handleApiImport}
-              onRetry={reset}
-            />
-          )}
           {(source === "sketch") && (
             <SketchPanel
               phase={phase}
@@ -272,120 +185,6 @@ export function ImportMigrationDialog({ open, onClose }: ImportMigrationDialogPr
 }
 
 // ─── Sub-panels ───────────────────────────────────────────────────────────────
-
-function FigmaPluginPanel({
-  phase,
-  fileInputRef,
-  onFilePick,
-  onRetry,
-}: {
-  phase: Phase;
-  fileInputRef: React.RefObject<HTMLInputElement>;
-  onFilePick: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onRetry: () => void;
-}) {
-  return (
-    <div style={styles.panelContent}>
-      <p style={styles.description}>
-        Install the free <strong style={{ color: "#7efff5" }}>Logos Figma Plugin</strong> in
-        your Figma file, click <em>Export for Logos</em>, then drag-and-drop or select
-        the downloaded <code>.logos-figma.json</code> file below.
-      </p>
-
-      <a
-        href="https://www.figma.com/community/plugin/logos-export"
-        target="_blank"
-        rel="noreferrer"
-        style={styles.link}
-      >
-        → Open plugin in Figma Community
-      </a>
-
-      {phase.kind === "idle" && (
-        <label style={styles.dropZone}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            style={{ display: "none" }}
-            onChange={onFilePick}
-          />
-          <span style={styles.dropIcon}>⬆</span>
-          <span>Select <code>.logos-figma.json</code></span>
-          <span style={styles.dropSub}>or drag and drop here</span>
-        </label>
-      )}
-
-      {phase.kind === "loading" && <Spinner />}
-      {phase.kind === "success" && <SuccessPanel phase={phase} onImportMore={onRetry} />}
-      {phase.kind === "error" && <ErrorPanel message={phase.message} onRetry={onRetry} />}
-    </div>
-  );
-}
-
-function FigmaApiPanel({
-  phase, apiKey, fileKey,
-  onApiKeyChange, onFileKeyChange,
-  onImport, onRetry,
-}: {
-  phase: Phase;
-  apiKey: string;
-  fileKey: string;
-  onApiKeyChange: (v: string) => void;
-  onFileKeyChange: (v: string) => void;
-  onImport: () => void;
-  onRetry: () => void;
-}) {
-  const ready = apiKey.trim().length > 0 && fileKey.trim().length > 0;
-
-  return (
-    <div style={styles.panelContent}>
-      <p style={styles.description}>
-        Provide a Figma personal access token and the file key from the URL.
-        No data is stored on our servers — requests go directly to Figma's API.
-      </p>
-
-      {(phase.kind === "idle" || phase.kind === "error") && (
-        <>
-          <label style={styles.fieldLabel}>
-            Personal access token
-            <input
-              type="password"
-              autoComplete="off"
-              placeholder="figd_…"
-              value={apiKey}
-              onChange={(e) => onApiKeyChange(e.target.value)}
-              style={styles.input}
-            />
-          </label>
-          <label style={styles.fieldLabel}>
-            File key <span style={styles.fieldHint}>(from the Figma URL: /design/<strong>KEY</strong>/…)</span>
-            <input
-              type="text"
-              placeholder="abc123XYZ…"
-              value={fileKey}
-              onChange={(e) => onFileKeyChange(e.target.value)}
-              style={styles.input}
-            />
-          </label>
-          {phase.kind === "error" && (
-            <p style={styles.errorText}>✕ {phase.message}</p>
-          )}
-          <button
-            style={{ ...styles.primaryBtn, ...(ready ? {} : styles.primaryBtnDisabled) }}
-            disabled={!ready}
-            onClick={onImport}
-          >
-            Import via API
-          </button>
-        </>
-      )}
-
-      {phase.kind === "loading" && <Spinner />}
-      {phase.kind === "success" && <SuccessPanel phase={phase} onImportMore={onRetry} />}
-    </div>
-  );
-}
 
 function SketchPanel({
   phase,
@@ -485,19 +284,6 @@ function XdPanel({
   );
 }
 
-function ComingSoonPanel({ platform }: { platform: string }) {
-  return (
-    <div style={{ ...styles.panelContent, alignItems: "center", textAlign: "center", paddingTop: 32 }}>
-      <span style={{ fontSize: 40 }}>{platform === "Sketch" ? "🖍" : "🟠"}</span>
-      <p style={{ ...styles.description, marginTop: 12 }}>
-        <strong>{platform}</strong> importer is coming soon.<br />
-        It will support Symbols, Shared Styles, and Smart Layout — all mapped
-        to Logos components and tokens.
-      </p>
-    </div>
-  );
-}
-
 function SuccessPanel({
   phase,
   onImportMore,
@@ -558,8 +344,6 @@ function Spinner() {
 // ─── Source config ────────────────────────────────────────────────────────────
 
 const SOURCES: { id: ImportSource; label: string; comingSoon?: boolean }[] = [
-  { id: "figma-plugin", label: "Figma (plugin)" },
-  { id: "figma-api",    label: "Figma (API)" },
   { id: "sketch",       label: "Sketch" },
   { id: "xd",          label: "Adobe XD" },
 ];

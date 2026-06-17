@@ -66,7 +66,7 @@ func matricesEqual(a any, m map[string]any) bool {
 	return true
 }
 
-// matrixToMap converts Penpot matrix values to {a,b,c,d,e,f} maps.
+// matrixToMap converts Logos matrix values to {a,b,c,d,e,f} maps.
 // Plain arrays are not decoded as Matrix instances by the frontend.
 func matrixToMap(v any) (map[string]any, bool) {
 	if v == nil {

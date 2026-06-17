@@ -92,7 +92,7 @@ export function ToolDropdown({
               textAlign: "left",
             }}
           >
-            {/* Checkmark when active (Figma-style) */}
+            {/* Checkmark when active (grouped) */}
             <span
               style={{
                 width: 14,

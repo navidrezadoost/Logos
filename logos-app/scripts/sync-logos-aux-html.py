@@ -15,9 +15,9 @@ HTML_FILES = ("rasterizer.html", "render.html")
 
 def read_version_tag() -> tuple[str, str, str]:
     text = CONFIG.read_text(encoding="utf-8", errors="replace") if CONFIG.is_file() else ""
-    ver = re.search(r'penpotVersion\s*=\s*"([^"]+)"', text)
-    tag = re.search(r'penpotVersionTag\s*=\s*"([^"]+)"', text)
-    build = re.search(r'penpotBuildDate\s*=\s*"([^"]+)"', text)
+    ver = re.search(r'logosVersion\s*=\s*"([^"]+)"', text)
+    tag = re.search(r'logosVersionTag\s*=\s*"([^"]+)"', text)
+    build = re.search(r'logosBuildDate\s*=\s*"([^"]+)"', text)
     version = ver.group(1) if ver else "2.15.3"
     version_tag = tag.group(1) if tag else version
     build_date = build.group(1) if build else ""

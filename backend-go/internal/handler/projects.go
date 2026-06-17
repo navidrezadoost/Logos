@@ -43,7 +43,7 @@ type Project struct {
 }
 
 // CreatedProject is returned by create-project. Includes the auto-seeded design
-// file so the client can navigate straight into the workspace (Figma-style flow).
+// file so the client can navigate straight into the workspace (external design tool-style flow).
 type CreatedProject struct {
 	Project
 	Pages []string `json:"pages"`
@@ -284,7 +284,7 @@ type createProjectInput struct {
 }
 
 // CreateProjectHandler creates a new project under a team and seeds a starter
-// design file so the client can open the editor immediately (Figma-style).
+// design file so the client can open the editor immediately (external design tool-style).
 func CreateProjectHandler(pool *db.Pool, store storage.Backend) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())

@@ -64,7 +64,7 @@ before any public disclosure.
 - SQL injection or unauthorized database access
 - Path traversal or unauthorized file access in storage backends
 - Token forgery or session hijacking
-- Insecure deserialization in `.logos` / `.penpot` file import
+- Insecure deserialization in `.logos` / `.logos` file import
 - Plugin sandbox escape (TypeScript sandbox or WASM runtime)
 - Sensitive data exposure in API responses
 - Denial of service via crafted requests or files
@@ -110,7 +110,7 @@ These notes are for researchers auditing the codebase.
 
 ### File Format
 
-- `.logos` / `.penpot` import validates the manifest type before processing
+- `.logos` / `.logos` import validates the manifest type before processing
 - Media blobs are size-limited before storage
 - File IDs are UUIDs — not user-controlled strings
 

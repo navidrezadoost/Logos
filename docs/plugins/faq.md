@@ -18,9 +18,9 @@ It’s not obligatory but keep in mind that the containing modal will change col
 
 By the time being any and all plugins must be hosted independently and outside the Logos environment. Check the <a target="_blank" href="/plugins/deployment/">documentation</a> for a guide on how to deploy your plugin on some deployment services like Netlify or Cloudflare.
 
-### Is there any way to export my figma plugins to logos?
+### Is there any way to export my external-design-tool plugins to logos?
 
-No. The feature set of figma and logos are not the same so it’s not compatible.
+No. The feature set of external-design-tool and logos are not the same so it’s not compatible.
 
 ### What is the recommended size for my plugin icon?
 

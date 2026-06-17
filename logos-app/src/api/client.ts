@@ -120,7 +120,7 @@ export function projectPhotoUrl(photoId: string | undefined): string | null {
   return `/assets/by-id/${photoId}`;
 }
 
-export function penpotWorkspaceURL(
+export function workspaceURL(
   teamId: string,
   fileId: string,
   pageId: string
@@ -133,22 +133,22 @@ export function penpotWorkspaceURL(
   return `/workspace.html#/workspace?${params.toString()}`;
 }
 
-/** Navigate into the full Penpot/Logos design editor (not the React spike). */
-export function openPenpotWorkspace(
+/** Navigate into the full Loogs design editor. */
+export function openWorkspace(
   teamId: string,
   fileId: string,
   pageId: string
 ): void {
-  window.location.assign(penpotWorkspaceURL(teamId, fileId, pageId));
+  window.location.assign(workspaceURL(teamId, fileId, pageId));
 }
 
-/** @deprecated Use penpotWorkspaceURL — React /workspace route is not the Penpot editor. */
+/** @deprecated Use workspaceURL. */
 export function workspacePath(
   teamId: string,
   fileId: string,
   pageId: string
 ): string {
-  return penpotWorkspaceURL(teamId, fileId, pageId);
+  return workspaceURL(teamId, fileId, pageId);
 }
 
 /** Resolve file + first page for opening a project in the editor. */

@@ -1,5 +1,5 @@
 /**
- * Logos system icons for Penpot workspace (Font Awesome sharp-solid).
+ * Logos system icons for Logos workspace (Font Awesome sharp-solid).
  * AUTO-GENERATED — run: python scripts/build-workspace-icons.py
  */
 (function (global) {

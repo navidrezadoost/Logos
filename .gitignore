@@ -9,7 +9,6 @@ logos-wasm/dist/
 backend/logs/
 backend/scripts/_env.local
 Cargo.lock
-
 # Frontend build outputs
 frontend/resources/public/css/
 frontend/resources/public/fonts/
@@ -54,7 +53,7 @@ frontend/resources/public/images/on-*.svg
 frontend/resources/public/images/onboarding-*.png
 frontend/resources/public/images/onboarding-*.jpg
 frontend/resources/public/images/open-source.svg
-frontend/resources/public/images/penpot-login.jpg
+frontend/resources/public/images/logos-login.jpg
 frontend/resources/public/images/ph-*.svg
 frontend/resources/public/images/project-placeholder.svg
 frontend/resources/public/images/registration-illustration.png
@@ -66,15 +65,11 @@ frontend/resources/public/images/video-tutorials.svg
 frontend/resources/public/images/walkthrough-cover.png
 frontend/resources/public/images/welcomeilustration.svg
 !frontend/resources/public/images/logos-logo.png
-
 # Storybook build outputs
 frontend/.storybook/preview-*.html
-
 # Shadow-cljs cache
 shadow/
-
 # Plugin build outputs
 plugins/libs/plugins-runtime/
-
 # Backup files
 *.bak

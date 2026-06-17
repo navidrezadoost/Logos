@@ -81,7 +81,7 @@ and injects `profileID` into the request context via `auth.WithProfileID`.
 
 ### Token compatibility
 
-Tokens issued by the original Clojure backend with `"aud": "penpot"` decrypt
+Tokens issued by the original Clojure backend with `"aud": "logos"` decrypt
 correctly — the Go verifier reads but does not assert the audience value.
 New tokens use `"aud": "logos"`.
 

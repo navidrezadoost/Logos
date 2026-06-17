@@ -1,26 +1,14 @@
 /**
- * Logos — Move / Hand / Scale (Figma-style tool group on the Move slot).
+ * Logos — Move / Hand / Scale (grouped tool control on the Move slot).
  *
- * One combo control overlays Penpot's Move button: active tool icon + chevron.
- * Move delegates to Penpot; Hand pans the viewport; Scale enables uniform resize.
+ * One combo control overlays workspace Move button: active tool icon + chevron.
+ * Move delegates to workspace; Hand pans the viewport; Scale enables uniform resize.
  */
 (function () {
   "use strict";
 
   var LOG_PREFIX = "[logos-move-tool]";
-  var BUILD = "2026-05-30-figma-combo7";
-  var DRAG_THRESHOLD_PX = 3;
-
-  var WORKSPACE_VIEWPORT_SEL = ".main_ui_workspace__workspace-viewport";
-  var WORKSPACE_CONTENT_SEL = ".main_ui_workspace__workspace-content";
-  var CANVAS_IGNORE_SEL =
-    ".main_ui_workspace_top_toolbar__main-toolbar," +
-    ".main_ui_workspace_left_header," +
-    ".main_ui_workspace_right_header," +
-    ".main_ui_workspace_sidebar," +
-    ".logos-move-tool-menu," +
-    ".logos-toolbar-position-menu," +
-    "#modal";
+  var BUILD = "2026-06-17-hand-pan2";
 
   if (
     localStorage.getItem("logos:workspace:no-toolbar") === "1" ||
@@ -75,8 +63,6 @@
   var TOOLBAR_SEL = ".main_ui_workspace_top_toolbar__main-toolbar";
   var OPTIONS_SEL = ".main_ui_workspace_top_toolbar__main-toolbar-options";
   var BTN_CLASS = "main_ui_workspace_top_toolbar__main-toolbar-options-button";
-  var VIEWPORT_SEL =
-    ".main_ui_workspace__workspace-viewport, .viewport-controls, .viewport-selrect, #viewport-controls, canvas";
 
   var LABELS = { move: "Move", hand: "Hand", scale: "Scale" };
   var SHORTCUTS = { move: "V", hand: "H", scale: "K" };
@@ -84,12 +70,9 @@
   var openMenuEl = null;
   var menuAnchorRef = null;
   var menuDismissHandler = null;
-  var viewportDragBound = false;
-  var viewportDragMode = null;
-  var lastPanPoint = null;
-  var pendingHandDrag = null;
-  var handPointerSession = false;
-  var spacePanActive = false;
+  var workspaceSpaceKeyHeld = false;
+  var workspaceSpaceActive = false;
+  var handPointerDrag = null;
   var toolbarRef = null;
   var moveBtnRef = null;
   var comboRef = null;
@@ -117,7 +100,11 @@
   }
 
   function isPanModeActive() {
-    return readTool() === "hand" || spacePanActive;
+    return readTool() === "hand" || workspaceSpaceKeyHeld || workspaceSpaceActive || !!handPointerDrag;
+  }
+
+  function wantsWorkspaceSpace() {
+    return readTool() === "hand" || workspaceSpaceKeyHeld;
   }
 
   function systemIcon(key) {
@@ -139,76 +126,298 @@
     return systemIcon(tool);
   }
 
-  function penpotAPP() {
+  function workspaceAPP() {
     return globalThis.$APP || null;
   }
 
   function panningApiReady() {
-    var APP = penpotAPP();
+    var APP = workspaceAPP();
     return !!(
       APP &&
-      APP.$app$main$store$emit_BANG_ &&
-      APP.$app$main$data$workspace$viewport$update_viewport_position$$
+      APP.$app$main$store$emit_BANG_$$ &&
+      APP.$app$util$keyboard$KeyboardEvent$$
     );
   }
 
-  function getViewportZoom() {
-    var APP = penpotAPP();
-    if (!APP || !APP.$app$main$store$state$$ || !APP.$cljs$core$_deref$$ || !APP.$cljs$core$get_in$$) {
+  function directPanApiReady() {
+    var APP = workspaceAPP();
+    return !!(
+      APP &&
+      APP.$app$main$store$emit_BANG_$$ &&
+      APP.$app$main$data$workspace$viewport$update_viewport_position$$ &&
+      APP.$cljs$core$PersistentArrayMap$$ &&
+      APP.$cljs$cst$1500$x$$ &&
+      APP.$cljs$cst$1501$y$$
+    );
+  }
+
+  function panApiDiagnostics() {
+    var APP = workspaceAPP();
+    var viewportKeys = [];
+    if (APP) {
+      try {
+        Object.keys(APP).forEach(function (key) {
+          if (key.indexOf("$app$main$data$workspace$viewport$") === 0) {
+            viewportKeys.push(key);
+          }
+        });
+      } catch (e) {
+        viewportKeys = ["<key scan failed>"];
+      }
+    }
+    return {
+      hasAPP: !!APP,
+      hasStoreEmit: !!(APP && APP.$app$main$store$emit_BANG_$$),
+      hasStoreState: !!(APP && APP.$app$main$store$state$$),
+      hasKeyboardEvent: !!(APP && APP.$app$util$keyboard$KeyboardEvent$$),
+      hasUpdateViewportPosition: !!(APP && APP.$app$main$data$workspace$viewport$update_viewport_position$$),
+      hasPersistentArrayMap: !!(APP && APP.$cljs$core$PersistentArrayMap$$),
+      hasKeywordX: !!(APP && APP.$cljs$cst$1500$x$$),
+      hasKeywordY: !!(APP && APP.$cljs$cst$1501$y$$),
+      viewportKeys: viewportKeys.slice(0, 12),
+    };
+  }
+
+  function currentZoom() {
+    var APP = workspaceAPP();
+    if (!APP || !APP.$app$main$store$state$$ || !APP.$cljs$core$_deref$$ || !APP.$cljs$core$get$$) {
       return 1;
     }
     try {
       var state = APP.$cljs$core$_deref$$(APP.$app$main$store$state$$);
-      var zoom = APP.$cljs$core$get_in$$.$cljs$core$IFn$_invoke$arity$2$(
+      var local = APP.$cljs$core$get$$.$cljs$core$IFn$_invoke$arity$2$(
         state,
-        new APP.$cljs$core$PersistentVector$(
-          null,
-          2,
-          5,
-          APP.$cljs$core$PersistentVector$EMPTY_NODE$$,
-          [APP.$cljs$cst$1906$workspace_local$$, APP.$cljs$cst$2159$zoom$$],
-          null
-        )
+        APP.$cljs$cst$1906$workspace_local$$
       );
-      return zoom && zoom > 0 ? zoom : 1;
+      var zoom = APP.$cljs$core$get$$.$cljs$core$IFn$_invoke$arity$2$(
+        local,
+        APP.$cljs$cst$2159$zoom$$
+      );
+      return typeof zoom === "number" && isFinite(zoom) && zoom > 0 ? zoom : 1;
     } catch (e) {
       return 1;
     }
   }
 
-  function penpotEmit(event) {
-    var APP = penpotAPP();
-    if (!APP || !APP.$app$main$store$emit_BANG_) return false;
+  function persistentArrayMap(entries) {
+    var APP = workspaceAPP();
+    if (!APP || typeof APP.$cljs$core$PersistentArrayMap$$ !== "function") {
+      return null;
+    }
+    return new APP.$cljs$core$PersistentArrayMap$$(null, entries.length / 2, entries, null);
+  }
+
+  function emitViewportPan(screenDx, screenDy) {
+    var APP = workspaceAPP();
+    if (!directPanApiReady()) return false;
+    var zoom = currentZoom();
+    var deltaX = -screenDx / zoom;
+    var deltaY = -screenDy / zoom;
     try {
-      APP.$app$main$store$emit_BANG_.$cljs$core$IFn$_invoke$arity$1$(event);
-      return true;
+      var event = APP.$app$main$data$workspace$viewport$update_viewport_position$$(
+        persistentArrayMap([
+          APP.$cljs$cst$1500$x$$,
+          function (v) { return v + deltaX; },
+          APP.$cljs$cst$1501$y$$,
+          function (v) { return v + deltaY; },
+        ])
+      );
+      return workspaceEmit(event);
     } catch (e) {
-      error("penpotEmit failed", e);
+      error("emitViewportPan failed", e);
       return false;
     }
   }
 
-  function penpotEmitVariadic(event, rest) {
-    var APP = penpotAPP();
-    if (!APP || !APP.$app$main$store$emit_BANG_) return false;
+  function isWorkspacePointerTarget(target) {
+    if (!target || !target.closest) return false;
+    if (
+      target.closest(TOOLBAR_SEL) ||
+      target.closest(".logos-move-tool-menu") ||
+      target.closest(".logos-toolbar-position-menu")
+    ) {
+      return false;
+    }
+    return !!target.closest(
+      ".main_ui_workspace__workspace-viewport, " +
+      ".main_ui_workspace_viewport__viewport, " +
+      "#viewport-controls, " +
+      ".viewport-controls, " +
+      ".viewport-selrect"
+    );
+  }
+
+  function cancelHandPointerDrag(source) {
+    if (!handPointerDrag) return;
+    handPointerDrag = null;
+    document.body.classList.remove("logos-move-tool-hand-dragging");
+    log("hand pointer drag ended", source || "");
+  }
+
+  function bindHandPointerPan() {
+    document.addEventListener(
+      "pointerdown",
+      function (e) {
+        if (readTool() !== "hand" || e.button !== 0 || isInputTarget(e.target)) return;
+        if (!isWorkspacePointerTarget(e.target)) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        emitWorkspaceInterrupt();
+        handPointerDrag = {
+          pointerId: e.pointerId,
+          lastClientX: e.clientX,
+          lastClientY: e.clientY,
+          blocked: !directPanApiReady(),
+        };
+        document.body.classList.add("logos-move-tool-hand-dragging");
+
+        if (handPointerDrag.blocked) {
+          handLog("pointer pan captured but API blocked", {
+            target: describeTarget(e.target),
+            api: panApiDiagnostics(),
+          });
+          syncWorkspaceSpaceState("hand-pointerdown-fallback");
+          return;
+        }
+
+        handLog("pointer pan start", {
+          target: describeTarget(e.target),
+          api: panApiDiagnostics(),
+        });
+      },
+      true
+    );
+
+    document.addEventListener(
+      "pointermove",
+      function (e) {
+        if (!handPointerDrag || e.pointerId !== handPointerDrag.pointerId) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        var dx = e.clientX - handPointerDrag.lastClientX;
+        var dy = e.clientY - handPointerDrag.lastClientY;
+        handPointerDrag.lastClientX = e.clientX;
+        handPointerDrag.lastClientY = e.clientY;
+        if (handPointerDrag.blocked) return;
+        if (dx || dy) emitViewportPan(dx, dy);
+      },
+      true
+    );
+
+    document.addEventListener(
+      "pointerup",
+      function (e) {
+        if (!handPointerDrag || e.pointerId !== handPointerDrag.pointerId) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        cancelHandPointerDrag("pointerup");
+      },
+      true
+    );
+
+    document.addEventListener(
+      "pointercancel",
+      function (e) {
+        if (!handPointerDrag || e.pointerId !== handPointerDrag.pointerId) return;
+        cancelHandPointerDrag("pointercancel");
+      },
+      true
+    );
+
+    document.addEventListener(
+      "click",
+      function (e) {
+        if (readTool() !== "hand") return;
+        if (!isWorkspacePointerTarget(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        handLog("click suppressed in hand mode", describeTarget(e.target));
+      },
+      true
+    );
+  }
+
+  function emitworkspaceKeyboardEvent(down, nativeEvent) {
+    var APP = workspaceAPP();
+    if (!APP || !APP.$app$util$keyboard$KeyboardEvent$$) return false;
+    var type = down ? APP.$cljs$cst$1939$down$$ : APP.$cljs$cst$1940$up$$;
+    var dom = nativeEvent || null;
+    try {
+      workspaceEmit(
+        new APP.$app$util$keyboard$KeyboardEvent$$(
+          type,
+          " ",
+          dom ? dom.shiftKey : false,
+          dom ? dom.ctrlKey : false,
+          dom ? dom.altKey : false,
+          dom ? dom.metaKey : false,
+          dom ? APP.$app$util$keyboard$mod_QMARK_$$(dom) : false,
+          false,
+          dom,
+          null,
+          null,
+          null
+        )
+      );
+      return true;
+    } catch (e) {
+      error("emitworkspaceKeyboardEvent failed", e);
+      return false;
+    }
+  }
+
+  function syncWorkspaceSpaceState(source) {
+    var wantSpace = wantsWorkspaceSpace();
+    if (wantSpace === workspaceSpaceActive) return true;
+    if (!panningApiReady()) {
+      handLog("syncWorkspaceSpace blocked — API not ready", { want: wantSpace, source: source || "" });
+      return false;
+    }
+    if (!emitworkspaceKeyboardEvent(wantSpace, null)) return false;
+    workspaceSpaceActive = wantSpace;
+    handLog("syncWorkspaceSpace", { active: wantSpace, tool: readTool(), source: source || "" });
+    return true;
+  }
+
+  function workspaceEmit(event) {
+    var APP = workspaceAPP();
+    if (!APP || !APP.$app$main$store$emit_BANG_$$) return false;
+    try {
+      APP.$app$main$store$emit_BANG_$$.$cljs$core$IFn$_invoke$arity$1$(event);
+      return true;
+    } catch (e) {
+      error("workspaceEmit failed", e);
+      return false;
+    }
+  }
+
+  function workspaceEmitVariadic(event, rest) {
+    var APP = workspaceAPP();
+    if (!APP || !APP.$app$main$store$emit_BANG_$$) return false;
     try {
       if (rest && rest.length && APP.$cljs$core$prim_seq$cljs$0core$0IFn$0_invoke$0arity$02$$) {
-        APP.$app$main$store$emit_BANG_.$cljs$core$IFn$_invoke$arity$variadic$(
+        APP.$app$main$store$emit_BANG_$$.$cljs$core$IFn$_invoke$arity$variadic$(
           event,
           APP.$cljs$core$prim_seq$cljs$0core$0IFn$0_invoke$0arity$02$$(rest)
         );
       } else {
-        APP.$app$main$store$emit_BANG_.$cljs$core$IFn$_invoke$arity$1$(event);
+        APP.$app$main$store$emit_BANG_$$.$cljs$core$IFn$_invoke$arity$1$(event);
       }
       return true;
     } catch (e) {
-      error("penpotEmitVariadic failed", e);
+      error("workspaceEmitVariadic failed", e);
       return false;
     }
   }
 
   function isScaleTextEnabled() {
-    var APP = penpotAPP();
+    var APP = workspaceAPP();
     if (!APP || !APP.$app$main$refs$workspace_layout$$ || !APP.$rumext$v2$deref$$) {
       return false;
     }
@@ -224,7 +433,7 @@
   }
 
   function setScaleTextEnabled(enabled) {
-    var APP = penpotAPP();
+    var APP = workspaceAPP();
     if (!APP) return;
     var flag = APP.$cljs$cst$3657$scale_text$$;
     var fn = APP.$app$main$data$workspace$layout$toggle_layout_flag$$;
@@ -235,8 +444,12 @@
 
     if (enabled) {
       var forceKey = APP.$cljs$cst$3675$force_QMARK_;
-      var opts = new APP.$cljs$core$PersistentArrayMap$(null, 1, [forceKey, true], null);
-      penpotEmit(
+      var opts = persistentArrayMap([forceKey, true]);
+      if (!opts) {
+        error("scale-text flag blocked — map API not ready", panApiDiagnostics());
+        return;
+      }
+      workspaceEmit(
         fn.$cljs$core$IFn$_invoke$arity$variadic$(
           flag,
           APP.$cljs$core$prim_seq$cljs$0core$0IFn$0_invoke$0arity$02$$([opts])
@@ -246,7 +459,7 @@
       return;
     }
 
-    penpotEmit(fn(flag));
+    workspaceEmit(fn(flag));
     log("scale-text flag disabled");
   }
 
@@ -283,36 +496,43 @@
     primary.setAttribute("aria-label", LABELS[tool]);
     comboRef.setAttribute("data-active-tool", tool);
 
-    var penpotSelected =
+    var workspaceSelected =
       moveBtnRef &&
       moveBtnRef.classList.contains("main_ui_workspace_top_toolbar__selected");
     primary.classList.toggle(
       "logos-move-tool-combo__main--active",
-      tool === "hand" || tool === "scale" || (tool === "move" && penpotSelected)
+      tool === "hand" || tool === "scale" || (tool === "move" && workspaceSelected)
     );
   }
 
   function emitWorkspaceInterrupt() {
     var fn = globalThis.$app$main$data$workspace$comments$handle_interrupt$$;
     if (typeof fn === "function") {
-      penpotEmit(fn());
+      workspaceEmit(fn());
     }
   }
 
-  function cljsPoint(x, y) {
-    var APP = penpotAPP();
-    if (!APP || !APP.$app$common$geom$point$point$$) return null;
-    return APP.$app$common$geom$point$point$$.$cljs$core$IFn$_invoke$arity$2$(x, y);
-  }
-
-  function isHandModeActive() {
-    return isPanModeActive();
+  function ensureWorkspaceSpaceSynced() {
+    var attempts = 0;
+    function tick() {
+      attempts++;
+      if (panningApiReady()) {
+        syncWorkspaceSpaceState("workspace-ready");
+        return;
+      }
+      if (attempts < 6000) {
+        requestAnimationFrame(tick);
+      }
+    }
+    tick();
   }
 
   function applyToolState(tool) {
     document.body.classList.toggle("logos-move-tool-hand", tool === "hand");
     document.body.classList.toggle("logos-move-tool-scale", tool === "scale");
+    document.body.classList.toggle("logos-move-tool-space", workspaceSpaceKeyHeld);
     updateComboDisplay();
+    syncWorkspaceSpaceState("apply-tool-state");
     log("tool state", tool);
   }
 
@@ -325,7 +545,8 @@
     applyToolState(tool);
 
     if (tool === "hand") {
-      // Same underlying mode as Space+Move: keep Penpot on the move tool.
+      // Keep workspace on the move slot for toolbar state, but canvas drag is
+      // intercepted above and sent to the viewport pan API.
       setScaleTextEnabled(false);
       if (moveBtnRef) {
         try {
@@ -446,21 +667,6 @@
     updateComboDisplay();
   }
 
-  function isViewportTarget(target) {
-    if (!target || !target.closest) return false;
-    if (target.closest(CANVAS_IGNORE_SEL)) return false;
-    if (openMenuEl && openMenuEl.contains(target)) return false;
-    var app = document.getElementById("app");
-    if (!app || !app.contains(target)) return false;
-    if (target.closest(WORKSPACE_VIEWPORT_SEL)) return true;
-    if (target.closest(VIEWPORT_SEL)) return true;
-    if (target.closest(WORKSPACE_CONTENT_SEL)) {
-      if (target.closest(".main_ui_workspace_sidebar")) return false;
-      return true;
-    }
-    return false;
-  }
-
   function isInputTarget(target) {
     if (!target) return false;
     return (
@@ -471,76 +677,76 @@
     );
   }
 
-  function emitStartPanning() {
-    if (!panningApiReady()) {
-      warnOnce("panning", "Workspace pan API not ready yet — wait for Penpot store to initialize.");
-      return false;
-    }
-    viewportDragMode = "hand";
-    handLog("panning started");
-    log("panning started");
-    return true;
-  }
+  function bindKeyboardShortcuts() {
+    if (shortcutsBound) return;
+    shortcutsBound = true;
 
-  function emitFinishViewportDrag() {
-    if (!viewportDragMode) return;
-    viewportDragMode = null;
-    lastPanPoint = null;
-    log("panning finished");
-  }
+    document.addEventListener(
+      "keydown",
+      function (e) {
+        if (isInputTarget(e.target)) return;
 
-  function pointCoord(APP, pt, axis) {
-    if (!pt) return 0;
-    if (typeof pt[axis] === "number") return pt[axis];
-    var kw = axis === "x" ? APP.$cljs$cst$1500$x$$ : APP.$cljs$cst$1501$y$$;
-    if (kw && kw.$cljs$core$IFn$_invoke$arity$1$) {
-      return kw.$cljs$core$IFn$_invoke$arity$1$(pt);
-    }
-    return 0;
-  }
+        if (e.code === "Space" || e.key === " ") {
+          if (e.repeat) return;
+          if (readTool() === "hand") {
+            e.preventDefault();
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          if (!workspaceSpaceKeyHeld) {
+            workspaceSpaceKeyHeld = true;
+            document.body.classList.add("logos-move-tool-space");
+            syncWorkspaceSpaceState("space-keydown");
+            handLog("space pan keydown");
+          }
+          return;
+        }
 
-  function emitPointerDelta(e) {
-    var APP = penpotAPP();
-    if (!APP || !APP.$app$common$geom$point$subtract$$) return;
-    if (!APP.$app$main$data$workspace$viewport$update_viewport_position$$) return;
-    var pt = cljsPoint(e.clientX, e.clientY);
-    if (!pt) return;
-    if (!lastPanPoint) {
-      lastPanPoint = pt;
-      return;
-    }
-    var delta = APP.$app$common$geom$point$subtract$$(pt, lastPanPoint);
-    lastPanPoint = pt;
-    var zoom = getViewportZoom();
-    var dx = pointCoord(APP, delta, "x") / zoom;
-    var dy = pointCoord(APP, delta, "y") / zoom;
-    try {
-      penpotEmit(
-        APP.$app$main$data$workspace$viewport$update_viewport_position$$(
-          new APP.$cljs$core$PersistentArrayMap$(
-            null,
-            2,
-            [
-              APP.$cljs$cst$1500$x$$,
-              function (v) {
-                return v - dx;
-              },
-              APP.$cljs$cst$1501$y$$,
-              function (v) {
-                return v - dy;
-              },
-            ],
-            null
-          )
-        )
-      );
-    } catch (e2) {
-      error("emitPointerDelta failed", e2);
-    }
-  }
+        if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
 
-  function clearPendingHandDrag() {
-    pendingHandDrag = null;
+        var key = e.key.toLowerCase();
+        if (key === "v") {
+          e.stopPropagation();
+          activateTool("move", "keyboard");
+        } else if (key === "h") {
+          e.preventDefault();
+          e.stopPropagation();
+          activateTool("hand", "keyboard");
+        } else if (key === "k") {
+          e.preventDefault();
+          e.stopPropagation();
+          activateTool("scale", "keyboard");
+        }
+      },
+      true
+    );
+
+    document.addEventListener(
+      "keyup",
+      function (e) {
+        if (e.code !== "Space" && e.key !== " ") return;
+        if (readTool() === "hand") {
+          e.preventDefault();
+          return;
+        }
+        if (!workspaceSpaceKeyHeld) return;
+        e.preventDefault();
+        e.stopPropagation();
+        workspaceSpaceKeyHeld = false;
+        document.body.classList.remove("logos-move-tool-space");
+        syncWorkspaceSpaceState("space-keyup");
+        handLog("space pan keyup");
+      },
+      true
+    );
+
+    window.addEventListener("blur", function () {
+      if (!workspaceSpaceKeyHeld) return;
+      workspaceSpaceKeyHeld = false;
+      document.body.classList.remove("logos-move-tool-space");
+      syncWorkspaceSpaceState("window-blur");
+    });
   }
 
   function closeMenu() {
@@ -651,194 +857,7 @@
     scheduleMenuDismiss();
   }
 
-  function bindViewportDrag() {
-    if (viewportDragBound) return;
-    viewportDragBound = true;
-
-    document.addEventListener(
-      "pointerdown",
-      function (e) {
-        if (!isHandModeActive()) return;
-        if (e.button !== 0) return;
-        if (!isViewportTarget(e.target)) {
-          if (readTool() === "hand") {
-            handLog("pointerdown ignored (outside canvas)", describeTarget(e.target));
-          }
-          return;
-        }
-        if (!panningApiReady()) {
-          handLog("pointerdown blocked — pan API not ready (reload if this persists)");
-          return;
-        }
-
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-
-        handPointerSession = true;
-        handLog(
-          "pointerdown",
-          describeTarget(e.target),
-          "client",
-          e.clientX,
-          e.clientY,
-          "tool",
-          readTool(),
-          "space",
-          spacePanActive
-        );
-
-        var captureEl =
-          document.getElementById("viewport-controls") ||
-          e.target.closest("#viewport-controls") ||
-          e.target.closest(VIEWPORT_SEL);
-        if (captureEl && captureEl.setPointerCapture) {
-          try {
-            captureEl.setPointerCapture(e.pointerId);
-          } catch (err) {
-            /* ignore */
-          }
-        }
-
-        lastPanPoint = cljsPoint(e.clientX, e.clientY);
-        if (readTool() === "hand") {
-          emitStartPanning();
-        } else {
-          pendingHandDrag = {
-            x: e.clientX,
-            y: e.clientY,
-            pointerId: e.pointerId,
-            captureEl: captureEl,
-          };
-        }
-      },
-      true
-    );
-
-    document.addEventListener(
-      "pointermove",
-      function (e) {
-        if (pendingHandDrag && !viewportDragMode) {
-          var dx = e.clientX - pendingHandDrag.x;
-          var dy = e.clientY - pendingHandDrag.y;
-          if (dx * dx + dy * dy >= DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
-            lastPanPoint = cljsPoint(pendingHandDrag.x, pendingHandDrag.y);
-            if (emitStartPanning()) {
-              emitPointerDelta(e);
-            } else {
-              lastPanPoint = null;
-            }
-            clearPendingHandDrag();
-          }
-        }
-        if (viewportDragMode) {
-          e.preventDefault();
-          e.stopPropagation();
-          emitPointerDelta(e);
-        }
-      },
-      true
-    );
-
-    document.addEventListener(
-      "pointerup",
-      function (e) {
-        if (handPointerSession) {
-          e.preventDefault();
-          e.stopPropagation();
-          handLog("pointerup", "panning", !!viewportDragMode);
-        }
-        handPointerSession = false;
-        clearPendingHandDrag();
-        emitFinishViewportDrag();
-      },
-      true
-    );
-
-    document.addEventListener(
-      "pointercancel",
-      function () {
-        handPointerSession = false;
-        clearPendingHandDrag();
-        emitFinishViewportDrag();
-      },
-      true
-    );
-
-    document.addEventListener(
-      "click",
-      function (e) {
-        if (!isHandModeActive()) return;
-        if (!isViewportTarget(e.target)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        handLog("click suppressed in pan mode", describeTarget(e.target));
-      },
-      true
-    );
-
-    log("viewport drag bound (hand pans immediately; space uses drag threshold)");
-  }
-
-  function bindKeyboardShortcuts() {
-    if (shortcutsBound) return;
-    shortcutsBound = true;
-
-    document.addEventListener(
-      "keydown",
-      function (e) {
-        if (isInputTarget(e.target)) return;
-
-        if (e.code === "Space" || e.key === " ") {
-          if (e.repeat) return;
-          e.preventDefault();
-          if (!spacePanActive) {
-            spacePanActive = true;
-            document.body.classList.add("logos-move-tool-space");
-            log("space pan active");
-          }
-          return;
-        }
-
-		if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
-
-		var key = e.key.toLowerCase();
-		if (key === "v") {
-			e.stopPropagation();
-			activateTool("move", "keyboard");
-		} else if (key === "h") {
-			e.preventDefault();
-			e.stopPropagation();
-			activateTool("hand", "keyboard");
-		} else if (key === "k") {
-			e.preventDefault();
-			e.stopPropagation();
-			activateTool("scale", "keyboard");
-		}
-      },
-      true
-    );
-
-    document.addEventListener(
-      "keyup",
-      function (e) {
-        if (e.code !== "Space" && e.key !== " ") return;
-        if (!spacePanActive) return;
-        spacePanActive = false;
-        document.body.classList.remove("logos-move-tool-space");
-        // Hand tool stays in pan mode; only end drag when Space was the pan source.
-        if (readTool() !== "hand") {
-          clearPendingHandDrag();
-          emitFinishViewportDrag();
-        }
-        log("space pan released");
-      },
-      true
-    );
-  }
-
-  function watchPenpotSelection() {
+  function watchworkspaceSelection() {
     if (!moveBtnRef) return;
     var observer = new MutationObserver(function () {
       updateComboDisplay();
@@ -859,7 +878,7 @@
     mountCombo(toolbar, moveBtnRef, moveLi);
     if (watchedMoveSlots && !watchedMoveSlots.has(moveLi)) {
       watchedMoveSlots.add(moveLi);
-      watchPenpotSelection();
+      watchworkspaceSelection();
     }
     if (!initialToolApplied) {
       initialToolApplied = true;
@@ -905,8 +924,9 @@
     if (initDone) return;
     initDone = true;
     try {
-      bindViewportDrag();
       bindKeyboardShortcuts();
+      bindHandPointerPan();
+      ensureWorkspaceSpaceSynced();
       scan();
       observeToolbarOnce();
       globalThis.logosMoveToolStatus = function () {
@@ -915,17 +935,19 @@
           tool: readTool(),
           panModeActive: isPanModeActive(),
           panningApiReady: panningApiReady(),
-          penpotApp: !!penpotAPP(),
-          viewportZoom: getViewportZoom(),
+          directPanApiReady: directPanApiReady(),
+          panApiDiagnostics: panApiDiagnostics(),
+          handPointerDragging: !!handPointerDrag,
+          workspaceSpaceActive: workspaceSpaceActive,
+          workspaceSpaceKeyHeld: workspaceSpaceKeyHeld,
+          workspaceApp: !!workspaceAPP(),
           scaleTextEnabled: isScaleTextEnabled(),
-          viewportDragMode: viewportDragMode,
-          spacePanActive: spacePanActive,
           moveBtn: !!moveBtnRef,
           combo: !!comboRef,
           debug: DEBUG,
         };
       };
-      log("init complete");
+      log("init complete (direct hand pan)");
     } catch (e) {
       error("init failed", e);
     }
@@ -949,7 +971,7 @@
   console.info(
     LOG_PREFIX,
     "build=" + BUILD,
-    "(Figma Move/Hand/Scale; hand mirrors Space+Move pan)"
+    "(Move/Hand/Scale; hand uses direct viewport pan)"
   );
 
   if (document.readyState === "loading") {

@@ -13,11 +13,11 @@ DIST = ROOT / "dist"
 
 DASHBOARD_BOOT_SCRIPT = """
     <script>
-      // Full Penpot editor: boot from workspace.html (not the React dashboard).
+      // Full workspace editor: boot from workspace.html (not the React dashboard).
       if (/^#\\/workspace(\\/|\\?)/.test(location.hash)) {
         location.replace("/workspace.html" + location.hash);
       } else {
-        document.cookie = "logos-penpot-shell=; path=/; max-age=0";
+        document.cookie = "logos-workspace-shell=; path=/; max-age=0";
       }
     </script>"""
 
@@ -26,7 +26,7 @@ WORKSPACE_HASH_RE = r'/^#\\/workspace(\/|\?)/.test(location.hash)'
 
 def inject_dashboard_boot(index_path: Path) -> None:
     html = index_path.read_text(encoding="utf-8")
-    if "logos-penpot-shell=; path=/; max-age=0" in html:
+    if "logos-workspace-shell=; path=/; max-age=0" in html:
         return
     if 'location.replace("/workspace.html"' in html:
         html = html.replace(
@@ -36,7 +36,7 @@ def inject_dashboard_boot(index_path: Path) -> None:
             """      if (/^#\\/workspace(\\/|\\?)/.test(location.hash)) {
         location.replace("/workspace.html" + location.hash);
       } else {
-        document.cookie = "logos-penpot-shell=; path=/; max-age=0";
+        document.cookie = "logos-workspace-shell=; path=/; max-age=0";
       }""",
             1,
         )
@@ -84,11 +84,11 @@ def main() -> int:
     print(f"Synced React SPA → {DIST}/ (index.html + assets/)")
     print("WASM/static files under dist/js/ are unchanged.")
 
-    sync_penpot = ROOT / "scripts" / "sync-penpot-workspace.py"
-    sync_aux = ROOT / "scripts" / "sync-penpot-aux-html.py"
-    if sync_penpot.is_file():
+    sync_workspace = ROOT / "scripts" / "sync-logos-workspace.py"
+    sync_aux = ROOT / "scripts" / "sync-logos-aux-html.py"
+    if sync_workspace.is_file():
         import subprocess
-        subprocess.run([sys.executable, str(sync_penpot)], check=False)
+        subprocess.run([sys.executable, str(sync_workspace)], check=False)
     if sync_aux.is_file():
         import subprocess
         subprocess.run([sys.executable, str(sync_aux)], check=False)
@@ -99,7 +99,7 @@ def main() -> int:
         (ROOT / "css" / "logos-toolbar-position.css", "css/logos-toolbar-position.css"),
         (ROOT / "css" / "logos-toolbar-move-tools.css", "css/logos-toolbar-move-tools.css"),
         (ROOT / "js" / "logos-workspace-icons.js", "js/logos-workspace-icons.js"),
-        (ROOT / "js" / "logos-penpot-bridge.js", "js/logos-penpot-bridge.js"),
+        (ROOT / "js" / "logos-workspace-bridge.js", "js/logos-workspace-bridge.js"),
         (ROOT / "js" / "logos-toolbar-position.js", "js/logos-toolbar-position.js"),
         (ROOT / "js" / "logos-toolbar-move-tools.js", "js/logos-toolbar-move-tools.js"),
     )

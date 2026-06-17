@@ -27,8 +27,8 @@ Phases 0–5 is available at no cost, forever, under the Mozilla Public License 
 | **Design tokens** | DTCG-compliant token runtime with aliasing, modes, and live theme switching |
 | **Dev Mode** | CSS / variables export, redlines, annotation links, REST integration API |
 | **Plugin system** | TypeScript sandbox, `@logos/plugin-types`, hot-reload developer mode |
-| **File import** | Zero-loss migration from Figma, Sketch, Adobe XD, SVG |
-| **File format** | Open `.logos` v3 ZIP archive (SVG/CSS-based; backward-compatible with `.penpot`) |
+| **File import** | Zero-loss migration from external design tool, Sketch, Adobe XD, SVG |
+| **File format** | Open ``.logos` v3 ZIP archive (SVG/CSS-based) |
 | **Self-hosted** | Single Go binary (~20 MB) + static React SPA — no JVM, no Node.js at runtime |
 
 Nothing is paywalled in this edition. There is no feature flag that unlocks paid content.
@@ -272,7 +272,7 @@ the MPL-licensed files remain open.
 
 Built on the shoulders of:
 
-- [Penpot](https://penpot.app/) — the open-source design tool this project started from
+- [Logos](https://logos.app/) — the open-source design tool this project started from
 - [wgpu](https://github.com/gfx-rs/wgpu) — cross-platform GPU abstraction
 - [pgx](https://github.com/jackc/pgx) — PostgreSQL driver for Go
 - [go-jose](https://github.com/go-jose/go-jose) — JWE/JWS for Go

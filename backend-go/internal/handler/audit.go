@@ -66,7 +66,7 @@ func PushAuditEventsHandler(pool *db.Pool) http.HandlerFunc {
 
 		var params pushAuditEventsParams
 		if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
-			// Match Penpot: accept and ignore malformed batches when logging is off.
+			// Match Logos: accept and ignore malformed batches when logging is off.
 			if os.Getenv("LOGOS_ENABLE_AUDIT_LOG") != "true" {
 				writeJSON(w, http.StatusOK, map[string]any{})
 				return

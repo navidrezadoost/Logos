@@ -9,7 +9,7 @@
  *   3. Swatches / assets    — named color variables (Sketch >= 69)
  *
  * Each source becomes a separate LogosTokenSet.  A single "Sketch Default"
- * theme is produced so the import is consistent with the Figma token model.
+ * theme is produced so the import stays consistent with other token imports.
  *
  * Naming convention:
  *   Layer styles:  "Layer Styles/<style name>/fill", "/border", etc.
@@ -29,7 +29,7 @@ import type {
   LogosTokenSet,
   LogosTokenTheme,
   LogosToken,
-} from "../figma/figma-token-converter";
+} from "../tokens/token-types";
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 

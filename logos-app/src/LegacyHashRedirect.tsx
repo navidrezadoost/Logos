@@ -1,9 +1,9 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { getProfile, penpotWorkspaceURL } from "./api/client";
+import { getProfile, workspaceURL } from "./api/client";
 
 /**
- * Penpot/Logos legacy URLs used hash routing, e.g.
+ * Legacy URLs used hash routing, e.g.
  *   #/dashboard/recent?team-id=…
  *   #/workspace/:projectId/:fileId?page-id=…
  * Redirect them to the React router paths on first load.
@@ -21,7 +21,7 @@ export function LegacyHashRedirect(): null {
     const [pathPart, queryPart = ""] = raw.split("?");
     const params = new URLSearchParams(queryPart);
 
-    // Penpot workspace routes — must land on workspace.html, not the React SPA.
+    // Workspace routes must land on workspace.html, not the React SPA.
     if (pathPart === "/workspace" || pathPart.startsWith("/workspace/")) {
       window.location.replace("/workspace.html" + hash);
       return;
@@ -47,7 +47,7 @@ export function LegacyHashRedirect(): null {
         void getProfile().then((profile) => {
             const teamId = profile["default-team-id"];
             if (teamId) {
-              window.location.replace(penpotWorkspaceURL(teamId, fileId, pageId));
+              window.location.replace(workspaceURL(teamId, fileId, pageId));
             }
           });
       }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write dist/workspace.html — Penpot/Logos design shell (full editor UI)."""
+"""Write dist/workspace.html — Logos design shell (full editor UI)."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ SHELL_LAYOUT_CSS = """
         height: auto !important;
         overflow: hidden !important;
       }
-      #penpot-sprites {
+      #logos-sprites {
         position: fixed;
         width: 0;
         height: 0;
@@ -84,7 +84,7 @@ def read_sprite_markup() -> str:
 
     symbols = "\n".join(symbol_chunks)
     return (
-        '<div id="penpot-sprites" aria-hidden="true">'
+        '<div id="logos-sprites" aria-hidden="true">'
         '<svg width="0" height="0" style="position:absolute" '
         'xmlns="http://www.w3.org/2000/svg">'
         f"{symbols}"
@@ -112,14 +112,13 @@ LOGOS_ASSET_SOURCES = (
     ROOT / "css" / "logos-toolbar-position.css",
     ROOT / "css" / "logos-toolbar-move-tools.css",
     ROOT / "js" / "logos-workspace-icons.js",
-    ROOT / "js" / "logos-workspace-debug.js",
     ROOT / "js" / "logos-toolbar-position.js",
     ROOT / "js" / "logos-toolbar-move-tools.js",
 )
 
 
 def logos_revision() -> str:
-    """Short content hash so Logos overrides bust cache independently of Penpot tag."""
+    """Short content hash so Logos overrides bust cache independently of workspace tag."""
     import hashlib
 
     digest = hashlib.sha256()
@@ -133,10 +132,10 @@ def logos_revision() -> str:
 def read_version_tag() -> str:
     if CONFIG.is_file():
         text = CONFIG.read_text(encoding="utf-8", errors="replace")
-        m = re.search(r'penpotVersionTag\s*=\s*"([^"]+)"', text)
+        m = re.search(r'logosVersionTag\s*=\s*"([^"]+)"', text)
         if m:
             return m.group(1)
-        m = re.search(r'penpotVersion\s*=\s*"([^"]+)"', text)
+        m = re.search(r'logosVersion\s*=\s*"([^"]+)"', text)
         if m:
             return m.group(1)
     return "2.15.3"
@@ -165,7 +164,7 @@ def build_html(tag: str, sprites: str, logos_rev: str) -> str:
         }}
         window.scrollTo(0, 0);
         globalThis.__logosPublicURI = location.origin;
-        // Broken legacy URLs (#/workspace/{{file}}/{{file}}) → query form Penpot expects
+        // Broken legacy URLs (#/workspace/{{file}}/{{file}}) → query form the workspace expects
         var hash = location.hash;
         var legacy = hash.match(/^#\\/workspace\\/([^/?#]+)\\/([^/?#]+)(\\?([^#]*))?$/);
         if (legacy && legacy[1] === legacy[2]) {{
@@ -188,7 +187,7 @@ def build_html(tag: str, sprites: str, logos_rev: str) -> str:
           }}
           hash = "#/workspace?" + params.toString();
         }}
-        // Penpot on_navigate requires origin+pathname === public_uri (e.g. http://host:8888/).
+        // workspace navigation requires origin+pathname === public_uri (e.g. http://host:8888/).
         // Keeping /workspace.html in the address bar makes valid_location false → instant 404.
         // Normalize to / + hash; dashboard → workspace still gets a proper history entry via assign().
         if (hash && hash.charAt(0) === "#") {{
@@ -198,7 +197,7 @@ def build_html(tag: str, sprites: str, logos_rev: str) -> str:
           }}
         }}
         // Reload of /#/workspace only hits GET / — serve-frontend uses this cookie to return workspace.html.
-        document.cookie = "logos-penpot-shell=1; path=/; SameSite=Lax";
+        document.cookie = "logos-workspace-shell=1; path=/; SameSite=Lax";
         // Chrome tab discard / bfcache restores stale WebGL workers — reload cleanly.
         window.addEventListener("pageshow", function (e) {{
           if (e.persisted) {{
@@ -225,7 +224,6 @@ def build_html(tag: str, sprites: str, logos_rev: str) -> str:
         }});
       }})();
     </script>
-    <script src="./js/logos-workspace-debug.js?version={tag}&logos={logos_rev}"></script>
     <!-- Warm critical JS before CSS/fonts consume HTTP/1.1 connection slots (6/host). -->
     <link rel="modulepreload" href="./js/shared.js?version={tag}" />
     <link rel="modulepreload" href="./js/libs.js?version={tag}" />
@@ -258,7 +256,7 @@ def build_html(tag: str, sprites: str, logos_rev: str) -> str:
       import defaultTranslations from "./js/translation.en.js?version={tag}";
       init({{ defaultTranslations }});
     </script>
-    <script type="module" src="./js/logos-penpot-bridge.js?version={tag}&logos={logos_rev}"></script>
+    <script type="module" src="./js/logos-workspace-bridge.js?version={tag}&logos={logos_rev}"></script>
     <script src="./js/logos-workspace-icons.js?version={tag}&logos={logos_rev}" defer></script>
     <script src="./js/logos-toolbar-position.js?version={tag}&logos={logos_rev}" defer></script>
     <script src="./js/logos-toolbar-move-tools.js?version={tag}&logos={logos_rev}" defer></script>
@@ -274,10 +272,9 @@ def sync_logos_assets() -> None:
         (ROOT / "css" / "logos-toolbar-position.css", "css/logos-toolbar-position.css"),
         (ROOT / "css" / "logos-toolbar-move-tools.css", "css/logos-toolbar-move-tools.css"),
         (ROOT / "js" / "logos-workspace-icons.js", "js/logos-workspace-icons.js"),
-        (ROOT / "js" / "logos-penpot-bridge.js", "js/logos-penpot-bridge.js"),
+        (ROOT / "js" / "logos-workspace-bridge.js", "js/logos-workspace-bridge.js"),
         (ROOT / "js" / "logos-toolbar-position.js", "js/logos-toolbar-position.js"),
         (ROOT / "js" / "logos-toolbar-move-tools.js", "js/logos-toolbar-move-tools.js"),
-        (ROOT / "js" / "logos-workspace-debug.js", "js/logos-workspace-debug.js"),
     )
     for src, rel in copies:
         if not src.is_file():
@@ -299,8 +296,7 @@ def write_shell(tag: str, html: str) -> None:
 def main() -> int:
     if not (DIST / "js" / "main.js").is_file():
         sys.stderr.write(
-            "Missing Penpot bundles in dist/js/. Run sync-prod-bundles.sh first,\n"
-            "or ensure dist/js/main.js exists.\n"
+            "Missing workspace bundles in dist/js/. Ensure dist/js/main.js exists.\n"
         )
         return 1
 
@@ -315,12 +311,12 @@ def main() -> int:
     write_shell(tag, html)
     sync_logos_assets()
 
-    aux = ROOT / "scripts" / "sync-penpot-aux-html.py"
+    aux = ROOT / "scripts" / "sync-logos-aux-html.py"
     if aux.is_file():
         import subprocess
         subprocess.run([sys.executable, str(aux)], check=False)
 
-    config_src = ROOT / "scripts" / "penpot-config.js"
+    config_src = ROOT / "scripts" / "logos-config.js"
     if config_src.is_file():
         text = config_src.read_text(encoding="utf-8")
         (DIST / "js" / "config.js").write_text(text, encoding="utf-8")
@@ -329,7 +325,7 @@ def main() -> int:
             build_config.write_text(text, encoding="utf-8")
 
     print(
-        f"Wrote Penpot workspace shell → {OUT} "
+        f"Wrote Logos workspace shell → {OUT} "
         f"(version {tag}, sprites {len(sprites):,} bytes)"
     )
     return 0

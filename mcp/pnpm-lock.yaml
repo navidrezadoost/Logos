@@ -23,10 +23,10 @@ importers:
 
   packages/plugin:
     dependencies:
-      '@penpot/plugin-styles':
+      '@logos/plugin-styles':
         specifier: 1.4.1
         version: 1.4.1
-      '@penpot/plugin-types':
+      '@logos/plugin-types':
         specifier: 1.4.1
         version: 1.4.1
     devDependencies:
@@ -60,7 +60,7 @@ importers:
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
-      penpot-mcp:
+      logos-mcp:
         specifier: file:..
         version: packages@file:packages
       pino:
@@ -82,7 +82,7 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@penpot/mcp-common':
+      '@logos/mcp-common':
         specifier: workspace:../common
         version: link:../common
       '@types/express':
@@ -612,10 +612,10 @@ packages:
       '@cfworker/json-schema':
         optional: true
 
-  '@penpot/plugin-styles@1.4.1':
+  '@logos/plugin-styles@1.4.1':
     resolution: {integrity: sha512-6TuJqKQsq1Xmhn2A02R+kCOzIzIdqgFg5z6ncLH2PlAflKIX6aYsGiOF7yFx4RYgCegRVMFPnVis6/hwO+YGQg==}
 
-  '@penpot/plugin-types@1.4.1':
+  '@logos/plugin-types@1.4.1':
     resolution: {integrity: sha512-pHE2B3GI8M5JR03S/NdBoN+z6e1R1IEh3vpFbLG9LN0EZpQE6nEbmCo5jWAWI73Jqlg6CHG/RWVJNmWECnkDTA==}
 
   '@pinojs/redact@0.4.0':
@@ -1889,9 +1889,9 @@ snapshots:
       - hono
       - supports-color
 
-  '@penpot/plugin-styles@1.4.1': {}
+  '@logos/plugin-styles@1.4.1': {}
 
-  '@penpot/plugin-types@1.4.1': {}
+  '@logos/plugin-types@1.4.1': {}
 
   '@pinojs/redact@0.4.0': {}
 

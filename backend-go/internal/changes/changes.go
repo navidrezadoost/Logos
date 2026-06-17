@@ -1,4 +1,4 @@
-// Package changes applies Penpot file change-sets to the JSON file.data blob.
+// Package changes applies Logos file change-sets to the JSON file.data blob.
 package changes
 
 import (

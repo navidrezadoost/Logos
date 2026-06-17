@@ -54,7 +54,7 @@ func Encode(v any) ([]byte, error) {
 }
 
 // transitMapKey encodes a JSON object key for Transit map entries.
-// Penpot file data uses UUIDs as map keys (pages-index, shape objects, …).
+// Logos file data uses UUIDs as map keys (pages-index, shape objects, …).
 func transitMapKey(k string) string {
 	if strings.HasPrefix(k, "~") {
 		return k
@@ -78,7 +78,7 @@ func transitMapKeyDecode(k string) string {
 }
 
 // EncodePlainStringMap encodes a map with plain string keys and values.
-// Penpot RPC results such as get-file-object-thumbnails use
+// Logos RPC results such as get-file-object-thumbnails use
 // [:map-of string string] — object-id paths and media-id UUIDs must stay
 // strings, not Transit keywords or ~u UUID tokens.
 func EncodePlainStringMap(m map[string]string) ([]byte, error) {
@@ -282,7 +282,7 @@ func transitFloat(v any) (float64, bool) {
 func fromTransit(v any) any {
 	switch val := v.(type) {
 	case []any:
-		// Penpot geometry tags: ["~#matrix", ["^ ", ...]] → plain map for storage.
+		// Logos geometry tags: ["~#matrix", ["^ ", ...]] → plain map for storage.
 		if len(val) == 2 {
 			if tag, ok := val[0].(string); ok && strings.HasPrefix(tag, "~#") {
 				return fromTransit(val[1])

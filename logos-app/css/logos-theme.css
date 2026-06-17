@@ -1,7 +1,7 @@
 /**
  * Logos brand theme — panel #1e232d, accent #6b82fe.
  *
- * Penpot duplicates palette tokens on scoped `.main_ui_* .default` blocks inside
+ * workspace duplicates palette tokens on scoped `.main_ui_* .default` blocks inside
  * main.css (higher specificity than a bare `.default`). Use body + !important so
  * these win over the bundled cyan/teal defaults (#7efff5 / #00d1b8).
  */
@@ -177,7 +177,7 @@ html body .main_ui_workspace_sidebar__left-sidebar-tabs .main_ui_ds_layout_tab_s
   color: #6b82fe !important;
 }
 
-/* Re-assert tokens on #app so Penpot module-scoped .default blocks cannot win */
+/* Re-assert tokens on #app so workspace module-scoped .default blocks cannot win */
 html body.default #app,
 html body.default #app [class~="default"] {
   --color-background-primary: #1e232d !important;

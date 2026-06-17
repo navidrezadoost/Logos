@@ -886,7 +886,7 @@ Current font rendering loads a single OTF/TTF file per family/weight. Variable f
 
 #### P4.2 — Vector Network (Non-Tree Path Topology)
 
-Currently paths must be simple open/closed chains. Figma-style **vector networks** allow multiple segments sharing anchor points without a tree topology.
+Currently paths must be simple open/closed chains. external design tool-style **vector networks** allow multiple segments sharing anchor points without a tree topology.
 
 **Plan:**
 1. Extend `common/types/path/segment.cljc` to support a graph structure (adjacency list of anchor → [segment]).
@@ -997,7 +997,7 @@ To build a tool that systematically wins, we must dissect the incumbents. Below 
 
 | Competitor | Key Strengths |
 |------------|---------------|
-| **Figma** | Vector networks, advanced auto-layout (v4.0), component variants + properties, Dev Mode (CSS/React extraction), real-time collaboration with hybrid OT/CRDT, rich plugin ecosystem, browser-only (zero install), robust prototyping, AI auto-layout suggestions. |
+| **external design tool** | Vector networks, advanced auto-layout (v4.0), component variants + properties, Dev Mode (CSS/React extraction), real-time collaboration with hybrid OT/CRDT, rich plugin ecosystem, browser-only (zero install), robust prototyping, AI auto-layout suggestions. |
 | **Canva** | Exceptional ease of use, massive template library, brand kits, AI-powered generation (Magic Design), collaborative editing for non-designers, strong export/print, mobile app. |
 | **Sketch** | Mature macOS-native vector editor, enormous plugin ecosystem, symbol/component system, offline-first, excellent performance with large documents. |
 | **Adobe XD** | (maintenance mode) Smart animate, voice prototyping, coediting. Mostly relevant as a migration source. |
@@ -1008,7 +1008,7 @@ To build a tool that systematically wins, we must dissect the incumbents. Below 
 
 | Competitor | Exploitable Weaknesses |
 |------------|------------------------|
-| **Figma** | Proprietary format (vendor lock-in), no offline mode, limited illustration/drawing, web-only means perf suffers on very large canvases, prohibitive pricing tiers, no self-hosted option, limited production-code export. |
+| **external design tool** | Proprietary format (vendor lock-in), no offline mode, limited illustration/drawing, web-only means perf suffers on very large canvases, prohibitive pricing tiers, no self-hosted option, limited production-code export. |
 | **Canva** | Weak vector editing (no Bézier, no boolean ops), limited design-system management, no dev handoff, no offline mode, generic template aesthetics. |
 | **Sketch** | macOS-only, no real-time multiplayer built-in (requires Sketch Mirror/Cloud), infrequent release cadence. |
 
@@ -1020,13 +1020,13 @@ Logos already has a **structurally superior foundation**:
 |-----------|-------------|
 | **SVG-native format** | Every design is readable, editable, and portable without Logos. No lock-in. |
 | **CSS-aware layouts** | Flex/grid that produces real CSS — directly usable by developers. No translation layer. |
-| **Self-hosted & private** | The only full-featured design tool teams can run on their own infrastructure. Directly addresses enterprise procurement objections against Figma. |
+| **Self-hosted & private** | The only full-featured design tool teams can run on their own infrastructure. Directly addresses enterprise procurement objections against external design tool. |
 | **Open source** | Community-driven improvements, enterprise auditability, no third-party data exposure. |
 | **AI with data sovereignty** | AI features that run client-side (WebGPU/WASM) or via the MCP server — user choice, no cloud dependency. |
 
 Strategic priorities in order:
-1. **Close the performance gap** (Phases 1-2) — must feel as fast as Figma.
-2. **Bulletproof collaboration** (Phase 2) — must be as reliable as Figma's OT.
+1. **Close the performance gap** (Phases 1-2) — must feel as fast as external design tool.
+2. **Bulletproof collaboration** (Phase 2) — must be as reliable as external design tool's OT.
 3. **Complete core feature parity** (Phase 4) — vector networks, offline, component variants.
 4. **Surpass on AI + openness** (Phase 4-5) — privacy-preserving AI is our biggest differentiator.
 
@@ -1046,7 +1046,7 @@ The phased plan from §13 is retained and extended with competitive targeting, p
 
 ### Phase 1: Performance Hotspots (Weeks 3-6) — "Solid 60 fps"
 
-Competitive parity requires a **solid 60 fps editor** on 10k-shape files with near-zero input latency. Figma maintains this through proprietary C++ rendering; we achieve it through our Rust/Skia WASM pipeline.
+Competitive parity requires a **solid 60 fps editor** on 10k-shape files with near-zero input latency. external design tool maintains this through proprietary C++ rendering; we achieve it through our Rust/Skia WASM pipeline.
 
 | ID | Task | Technical Method | Reference |
 |----|------|-----------------|-----------|
@@ -1071,12 +1071,12 @@ Competitive parity requires a **solid 60 fps editor** on 10k-shape files with ne
 
 ### Phase 2: Scalability & Robust Collaboration (Weeks 7-12) — "Enterprise-Grade Multiplayer"
 
-Figma's real-time collaboration is the benchmark. We implement a **CRDT + OT hybrid** that guarantees eventual consistency without silent data loss. This directly addresses our current B1 (highest severity) bottleneck.
+external design tool's real-time collaboration is the benchmark. We implement a **CRDT + OT hybrid** that guarantees eventual consistency without silent data loss. This directly addresses our current B1 (highest severity) bottleneck.
 
 | ID | Task | Competitive Reason | Technical Approach |
 |----|------|--------------------|--------------------|
 | P2.1 | Delta-compressed WebSocket (page-scoped fan-out) | 70% bandwidth reduction | Only forward changes whose `page-id` matches subscriber's current page |
-| P2.2 | Page-level file fragmentation | Match Figma's implicit per-page loading; drastically cut initial load for large files | Extend `file_data` table to per-page rows `(file_id, page_id)` |
+| P2.2 | Page-level file fragmentation | Match external design tool's implicit per-page loading; drastically cut initial load for large files | Extend `file_data` table to per-page rows `(file_id, page_id)` |
 | P2.3 | **OT attribute-level conflict resolution** | Replace last-writer-wins; end silent data loss | Server assigns `revn`; clients send `base_revn`; server rebases using commutative transforms for `set-attr` and `move` ops |
 | P2.4 | Horizontal WebSocket scaling via Redis | Multi-server deployments | Extend `msgbus.clj` with per-page Redis routing keys |
 | P2.5 | **CRDT shape PoC** (research branch) | Long-term: true peer-to-peer offline | Yjs/Automerge-like representation; guided by *Purely Functional Data Structures* |
@@ -1084,7 +1084,7 @@ Figma's real-time collaboration is the benchmark. We implement a **CRDT + OT hyb
 
 **Reference:** *Designing Data-Intensive Applications*, Chapter 5 — replication and conflict resolution. The OT rebase model (P2.3) follows the operational transformation approach for commutative set operations.
 
-**Competitive advantage:** Figma has no self-hosted option. Our scalable self-hosted collab directly wins enterprise procurement decisions.
+**Competitive advantage:** external design tool has no self-hosted option. Our scalable self-hosted collab directly wins enterprise procurement decisions.
 
 ---
 
@@ -1095,8 +1095,8 @@ Figma's real-time collaboration is the benchmark. We implement a **CRDT + OT hyb
 | P3.1 | Unified `logos` CLI (Babashka) | `logos dev`, `logos test`, `logos build wasm`, `logos migrate` |
 | P3.2 | Full clj-kondo integration | Architectural boundary enforcement; pre-commit hooks |
 | P3.3 | OpenTelemetry + performance dashboards | Developer-visible frame graphs, DB query times, GPU metrics (USE method from *Systems Performance* by Brendan Gregg) |
-| P3.4 | Property-based tests ≥ 80% on geometry | Regression safety for layout engine (critical for Figma parity) |
-| P3.5 | `@logos/plugin-types` npm package | Auto-generated from Malli schemas → TypeScript declarations; matches Figma's typed plugin API |
+| P3.4 | Property-based tests ≥ 80% on geometry | Regression safety for layout engine (critical for external design tool parity) |
+| P3.5 | `@logos/plugin-types` npm package | Auto-generated from Malli schemas → TypeScript declarations; matches external design tool's typed plugin API |
 | P3.6 | **Contributor Lab** | Docker Compose environment with sample plugins, MCP integration, and AI agent playground |
 
 ---
@@ -1107,15 +1107,15 @@ Systematic closure of the feature gap. Each item targets a specific competitor w
 
 | # | Feature | Competitor Target | Implementation |
 |---|---------|------------------|----------------|
-| **4.1** | **Variable Fonts** | Figma + Sketch | Extend Skia bindings to `SkFontArguments`; UI for axis values (weight, width, slant, optical size); extend `typography.cljc` with `font-variation-settings` map. Ref: *Real-Time Rendering* — text chapter |
-| **4.2** | **Vector Networks** | Figma's core differentiator | Non-tree path topology using **half-edge data structure**. Extend `segment.cljc` to adjacency-list graph. Update `shapes/paths.rs` for fan-in/fan-out anchors. Ref: *Geometric Tools for Computer Graphics* |
-| **4.3** | **Auto-Layout Enhancements** | Figma Auto-Layout v4.0 | `min/max` child constraints, `stretch` with wrapping, negative gap, CSS Grid Level 2 subgrid. Our flex/grid engines have the foundation. Ref: *Discrete Mathematics* — constraint solving |
-| **4.4** | **Component Variants & Props** | Figma Components | Boolean/text properties on components; swap-instance based on variant metadata. Model as CRDT change-sets + metadata. Ref: *Game Programming Patterns* — Component pattern |
-| **4.5** | **Offline / Local-First Mode** | Exploit Figma's biggest weakness | IndexedDB change-set persistence; reconnect re-sync via OT layer (P2.3). Long-term: local-first DB (custom store). Ref: *Designing Data-Intensive Applications* + *Event-Driven Architecture* |
-| **4.6** | **AI Design Assistant** | Canva Magic Design + Figma AI | MCP server integration in-app: "Generate layout from prompt", "Apply colour palette", "Resize for breakpoints". **Local LLM via WebGPU/WASM** for offline + privacy-preserving AI — our biggest differentiator vs. all competitors |
+| **4.1** | **Variable Fonts** | external design tool + Sketch | Extend Skia bindings to `SkFontArguments`; UI for axis values (weight, width, slant, optical size); extend `typography.cljc` with `font-variation-settings` map. Ref: *Real-Time Rendering* — text chapter |
+| **4.2** | **Vector Networks** | external design tool's core differentiator | Non-tree path topology using **half-edge data structure**. Extend `segment.cljc` to adjacency-list graph. Update `shapes/paths.rs` for fan-in/fan-out anchors. Ref: *Geometric Tools for Computer Graphics* |
+| **4.3** | **Auto-Layout Enhancements** | external design tool Auto-Layout v4.0 | `min/max` child constraints, `stretch` with wrapping, negative gap, CSS Grid Level 2 subgrid. Our flex/grid engines have the foundation. Ref: *Discrete Mathematics* — constraint solving |
+| **4.4** | **Component Variants & Props** | external design tool Components | Boolean/text properties on components; swap-instance based on variant metadata. Model as CRDT change-sets + metadata. Ref: *Game Programming Patterns* — Component pattern |
+| **4.5** | **Offline / Local-First Mode** | Exploit external design tool's biggest weakness | IndexedDB change-set persistence; reconnect re-sync via OT layer (P2.3). Long-term: local-first DB (custom store). Ref: *Designing Data-Intensive Applications* + *Event-Driven Architecture* |
+| **4.6** | **AI Design Assistant** | Canva Magic Design + external design tool AI | MCP server integration in-app: "Generate layout from prompt", "Apply colour palette", "Resize for breakpoints". **Local LLM via WebGPU/WASM** for offline + privacy-preserving AI — our biggest differentiator vs. all competitors |
 | **4.7** | **Template Library & Brand Kits** | Canva | Community-contributed gallery stored as standard Logos files. One-click "Use template". No proprietary format |
-| **4.8** | **Prototyping & Interactions** | Figma + Adobe XD | Connect frames with triggers; CSS transitions + SVG animations as implementation layer |
-| **4.9** | **Dev Mode (Code Export)** | Figma Dev Mode | Because Logos is CSS-aware, generate production-ready HTML/CSS/React/Tailwind/Svelte directly via pluggable template system |
+| **4.8** | **Prototyping & Interactions** | external design tool + Adobe XD | Connect frames with triggers; CSS transitions + SVG animations as implementation layer |
+| **4.9** | **Dev Mode (Code Export)** | external design tool Dev Mode | Because Logos is CSS-aware, generate production-ready HTML/CSS/React/Tailwind/Svelte directly via pluggable template system |
 
 ---
 
@@ -1127,7 +1127,7 @@ Port the rendering core from Skia/WebGL to **WebGPU (WGSL shaders)**:
 |-----------|------|
 | Compute shaders for layout | GPU-side flex/grid calculation — eliminates worker thread bottleneck |
 | Parallel hit-testing and snapping | Massive parallelism; snapping scales to millions of objects |
-| True 3D transforms | Perspective editing — a step beyond Figma |
+| True 3D transforms | Perspective editing — a step beyond external design tool |
 | Wide-gamut color (Display P3) | Future-proof for HDR displays |
 
 **Implementation:** Begin with a proof-of-concept tile renderer in WGSL alongside the existing WASM module, toggled via feature flag. Reference: *WebGPU Fundamentals*, *Real-Time Rendering* (4th ed.).
@@ -1136,9 +1136,9 @@ Port the rendering core from Skia/WebGL to **WebGPU (WGSL shaders)**:
 
 ## 18. Key Performance Metrics & Benchmarks
 
-All metrics are publicly tracked on a **Performance Dashboard** and measured against Figma (browser) on every release.
+All metrics are publicly tracked on a **Performance Dashboard** and measured against external design tool (browser) on every release.
 
-| Metric | Logos Target (p95) | Figma Baseline | Measurement Tool |
+| Metric | Logos Target (p95) | external design tool Baseline | Measurement Tool |
 |--------|-------------------|----------------|------------------|
 | Canvas frame time | ≤ 4 ms | ~6-8 ms (10k shapes) | OpenTelemetry + Chrome trace |
 | File open (1,000 shapes) | ≤ 1.5 s | ~2 s | Custom profiler |
@@ -1148,7 +1148,7 @@ All metrics are publicly tracked on a **Performance Dashboard** and measured aga
 | Test coverage (common) | ≥ 85% line | N/A | cloverage |
 | Serialization cost | Moved to worker (0 ms main thread) | ~40-80 ms main thread | Lighthouse audit |
 
-A monthly **Competitive Scorecard** comparing Logos vs. Figma and Canva on each feature dimension will be published to keep focus.
+A monthly **Competitive Scorecard** comparing Logos vs. external design tool and Canva on each feature dimension will be published to keep focus.
 
 ---
 

@@ -263,7 +263,7 @@ Use the relevant directory or subsystem name:
 
 ```
 feat(auth): add magic-link login flow
-fix(binfile): accept legacy penpot/export-files manifest type
+fix(binfile): accept legacy logos/export-files manifest type
 perf(rebase): skip no-op set-ops during merge
 docs(backend): document all 25 RPC handler endpoints
 test(handler): add integration tests for file export

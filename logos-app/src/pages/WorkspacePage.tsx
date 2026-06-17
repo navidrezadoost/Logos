@@ -134,7 +134,7 @@ export function WorkspacePage(): React.ReactElement {
 
       <button
         onClick={() => setImportDialogOpen(true)}
-        title="Import design tokens from Figma, Sketch, or XD"
+        title="Import design tokens from Sketch or XD"
         style={{
           position: "absolute",
           top: 12,
