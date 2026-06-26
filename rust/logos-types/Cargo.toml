@@ -20,10 +20,10 @@ repository  = "https://github.com/navidrezadoost/Logos"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
+default = ["serde"]
 # Enable serde serialization (always-on in practice; behind a feature so
 # pure-native benchmarks can opt out without pulling in serde).
-serde   = ["dep:serde", "uuid/serde"]
+serde   = ["dep:serde", "uuid/serde", "chrono/serde", "logos-layout/serde"]
 # wasm-bindgen glue for browser targets.
 wasm    = ["wasm-bindgen"]
 # TypeScript type generation.
@@ -38,6 +38,9 @@ ts      = []
 [dependencies]
 # UUID generation + serialization.
 uuid = { version = "1", features = ["v4"] }
+
+# Timestamp fields for registry entities.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 # Geometry primitives from logos-layout.
 logos-layout = { path = "../logos-layout" }

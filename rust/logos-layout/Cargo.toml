@@ -13,11 +13,15 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default    = []
+serde      = ["dep:serde"]
 wasm       = ["wasm-bindgen"]
 
 [dependencies]
 # Optional wasm-bindgen — only pulled in when the "wasm" feature is enabled
 wasm-bindgen = { version = "0.2", optional = true }
+
+# Optional serialization for shared geometry types consumed by logos-types.
+serde = { version = "1", features = ["derive"], optional = true }
 
 [dev-dependencies]
 # approx: floating-point assertion helpers (ulp / absolute epsilon)

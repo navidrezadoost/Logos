@@ -47,8 +47,12 @@ pub use color::{Color, Gradient, GradientStop, GradientType};
 pub use fill::Fill;
 pub use shadow::{Shadow, ShadowStyle};
 pub use shape::{Constraint, Shape, ShapeType};
-pub use stroke::{Stroke, StrokeCap, StrokeStyle, StrokePosition};
-pub use token::{Token, TokenType, TokensLib};
+pub use stroke::{Stroke, StrokeCap, StrokePosition, StrokeStyle};
+pub use token::{
+    DesignAspect, ModeStrategy, PrimitiveToken, PropertyScope, SemanticToken, Token, TokenRegistry,
+    TokenSource, TokenType, TokenValue, TokenValueKind, TokensLib, VariableBinding,
+    VariableCollection, VariableMode, TOKEN_REGISTRY_SCHEMA_VERSION,
+};
 pub use typography::Typography;
 
 // Re-export uuid so consumers don't have to add it as a direct dependency.
