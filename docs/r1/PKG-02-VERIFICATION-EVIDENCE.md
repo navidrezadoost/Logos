@@ -2,6 +2,7 @@
 
 **Status:** Implementation correction in the verification worktree; verification incomplete; not rollout-approved  
 **Base commit:** `d387cc83fd3f45d1ffe019bf86b1c52dcf27c866` (the package merge commit on `origin/main`)  
+**Correction commit:** `3285785268a3d45b76bc299dbfc6b6b64c5b3657`  
 **Branch/worktree:** `r1/pkg02-verification` — `/home/navidrezadoost/Documents/Github/Logos-r1-pkg02-verification`
 
 ## Scope
