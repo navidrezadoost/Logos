@@ -5,14 +5,29 @@ on:
     branches: ["main", "r1/**"]
     paths:
       - "mcp/**"
+      - "docker/devenv/**"
       - ".github/workflows/mcp-server.yml"
   pull_request:
     branches: ["main"]
     paths:
       - "mcp/**"
+      - "docker/devenv/**"
       - ".github/workflows/mcp-server.yml"
 
 jobs:
+  compose-security:
+    name: Validate loopback-only development publications
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve Compose config and assert host bindings
+        run: |
+          LOGOS_MCP_LOCAL_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')" \
+          CURRENT_USER_ID=1000 \
+          docker compose -f docker/devenv/docker-compose.yaml config --format json |
+          python3 -c 'import json,sys; c=json.load(sys.stdin); ports=[p for s in c["services"].values() for p in s.get("ports",[])]; assert len(ports)==21, len(ports); assert all(p.get("host_ip")=="127.0.0.1" for p in ports); m=c["services"]["main"]; assert not ({4400,4401,4402} & {p["target"] for p in m["ports"]}); assert m["environment"]["LOGOS_MCP_SERVER_HOST"]=="127.0.0.1"; assert m["environment"]["WS_URI"]=="ws://127.0.0.1:3450/mcp/ws"; assert len(m["environment"]["LOGOS_MCP_LOCAL_TOKEN"])==64; print("Compose host bindings are loopback-only; MCP upstream ports are private")'
+
   test:
     name: Build and test local MCP security boundary
     runs-on: ubuntu-latest

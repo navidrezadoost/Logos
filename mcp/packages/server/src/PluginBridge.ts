@@ -55,9 +55,9 @@ export class PluginBridge {
                     if (!authenticated) {
                         if (
                             message?.type !== "logos.mcp.auth" ||
-                            !this.mcpServer.isLocalTokenValid(message?.token)
+                            !this.mcpServer.consumePluginPairingCode(message?.pairingCode)
                         ) {
-                            ws.close(1008, "Invalid local authentication");
+                            ws.close(1008, "Invalid or expired pairing code");
                             return;
                         }
 
@@ -74,7 +74,7 @@ export class PluginBridge {
                 } catch (error) {
                     this.logger.warn(error, "Rejected malformed WebSocket message");
                     if (!authenticated && ws.readyState === WebSocket.OPEN) {
-                        ws.close(1008, "Invalid local authentication");
+                        ws.close(1008, "Invalid or expired pairing code");
                     }
                 }
             });

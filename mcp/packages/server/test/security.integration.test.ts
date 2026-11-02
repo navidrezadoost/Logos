@@ -115,6 +115,19 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         assert.equal(authenticatedRepl.status, 400);
         await authenticatedRepl.body?.cancel();
 
+        const unauthenticatedPairing = await fetch(`${base}/local/plugin-pairing`, { method: "POST" });
+        assert.equal(unauthenticatedPairing.status, 401);
+        await unauthenticatedPairing.body?.cancel();
+
+        const pairingResponse = await fetch(`${base}/local/plugin-pairing`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}` },
+        });
+        assert.equal(pairingResponse.status, 201);
+        assert.equal(pairingResponse.headers.get("cache-control"), "no-store");
+        const pairing = (await pairingResponse.json()) as { code: string; expiresInSeconds: number };
+        assert.equal(pairing.expiresInSeconds, 60);
+
         const unauthorizedSocket = new WebSocket(wsUrl);
         await waitForOpen(unauthorizedSocket);
         const rejectedSocket = waitForClose(unauthorizedSocket);
@@ -125,18 +138,24 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         const invalidSocket = new WebSocket(wsUrl);
         await waitForOpen(invalidSocket);
         const invalidClose = waitForClose(invalidSocket);
-        invalidSocket.send(JSON.stringify({ type: "logos.mcp.auth", token: "b".repeat(64) }));
+        invalidSocket.send(JSON.stringify({ type: "logos.mcp.auth", pairingCode: "not-a-pairing-code" }));
         assert.equal(await invalidClose, 1008);
 
         const authenticatedSocket = new WebSocket(wsUrl);
         await waitForOpen(authenticatedSocket);
         const authenticationAck = waitForMessage(authenticatedSocket);
-        authenticatedSocket.send(JSON.stringify({ type: "logos.mcp.auth", token }));
+        authenticatedSocket.send(JSON.stringify({ type: "logos.mcp.auth", pairingCode: pairing.code }));
         const ack = await authenticationAck;
         assert.deepEqual(JSON.parse(ack.toString()), { type: "logos.mcp.auth", ok: true });
         const socketClosed = waitForClose(authenticatedSocket);
         authenticatedSocket.close();
         await socketClosed;
+
+        const replayedPairingSocket = new WebSocket(wsUrl);
+        await waitForOpen(replayedPairingSocket);
+        const replayedPairingClose = waitForClose(replayedPairingSocket);
+        replayedPairingSocket.send(JSON.stringify({ type: "logos.mcp.auth", pairingCode: pairing.code }));
+        assert.equal(await replayedPairingClose, 1008);
     } finally {
         await server.stop();
         await assert.rejects(fetch(`${base}/mcp`));

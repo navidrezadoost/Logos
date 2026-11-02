@@ -1,9 +1,51 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 export interface LocalMcpSecurityConfig {
     host: string;
     token: string;
+}
+
+const pairingCodeLifetimeMs = 60_000;
+const maxPendingPairingCodes = 32;
+
+/** One-time, short-lived pairing credentials for a local plugin WebSocket. */
+export class LocalPluginPairingCodes {
+    private readonly expirationsByDigest = new Map<string, number>();
+
+    public issue(now = Date.now()): { code: string; expiresInSeconds: number } {
+        this.prune(now);
+        if (this.expirationsByDigest.size >= maxPendingPairingCodes) {
+            throw new Error("Too many pending local plugin pairings");
+        }
+
+        const code = randomBytes(32).toString("base64url");
+        this.expirationsByDigest.set(this.digest(code), now + pairingCodeLifetimeMs);
+        return { code, expiresInSeconds: pairingCodeLifetimeMs / 1000 };
+    }
+
+    public consume(code: string | undefined, now = Date.now()): boolean {
+        if (!code) return false;
+        const digest = this.digest(code);
+        const expiresAt = this.expirationsByDigest.get(digest);
+        if (expiresAt === undefined) return false;
+        this.expirationsByDigest.delete(digest);
+        return expiresAt > now;
+    }
+
+    public clear(): void {
+        this.expirationsByDigest.clear();
+    }
+
+    private digest(code: string): string {
+        return createHash("sha256").update(code, "utf8").digest("hex");
+    }
+
+    private prune(now: number): void {
+        for (const [digest, expiresAt] of this.expirationsByDigest) {
+            if (expiresAt <= now) this.expirationsByDigest.delete(digest);
+        }
+    }
 }
 
 export function loadLocalMcpSecurityConfig(
