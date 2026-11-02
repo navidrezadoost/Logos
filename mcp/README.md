@@ -24,8 +24,9 @@ via the dedicated **Logos MCP Plugin**,
 which connects to the MCP server via WebSocket.  
 This enables the LLM to carry out tasks in the context of a design file by 
 executing code that leverages the Logos Plugin API.
-The LLM is free to write and execute arbitrary code snippets
-within the Logos Plugin environment to accomplish its tasks.
+The local, authenticated profile can execute tasks through the Logos Plugin API.
+Remote and multi-user execution are disabled; the local listener is not a remote
+code-execution service.
 
 ![Architecture](resources/architecture.png)
 
@@ -81,8 +82,14 @@ cd mcp/
 Then build all components and start the two servers:
 
 ```shell
+export LOGOS_MCP_LOCAL_TOKEN="$(openssl rand -hex 32)"
+# Optional: allow a specific trusted Logos web origin to fetch the plugin preview.
+# export LOGOS_MCP_PLUGIN_ALLOWED_ORIGIN="https://design.logos.app"
 pnpm run bootstrap
 ```
+
+Use the same private value when configuring the local MCP client. The plugin
+build embeds it for the loopback WebSocket handshake; do not publish that build.
 
 This bootstrap command will:
 
@@ -137,7 +144,7 @@ the locally build documentation)
 1. Open Logos in your browser
 2. Navigate to a design file
 3. Open the Plugins menu
-4. Load the plugin using the development URL (`http://localhost:4400/manifest.json` by default)
+4. Load the plugin using the development URL (`http://127.0.0.1:4400/manifest.json` by default)
 5. Open the plugin UI
 6. In the plugin UI, click "Connect to MCP server".
    The connection status should change from "Not connected" to "Connected to MCP server".
@@ -149,13 +156,29 @@ the locally build documentation)
 
 ### 3. Connect an MCP Client
 
-By default, the server runs on port 4401 and provides:
+The server is local-only and requires a bearer token. Generate a per-run secret
+of at least 32 bytes and export it before starting the server and building the
+local plugin. Do not commit the token or publish a plugin bundle containing it.
 
-- **Modern Streamable HTTP endpoint**: `http://localhost:4401/mcp`
-- **Legacy SSE endpoint**: `http://localhost:4401/sse`
+```sh
+export LOGOS_MCP_LOCAL_TOKEN="$(openssl rand -hex 32)"
+# Optional exact origin for a trusted Logos host; wildcard CORS stays disabled.
+# export LOGOS_MCP_PLUGIN_ALLOWED_ORIGIN="https://design.logos.app"
+```
 
-These endpoints can be used directly by MCP clients that support them.
-Simply configure the client to connect the MCP server by providing the respective URL.
+The server binds only to loopback (`127.0.0.1` by default; `::1` is also
+accepted) and provides:
+
+- **Modern Streamable HTTP endpoint**: `http://127.0.0.1:4401/mcp`
+- **Legacy SSE endpoint**: `http://127.0.0.1:4401/sse`
+- **Authenticated plugin WebSocket**: `ws://127.0.0.1:4402`
+- **Authenticated development REPL**: `http://127.0.0.1:4403`
+
+Every HTTP/SSE/REPL request must include `Authorization: Bearer $LOGOS_MCP_LOCAL_TOKEN`.
+The plugin WebSocket authenticates with a first-frame token message. Configure
+the MCP client or its transport proxy to send the bearer header; clients that
+cannot set authorization headers are not supported by this local profile.
+Build the Logos plugin with the same `LOGOS_MCP_LOCAL_TOKEN` in its environment.
 
 When using a client that only supports stdio transport,
 a proxy like `mcp-remote` is required.
@@ -173,7 +196,10 @@ allowing clients that support only stdio to connect to the MCP server indirectly
 
 2. Use `mcp-remote` to provide the launch command for your MCP client:
 
-        npx -y mcp-remote http://localhost:4401/sse --allow-http
+        npx -y mcp-remote http://127.0.0.1:4401/sse --allow-http
+
+The proxy must be configured to attach the bearer authorization header. Do not
+remove server authentication to accommodate a client that cannot do so.
 
 #### Example: Claude Desktop
 
@@ -196,7 +222,7 @@ Add a `logos` entry under `mcpServers` with the following content:
     "mcpServers": {
         "logos": {
             "command": "npx",
-            "args": ["-y", "mcp-remote", "http://localhost:4401/sse", "--allow-http"]
+            "args": ["-y", "mcp-remote", "http://127.0.0.1:4401/sse", "--allow-http"]
         }
     }
 }
@@ -215,7 +241,7 @@ of the prompt input area.
 
 To add the Logos MCP server to a Claude Code project, issue the command
 
-    claude mcp add logos -t http http://localhost:4401/mcp
+    claude mcp add logos -t http http://127.0.0.1:4401/mcp
 
 ## Repository Structure
 
@@ -249,14 +275,16 @@ options use the `LOGOS_MCP_` prefix for consistency.
 
 ### Server Configuration
 
-| Environment Variable               | Description                                                                | Default      |
-|------------------------------------|----------------------------------------------------------------------------|--------------|
-| `LOGOS_MCP_SERVER_LISTEN_ADDRESS` | Address on which the MCP server listens (binds to)                         | `localhost`  |
-| `LOGOS_MCP_SERVER_PORT`           | Port for the HTTP/SSE server                                               | `4401`       |
-| `LOGOS_MCP_WEBSOCKET_PORT`        | Port for the WebSocket server (plugin connection)                          | `4402`       |
-| `LOGOS_MCP_REPL_PORT`             | Port for the REPL server (development/debugging)                           | `4403`       |
-| `LOGOS_MCP_SERVER_ADDRESS`        | Hostname or IP address via which clients can reach the MCP server          | `localhost`  |
-| `LOGOS_MCP_REMOTE_MODE`           | Enable remote mode (disables file system access). Set to `true` to enable. | `false`      |
+| Environment Variable               | Description | Default |
+|------------------------------------|-------------|---------|
+| `LOGOS_MCP_LOCAL_TOKEN` | Required local bearer/WebSocket credential; at least 32 bytes. Use a random per-run value and keep it private. | **Required** |
+| `LOGOS_MCP_SERVER_HOST` | Literal loopback bind address. Only `127.0.0.1` or `::1` is accepted. | `127.0.0.1` |
+| `LOGOS_MCP_SERVER_LISTEN_ADDRESS` | Legacy alias for the bind address; loopback values only. | — |
+| `LOGOS_MCP_SERVER_PORT` | Port for the HTTP/SSE server. | `4401` |
+| `LOGOS_MCP_WEBSOCKET_PORT` | Port for the authenticated plugin WebSocket. | `4402` |
+| `LOGOS_MCP_REPL_PORT` | Port for the authenticated development REPL. | `4403` |
+| `LOGOS_MCP_REMOTE_MODE` | Remote mode is not implemented; setting this to `true` causes startup to fail. | `false` |
+| `LOGOS_MCP_PLUGIN_ALLOWED_ORIGIN` | Optional exact origin allowed to fetch the local plugin preview. Wildcard CORS is disabled. | unset |
 
 ### Logging Configuration
 
@@ -271,21 +299,9 @@ options use the `LOGOS_MCP_` prefix for consistency.
 |-------------------------------------------|-----------------------------------------------------------------------------------------|--------------|
 | `LOGOS_MCP_PLUGIN_SERVER_LISTEN_ADDRESS` | Address on which the plugin web server listens (single address or comma-separated list) | (local only) |
 
-## Beyond Local Execution
+## Remote execution
 
-The above instructions describe how to run the MCP server and plugin server locally.
-We are working on enabling remote deployments of the MCP server, particularly
-in [multi-user mode](docs/multi-user-mode.md), where multiple Logos users will
-be able to connect to the same MCP server instance.
-
-To run the server remotely (even for a single user),
-you may set the following environment variables to configure the two servers
-(MCP server & plugin server) appropriately:
- * `LOGOS_MCP_REMOTE_MODE=true`: This ensures that the MCP server is operating
-   in remote mode, with local file system access disabled.
- * `LOGOS_MCP_SERVER_LISTEN_ADDRESS` and `LOGOS_MCP_PLUGIN_SERVER_LISTEN_ADDRESS`:
-   Set these according to your requirements for remote connectivity.
-   To bind all interfaces, use `0.0.0.0` (use caution in untrusted networks).
- * `LOGOS_MCP_SERVER_ADDRESS=<your-address>`: This sets the hostname or IP address
-   where the MCP server can be reached. The Logos MCP Plugin uses this to construct
-   the WebSocket URL as `ws://<your-address>:<port>` (default port: `4402`).
+Remote and multi-user execution are disabled pending a separately reviewed,
+authenticated deployment profile. `--multi-user`, `LOGOS_MCP_REMOTE_MODE=true`,
+and non-loopback bind addresses are rejected. Generic code execution is not
+available to remote clients. Do not expose or proxy these listeners publicly.

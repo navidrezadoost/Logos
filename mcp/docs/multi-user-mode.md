@@ -1,4 +1,14 @@
-# Multi-User Mode
+# Multi-User Mode — Disabled
+
+Multi-user and remote MCP operation are currently disabled pending a separately
+reviewed authentication and authorization profile. The server rejects
+`--multi-user`, `LOGOS_MCP_REMOTE_MODE=true`, and non-loopback listener binds.
+Do not use the historical instructions below or expose MCP listeners to a
+network. The local server requires `LOGOS_MCP_LOCAL_TOKEN` and authenticates
+HTTP, WebSocket, and REPL connections.
+
+The previous multi-user notes are retained below as historical context only;
+they are not executable guidance.
 
 > [!WARNING]
 > Multi-user mode is under development and not yet fully integrated.

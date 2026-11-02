@@ -1,0 +1,46 @@
+name: MCP local security
+
+on:
+  push:
+    branches: ["main", "r1/**"]
+    paths:
+      - "mcp/**"
+      - ".github/workflows/mcp-server.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "mcp/**"
+      - ".github/workflows/mcp-server.yml"
+
+jobs:
+  test:
+    name: Build and test local MCP security boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: mcp/pnpm-lock.yaml
+
+      - name: Install MCP workspace dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: mcp
+
+      - name: Type-check MCP server
+        run: pnpm --filter mcp-server types:check
+        working-directory: mcp
+
+      - name: Run MCP authentication integration tests
+        run: pnpm --filter mcp-server test:security
+        working-directory: mcp
+
+      - name: Build MCP plugin
+        run: pnpm --filter mcp-plugin build
+        working-directory: mcp

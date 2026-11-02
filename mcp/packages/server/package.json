@@ -9,6 +9,7 @@
     "build": "pnpm run build:server && cp -r src/static dist/static && cp -r data dist/data",
     "build:multi-user": "pnpm run build",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "test:security": "esbuild src/localSecurity.test.ts test/security.integration.test.ts --bundle --platform=node --target=node20 --format=esm --packages=external --outbase=. --outdir=dist/security-tests && node --test dist/security-tests/src/localSecurity.test.js dist/security-tests/test/security.integration.test.js",
     "start": "node dist/index.js",
     "start:multi-user": "node dist/index.js --multi-user",
     "start:dev": "node --import ts-node/register src/index.ts",

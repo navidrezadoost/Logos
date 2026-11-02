@@ -4,10 +4,6 @@ import "./style.css";
 const searchParams = new URLSearchParams(window.location.search);
 document.body.dataset.theme = searchParams.get("theme") ?? "light";
 
-// Determine whether multi-user mode is enabled based on URL parameters
-const isMultiUserMode = searchParams.get("multiUser") === "true";
-console.log("Logos MCP multi-user mode:", isMultiUserMode);
-
 // WebSocket connection management
 let ws: WebSocket | null = null;
 const statusElement = document.getElementById("connection-status");
@@ -51,24 +47,27 @@ function connectToMcpServer(): void {
     }
 
     try {
-        let wsUrl = LOGOS_MCP_WEBSOCKET_URL;
-        if (isMultiUserMode) {
-            // TODO obtain proper userToken from logos
-            const userToken = "dummyToken";
-            wsUrl += `?userToken=${encodeURIComponent(userToken)}`;
-        }
-        ws = new WebSocket(wsUrl);
+        ws = new WebSocket(LOGOS_MCP_WEBSOCKET_URL);
         updateConnectionStatus("Connecting...", false);
 
         ws.onopen = () => {
-            console.log("Connected to MCP server");
-            updateConnectionStatus("Connected to MCP server", true);
+            ws?.send(JSON.stringify({ type: "logos.mcp.auth", token: LOGOS_MCP_LOCAL_TOKEN }));
+            updateConnectionStatus("Authenticating with local MCP server", false);
         };
 
         ws.onmessage = (event) => {
             console.log("Received from MCP server:", event.data);
             try {
                 const request = JSON.parse(event.data);
+                if (request?.type === "logos.mcp.auth") {
+                    if (request.ok === true) {
+                        updateConnectionStatus("Connected to MCP server", true);
+                    } else {
+                        updateConnectionStatus("Local MCP authentication failed", false);
+                        ws?.close();
+                    }
+                    return;
+                }
                 // Forward the task request to the plugin for execution
                 parent.postMessage(request, "*");
             } catch (error) {

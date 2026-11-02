@@ -16,12 +16,15 @@ import { ApplyPaletteTool } from "./tools/ApplyPaletteTool";
 import { BreakpointTool } from "./tools/BreakpointTool";
 import { ReplServer } from "./ReplServer";
 import { ApiDocs } from "./ApiDocs";
+import { hasValidBearerHeader, hasValidLocalToken, loadLocalMcpSecurityConfig } from "./localSecurity";
+import type { Server as HttpServer } from "node:http";
 
 /**
- * Session context for request-scoped data.
+ * Request context contains only the local transport marker. Remote identity
+ * and query-string user tokens are not accepted in this profile.
  */
 export interface SessionContext {
-    userToken?: string;
+    transport: "local";
 }
 
 export class LogosMcpServer {
@@ -30,28 +33,33 @@ export class LogosMcpServer {
     private readonly tools: Map<string, Tool<any>>;
     public readonly configLoader: ConfigurationLoader;
     private app: any;
+    private httpServer: HttpServer | null = null;
     public readonly pluginBridge: PluginBridge;
     private readonly replServer: ReplServer;
     private apiDocs: ApiDocs;
 
     /**
-     * Manages session-specific context, particularly user tokens for each request.
+     * Scopes request handling to the authenticated local transport.
      */
     private readonly sessionContext = new AsyncLocalStorage<SessionContext>();
 
     private readonly transports = {
         streamable: {} as Record<string, StreamableHTTPServerTransport>,
-        sse: {} as Record<string, { transport: SSEServerTransport; userToken?: string }>,
+        sse: {} as Record<string, { transport: SSEServerTransport }>,
     };
 
     public readonly host: string;
     public readonly port: number;
     public readonly webSocketPort: number;
     public readonly replPort: number;
+    private readonly localToken: string;
 
-    constructor(private isMultiUser: boolean = false) {
+    constructor(isMultiUser = false) {
+        const security = loadLocalMcpSecurityConfig(process.env, isMultiUser);
+        this.localToken = security.token;
+
         // read port configuration from environment variables
-        this.host = process.env.LOGOS_MCP_SERVER_HOST ?? "0.0.0.0";
+        this.host = security.host;
         this.port = parseInt(process.env.LOGOS_MCP_SERVER_PORT ?? "4401", 10);
         this.webSocketPort = parseInt(process.env.LOGOS_MCP_WEBSOCKET_PORT ?? "4402", 10);
         this.replPort = parseInt(process.env.LOGOS_MCP_REPL_PORT ?? "4403", 10);
@@ -77,25 +85,17 @@ export class LogosMcpServer {
     }
 
     /**
-     * Indicates whether the server is running in multi-user mode,
-     * where user tokens are required for authentication.
+     * Multi-user mode is disabled until a separately reviewed profile exists.
      */
     public isMultiUserMode(): boolean {
-        return this.isMultiUser;
+        return false;
     }
 
     /**
-     * Indicates whether the server is running in remote mode.
-     *
-     * In remote mode, the server is not assumed to be accessed only by a local user on the same machine,
-     * with corresponding limitations being enforced.
-     * Remote mode can be explicitly enabled by setting the environment variable LOGOS_MCP_REMOTE_MODE
-     * to "true". Enabling multi-user mode forces remote mode, regardless of the value of the environment
-     * variable.
+     * Remote mode is disabled; configuration requesting it fails at startup.
      */
     public isRemoteMode(): boolean {
-        const isRemoteModeRequested: boolean = process.env.LOGOS_MCP_REMOTE_MODE === "true";
-        return this.isMultiUserMode() || isRemoteModeRequested;
+        return false;
     }
 
     /**
@@ -120,6 +120,14 @@ export class LogosMcpServer {
      */
     public getSessionContext(): SessionContext | undefined {
         return this.sessionContext.getStore();
+    }
+
+    public isLocalTokenValid(token: string | undefined): boolean {
+        return hasValidLocalToken(token, this.localToken);
+    }
+
+    public isLocalRequestAuthorized(authorization: string | undefined): boolean {
+        return hasValidBearerHeader(authorization, this.localToken);
     }
 
     private registerTools(): void {
@@ -163,9 +171,7 @@ export class LogosMcpServer {
          * Modern Streamable HTTP connection endpoint
          */
         this.app.all("/mcp", async (req: any, res: any) => {
-            const userToken = req.query.userToken as string | undefined;
-
-            await this.sessionContext.run({ userToken }, async () => {
+            await this.sessionContext.run({ transport: "local" }, async () => {
                 const { randomUUID } = await import("node:crypto");
 
                 const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -198,11 +204,9 @@ export class LogosMcpServer {
          * Legacy SSE connection endpoint
          */
         this.app.get("/sse", async (req: any, res: any) => {
-            const userToken = req.query.userToken as string | undefined;
-
-            await this.sessionContext.run({ userToken }, async () => {
+            await this.sessionContext.run({ transport: "local" }, async () => {
                 const transport = new SSEServerTransport("/messages", res);
-                this.transports.sse[transport.sessionId] = { transport, userToken };
+                this.transports.sse[transport.sessionId] = { transport };
 
                 res.on("close", () => {
                     delete this.transports.sse[transport.sessionId];
@@ -220,7 +224,7 @@ export class LogosMcpServer {
             const session = this.transports.sse[sessionId];
 
             if (session) {
-                await this.sessionContext.run({ userToken: session.userToken }, async () => {
+                await this.sessionContext.run({ transport: "local" }, async () => {
                     await session.transport.handlePostMessage(req, res, req.body);
                 });
             } else {
@@ -232,23 +236,34 @@ export class LogosMcpServer {
     async start(): Promise<void> {
         const { default: express } = await import("express");
         this.app = express();
+        this.app.use((req: any, res: any, next: () => void) => {
+            if (!this.isLocalRequestAuthorized(req.headers.authorization)) {
+                res.setHeader("WWW-Authenticate", "Bearer");
+                res.status(401).send("Unauthorized");
+                return;
+            }
+            next();
+        });
         this.app.use(express.json());
 
         this.setupHttpEndpoints();
 
-        return new Promise((resolve) => {
-            this.app.listen(this.port, this.host, async () => {
+        return new Promise((resolve, reject) => {
+            this.httpServer = this.app.listen(this.port, this.host, async () => {
                 this.logger.info(`Multi-user mode: ${this.isMultiUserMode()}`);
                 this.logger.info(`Remote mode: ${this.isRemoteMode()}`);
                 this.logger.info(`Modern Streamable HTTP endpoint: http://${this.host}:${this.port}/mcp`);
                 this.logger.info(`Legacy SSE endpoint: http://${this.host}:${this.port}/sse`);
                 this.logger.info(`WebSocket server URL: ws://${this.host}:${this.webSocketPort}`);
 
-                // start the REPL server
-                await this.replServer.start();
-
-                resolve();
+                try {
+                    await this.replServer.start();
+                    resolve();
+                } catch (error) {
+                    reject(error);
+                }
             });
+            this.httpServer.once("error", reject);
         });
     }
 
@@ -259,7 +274,16 @@ export class LogosMcpServer {
      */
     public async stop(): Promise<void> {
         this.logger.info("Stopping Logos MCP Server...");
-        await this.replServer.stop();
+        await Promise.all([this.replServer.stop(), this.pluginBridge.stop(), this.closeHttpServer()]);
         this.logger.info("Logos MCP Server stopped");
+    }
+
+    private async closeHttpServer(): Promise<void> {
+        const server = this.httpServer;
+        this.httpServer = null;
+        if (!server?.listening) return;
+        await new Promise<void>((resolve, reject) => {
+            server.close((error) => (error ? reject(error) : resolve()));
+        });
     }
 }
