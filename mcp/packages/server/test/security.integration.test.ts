@@ -63,11 +63,13 @@ test("all local MCP transports require authentication and cannot bind off-loopba
     delete process.env.LOGOS_MCP_REMOTE_MODE;
 
     const server = new LogosMcpServer();
+    const base = `http://127.0.0.1:${httpPort}`;
+    const replBase = `http://127.0.0.1:${replPort}`;
+    const wsUrl = `ws://127.0.0.1:${wsPort}`;
     try {
         assert.equal(server.host, "127.0.0.1");
         await server.start();
 
-        const base = `http://127.0.0.1:${httpPort}`;
         const unauthenticatedMcp = await fetch(`${base}/mcp`, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -75,6 +77,17 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         });
         assert.equal(unauthenticatedMcp.status, 401);
         await unauthenticatedMcp.body?.cancel();
+
+        const wrongBearerMcp = await fetch(`${base}/mcp?userToken=${token}`, {
+            method: "POST",
+            headers: {
+                authorization: `Bearer ${"b".repeat(64)}`,
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+        });
+        assert.equal(wrongBearerMcp.status, 401);
+        await wrongBearerMcp.body?.cancel();
 
         const authenticatedMcp = await fetch(`${base}/mcp`, {
             method: "POST",
@@ -88,7 +101,6 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         assert.notEqual(authenticatedMcp.status, 401);
         await authenticatedMcp.body?.cancel();
 
-        const replBase = `http://127.0.0.1:${replPort}`;
         const unauthenticatedRepl = await fetch(`${replBase}/execute`, { method: "POST" });
         assert.equal(unauthenticatedRepl.status, 401);
         await unauthenticatedRepl.body?.cancel();
@@ -103,22 +115,34 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         assert.equal(authenticatedRepl.status, 400);
         await authenticatedRepl.body?.cancel();
 
-        const unauthorizedSocket = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+        const unauthorizedSocket = new WebSocket(wsUrl);
         await waitForOpen(unauthorizedSocket);
         const rejectedSocket = waitForClose(unauthorizedSocket);
         unauthorizedSocket.send(JSON.stringify({ id: "forged-task", success: true, data: {} }));
         const closeCode = await rejectedSocket;
         assert.equal(closeCode, 1008);
 
-        const authenticatedSocket = new WebSocket(`ws://127.0.0.1:${wsPort}`);
+        const invalidSocket = new WebSocket(wsUrl);
+        await waitForOpen(invalidSocket);
+        const invalidClose = waitForClose(invalidSocket);
+        invalidSocket.send(JSON.stringify({ type: "logos.mcp.auth", token: "b".repeat(64) }));
+        assert.equal(await invalidClose, 1008);
+
+        const authenticatedSocket = new WebSocket(wsUrl);
         await waitForOpen(authenticatedSocket);
         const authenticationAck = waitForMessage(authenticatedSocket);
         authenticatedSocket.send(JSON.stringify({ type: "logos.mcp.auth", token }));
         const ack = await authenticationAck;
         assert.deepEqual(JSON.parse(ack.toString()), { type: "logos.mcp.auth", ok: true });
+        const socketClosed = waitForClose(authenticatedSocket);
         authenticatedSocket.close();
+        await socketClosed;
     } finally {
         await server.stop();
+        await assert.rejects(fetch(`${base}/mcp`));
+        await assert.rejects(fetch(`${replBase}/`));
+        const stoppedSocket = new WebSocket(wsUrl);
+        await assert.rejects(waitForOpen(stoppedSocket));
         if (previous.token === undefined) delete process.env.LOGOS_MCP_LOCAL_TOKEN;
         else process.env.LOGOS_MCP_LOCAL_TOKEN = previous.token;
         if (previous.host === undefined) delete process.env.LOGOS_MCP_SERVER_HOST;

@@ -21,11 +21,12 @@
 - The plugin WebSocket is not eligible to receive tasks until its first frame proves the local token. Query-string `userToken` is no longer treated as identity.
 - `--multi-user` and `LOGOS_MCP_REMOTE_MODE=true` fail closed before listener startup. No remote profile is implemented or enabled.
 - Plugin preview CORS defaults off. An optional exact `http(s)` origin can be configured; wildcard, paths and non-origin URLs are rejected. The local token is embedded in the locally built plugin for the loopback WebSocket handshake; that bundle must not be published.
+- This is a per-run **shared local secret**, not per-client enrollment. Use only a private local-development build with an ephemeral token, no token in logs/URLs, and preview CORS restricted to a trusted origin. A one-time/per-client pairing mechanism has not been implemented or approved; review it before distribution or broader access.
 - Generic code execution remains available only in the authenticated local profile. The remote profile is unavailable, so this is not a remote execution service.
 
 ## Tests authored
 
-`mcp/packages/server/test/security.integration.test.ts` starts the actual HTTP, WebSocket and REPL listeners on loopback test ports. It checks unauthenticated MCP HTTP and REPL requests return 401; a valid bearer reaches the MCP handler; unauthenticated WebSocket task-response frames close with policy code 1008; a valid first-frame token receives an authentication acknowledgment; and remote/non-loopback settings are rejected by unit tests.
+`mcp/packages/server/test/security.integration.test.ts` starts the actual HTTP, WebSocket and REPL listeners on loopback test ports. It checks unauthenticated and wrong-bearer MCP requests return 401 (including a query `userToken`); an authenticated bearer reaches the MCP handler; unauthenticated/invalid-token WebSocket frames close with policy code 1008; a valid first-frame token receives an acknowledgment; and HTTP/WS/REPL listeners reject connections after shutdown. Unit tests reject remote/non-loopback settings.
 
 ## Executed evidence and blockers
 
