@@ -3,6 +3,7 @@
 **Status:** Verification incomplete; M0 remains open  
 **Base commit:** `d387cc83fd3f45d1ffe019bf86b1c52dcf27c866` (`origin/main`, containing PRs #27–29)  
 **Original PKG-00 implementation commit:** `32c6a5f07c724c9bc91644c3e5151757145d076d`  
+**Verification evidence commit:** `ff07e92e2baedccb3311dd87b504e709ceb596b4`  
 **Branch/worktree:** `r1/pkg00-verification` — `/home/navidrezadoost/Documents/Github/Logos-r1-pkg00-verification`
 
 This verification branch contains no source changes; it records the clean-baseline checks performed after the package merges.
