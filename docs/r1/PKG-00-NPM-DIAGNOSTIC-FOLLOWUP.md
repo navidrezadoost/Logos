@@ -54,7 +54,7 @@ Error groups and locations:
 - `src/render-webgpu/llm-pipeline.ts`: missing `GPUBufferUsageFlags`, `GPUComputePipelineDescriptor`, and three `GPUQueue.onSubmittedWorkDone` declarations.
 - `src/stores/aiStore.ts:318`: nullable `requestWebGPUDevice()` result dereferenced without a null check.
 
-This was a real TypeScript build failure under the pinned install, not a download failure. The generated icon index formatting and `tsconfig.tsbuildinfo` created during the first build were restored/removed. A separate package-scoped correction branch, `r1/pkg00-react-build-fix` at `ae54bb91`, addresses these errors; its Node 20 `npm run build` (including `tsc -b` and Vite) passes. See `docs/r1/PKG-00-REACT-BUILD-FOLLOWUP.md` on that branch. This diagnostics branch remains documentation-only.
+This was a real TypeScript build failure under the pinned install, not a download failure. The generated icon index formatting and `tsconfig.tsbuildinfo` created during the first build were restored/removed. The separate package-scoped correction branch `r1/pkg00-react-build-fix` addresses these errors; its Node 20 `npm run build` (including `tsc -b` and Vite) passes. The current head (`ea5022fe`) also fixes the CI sync from `build/` to `dist/`; the full workspace bundle remains incomplete. See `docs/r1/PKG-00-REACT-BUILD-FOLLOWUP.md` on that branch. This diagnostics branch remains documentation-only.
 
 ## Independent Cargo access check
 
