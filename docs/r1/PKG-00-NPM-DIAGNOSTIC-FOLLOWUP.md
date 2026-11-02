@@ -1,6 +1,6 @@
 # R1 PKG-00 — Node 20 npm Install Diagnostic
 
-**Status:** Pinned Node 20 install succeeds on host network; React build fails at TypeScript; M0 remains open
+**Status:** Pinned Node 20 install and corrected React build pass locally; full root Rust workspace and release target remain open
 **Base commit:** `ddae16ad048cf429b386f14e66095ba8faddb256` (`origin/main`, after PRs #27–32)
 **Branch/worktree:** `r1/pkg00-m0-followup` — `/home/navidrezadoost/Documents/Github/Logos-r1-pkg00-m0-followup`
 
@@ -54,7 +54,7 @@ Error groups and locations:
 - `src/render-webgpu/llm-pipeline.ts`: missing `GPUBufferUsageFlags`, `GPUComputePipelineDescriptor`, and three `GPUQueue.onSubmittedWorkDone` declarations.
 - `src/stores/aiStore.ts:318`: nullable `requestWebGPUDevice()` result dereferenced without a null check.
 
-This is a real TypeScript build failure under the pinned install, not a download failure. The generated icon index formatting and `tsconfig.tsbuildinfo` created during the build were restored/removed; no source or lockfile changes are part of this documentation branch. A separate, package-scoped correction branch is needed before rerunning the build.
+This was a real TypeScript build failure under the pinned install, not a download failure. The generated icon index formatting and `tsconfig.tsbuildinfo` created during the first build were restored/removed. A separate package-scoped correction branch, `r1/pkg00-react-build-fix` at `ae54bb91`, addresses these errors; its Node 20 `npm run build` (including `tsc -b` and Vite) passes. See `docs/r1/PKG-00-REACT-BUILD-FOLLOWUP.md` on that branch. This diagnostics branch remains documentation-only.
 
 ## Independent Cargo access check
 
@@ -67,8 +67,18 @@ warning: ... Timeout was reached (failed to download any data for `glam v0.24.2`
 Command exceeded timeout of 150000 ms
 ```
 
-Cargo dependency access also timed out before compilation; this is independent of the npm TLS error and is not a Rust compile failure. `--locked` was used, and no lockfile changes were made. Re-run in a CI environment with approved crates.io access before classifying Rust build health.
+The initial root-workspace Cargo command timed out before compilation. Additional transport checks from the host got TLS-verified HTTP 200 responses from `index.crates.io` and `static.crates.io`, and an HTTPS GET for `approx 0.5.1` returned bytes. Cargo itself still timed out fetching that locked crate, including with `CARGO_HTTP_TIMEOUT=120` and HTTP multiplexing disabled. Of the 48 registry archives in `rust/Cargo.lock`, 47 were already checksum-verified in cache; the missing `approx 0.5.1` was fetched from `static.crates.io` and SHA-256-checked against the lock. No lockfile changed.
 
-The temporary containers were removed. The pinned install succeeded through host networking, but React type-check/build remains failed until the listed source/declaration errors are corrected. Cargo still has independent registry timeouts. Do not alter dependencies, regenerate locks, or weaken TLS; M0 remains open pending successful React and Rust builds and release-target verification.
+Using that verified cache, the CI-equivalent domain-workspace command passed:
+
+```text
+$ cargo test --manifest-path rust/Cargo.toml --workspace --locked --offline
+test result: 386 unit tests passed; 0 failed
+doc-tests: 28 passed; 0 failed
+```
+
+This verifies the `rust/` domain workspace on Cargo/rustc 1.93.0. The root workspace (`cargo test --workspace --locked`, including `render-wasm`) remains unverified: its complete locked dependency cache was not restored; a root-cache HTTPS transfer for `anyhow 1.0.101` timed out part-way through. This is still a transport/cache blocker, not a Rust compilation result. GitHub-hosted CI status remains unavailable.
+
+The temporary Node containers were removed. Both React and the `rust/` domain workspace now pass locally with existing locks; root Rust workspace CI and the release artifact remain unresolved. Do not alter dependencies, regenerate locks, or weaken TLS; M0 remains open.
 
 No rollout approval is implied; M0 remains open.
