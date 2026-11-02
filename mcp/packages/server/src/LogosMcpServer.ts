@@ -265,7 +265,7 @@ export class LogosMcpServer {
         this.setupHttpEndpoints();
 
         return new Promise((resolve, reject) => {
-            this.httpServer = this.app.listen(this.port, this.host, async () => {
+            const httpServer: HttpServer = this.app.listen(this.port, this.host, async () => {
                 this.logger.info(`Multi-user mode: ${this.isMultiUserMode()}`);
                 this.logger.info(`Remote mode: ${this.isRemoteMode()}`);
                 this.logger.info(`Modern Streamable HTTP endpoint: http://${this.host}:${this.port}/mcp`);
@@ -279,7 +279,8 @@ export class LogosMcpServer {
                     reject(error);
                 }
             });
-            this.httpServer.once("error", reject);
+            this.httpServer = httpServer;
+            httpServer.once("error", reject);
         });
     }
 

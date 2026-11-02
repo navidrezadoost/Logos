@@ -40,10 +40,21 @@ function waitForClose(socket: WebSocket): Promise<number> {
     });
 }
 
+async function readMcpResponse(response: Response): Promise<unknown> {
+    const body = await response.text();
+    if (response.headers.get("content-type")?.includes("text/event-stream")) {
+        const dataLine = body.split(/\r?\n/).find((line) => line.startsWith("data:"));
+        if (!dataLine) throw new Error(`MCP SSE response had no data event: ${body}`);
+        return JSON.parse(dataLine.slice("data:".length).trim());
+    }
+    return JSON.parse(body);
+}
+
 test("all local MCP transports require authentication and cannot bind off-loopback", async () => {
     const previous = {
         token: process.env.LOGOS_MCP_LOCAL_TOKEN,
         host: process.env.LOGOS_MCP_SERVER_HOST,
+        listenAddress: process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS,
         httpPort: process.env.LOGOS_MCP_SERVER_PORT,
         wsPort: process.env.LOGOS_MCP_WEBSOCKET_PORT,
         replPort: process.env.LOGOS_MCP_REPL_PORT,
@@ -55,6 +66,16 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         unusedLoopbackPort(),
         unusedLoopbackPort(),
     ]);
+
+    delete process.env.LOGOS_MCP_LOCAL_TOKEN;
+    delete process.env.LOGOS_MCP_REMOTE_MODE;
+    process.env.LOGOS_MCP_SERVER_HOST = "127.0.0.1";
+    delete process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS;
+    assert.throws(() => new LogosMcpServer(), /LOGOS_MCP_LOCAL_TOKEN/);
+    process.env.LOGOS_MCP_LOCAL_TOKEN = token;
+    process.env.LOGOS_MCP_SERVER_HOST = "0.0.0.0";
+    assert.throws(() => new LogosMcpServer(), /127\.0\.0\.1 or ::1/);
+
     process.env.LOGOS_MCP_LOCAL_TOKEN = token;
     process.env.LOGOS_MCP_SERVER_HOST = "127.0.0.1";
     process.env.LOGOS_MCP_SERVER_PORT = String(httpPort);
@@ -89,17 +110,88 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         assert.equal(wrongBearerMcp.status, 401);
         await wrongBearerMcp.body?.cancel();
 
-        const authenticatedMcp = await fetch(`${base}/mcp`, {
+        const initializedMcp = await fetch(`${base}/mcp`, {
             method: "POST",
             headers: {
                 authorization: `Bearer ${token}`,
                 "content-type": "application/json",
                 accept: "application/json, text/event-stream",
             },
-            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+            body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method: "initialize",
+                params: {
+                    protocolVersion: "2025-11-25",
+                    capabilities: {},
+                    clientInfo: { name: "security-test", version: "1.0.0" },
+                },
+            }),
         });
-        assert.notEqual(authenticatedMcp.status, 401);
-        await authenticatedMcp.body?.cancel();
+        assert.equal(initializedMcp.status, 200);
+        const sessionId = initializedMcp.headers.get("mcp-session-id");
+        assert.ok(sessionId);
+        const initializedPayload = (await readMcpResponse(initializedMcp)) as {
+            result?: { protocolVersion?: string };
+        };
+        assert.equal(initializedPayload.result?.protocolVersion, "2025-11-25");
+
+        const initializedNotification = await fetch(`${base}/mcp`, {
+            method: "POST",
+            headers: {
+                authorization: `Bearer ${token}`,
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+                "mcp-session-id": sessionId,
+                "mcp-protocol-version": "2025-11-25",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+        });
+        assert.equal(initializedNotification.status, 202);
+        await initializedNotification.body?.cancel();
+
+        const authenticatedMcp = await fetch(`${base}/mcp`, {
+            method: "POST",
+            headers: {
+                authorization: `Bearer ${token}`,
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+                "mcp-session-id": sessionId,
+                "mcp-protocol-version": "2025-11-25",
+            },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+        });
+        assert.equal(authenticatedMcp.status, 200);
+        const toolsPayload = (await readMcpResponse(authenticatedMcp)) as {
+            result?: { tools?: Array<{ name: string }> };
+        };
+        assert.ok(toolsPayload.result?.tools?.some((tool) => tool.name === "execute_code"));
+
+        const unauthenticatedSse = await fetch(`${base}/sse`, {
+            headers: { accept: "text/event-stream" },
+        });
+        assert.equal(unauthenticatedSse.status, 401);
+        await unauthenticatedSse.body?.cancel();
+
+        const unauthenticatedSseMessage = await fetch(`${base}/messages?sessionId=missing`, { method: "POST" });
+        assert.equal(unauthenticatedSseMessage.status, 401);
+        await unauthenticatedSseMessage.body?.cancel();
+
+        const authenticatedSseMessage = await fetch(`${base}/messages?sessionId=missing`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}` },
+        });
+        assert.equal(authenticatedSseMessage.status, 400);
+        await authenticatedSseMessage.body?.cancel();
+
+        const authenticatedSse = await fetch(`${base}/sse`, {
+            headers: {
+                authorization: `Bearer ${token}`,
+                accept: "text/event-stream",
+            },
+        });
+        assert.equal(authenticatedSse.status, 200);
+        await authenticatedSse.body?.cancel();
 
         const unauthenticatedRepl = await fetch(`${replBase}/execute`, { method: "POST" });
         assert.equal(unauthenticatedRepl.status, 401);
@@ -156,6 +248,24 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         const replayedPairingClose = waitForClose(replayedPairingSocket);
         replayedPairingSocket.send(JSON.stringify({ type: "logos.mcp.auth", pairingCode: pairing.code }));
         assert.equal(await replayedPairingClose, 1008);
+
+        const expiringPairingResponse = await fetch(`${base}/local/plugin-pairing`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}` },
+        });
+        assert.equal(expiringPairingResponse.status, 201);
+        const expiringPairing = (await expiringPairingResponse.json()) as { code: string };
+        const expiredPairingSocket = new WebSocket(wsUrl);
+        await waitForOpen(expiredPairingSocket);
+        const expiredPairingClose = waitForClose(expiredPairingSocket);
+        const originalDateNow = Date.now;
+        Date.now = () => originalDateNow() + 61_000;
+        try {
+            expiredPairingSocket.send(JSON.stringify({ type: "logos.mcp.auth", pairingCode: expiringPairing.code }));
+            assert.equal(await expiredPairingClose, 1008);
+        } finally {
+            Date.now = originalDateNow;
+        }
     } finally {
         await server.stop();
         await assert.rejects(fetch(`${base}/mcp`));
@@ -166,6 +276,8 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         else process.env.LOGOS_MCP_LOCAL_TOKEN = previous.token;
         if (previous.host === undefined) delete process.env.LOGOS_MCP_SERVER_HOST;
         else process.env.LOGOS_MCP_SERVER_HOST = previous.host;
+        if (previous.listenAddress === undefined) delete process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS;
+        else process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS = previous.listenAddress;
         if (previous.httpPort === undefined) delete process.env.LOGOS_MCP_SERVER_PORT;
         else process.env.LOGOS_MCP_SERVER_PORT = previous.httpPort;
         if (previous.wsPort === undefined) delete process.env.LOGOS_MCP_WEBSOCKET_PORT;

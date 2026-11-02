@@ -48,6 +48,10 @@ jobs:
         run: pnpm install --frozen-lockfile
         working-directory: mcp
 
+      - name: Build shared MCP types
+        run: pnpm --filter mcp-common build
+        working-directory: mcp
+
       - name: Type-check MCP server
         run: pnpm --filter mcp-server types:check
         working-directory: mcp
