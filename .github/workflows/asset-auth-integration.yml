@@ -1,0 +1,61 @@
+name: A31 asset authorization
+
+on:
+  push:
+    branches: ["main", "r1/**"]
+    paths:
+      - "backend-go/internal/assetauth/**"
+      - "backend-go/internal/handler/assets.go"
+      - "backend-go/internal/handler/testdata/asset_auth_schema.sql"
+      - "backend-go/internal/perms/**"
+      - ".github/workflows/asset-auth-integration.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "backend-go/internal/assetauth/**"
+      - "backend-go/internal/handler/assets.go"
+      - "backend-go/internal/handler/testdata/asset_auth_schema.sql"
+      - "backend-go/internal/perms/**"
+      - ".github/workflows/asset-auth-integration.yml"
+
+jobs:
+  test:
+    name: Resource-scoped asset access integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: logos
+          POSTGRES_PASSWORD: logos
+          POSTGRES_DB: logos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logos -d logos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://logos:logos@127.0.0.1:5432/logos_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend-go/go.mod
+          cache-dependency-path: backend-go/go.sum
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Download Go modules
+        run: go mod download
+        working-directory: backend-go
+
+      - name: Initialize disposable authorization schema
+        run: psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f backend-go/internal/handler/testdata/asset_auth_schema.sql
+
+      - name: Test A31 resource authorization
+        run: go test ./internal/assetauth -run '^TestAssetByIDHandlerEnforcesResourceAuthorization$' -count=1 -v
+        working-directory: backend-go
