@@ -44,6 +44,7 @@ test("all local MCP transports require authentication and cannot bind off-loopba
     const previous = {
         token: process.env.LOGOS_MCP_LOCAL_TOKEN,
         host: process.env.LOGOS_MCP_SERVER_HOST,
+        listenAddress: process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS,
         httpPort: process.env.LOGOS_MCP_SERVER_PORT,
         wsPort: process.env.LOGOS_MCP_WEBSOCKET_PORT,
         replPort: process.env.LOGOS_MCP_REPL_PORT,
@@ -55,6 +56,16 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         unusedLoopbackPort(),
         unusedLoopbackPort(),
     ]);
+
+    delete process.env.LOGOS_MCP_LOCAL_TOKEN;
+    delete process.env.LOGOS_MCP_REMOTE_MODE;
+    process.env.LOGOS_MCP_SERVER_HOST = "127.0.0.1";
+    delete process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS;
+    assert.throws(() => new LogosMcpServer(), /LOGOS_MCP_LOCAL_TOKEN/);
+    process.env.LOGOS_MCP_LOCAL_TOKEN = token;
+    process.env.LOGOS_MCP_SERVER_HOST = "0.0.0.0";
+    assert.throws(() => new LogosMcpServer(), /127\.0\.0\.1 or ::1/);
+
     process.env.LOGOS_MCP_LOCAL_TOKEN = token;
     process.env.LOGOS_MCP_SERVER_HOST = "127.0.0.1";
     process.env.LOGOS_MCP_SERVER_PORT = String(httpPort);
@@ -98,7 +109,7 @@ test("all local MCP transports require authentication and cannot bind off-loopba
             },
             body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
         });
-        assert.notEqual(authenticatedMcp.status, 401);
+        assert.equal(authenticatedMcp.status, 200);
         await authenticatedMcp.body?.cancel();
 
         const unauthenticatedSse = await fetch(`${base}/sse`, {
@@ -192,6 +203,8 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         else process.env.LOGOS_MCP_LOCAL_TOKEN = previous.token;
         if (previous.host === undefined) delete process.env.LOGOS_MCP_SERVER_HOST;
         else process.env.LOGOS_MCP_SERVER_HOST = previous.host;
+        if (previous.listenAddress === undefined) delete process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS;
+        else process.env.LOGOS_MCP_SERVER_LISTEN_ADDRESS = previous.listenAddress;
         if (previous.httpPort === undefined) delete process.env.LOGOS_MCP_SERVER_PORT;
         else process.env.LOGOS_MCP_SERVER_PORT = previous.httpPort;
         if (previous.wsPort === undefined) delete process.env.LOGOS_MCP_WEBSOCKET_PORT;
