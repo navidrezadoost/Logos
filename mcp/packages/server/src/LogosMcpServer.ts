@@ -16,7 +16,11 @@ import { ApplyPaletteTool } from "./tools/ApplyPaletteTool";
 import { BreakpointTool } from "./tools/BreakpointTool";
 import { ReplServer } from "./ReplServer";
 import { ApiDocs } from "./ApiDocs";
-import { hasValidBearerHeader, hasValidLocalToken, loadLocalMcpSecurityConfig } from "./localSecurity";
+import {
+    hasValidBearerHeader,
+    loadLocalMcpSecurityConfig,
+    LocalPluginPairingCodes,
+} from "./localSecurity";
 import type { Server as HttpServer } from "node:http";
 
 /**
@@ -53,6 +57,7 @@ export class LogosMcpServer {
     public readonly webSocketPort: number;
     public readonly replPort: number;
     private readonly localToken: string;
+    private readonly pluginPairingCodes = new LocalPluginPairingCodes();
 
     constructor(isMultiUser = false) {
         const security = loadLocalMcpSecurityConfig(process.env, isMultiUser);
@@ -122,12 +127,16 @@ export class LogosMcpServer {
         return this.sessionContext.getStore();
     }
 
-    public isLocalTokenValid(token: string | undefined): boolean {
-        return hasValidLocalToken(token, this.localToken);
-    }
-
     public isLocalRequestAuthorized(authorization: string | undefined): boolean {
         return hasValidBearerHeader(authorization, this.localToken);
+    }
+
+    public issuePluginPairingCode(): { code: string; expiresInSeconds: number } {
+        return this.pluginPairingCodes.issue();
+    }
+
+    public consumePluginPairingCode(code: string | undefined): boolean {
+        return this.pluginPairingCodes.consume(code);
     }
 
     private registerTools(): void {
@@ -167,6 +176,13 @@ export class LogosMcpServer {
     }
 
     private setupHttpEndpoints(): void {
+        this.app.post("/local/plugin-pairing", (_req: any, res: any) => {
+            const pairing = this.issuePluginPairingCode();
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("Pragma", "no-cache");
+            res.status(201).json(pairing);
+        });
+
         /**
          * Modern Streamable HTTP connection endpoint
          */
@@ -274,6 +290,7 @@ export class LogosMcpServer {
      */
     public async stop(): Promise<void> {
         this.logger.info("Stopping Logos MCP Server...");
+        this.pluginPairingCodes.clear();
         await Promise.all([this.replServer.stop(), this.pluginBridge.stop(), this.closeHttpServer()]);
         this.logger.info("Logos MCP Server stopped");
     }

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hasValidBearerHeader, hasValidLocalToken, loadLocalMcpSecurityConfig } from "./localSecurity";
+import {
+    hasValidBearerHeader,
+    hasValidLocalToken,
+    loadLocalMcpSecurityConfig,
+    LocalPluginPairingCodes,
+} from "./localSecurity";
 
 const token = "a".repeat(64);
 
@@ -29,4 +34,16 @@ test("local token and bearer checks reject missing or incorrect credentials", ()
     assert.equal(hasValidBearerHeader(`bearer ${token}`, token), true);
     assert.equal(hasValidBearerHeader(token, token), false);
     assert.equal(hasValidBearerHeader(`Bearer ${"b".repeat(64)}`, token), false);
+});
+
+test("plugin pairing codes expire and can be consumed only once", () => {
+    const pairings = new LocalPluginPairingCodes();
+    const issued = pairings.issue(1000);
+    assert.equal(issued.expiresInSeconds, 60);
+    assert.equal(pairings.consume(issued.code, 1001), true);
+    assert.equal(pairings.consume(issued.code, 1002), false);
+
+    const expired = pairings.issue(2000);
+    assert.equal(pairings.consume(expired.code, 62_001), false);
+    assert.equal(pairings.consume(undefined), false);
 });

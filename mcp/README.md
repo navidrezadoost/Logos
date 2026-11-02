@@ -88,8 +88,8 @@ export LOGOS_MCP_LOCAL_TOKEN="$(openssl rand -hex 32)"
 pnpm run bootstrap
 ```
 
-Use the same private value when configuring the local MCP client. The plugin
-build embeds it for the loopback WebSocket handshake; do not publish that build.
+Configure the local MCP client with the bearer token. The plugin build does not
+contain this credential; plugin WebSocket access uses a separate one-time code.
 
 This bootstrap command will:
 
@@ -144,9 +144,20 @@ the locally build documentation)
 1. Open Logos in your browser
 2. Navigate to a design file
 3. Open the Plugins menu
-4. Load the plugin using the development URL (`http://127.0.0.1:4400/manifest.json` by default)
+4. Load the plugin using the development URL (`http://127.0.0.1:3450/plugins/mcp/manifest.json` in Docker Compose; `http://127.0.0.1:4400/manifest.json` when running the plugin preview directly on the host)
 5. Open the plugin UI
-6. In the plugin UI, click "Connect to MCP server".
+6. In a trusted local terminal, issue a one-time pairing code with the authenticated endpoint:
+
+   ```sh
+    curl --fail-with-body --silent --show-error -X POST \
+      -H "Authorization: Bearer $LOGOS_MCP_LOCAL_TOKEN" \
+      http://127.0.0.1:4401/local/plugin-pairing
+    ```
+
+   Copy only the returned `code` value into the plugin's pairing-code field and click
+   "Connect to MCP server". The code is one-use, expires after 60 seconds, and is returned
+   with `Cache-Control: no-store`. In Docker Compose, use
+   `http://127.0.0.1:3450/mcp/local/plugin-pairing` instead. Do not log or share the code.
    The connection status should change from "Not connected" to "Connected to MCP server".
    (Check the browser's developer console for WebSocket connection logs.
    Check the MCP server terminal for WebSocket connection messages.)
@@ -157,8 +168,8 @@ the locally build documentation)
 ### 3. Connect an MCP Client
 
 The server is local-only and requires a bearer token. Generate a per-run secret
-of at least 32 bytes and export it before starting the server and building the
-local plugin. Do not commit the token or publish a plugin bundle containing it.
+of at least 32 bytes and export it before starting the server and configuring the
+local MCP client. The plugin bundle does not contain this credential.
 
 ```sh
 export LOGOS_MCP_LOCAL_TOKEN="$(openssl rand -hex 32)"
@@ -175,10 +186,29 @@ accepted) and provides:
 - **Authenticated development REPL**: `http://127.0.0.1:4403`
 
 Every HTTP/SSE/REPL request must include `Authorization: Bearer $LOGOS_MCP_LOCAL_TOKEN`.
-The plugin WebSocket authenticates with a first-frame token message. Configure
-the MCP client or its transport proxy to send the bearer header; clients that
-cannot set authorization headers are not supported by this local profile.
-Build the Logos plugin with the same `LOGOS_MCP_LOCAL_TOKEN` in its environment.
+The plugin WebSocket authenticates with a one-time pairing code. Configure the
+MCP client or its transport proxy to send the bearer header; clients that cannot
+set authorization headers are not supported by this local profile.
+
+### Docker Compose local-only endpoints
+
+The development Compose file publishes host ports on loopback only. Export the
+per-run `LOGOS_MCP_LOCAL_TOKEN` before starting Compose (do not put it in the
+Compose file):
+
+```sh
+export LOGOS_MCP_LOCAL_TOKEN="$(openssl rand -hex 32)"
+docker-compose -f docker/devenv/docker-compose.yaml up
+```
+
+MCP upstream listeners
+4401–4403 are container-loopback and are not published directly; use the Caddy
+loopback proxy:
+
+- Streamable HTTP: `http://127.0.0.1:3450/mcp/stream`
+- Plugin WebSocket: `ws://127.0.0.1:3450/mcp/ws`
+- Pairing code: `http://127.0.0.1:3450/mcp/local/plugin-pairing`
+- REPL: `http://127.0.0.1:3450/mcp/repl/`
 
 When using a client that only supports stdio transport,
 a proxy like `mcp-remote` is required.
@@ -277,7 +307,7 @@ options use the `LOGOS_MCP_` prefix for consistency.
 
 | Environment Variable               | Description | Default |
 |------------------------------------|-------------|---------|
-| `LOGOS_MCP_LOCAL_TOKEN` | Required local bearer/WebSocket credential; at least 32 bytes. Use a random per-run value and keep it private. | **Required** |
+| `LOGOS_MCP_LOCAL_TOKEN` | Required HTTP/SSE/REPL bearer credential; at least 32 bytes. Use a random per-run value and keep it private. It is not embedded in the plugin bundle. | **Required** |
 | `LOGOS_MCP_SERVER_HOST` | Literal loopback bind address. Only `127.0.0.1` or `::1` is accepted. | `127.0.0.1` |
 | `LOGOS_MCP_SERVER_LISTEN_ADDRESS` | Legacy alias for the bind address; loopback values only. | — |
 | `LOGOS_MCP_SERVER_PORT` | Port for the HTTP/SSE server. | `4401` |

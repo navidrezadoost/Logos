@@ -3,6 +3,7 @@ import "./style.css";
 // get the current theme from the URL
 const searchParams = new URLSearchParams(window.location.search);
 document.body.dataset.theme = searchParams.get("theme") ?? "light";
+const pairingCodeInput = document.getElementById("pairing-code") as HTMLInputElement | null;
 
 // WebSocket connection management
 let ws: WebSocket | null = null;
@@ -47,11 +48,18 @@ function connectToMcpServer(): void {
     }
 
     try {
+        const pairingCode = pairingCodeInput?.value.trim();
+        if (!pairingCode) {
+            updateConnectionStatus("Enter a one-time pairing code", false);
+            return;
+        }
+
         ws = new WebSocket(LOGOS_MCP_WEBSOCKET_URL);
         updateConnectionStatus("Connecting...", false);
 
         ws.onopen = () => {
-            ws?.send(JSON.stringify({ type: "logos.mcp.auth", token: LOGOS_MCP_LOCAL_TOKEN }));
+            ws?.send(JSON.stringify({ type: "logos.mcp.auth", pairingCode }));
+            if (pairingCodeInput) pairingCodeInput.value = "";
             updateConnectionStatus("Authenticating with local MCP server", false);
         };
 

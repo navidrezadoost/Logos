@@ -47,6 +47,5 @@ export default defineConfig({
     },
     define: {
         LOGOS_MCP_WEBSOCKET_URL: JSON.stringify(WS_URI),
-        LOGOS_MCP_LOCAL_TOKEN: JSON.stringify(process.env.LOGOS_MCP_LOCAL_TOKEN ?? ""),
     },
 });
