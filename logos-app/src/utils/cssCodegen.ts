@@ -7,7 +7,7 @@
  * DevModePanel can render them with copy-to-clipboard support.
  */
 
-import type { Shape } from "../types/shapes";
+import type { Fill, Shape } from "../types/shapes";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -54,6 +54,26 @@ function hexToRgba(hex: string, opacity = 1): string {
   return alpha === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+/** Convert a model fill into a CSS color/gradient background value. */
+export function fillToCss(fill: Fill): string {
+  if (fill.type === "solid") return hexToRgba(fill.color, fill.opacity);
+
+  const stops = fill.gradient.stops.map((stop) =>
+    `${hexToRgba(stop.color, stop.opacity * fill.opacity)} ${Math.round(stop.position * 10000) / 100}%`
+  );
+  if (stops.length === 0) return "transparent";
+  if (stops.length === 1) return hexToRgba(fill.gradient.stops[0].color, fill.gradient.stops[0].opacity * fill.opacity);
+
+  if (fill.gradient.type === "radial") {
+    return `radial-gradient(ellipse at ${fill.gradient.startX * 100}% ${fill.gradient.startY * 100}%, ${stops.join(", ")})`;
+  }
+
+  const dx = fill.gradient.endX - fill.gradient.startX;
+  const dy = fill.gradient.endY - fill.gradient.startY;
+  const angle = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+  return `linear-gradient(${Math.round(angle * 100) / 100}deg, ${stops.join(", ")})`;
+}
+
 /** Round to at most 2 decimal places, remove trailing zeros. */
 function px(n: number): string {
   const rounded = Math.round(n * 100) / 100;
@@ -94,10 +114,13 @@ export function generateCssGroups(shape: Shape): CssGroup[] {
 
   // ── Fill ─────────────────────────────────────────────────────────────────
   if (shape.fills.length > 0) {
-    const fillProps: CssProp[] = shape.fills.map((f, i) => ({
-      property: shape.fills.length === 1 ? "background-color" : `/* fill-${i + 1} */ background-color`,
-      value: hexToRgba(f.color, f.opacity),
-    }));
+    const fillProps: CssProp[] = shape.fills.map((fill, i) => {
+      const property = fill.type === "solid" ? "background-color" : "background";
+      return {
+        property: shape.fills.length === 1 ? property : `/* fill-${i + 1} */ ${property}`,
+        value: fillToCss(fill),
+      };
+    });
     groups.push({ label: "Fill", props: fillProps });
   } else {
     groups.push({ label: "Fill", props: [{ property: "background-color", value: "transparent" }] });

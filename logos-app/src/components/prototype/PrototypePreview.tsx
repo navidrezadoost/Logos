@@ -11,6 +11,7 @@ import { useProtoStore } from "../../stores/prototypeStore";
 import { useDocumentStore } from "../../stores/documentStore";
 import type { Shape } from "../../types/shapes";
 import type { PrototypeTransition } from "../../types/prototype";
+import { fillToCss } from "../../utils/cssCodegen";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shape renderer (HTML/CSS, not WASM)
@@ -25,10 +26,16 @@ interface ShapeViewProps {
   onClick?: (shapeId: string) => void;
 }
 
-function fillColor(shape: Shape): string {
-  const f = shape.fills?.[0];
-  if (!f) return "transparent";
-  return f.color;
+function fillBackground(shape: Shape): string {
+  const fill = shape.fills?.[0];
+  return fill ? fillToCss(fill) : "transparent";
+}
+
+function fillTextColor(shape: Shape): string {
+  const fill = shape.fills?.[0];
+  if (fill?.type === "solid") return fill.color;
+  if (fill?.type === "gradient") return fill.gradient.stops[0]?.color ?? "#cdd6f4";
+  return "#cdd6f4";
 }
 
 function ShapeView({ shape, allShapes, scale, offsetX, offsetY, onClick }: ShapeViewProps): React.ReactElement | null {
@@ -48,7 +55,7 @@ function ShapeView({ shape, allShapes, scale, offsetX, offsetY, onClick }: Shape
     overflow: "hidden",
   };
 
-  const bg = fillColor(shape);
+  const bg = fillBackground(shape);
 
   if (shape.type === "text") {
     return (
@@ -56,7 +63,7 @@ function ShapeView({ shape, allShapes, scale, offsetX, offsetY, onClick }: Shape
         style={{
           ...baseStyle,
           background: "transparent",
-          color: bg || "#cdd6f4",
+          color: fillTextColor(shape),
           fontSize: Math.max(10, (shape.bounds.h * scale) * 0.6),
           display: "flex",
           alignItems: "center",
@@ -214,7 +221,7 @@ function FrameRenderer({
         overflow: "hidden",
         boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
         borderRadius: 4,
-        background: fillColor(frame) || "#1e1e2e",
+        background: frame.fills?.length ? fillBackground(frame) : "#1e1e2e",
       }}
     >
       {frame.children?.map((childId) => {

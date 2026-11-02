@@ -13,7 +13,6 @@ import { useDocumentStore, type Page } from "../stores/documentStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import type { Shape as InternalShape } from "../types/shapes";
 import type {
-  Fill,
   PluginFill,
   PluginPage,
   PluginShape,
@@ -61,9 +60,12 @@ function toPluginShape(s: InternalShape): PluginShape {
     hidden: s.hidden,
     locked: s.locked,
     blendMode: "normal",
-    fills: s.fills.map(
-      (f): Fill => ({ type: "solid", color: f.color, opacity: f.opacity })
-    ),
+    fills: s.fills.map((fill): PluginFill => {
+      if (fill.type === "solid") {
+        return { type: "solid", color: fill.color, opacity: fill.opacity };
+      }
+      return { type: "gradient", gradient: fill.gradient, opacity: fill.opacity };
+    }),
     strokes: [],
     shadows: [],
     constraintsH: "left",
