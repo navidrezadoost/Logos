@@ -53,6 +53,7 @@ declare const GPUMapMode: {
 
 type GPUTextureFormat = string;
 type GPUFeatureName   = string;
+type GPUBufferUsageFlags = number;
 
 interface GPUColorDict { r: number; g: number; b: number; a: number }
 
@@ -92,7 +93,9 @@ interface GPUDeviceLostInfo {
 
 interface GPUQueue extends GPUObjectBase {
   writeBuffer(buffer: GPUBuffer, bufferOffset: number, data: ArrayBufferView | ArrayBuffer, dataOffset?: number, size?: number): void;
+  writeTexture(destination: GPUImageCopyTexture, data: ArrayBufferView | ArrayBuffer, dataLayout: GPUImageDataLayout, size: GPUExtent3D): void;
   submit(commandBuffers: GPUCommandBuffer[]): void;
+  onSubmittedWorkDone(): Promise<void>;
 }
 
 interface GPUDevice extends GPUObjectBase {
@@ -108,6 +111,8 @@ interface GPUDevice extends GPUObjectBase {
     label?: string; size: [number, number] | [number, number, number]; format: GPUTextureFormat; usage: number; mipLevelCount?: number; sampleCount?: number;
   }): GPUTexture;
 
+  createSampler(descriptor?: GPUSamplerDescriptor): GPUSampler;
+
   createShaderModule(descriptor: { label?: string; code: string }): GPUShaderModule;
 
   createBindGroupLayout(descriptor: {
@@ -122,11 +127,7 @@ interface GPUDevice extends GPUObjectBase {
 
   createRenderPipeline(descriptor: GPURenderPipelineDescriptor): GPURenderPipeline;
 
-  createComputePipelineAsync(descriptor: {
-    label?: string;
-    layout: GPUPipelineLayout;
-    compute: { module: GPUShaderModule; entryPoint: string };
-  }): Promise<GPUComputePipeline>;
+  createComputePipelineAsync(descriptor: GPUComputePipelineDescriptor): Promise<GPUComputePipeline>;
 
   createBindGroup(descriptor: {
     label?: string;
@@ -147,6 +148,41 @@ interface GPUBindGroup extends GPUObjectBase {}
 interface GPUPipelineLayout extends GPUObjectBase {}
 interface GPURenderPipeline extends GPUObjectBase {}
 interface GPUComputePipeline extends GPUObjectBase {}
+
+interface GPUComputePipelineDescriptor {
+  label?: string;
+  layout: GPUPipelineLayout | "auto";
+  compute: { module: GPUShaderModule; entryPoint: string; constants?: Record<string, number> };
+}
+
+interface GPUSamplerDescriptor {
+  label?: string;
+  addressModeU?: string;
+  addressModeV?: string;
+  addressModeW?: string;
+  magFilter?: string;
+  minFilter?: string;
+  mipmapFilter?: string;
+}
+
+interface GPUImageCopyTexture {
+  texture: GPUTexture;
+  mipLevel?: number;
+  origin?: { x?: number; y?: number; z?: number } | [number, number, number];
+  aspect?: string;
+}
+
+interface GPUImageDataLayout {
+  offset?: number;
+  bytesPerRow?: number;
+  rowsPerImage?: number;
+}
+
+interface GPUExtent3D {
+  width: number;
+  height: number;
+  depthOrArrayLayers?: number;
+}
 
 interface GPUBindGroupLayoutEntry {
   binding:    number;

@@ -314,6 +314,7 @@ export const useAiStore = create<AiState>((set) => ({
                     set({ llmStatus: "loading-model", llmProgress: null });
                     _pipelinePromise = (async () => {
                         const handle = await requestWebGPUDevice();
+                        if (!handle) throw new Error("WebGPU is not available on this device");
                         const pipe = await LLMPipeline.create(
                             handle.device,
                             "/models/logos-ai-sm.bin",
