@@ -4,6 +4,7 @@
 **Verification status:** Focused tests pass against a schema-only snapshot restored into PostgreSQL 16.14; authoritative schema provenance and deployment verification remain outstanding  
 **Rollout approval:** Not approved  
 **Base commit:** `ac57a34cd0b5869aaa9580c4773c79e908aa4a95`  
+**Implementation commit:** `f4493763a7d1eccc0487acfad6bbd2f54ed23124`  
 **Branch/worktree:** `r1/pkg01-asset-auth` — `/home/navidrezadoost/Documents/Github/Logos-r1-pkg01-asset-auth`
 
 ## Changed-file scope
