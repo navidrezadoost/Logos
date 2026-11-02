@@ -88,12 +88,13 @@ func GetProjectPermissions(ctx context.Context, pool *db.Pool, profileID, projec
 	const q = `
 		SELECT tpr.is_owner, tpr.is_admin, tpr.can_edit
 		  FROM team_profile_rel AS tpr
-		  JOIN project AS p ON (p.team_id = tpr.team_id)
+		  JOIN project AS p ON (p.team_id = tpr.team_id AND p.deleted_at IS NULL)
 		 WHERE p.id = $1
 		   AND tpr.profile_id = $2
 		UNION ALL
 		SELECT ppr.is_owner, ppr.is_admin, ppr.can_edit
 		  FROM project_profile_rel AS ppr
+		  JOIN project AS p ON (p.id = ppr.project_id AND p.deleted_at IS NULL)
 		 WHERE ppr.project_id = $1
 		   AND ppr.profile_id = $2`
 
