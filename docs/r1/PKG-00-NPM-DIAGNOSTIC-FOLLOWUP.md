@@ -28,6 +28,17 @@ In the Node 20 reproduction container, the effective npm registry was `https://r
 
 For comparison, the host's npm config also reports the same registry, `strict-ssl=true`, and no custom CA file; both npm proxy settings are configured to an HTTP proxy (endpoint/credentials omitted here). Host proxy environment variables are unset. The Node 20 container did not inherit that host npm configuration, so the reproduced TLS failure occurred with no npm proxy configured. No certificate verification or registry security setting was disabled.
 
+I also repeated the same Node 20/npm 10.2.4 install with the host's configured proxy explicitly passed to the container as `npm_config_proxy` and `npm_config_https_proxy` (strict TLS verification remained enabled):
+
+```text
+npm ERR! code ETIMEDOUT
+npm ERR! request to https://registry.npmjs.org/zustand/-/zustand-5.0.13.tgz failed
+npm ERR! connect ETIMEDOUT <configured-proxy>:8080
+Exited with code 1
+```
+
+The configured proxy endpoint is redacted; the container could not connect to it. This second failure is a proxy reachability timeout, distinct from the direct-path TLS protocol error. Neither test reaches package resolution or lifecycle scripts.
+
 ## Independent Cargo access check
 
 ```text
