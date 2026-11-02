@@ -1,6 +1,6 @@
 # R1 PKG-02 — Runtime Verification Follow-up
 
-**Status:** Local Node 20 transport suite and server type-check pass; full workspace/plugin/proxy/deployment gates remain open
+**Status:** Local Node 20 listener/type-check and isolated Caddy/Nginx proxy tests pass; full workspace/hosted-CI/deployment gates remain open
 **Base commit:** `ddae16ad048cf429b386f14e66095ba8faddb256` (`origin/main`, after PRs #27–32)
 **Branch/worktree:** `r1/pkg02-mcp-runtime-followup` — `/home/navidrezadoost/Documents/Github/Logos-r1-pkg02-mcp-runtime-followup`
 
@@ -22,17 +22,24 @@ The merged implementation requires a per-run local bearer for MCP HTTP/SSE/REPL,
 | `pnpm --filter mcp-common build` then `pnpm --filter mcp-server types:check` | **Pass** — server type-check succeeds when the shared package's `dist` declarations are built first. The workflow now includes this build step. |
 | `pnpm --filter mcp-server test:security` | **Pass** — 4 tests, 0 failures, Node 20.11.1/pnpm 10.28.2; listener bound to `127.0.0.1` on ephemeral ports. |
 | Isolated actual Caddy/Nginx/MCP harness using the repository Caddyfile/Nginx config | **Pass, scoped** — Caddy 2.10.2 and Nginx 1.22.1; host publishes only `127.0.0.1:3450`. Through both proxies, unauthorized HTTP/SSE/REPL/pairing was denied; authorized MCP initialize/tools/list, pairing, and WebSocket auth worked; replay/unpaired WebSockets closed with 1008. Host listener was removed at shutdown. |
-| Separate container on the test bridge | **Pass** — Compose-style `logos-devenv-main` alias reached Caddy/Nginx but unauthenticated MCP requests returned 401; raw MCP HTTP/WS/REPL upstream ports 4401–4403 refused bridge connections. |
+| Separate container on the test bridge | **Pass** — Compose-style `logos-devenv-main` alias reached Caddy/Nginx but unauthenticated MCP requests returned 401; raw MCP HTTP/WS/REPL upstream ports 4401–4403 refused bridge connections. Unknown IP-based Host received 421 for both HTTP and WebSocket upgrade requests. |
 | `gh run list` for the pushed follow-up branch | **Blocked** — GitHub Actions API connection reset; hosted CI status was not verified. |
 
 Earlier default Docker-bridge installs also timed out. Host-network access enabled the targeted server install and tests, but the full plugin workspace still needs an authorized source for its locked 1.4.1 `@logos/*` packages. Do not substitute the repository's 1.4.2 packages or change the lock without approval.
+
+### Workspace package contract investigation
+
+- `pnpm --version` in the Node 20 test container was `10.28.2`. There is no repository-root `pnpm-workspace.yaml`; the two existing workspace files are `mcp/pnpm-workspace.yaml` and `plugins/pnpm-workspace.yaml`.
+- `mcp/pnpm-workspace.yaml` includes only `mcp/packages/common`, `server`, and `plugin`. `plugins/pnpm-workspace.yaml` separately includes `plugins/libs/**`; the local packages there are not members of the MCP workspace.
+- `mcp/packages/plugin/package.json` pins `@logos/plugin-styles` and `@logos/plugin-types` to exact `1.4.1`; `mcp/pnpm-lock.yaml` resolves both from the registry. The corresponding local manifests at `plugins/libs/plugins-styles/package.json` and `plugins/libs/plugin-types/package.json` are `1.4.2`.
+- The full frozen install's registry 404 therefore reflects an unavailable locked version (or missing authorized registry access), not just the earlier network timeout. Whether MCP should consume published `1.4.1` packages or workspace-link the local `1.4.2` packages is not established. I made no manifest/lock changes; owner approval is needed before choosing either contract.
 
 ## Remaining runtime/exposure gates
 
 - The executed suite covers missing-token/off-loopback constructor rejection; missing/wrong bearer and query-token bypass; a valid MCP initialize/notifications/tools-list flow; unauthenticated and authenticated SSE `/sse`/`/messages`; REPL auth; one-time pairing expiry and replay; forged WebSocket task before auth; and shutdown listener cleanup. The listener assertions passed locally.
 - The listener test includes constructor fail-closed assertions; separate process-level checks confirm missing-token and non-loopback startup exit 1. Pairing expiry is covered by the helper and by an expired-code WebSocket rejection using a controlled clock; replay is rejected on a live WebSocket. The bearer token itself has no expiry field in this local profile.
 - The isolated harness ran the repository's actual Caddyfile and Nginx config, but not the full `logos/devenv:latest` image or all Compose services. The Caddy TLS site on 3449 and a restart cycle were not tested.
-- The harness confirms the Docker bridge distinction: sibling containers using the Compose alias can reach the Caddy/Nginx edge despite loopback-only host publication, but unauthenticated requests are denied and raw MCP upstream listeners remain loopback-only. An IP-based Host header to Caddy returned an empty `200` with no body rather than routing to MCP; no protected data was returned. Review accepted Host behavior before treating arbitrary bridge clients as trusted. Production bridge membership and ingress rules remain unknown.
+- The prior Caddy default for an unrecognized IP Host returned an empty `200`. The follow-up Caddyfile now routes only `localhost`, `127.0.0.1`, and `logos-devenv-main` to Nginx; all other Host values receive an inert `421 Misdirected Request`. The runtime harness verified both ordinary HTTP and WebSocket upgrade rejection for an unknown IP Host. Production bridge membership and ingress rules remain unknown.
 - Production hosts, firewall/security-group rules, ingress routes and deployed versions remain unknown. The local listener inventory showed no Logos process; this is not production evidence.
 - The one-time pairing code is per-connection and single-use but is not bound to a persistent plugin identity. Keep remote access disabled; do not distribute the local profile or relax auth for clients lacking bearer support.
 

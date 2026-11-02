@@ -9,12 +9,15 @@ localhost:3449, 127.0.0.1:3449 {
  header -Strict-Transport-Security
 }
 
-http://localhost:3450, http://127.0.0.1:3450 {
+:3450 {
  bind 0.0.0.0
- reverse_proxy localhost:4449
-}
 
-http://logos-devenv-main:3450 {
- bind 0.0.0.0
- reverse_proxy localhost:4449
+ # Only known local/Compose hosts may reach the proxy; reject arbitrary bridge Host headers.
+ @trusted_host host localhost 127.0.0.1 logos-devenv-main
+ handle @trusted_host {
+  reverse_proxy localhost:4449
+ }
+ handle {
+  respond "Misdirected Request" 421
+ }
 }
