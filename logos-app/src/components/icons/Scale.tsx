@@ -1,0 +1,35 @@
+import React from "react";
+import type { SVGProps } from "react";
+
+export interface ScaleProps extends SVGProps<SVGSVGElement> {
+  size?: number | string;
+}
+
+const Scale = React.forwardRef<SVGSVGElement, ScaleProps>(
+  ({ size, className, style, ...props }, ref) => {
+    const dimensions = size ? { width: size, height: size } : {
+      width: props.width || 24,
+      height: props.height || 24
+    };
+
+    return (
+      <svg
+        ref={ref}
+        viewBox="0 0 640 640"
+        xmlns="http://www.w3.org/2000/svg"
+        width={dimensions.width}
+        height={dimensions.height}
+        fill={props.fill || "currentColor"}
+        className={className}
+        style={style}
+        {...props}
+      >
+        <path fill="currentColor" d="M128 96L96 96L96 256L160 256L160 160L256 160L256 96L128 96zM160 416L160 384L96 384L96 544L256 544L256 480L160 480L160 416zM416 96L384 96L384 160L480 160L480 256L544 256L544 96L416 96zM544 416L544 384L480 384L480 480L384 480L384 544L544 544L544 416z"/>
+      </svg>
+    );
+  }
+);
+
+Scale.displayName = "Scale";
+
+export default Scale;

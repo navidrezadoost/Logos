@@ -12,6 +12,7 @@ import { useCurrentPageShapes, useDocumentStore } from "../../stores/documentSto
 import { useSelectionStore, useIsSelected } from "../../stores/selectionStore";
 import type { Shape } from "../../types/shapes";
 import { MultiSelectChips, type ScrollMode } from "../ui/MultiSelectChips";
+import { theme } from "../../theme/colors";
 
 const ITEM_HEIGHT = 32;
 
@@ -66,9 +67,9 @@ export function LayersPanel(): React.ReactElement {
 
       {/* Type filter bar — only shown when shapes exist */}
       {allTypes.length > 0 && (
-        <div style={{ padding: "6px 8px", borderBottom: "1px solid #313244" }}>
+        <div style={{ padding: "6px 8px", borderBottom: `1px solid ${theme.border}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-            <span style={{ fontSize: 10, color: "#585b70", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            <span style={{ fontSize: 10, color: theme.textDim, textTransform: "uppercase", letterSpacing: "0.05em" }}>
               Filter
             </span>
             <div style={{ display: "flex", gap: 2 }}>
@@ -78,11 +79,11 @@ export function LayersPanel(): React.ReactElement {
                   onClick={() => setFilterScrollMode(mode)}
                   title={`${mode} mode`}
                   style={{
-                    background: filterScrollMode === mode ? "#313244" : "transparent",
+                    background: filterScrollMode === mode ? theme.surface : "transparent",
                     border: "1px solid",
-                    borderColor: filterScrollMode === mode ? "#45475a" : "transparent",
+                    borderColor: filterScrollMode === mode ? theme.borderStrong : "transparent",
                     borderRadius: 3,
-                    color: filterScrollMode === mode ? "#cdd6f4" : "#45475a",
+                    color: filterScrollMode === mode ? theme.text : theme.borderStrong,
                     fontSize: 10,
                     padding: "1px 4px",
                     cursor: "pointer",
@@ -158,15 +159,15 @@ function ShapeRow({
         padding: "0 8px",
         gap: 6,
         cursor: "pointer",
-        background: isSelected ? "#313244" : "transparent",
-        borderLeft: isSelected ? "2px solid #cba6f7" : "2px solid transparent",
+        background: isSelected ? theme.surface : "transparent",
+        borderLeft: isSelected ? `2px solid ${theme.accent}` : "2px solid transparent",
         fontSize: 12,
-        color: "#cdd6f4",
+        color: theme.text,
         userSelect: "none",
       }}
       title="Click to select · Ctrl/Cmd-click to toggle · Shift-click for range"
       onMouseEnter={(e) => {
-        if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "#1e1e2e";
+        if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = theme.panelHover;
       }}
       onMouseLeave={(e) => {
         if (!isSelected) (e.currentTarget as HTMLDivElement).style.background = "transparent";
@@ -213,8 +214,8 @@ function shapeIcon(type: string): string {
 
 const panelStyle: React.CSSProperties = {
   width: 220,
-  background: "#181825",
-  borderRight: "1px solid #313244",
+  background: theme.panel,
+  borderRight: `1px solid ${theme.border}`,
   display: "flex",
   flexDirection: "column",
   flexShrink: 0,
@@ -224,8 +225,8 @@ const headerStyle: React.CSSProperties = {
   padding: "8px 12px",
   fontSize: 11,
   fontWeight: 600,
-  color: "#7f849c",
+  color: theme.textMuted,
   letterSpacing: "0.05em",
   textTransform: "uppercase",
-  borderBottom: "1px solid #313244",
+  borderBottom: `1px solid ${theme.border}`,
 };

@@ -1,15 +1,12 @@
 name: Rust
-
 on:
   push:
     branches: [ "main" ]
     tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -110,7 +107,7 @@ jobs:
         fi
     - name: Verify import crate tests
       run: |
-        RESULT=$(cargo test -p logos-import-figma -p logos-import-common -p logos-import-svg -p logos-import-sketch -p logos-import-pdf -p logos-import-xd -p logos-import-canva 2>&1)
+        RESULT=$(cargo test -p logos-import-common -p logos-import-svg -p logos-import-sketch -p logos-import-pdf -p logos-import-xd -p logos-import-canva 2>&1)
         PASSED=$(echo "$RESULT" | grep -oP '\d+ passed' | grep -oP '\d+' | awk '{sum+=$1} END{print sum}')
         echo "Import tests: $PASSED passed"
         if [ "$PASSED" -lt 139 ]; then
@@ -132,7 +129,6 @@ jobs:
       run: cargo fmt --all -- --check
     - name: Clippy lints
       run: cargo clippy --workspace -- -D warnings 2>&1 || true
-
   release:
     needs: build
     runs-on: ubuntu-latest

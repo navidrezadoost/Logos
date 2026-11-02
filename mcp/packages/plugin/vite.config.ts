@@ -1,11 +1,20 @@
 import { defineConfig } from "vite";
 import livePreview from "vite-live-preview";
 
-let WS_URI = process.env.WS_URI || "http://localhost:4402";
-let MULTI_USER_MODE = process.env.MULTI_USER_MODE === "true";
+let WS_URI = process.env.WS_URI || "ws://127.0.0.1:4402";
+const pluginAllowedOrigin = process.env.LOGOS_MCP_PLUGIN_ALLOWED_ORIGIN;
 
-console.log("Will define IS_MULTI_USER_MODE as:", JSON.stringify(MULTI_USER_MODE));
-console.log("Will define PENPOT_MCP_WEBSOCKET_URL as:", JSON.stringify(WS_URI));
+if (pluginAllowedOrigin) {
+    const parsedOrigin = new URL(pluginAllowedOrigin);
+    if (
+        parsedOrigin.origin !== pluginAllowedOrigin ||
+        !["http:", "https:"].includes(parsedOrigin.protocol)
+    ) {
+        throw new Error("LOGOS_MCP_PLUGIN_ALLOWED_ORIGIN must be one exact http(s) origin");
+    }
+}
+
+console.log("Will define LOGOS_MCP_WEBSOCKET_URL as:", JSON.stringify(WS_URI));
 
 export default defineConfig({
     base: "./",
@@ -31,13 +40,13 @@ export default defineConfig({
         },
     },
     preview: {
-        host: "0.0.0.0",
+        host: "127.0.0.1",
         port: 4400,
-        cors: true,
+        cors: pluginAllowedOrigin ? { origin: pluginAllowedOrigin } : false,
         allowedHosts: [],
     },
     define: {
-        IS_MULTI_USER_MODE: JSON.stringify(process.env.MULTI_USER_MODE === "true"),
-        PENPOT_MCP_WEBSOCKET_URL: JSON.stringify(WS_URI),
+        LOGOS_MCP_WEBSOCKET_URL: JSON.stringify(WS_URI),
+        LOGOS_MCP_LOCAL_TOKEN: JSON.stringify(process.env.LOGOS_MCP_LOCAL_TOKEN ?? ""),
     },
 });

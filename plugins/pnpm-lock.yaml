@@ -228,7 +228,7 @@ importers:
 
   libs/plugins-runtime:
     dependencies:
-      '@penpot/plugin-types':
+      '@logos/plugin-types':
         specifier: ^1.4.2
         version: link:../plugin-types
       ses:

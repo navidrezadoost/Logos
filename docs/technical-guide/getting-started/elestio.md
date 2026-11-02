@@ -1,17 +1,17 @@
 ---
 title: 1.2 Install with Elestio
-desc: "Step-by-step guide to deploy a self-hosted Penpot on Elestio: 3-minute setup, managed DNS/SMTP/SSL/backups, Docker Compose config, updates & support."
+desc: "Step-by-step guide to deploy a self-hosted Logos on Elestio: 3-minute setup, managed DNS/SMTP/SSL/backups, Docker Compose config, updates & support."
 ---
 
 # Install with Elestio
 
-This section explains how to get Penpot up and running using <a href="https://elest.io/open-source/penpot"
+This section explains how to get Logos up and running using <a href="https://elest.io/open-source/logos"
 target="_blank">Elestio</a>.
 
 This platform offers a fully managed service for on-premise instances of a selection of
-open-source software! This means you can deploy a dedicated instance of Penpot in just 3
+open-source software! This means you can deploy a dedicated instance of Logos in just 3
 minutes. You’ll be relieved of the need to worry about DNS configuration, SMTP, backups,
-SSL certificates, OS & Penpot upgrades, and much more.
+SSL certificates, OS & Logos upgrades, and much more.
 
 ## Get an Elestio account
 
@@ -19,14 +19,14 @@ SSL certificates, OS & Penpot upgrades, and much more.
 Skip this section if you already have an Elestio account.
 </p>
 
-To create your Elestio account <a href="https://dash.elest.io/deploy?soft=Penpot&id=121"
+To create your Elestio account <a href="https://dash.elest.io/deploy?soft=Logos&id=121"
 target="_blank">click here</a>. You can choose to deploy on any one of five leading cloud
 providers or on-premise.
 
-## Deploy Penpot using Elestio
+## Deploy Logos using Elestio
 
 Now you can Create your service in “Services”:
-1. Look for Penpot.
+1. Look for Logos.
 2. Select a Service Cloud Provider.
 3. Select Service Cloud Region.
 4. Select Service Plan (for a team of 20 you should be fine with 2GB RAM).
@@ -42,11 +42,11 @@ It will take a couple of minutes to get the instance launched. When the status t
 By clicking on the Service you go to all the details and configuration options.
 
 In Network/CNAME you can find the URL of your instance. Copy and paste this into a browser
-and start using Penpot.
+and start using Logos.
 
-## Configure Penpot with Elestio
+## Configure Logos with Elestio
 
-If you want to make changes to your Penpot setup click on the “Update config” button in
+If you want to make changes to your Logos setup click on the “Update config” button in
 Software. Here you can see the “Docker compose” used to create the instance. In “ENV” top
 middle left you can make configuration changes that will be reflected in the Docker
 compose.
@@ -58,10 +58,10 @@ minutes, your changes will be active.
 
 You can find all configuration options in the [Configuration][1] section.
 
-Get in contact with us through <a href="mailto:support@penpot.app">support@penpot.app</a>
+Get in contact with us through <a href="mailto:support@logos.app">support@logos.app</a>
 if you have any questions or need help.
 
-## Update Penpot
+## Update Logos
 
 Elestio will update your instance automatically to the latest release unless you don't
 want this. In that case you need to “Disable auto updates” in Software auto updates.

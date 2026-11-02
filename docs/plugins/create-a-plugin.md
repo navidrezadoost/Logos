@@ -1,16 +1,16 @@
 ---
 layout: layouts/plugins.njk
 title: 2. Create a Plugin
-desc: Dive into Penpot plugin development! This guide covers creating plugins from scratch or using templates, libraries, API communication, & deployment.
+desc: Dive into Logos plugin development! This guide covers creating plugins from scratch or using templates, libraries, API communication, & deployment.
 ---
 
 # Create a Plugin
 
-This guide covers the creation of a Penpot plugin. Penpot offers two ways to kickstart your development:
+This guide covers the creation of a Logos plugin. Logos offers two ways to kickstart your development:
 
 <p class="advice">
 Have you got an idea for a new plugin? Great! But first take a look at <a
-href="https://penpot.app/penpothub/plugins">the plugin overview</a> to see if already
+href="https://logos.app/logoshub/plugins">the plugin overview</a> to see if already
 exists, and consider joining efforts with other developers. This does not imply that we
 won't accept plugins that do similar things, since anything can be improved and done in
 different ways.
@@ -18,11 +18,11 @@ different ways.
 
 1. Using a Template:
 
-   - **Typescript template**: Using the <a target="_blank" href="https://github.com/penpot/penpot-plugin-starter-template">Penpot Plugin Starter Template</a>: A basic template with the required files for quickstarting your plugin. This template uses Typescript and Vite.
-   - **Framework templates**: These templates already have everything you need to start <a target="_blank" href="https://github.com/penpot/plugin-examples">developing a plugin using a JavaScript framework. </a>
+   - **Typescript template**: Using the <a target="_blank" href="https://github.com/logos/logos-plugin-starter-template">Logos Plugin Starter Template</a>: A basic template with the required files for quickstarting your plugin. This template uses Typescript and Vite.
+   - **Framework templates**: These templates already have everything you need to start <a target="_blank" href="https://github.com/logos/plugin-examples">developing a plugin using a JavaScript framework. </a>
 
 <p class="advice">
-In case you'll use any of these templates, you can skip to <a href="#2.7.-step-7.-load-the-plugin-in-penpot">step 2.7</a>
+In case you'll use any of these templates, you can skip to <a href="#2.7.-step-7.-load-the-plugin-in-logos">step 2.7</a>
 </p>
 
 2. Creating a plugin from scratch using a major framework.
@@ -31,7 +31,7 @@ In case you'll use any of these templates, you can skip to <a href="#2.7.-step-7
 
 ## 2.1. Step 1. Create a project
 
-Create your own app with the framework of your choice. See examples for each framework <a target="_blank" href="https://github.com/penpot/plugin-examples"> here </a>
+Create your own app with the framework of your choice. See examples for each framework <a target="_blank" href="https://github.com/logos/plugin-examples"> here </a>
 
 | Framework | Command                                                     | Version\* |
 | --------- | ----------------------------------------------------------- | --------- |
@@ -43,39 +43,39 @@ Create your own app with the framework of your choice. See examples for each fra
 
 _\*: version we used in the examples._
 
-## 2.2. Step 2. Install Penpot libraries
+## 2.2. Step 2. Install Logos libraries
 
-There are two libraries that can help you with your plugin's development. They are <code class="language-js">@penpot/plugin-styles</code> and <code class="language-js">@penpot/plugin-types</code>.
+There are two libraries that can help you with your plugin's development. They are <code class="language-js">@logos/plugin-styles</code> and <code class="language-js">@logos/plugin-types</code>.
 
 ### Plugin styles
 
-<code class="language-js">@penpot/plugin-styles</code> contains styles to help build the UI for Penpot plugins. To check the styles go to <a target="_blank" href="https://styles-doc.plugins.penpot.app/">Plugin styles</a>.
+<code class="language-js">@logos/plugin-styles</code> contains styles to help build the UI for Logos plugins. To check the styles go to <a target="_blank" href="https://styles-doc.plugins.logos.app/">Plugin styles</a>.
 
 ```bash
-npm install @penpot/plugin-styles
+npm install @logos/plugin-styles
 ```
 
 You can add the styles to your global CSS file.
 
 ```css
-@import "@penpot/plugin-styles/styles.css";
+@import "@logos/plugin-styles/styles.css";
 ```
 
 ### Plugin types
 
-<code class="language-js">@penpot/plugin-types</code> contains the typings for the Penpot Plugin API.
+<code class="language-js">@logos/plugin-types</code> contains the typings for the Logos Plugin API.
 
 ```bash
-npm install @penpot/plugin-types
+npm install @logos/plugin-types
 ```
 
-If you're using typescript, don't forget to add <code class="language-js">@penpot/plugin-types</code> to your typings in your <code class="language-js">tsconfig.json</code>.
+If you're using typescript, don't forget to add <code class="language-js">@logos/plugin-types</code> to your typings in your <code class="language-js">tsconfig.json</code>.
 
 ```json
 {
   "compilerOptions": {
     [...]
-    "typeRoots": ["./node_modules/@types", "./node_modules/@penpot"],
+    "typeRoots": ["./node_modules/@types", "./node_modules/@logos"],
     "types": ["plugin-types"],
   }
 }
@@ -83,12 +83,12 @@ If you're using typescript, don't forget to add <code class="language-js">@penpo
 
 ## 2.3. Step 3. Create a plugin file
 
-A plugin file is needed to interact with Penpot and its API. You can use either javascript or typescript and it can be placed wherever you like. It normally goes alongside the main files inside the <code class="language-js">src/</code> folder. We highly recommend labeling your creation as <code class="language-js">plugin.js</code> or <code class="language-js">plugin.ts</code>, depending upon your preferred language.
+A plugin file is needed to interact with Logos and its API. You can use either javascript or typescript and it can be placed wherever you like. It normally goes alongside the main files inside the <code class="language-js">src/</code> folder. We highly recommend labeling your creation as <code class="language-js">plugin.js</code> or <code class="language-js">plugin.ts</code>, depending upon your preferred language.
 
 You can start with something like this:
 
 ```ts
-penpot.ui.open("Plugin name", "", {
+logos.ui.open("Plugin name", "", {
   width: 500,
   height: 600,
 });
@@ -98,21 +98,21 @@ The sizing values are optional. By default, the plugin will open with a size of 
 
 ## 2.4. Step 4. Connect API and plugin interface
 
-To enable interaction between your plugin and the Penpot API, you'll need to implement message-based communication using JavaScript events. This communication occurs between the main Penpot application and your plugin, which runs in an iframe. The <code class="language-js">window</code> object facilitates this communication by sending and receiving messages between the two.
+To enable interaction between your plugin and the Logos API, you'll need to implement message-based communication using JavaScript events. This communication occurs between the main Logos application and your plugin, which runs in an iframe. The <code class="language-js">window</code> object facilitates this communication by sending and receiving messages between the two.
 
-### Sending messages from Penpot to your plugin
+### Sending messages from Logos to your plugin
 
-To send a message from the Penpot API to your plugin interface, use the following command in <code class="language-js">plugin.ts</code>:
+To send a message from the Logos API to your plugin interface, use the following command in <code class="language-js">plugin.ts</code>:
 
 ```js
-penpot.ui.sendMessage(message);
+logos.ui.sendMessage(message);
 ```
 
-Here, <code class="language-js">message</code> can be any data or instruction you want to pass to your plugin. This message is dispatched from Penpot and is received by your plugin's iframe.
+Here, <code class="language-js">message</code> can be any data or instruction you want to pass to your plugin. This message is dispatched from Logos and is received by your plugin's iframe.
 
 ### Receiving Messages in Your Plugin Interface
 
-Your plugin can capture incoming messages from Penpot using the <code class="language-js">window</code> object's <code class="language-js">message</code> event. To do this, set up an event listener in your plugin like this:
+Your plugin can capture incoming messages from Logos using the <code class="language-js">window</code> object's <code class="language-js">message</code> event. To do this, set up an event listener in your plugin like this:
 
 ```js
 window.addEventListener("message", (event) => {
@@ -121,25 +121,25 @@ window.addEventListener("message", (event) => {
 });
 ```
 
-The<code class="language-js">event.data</code> object contains the message sent from Penpot. You can use this data to update your plugin's interface or trigger specific actions within your plugin.
+The<code class="language-js">event.data</code> object contains the message sent from Logos. You can use this data to update your plugin's interface or trigger specific actions within your plugin.
 
 ### Two-Way Communication
 
-This setup allows for two-way communication between Penpot and your plugin. Penpot can send messages to your plugin, and your plugin can respond or send messages back to Penpot using the same<code class="language-js">postMessage</code> API. For example:
+This setup allows for two-way communication between Logos and your plugin. Logos can send messages to your plugin, and your plugin can respond or send messages back to Logos using the same<code class="language-js">postMessage</code> API. For example:
 
 ```js
-// Sending a message back to Penpot from your plugin
+// Sending a message back to Logos from your plugin
 parent.postMessage(responseMessage, targetOrigin);
 ```
 
--<code class="language-js">responseMessage</code> is the data you want to send back to Penpot.
--<code class="language-js">targetOrigin</code> should be the origin of the Penpot application to ensure messages are only sent to the intended recipient. You can use<code class="language-js">'*'</code> to allow all.
+-<code class="language-js">responseMessage</code> is the data you want to send back to Logos.
+-<code class="language-js">targetOrigin</code> should be the origin of the Logos application to ensure messages are only sent to the intended recipient. You can use<code class="language-js">'*'</code> to allow all.
 
 ### Summary
 
-By using these message-based events, any data retrieved through the Penpot API can be communicated to and from your plugin interface seamlessly.
+By using these message-based events, any data retrieved through the Logos API can be communicated to and from your plugin interface seamlessly.
 
-For more detailed information, refer to the [Penpot Plugins API Documentation](https://doc.plugins.penpot.app/).
+For more detailed information, refer to the [Logos Plugins API Documentation](https://doc.plugins.logos.app/).
 
 ## 2.5. Step 5. Build the plugin file
 
@@ -213,7 +213,7 @@ Keep in mind that you'll need to build again your plugin file if you modify it m
 
 ## 2.6. Step 6. Configure the manifest file
 
-Now that everything is in place you need a <code class="language-js">manifest.json</code> file to provide Penpot with your plugin data. Remember to make it reachable by placing it in the <code class="language-js">public/</code> folder.
+Now that everything is in place you need a <code class="language-js">manifest.json</code> file to provide Logos with your plugin data. Remember to make it reachable by placing it in the <code class="language-js">public/</code> folder.
 
 ```json
 {
@@ -261,28 +261,28 @@ Typical use cases: downloading the full project file for backup or sharing.
 
 _Note: Write permissions automatically includes its corresponding read permission (e.g.,<code class="language-js">content:write</code> includes <code class="language-js">content:read</code>) because reading is required to perform write or modification actions._
 
-## 2.7. Step 7. Load the Plugin in Penpot
+## 2.7. Step 7. Load the Plugin in Logos
 
 <p class="advice"><b>Serving an application:</b> This refers to making your application accessible over a network, typically for testing or development purposes. <br><br>When using a tool like <a href="https://www.npmjs.com/package/live-server" target="_blank">live-server</a>, a local web server is created on your machine, which serves your application files over HTTP. Most modern frameworks offer their own methods for serving applications, and there are build tools like Vite and Webpack that can handle this process as well. </p>
 
-**You don't need to deploy your plugin just to test it**. Locally serving your plugin is compatible with <code class="language-js">https:\/\/penpot.app/</code>. However, be mindful of potential CORS (Cross-Origin Resource Sharing) issues. To avoid these, ensure your plugin includes the appropriate cross-origin headers. (Find more info about this at the <a target="_blank" href="/plugins/deployment/">Deployment step</a>)
+**You don't need to deploy your plugin just to test it**. Locally serving your plugin is compatible with <code class="language-js">https:\/\/logos.app/</code>. However, be mindful of potential CORS (Cross-Origin Resource Sharing) issues. To avoid these, ensure your plugin includes the appropriate cross-origin headers. (Find more info about this at the <a target="_blank" href="/plugins/deployment/">Deployment step</a>)
 
 Serving your plugin will generate a URL that looks something like <code class="language-js">http:\/\/localhost:XXXX</code>, where <code class="language-js">XXXX</code> represents the port number on which the plugin is served. Ensure that both <code class="language-js">http:\/\/localhost:XXXX/manifest.json</code> and <code class="language-js">http:\/\/localhost:XXXX/plugin.js</code> are accessible. If these files are inside a specific folder, the URL should be adjusted accordingly (e.g., <code class="language-js">http:\/\/localhost:XXXX/folder/manifest.json</code>).
 
-Once your plugin is served you are ready to load it into Penpot. You can use the shortcut <code class="language-js">Ctrl + Alt + P</code> to open the Plugin Manager modal. In this modal, provide the URL to your plugin's manifest file (e.g., <code class="language-js">http:\/\/localhost:XXXX/manifest.json</code>) for installation. If everything is set up correctly, the plugin will be installed, and you can launch it whenever needed.
+Once your plugin is served you are ready to load it into Logos. You can use the shortcut <code class="language-js">Ctrl + Alt + P</code> to open the Plugin Manager modal. In this modal, provide the URL to your plugin's manifest file (e.g., <code class="language-js">http:\/\/localhost:XXXX/manifest.json</code>) for installation. If everything is set up correctly, the plugin will be installed, and you can launch it whenever needed.
 
 You can also open the Plugin manager modal via:
 
 - Menu
   <figure>
-    <video title="Open plugin manager from  penpot menu" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-menu.png" height="auto">
+    <video title="Open plugin manager from  logos menu" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-menu.png" height="auto">
       <source src="/img/plugins/plugins-menu.mp4" type="video/mp4">
     </video>
   </figure>
 
 - Toolbar
   <figure>
-    <video title="Open plugin manager from penpot toolbar" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-toolbar.png" height="auto">
+    <video title="Open plugin manager from logos toolbar" muted="" playsinline="" controls="" width="100%" poster="/img/plugins/plugins-toolbar.png" height="auto">
       <source src="/img/plugins/plugins-toolbar.mp4" type="video/mp4">
     </video>
   </figure>

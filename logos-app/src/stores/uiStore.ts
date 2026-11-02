@@ -7,7 +7,28 @@
 
 import { create } from "zustand";
 
-export type Tool = "select" | "rect" | "ellipse" | "text" | "path" | "hand" | "prototype" | "dev";
+export type Tool =
+  // ── Group 1: Move ──────────────────────────────────────────────────────────
+  | "select"      // V   — pointer / selection
+  | "hand"        // H   — pan canvas
+  | "scale"       // K   — uniform scale
+  // ── Group 2: Frame ────────────────────────────────────────────────────────
+  | "frame"       // F   — draw frame container
+  | "selection"   // S   — marquee (region) select            (Shift+S)
+  | "slice"       // S   — define export slice                (S)
+  // ── Group 3: Shapes ───────────────────────────────────────────────────────
+  | "rect"        // R   — rectangle
+  | "line"        // L   — straight line
+  | "arrow"       //     — line with arrowhead                (Shift+L)
+  | "ellipse"     // O   — ellipse / circle
+  | "polygon"     //     — regular polygon
+  | "star"        //     — star shape
+  | "imageImport" //     — image / video import               (Ctrl+Shift+K)
+  // ── Standalone ────────────────────────────────────────────────────────────
+  | "text"        // T   — text
+  | "path"        // P   — pen / path
+  | "prototype"   //     — prototype connections
+  | "dev";        // D   — dev mode
 
 interface UiState {
   activeTool: Tool;

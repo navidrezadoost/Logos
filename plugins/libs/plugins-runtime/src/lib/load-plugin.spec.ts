@@ -8,7 +8,7 @@ import {
 } from './load-plugin';
 import { loadManifest } from './parse-manifest';
 import { createPlugin } from './create-plugin';
-import type { Context } from '@penpot/plugin-types';
+import type { Context } from '@logos/plugin-types';
 import type { Manifest } from './models/manifest.model.js';
 
 vi.mock('./parse-manifest', () => ({

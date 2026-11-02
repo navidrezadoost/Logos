@@ -4,7 +4,7 @@ This guide walks you through the steps to create an Angular plugin for our platf
 
 If you prefer to create the plugin without a specific framework there's also [Creating a Plugin](./create-plugin.md).
 
-Keep in mind that this guide is for creating a plugin **inside `penpot-plugins` monorepo**. If you want to create a plugin outside our environment you can check the [Penpot Plugin Starter Template](https://github.com/penpot/penpot-plugin-starter-template) or the documentation at [Create a Plugin](https://help.penpot.app/plugins/create-a-plugin/).
+Keep in mind that this guide is for creating a plugin **inside `logos-plugins` monorepo**. If you want to create a plugin outside our environment you can check the [Logos Plugin Starter Template](https://github.com/logos/logos-plugin-starter-template) or the documentation at [Create a Plugin](https://help.logos.app/plugins/create-a-plugin/).
 
 Let's dive in.
 
@@ -136,15 +136,15 @@ pnpm --filter example-plugin serve
 
 This will start the Angular development server.
 
-### Step 8: Load the Plugin in Penpot
+### Step 8: Load the Plugin in Logos
 
-To load your plugin into Penpot you can use the shortcut `Ctrl + Alt + P` to directly open the Plugin manager modal. There you need to provide the plugin's manifest URL (example: `http://plugin.example/manifest.json`) for the installation. If there's no issues the plugin will be installed and then you would be able to open it whenever you like.
+To load your plugin into Logos you can use the shortcut `Ctrl + Alt + P` to directly open the Plugin manager modal. There you need to provide the plugin's manifest URL (example: `http://plugin.example/manifest.json`) for the installation. If there's no issues the plugin will be installed and then you would be able to open it whenever you like.
 
 You can also open the Plugin manager modal via:
 
 - Menu
 
-  ![Penpot's menu image](./images/plugin-menu.png)
+  ![Logos's menu image](./images/plugin-menu.png)
 
 ### Step 9: Build plugin
 

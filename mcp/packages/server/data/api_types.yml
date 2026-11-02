@@ -1,12 +1,12 @@
-Penpot:
+Logos:
   overview: |-
-    Interface Penpot
+    Interface Logos
     ================
 
-    These are methods and properties available on the `penpot` global object.
+    These are methods and properties available on the `logos` global object.
 
     ```
-    interface Penpot { 
+    interface Logos { 
         ui: { 
             open: ((name: string, url: string, options?: { 
                 width: number; 
@@ -76,7 +76,7 @@ Penpot:
     Hierarchy
 
     * Omit<Context, "addListener" | "removeListener">
-      + Penpot
+      + Logos
   members:
     Properties:
       ui: |-
@@ -100,12 +100,12 @@ Penpot:
 
         * open: ((name: string, url: string, options?: {     width: number;     height: number; }) => void)
 
-          Opens the plugin UI. It is possible to develop a plugin without interface (see Palette color example) but if you need, the way to open this UI is using `penpot.ui.open`.
+          Opens the plugin UI. It is possible to develop a plugin without interface (see Palette color example) but if you need, the way to open this UI is using `logos.ui.open`.
           There is a minimum and maximum size for this modal and a default size but it's possible to customize it anyway with the options parameter.
 
           Example
           ```
-          penpot.ui.open('Plugin name', 'url', {width: 150, height: 300});
+          logos.ui.open('Plugin name', 'url', {width: 150, height: 300});
           ```
 
           + ```
@@ -137,7 +137,7 @@ Penpot:
 
           Example
           ```
-          penpot.ui.resize(300, 400);
+          logos.ui.resize(300, 400);
           ```
 
           + ```
@@ -178,7 +178,7 @@ Penpot:
 
           Example
           ```
-          penpot.ui.onMessage((message) => {if(message.type === 'example-type' { ...do something })});
+          logos.ui.onMessage((message) => {if(message.type === 'example-type' { ...do something })});
           ```
 
           + ```
@@ -219,14 +219,14 @@ Penpot:
 
         Example
         ```
-        penpot.closePlugin();
+        logos.closePlugin();
         ```
       root: |-
         ```
         readonly root: null | Shape
         ```
 
-        The root shape in the current Penpot context. Requires `content:read` permission.
+        The root shape in the current Logos context. Requires `content:read` permission.
 
         Example
         ```
@@ -237,7 +237,7 @@ Penpot:
         readonly currentFile: null | File
         ```
 
-        Retrieves file data from the current Penpot context. Requires `content:read` permission.
+        Retrieves file data from the current Logos context. Requires `content:read` permission.
 
         Returns
 
@@ -252,7 +252,7 @@ Penpot:
         readonly currentPage: null | Page
         ```
 
-        The current page in the Penpot context. Requires `content:read` permission.
+        The current page in the Logos context. Requires `content:read` permission.
 
         Example
         ```
@@ -263,7 +263,7 @@ Penpot:
         readonly viewport: Viewport
         ```
 
-        The viewport settings in the Penpot context.
+        The viewport settings in the Logos context.
 
         Example
         ```
@@ -291,7 +291,7 @@ Penpot:
         readonly library: LibraryContext
         ```
 
-        The library context in the Penpot context, including both local and connected libraries. Requires `library:read` permission.
+        The library context in the Logos context, including both local and connected libraries. Requires `library:read` permission.
 
         Example
         ```
@@ -302,7 +302,7 @@ Penpot:
         readonly fonts: FontsContext
         ```
 
-        The fonts context in the Penpot context, providing methods to manage fonts. Requires `content:read` permission.
+        The fonts context in the Logos context, providing methods to manage fonts. Requires `content:read` permission.
 
         Example
         ```
@@ -313,7 +313,7 @@ Penpot:
         readonly currentUser: User
         ```
 
-        The current user in the Penpot context. Requires `user:read` permission.
+        The current user in the Logos context. Requires `user:read` permission.
 
         Example
         ```
@@ -324,7 +324,7 @@ Penpot:
         readonly activeUsers: ActiveUser[]
         ```
 
-        An array of active users in the Penpot context. Requires `user:read` permission.
+        An array of active users in the Logos context. Requires `user:read` permission.
 
         Example
         ```
@@ -335,7 +335,7 @@ Penpot:
         readonly theme: Theme
         ```
 
-        The current theme (light or dark) in Penpot.
+        The current theme (light or dark) in Logos.
 
         Example
         ```
@@ -352,7 +352,7 @@ Penpot:
         selection: Shape[]
         ```
 
-        The currently selected shapes in Penpot. Requires `content:read` permission.
+        The currently selected shapes in Logos. Requires `content:read` permission.
 
         Example
         ```
@@ -373,7 +373,7 @@ Penpot:
           + shapechange: event emitted when the shape changes. This event requires to send inside the `props` object the shape
             that will be observed. For example:
           ```
-          // Observe the current selected shapepenpot.on('shapechange', (shape) => console.log(shape.name), { shapeId: penpot.selection[0].id });
+          // Observe the current selected shapelogos.on('shapechange', (shape) => console.log(shape.name), { shapeId: logos.selection[0].id });
           ```
 
           + selectionchange: event emitted when the current selection changes. The callback will receive the list of ids for the new selection
@@ -413,7 +413,7 @@ Penpot:
 
           Example
           ```
-          penpot.on('pagechange', () => {...do something}).
+          logos.on('pagechange', () => {...do something}).
           ```
       off: |-
         ```
@@ -431,14 +431,14 @@ Penpot:
 
           Example
           ```
-          const listenerId = penpot.on('contentsave', () => console.log("Changed"));penpot.off(listenerId);
+          const listenerId = logos.on('contentsave', () => console.log("Changed"));logos.off(listenerId);
           ```
       shapesColors: |-
         ```
         shapesColors(shapes): (Color & ColorShapeInfo)[]
         ```
 
-        * Retrieves colors applied to the given shapes in Penpot. Requires `content:read` permission.
+        * Retrieves colors applied to the given shapes in Logos. Requires `content:read` permission.
 
           Parameters
           + shapes: Shape[]
@@ -474,7 +474,7 @@ Penpot:
         uploadMediaUrl(name, url): Promise<ImageData>
         ```
 
-        * Uploads media to Penpot and retrieves its image data. Requires `content:write` permission.
+        * Uploads media to Logos and retrieves its image data. Requires `content:write` permission.
 
           Parameters
           + name: string
@@ -490,14 +490,14 @@ Penpot:
 
           Example
           ```
-          const imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');console.log(imageData);// to insert the image in a shape we can doconst board = penpot.createBoard();const shape = penpot.createRectangle();board.appendChild(shape);shape.fills = [{ fillOpacity: 1, fillImage: imageData }];
+          const imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');console.log(imageData);// to insert the image in a shape we can doconst board = logos.createBoard();const shape = logos.createRectangle();board.appendChild(shape);shape.fills = [{ fillOpacity: 1, fillImage: imageData }];
           ```
       uploadMediaData: |-
         ```
         uploadMediaData(name, data, mimeType): Promise<ImageData>
         ```
 
-        * Uploads media to penpot and retrieves the image data. Requires `content:write` permission.
+        * Uploads media to logos and retrieves the image data. Requires `content:write` permission.
 
           Parameters
           + name: string
@@ -534,7 +534,7 @@ Penpot:
 
           Example
           ```
-          const penpotShapesArray = penpot.selection;penpot.group(penpotShapesArray);
+          const logosShapesArray = logos.selection;logos.group(logosShapesArray);
           ```
       ungroup: |-
         ```
@@ -555,7 +555,7 @@ Penpot:
 
           Example
           ```
-          const penpotShapesArray = penpot.selection;// We need to make sure that something is selected, and if the selected shape is a group,if (selected.length && penpot.utils.types.isGroup(penpotShapesArray[0])) {  penpot.group(penpotShapesArray[0]);}
+          const logosShapesArray = logos.selection;// We need to make sure that something is selected, and if the selected shape is a group,if (selected.length && logos.utils.types.isGroup(logosShapesArray[0])) {  logos.group(logosShapesArray[0]);}
           ```
       createRectangle: |-
         ```
@@ -568,7 +568,7 @@ Penpot:
 
           Example
           ```
-          const shape = penpot.createRectangle();// just change the values like thisshape.name = "Example rectangle";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for a image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.borderRadius = 8;shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
+          const shape = logos.createRectangle();// just change the values like thisshape.name = "Example rectangle";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for a image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.borderRadius = 8;shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
           ```
       createBoard: |-
         ```
@@ -577,13 +577,13 @@ Penpot:
 
         * Use this method to create a board. This is the first step before anything else, the container. Requires `content:write` permission.
           Then you can add a gridlayout, flexlayout or add a shape inside the board.
-          Just a heads-up: board is a board in Penpot UI.
+          Just a heads-up: board is a board in Logos UI.
 
           Returns Board
 
           Example
           ```
-          const board = penpot.createBoard();// to add grid layoutboard.addGridLayout();// to add flex layoutboard.addFlexLayout();// to create a shape inside the boardconst shape = penpot.createRectangle();board.appendChild(shape);
+          const board = logos.createBoard();// to add grid layoutboard.addGridLayout();// to add flex layoutboard.addFlexLayout();// to create a shape inside the boardconst shape = logos.createRectangle();board.appendChild(shape);
           ```
       createEllipse: |-
         ```
@@ -596,7 +596,7 @@ Penpot:
 
           Example
           ```
-          const shape = penpot.createEllipse();// just change the values like thisshape.name = "Example ellipse";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for an image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
+          const shape = logos.createEllipse();// just change the values like thisshape.name = "Example ellipse";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for an image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
           ```
       createPath: |-
         ```
@@ -609,7 +609,7 @@ Penpot:
 
           Example
           ```
-          const path = penpot.createPath();path.name = "My path";// for solid colorpath.fills = [{ fillColor: "#7EFFF5" }];
+          const path = logos.createPath();path.name = "My path";// for solid colorpath.fills = [{ fillColor: "#7EFFF5" }];
           ```
       createBoolean: |-
         ```
@@ -694,7 +694,7 @@ Penpot:
 
           Example
           ```
-          const board = penpot.createBoard();let text;text = penpot.createText();// just change the values like thistext.growType = 'auto-height';text.fontFamily = 'Work Sans';text.fontSize = '12';text.fills = [{fillColor: '#9f05ff', fillOpacity: 1}];text.strokes = [{strokeOpacity: 1, strokeStyle: 'solid', strokeWidth: 2, strokeColor: '#deabff', strokeAlignment: 'outer'}];board.appendChild(text);
+          const board = logos.createBoard();let text;text = logos.createText();// just change the values like thistext.growType = 'auto-height';text.fontFamily = 'Work Sans';text.fontSize = '12';text.fills = [{fillColor: '#9f05ff', fillOpacity: 1}];text.strokes = [{strokeOpacity: 1, strokeStyle: 'solid', strokeWidth: 2, strokeColor: '#deabff', strokeAlignment: 'outer'}];board.appendChild(text);
           ```
       generateMarkup: |-
         ```
@@ -755,7 +755,7 @@ Penpot:
 
           Example
           ```
-          const fontfaces = context.generateFontFaces(penpot.selection);console.log(fontfaces);
+          const fontfaces = context.generateFontFaces(logos.selection);console.log(fontfaces);
           ```
       openViewer: |-
         ```
@@ -873,7 +873,7 @@ ActiveUser:
     Interface ActiveUser
     ====================
 
-    Represents an active user in Penpot, extending the `User` interface.
+    Represents an active user in Logos, extending the `User` interface.
     This interface includes additional properties specific to active users.
 
     ```
@@ -896,7 +896,7 @@ ActiveUser:
     * User
       + ActiveUser
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Properties:
       position: |-
@@ -984,7 +984,7 @@ Blur:
     Interface Blur
     ==============
 
-    Represents blur properties in Penpot.
+    Represents blur properties in Logos.
     This interface includes properties for defining the type and intensity of a blur effect, along with its visibility.
 
     ```
@@ -1030,7 +1030,7 @@ Board:
     Interface Board
     ===============
 
-    Represents a board in Penpot.
+    Represents a board in Logos.
     This interface extends `ShapeBase` and includes properties and methods specific to board.
 
     ```
@@ -1160,7 +1160,7 @@ Board:
       + Board
         - VariantContainer
 
-    Referenced by: CloseOverlay, CommentThread, Context, ContextTypesUtils, Flow, NavigateTo, OpenOverlay, OverlayAction, Page, Penpot, RulerGuide, Shape, ToggleOverlay
+    Referenced by: CloseOverlay, CommentThread, Context, ContextTypesUtils, Flow, NavigateTo, OpenOverlay, OverlayAction, Page, Logos, RulerGuide, Shape, ToggleOverlay
   members:
     Properties:
       type: |-
@@ -1547,7 +1547,7 @@ Board:
 
           Example
           ```
-          const board = penpot.createBoard();const flex = board.addFlexLayout();// You can change the flex properties as follows.flex.dir = "column";flex.wrap = "wrap";flex.alignItems = "center";flex.justifyContent = "center";flex.horizontalSizing = "fill";flex.verticalSizing = "fill";
+          const board = logos.createBoard();const flex = board.addFlexLayout();// You can change the flex properties as follows.flex.dir = "column";flex.wrap = "wrap";flex.alignItems = "center";flex.justifyContent = "center";flex.horizontalSizing = "fill";flex.verticalSizing = "fill";
           ```
       addGridLayout: |-
         ```
@@ -1562,7 +1562,7 @@ Board:
 
           Example
           ```
-          const board = penpot.createBoard();const grid = board.addGridLayout();// You can change the grid properties as follows.grid.alignItems = "center";grid.justifyItems = "start";grid.rowGap = 10;grid.columnGap = 10;grid.verticalPadding = 5;grid.horizontalPadding = 5
+          const board = logos.createBoard();const grid = board.addGridLayout();// You can change the grid properties as follows.grid.alignItems = "center";grid.justifyItems = "start";grid.rowGap = 10;grid.columnGap = 10;grid.verticalPadding = 5;grid.horizontalPadding = 5
           ```
       addRulerGuide: |-
         ```
@@ -1852,7 +1852,7 @@ Board:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -2028,7 +2028,7 @@ VariantContainer:
     Interface VariantContainer
     ==========================
 
-    Represents a VariantContainer in Penpot
+    Represents a VariantContainer in Logos
     This interface extends `Board` and includes properties and methods specific to VariantContainer.
 
     ```
@@ -2549,7 +2549,7 @@ VariantContainer:
 
           Example
           ```
-          const board = penpot.createBoard();const flex = board.addFlexLayout();// You can change the flex properties as follows.flex.dir = "column";flex.wrap = "wrap";flex.alignItems = "center";flex.justifyContent = "center";flex.horizontalSizing = "fill";flex.verticalSizing = "fill";
+          const board = logos.createBoard();const flex = board.addFlexLayout();// You can change the flex properties as follows.flex.dir = "column";flex.wrap = "wrap";flex.alignItems = "center";flex.justifyContent = "center";flex.horizontalSizing = "fill";flex.verticalSizing = "fill";
           ```
       addGridLayout: |-
         ```
@@ -2564,7 +2564,7 @@ VariantContainer:
 
           Example
           ```
-          const board = penpot.createBoard();const grid = board.addGridLayout();// You can change the grid properties as follows.grid.alignItems = "center";grid.justifyItems = "start";grid.rowGap = 10;grid.columnGap = 10;grid.verticalPadding = 5;grid.horizontalPadding = 5
+          const board = logos.createBoard();const grid = board.addGridLayout();// You can change the grid properties as follows.grid.alignItems = "center";grid.justifyItems = "start";grid.rowGap = 10;grid.columnGap = 10;grid.verticalPadding = 5;grid.horizontalPadding = 5
           ```
       addRulerGuide: |-
         ```
@@ -2854,7 +2854,7 @@ VariantContainer:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -3030,7 +3030,7 @@ Boolean:
     Interface Boolean
     =================
 
-    Represents a boolean operation shape in Penpot.
+    Represents a boolean operation shape in Logos.
     This interface extends `ShapeBase` and includes properties and methods specific to boolean operations.
 
     ```
@@ -3150,7 +3150,7 @@ Boolean:
     * ShapeBase
       + Boolean
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape
+    Referenced by: Context, ContextTypesUtils, Logos, Shape
   members:
     Properties:
       type: |-
@@ -3761,7 +3761,7 @@ Boolean:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -3973,7 +3973,7 @@ Color:
     Interface Color
     ===============
 
-    Represents color properties in Penpot.
+    Represents color properties in Logos.
     This interface includes properties for defining solid colors, gradients, and image fills, along with metadata.
 
     ```
@@ -3991,7 +3991,7 @@ Color:
     }
     ```
 
-    Referenced by: Context, Penpot, Shadow
+    Referenced by: Context, Logos, Shadow
   members:
     Properties:
       id: |-
@@ -4076,7 +4076,7 @@ ColorShapeInfo:
     }
     ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Properties:
       shapesInfo: |-
@@ -4176,7 +4176,7 @@ CommentThread:
     =======================
 
     Represents a list of comments one after the other. Usually these threads
-    are conversations the users have in Penpot.
+    are conversations the users have in Logos.
 
     ```
     interface CommentThread { 
@@ -4264,7 +4264,7 @@ CommonLayout:
     Interface CommonLayout
     ======================
 
-    CommonLayout represents a common layout interface in the Penpot application.
+    CommonLayout represents a common layout interface in the Logos application.
     It includes various properties for alignment, spacing, padding, and sizing, as well as a method to remove the layout.
 
     ```
@@ -4476,7 +4476,7 @@ Context:
     Interface Context
     =================
 
-    Represents the context of Penpot, providing access to various Penpot functionalities and data.
+    Represents the context of Logos, providing access to various Logos functionalities and data.
 
     ```
     interface Context { 
@@ -4537,7 +4537,7 @@ Context:
         readonly root: null | Shape
         ```
 
-        The root shape in the current Penpot context. Requires `content:read` permission.
+        The root shape in the current Logos context. Requires `content:read` permission.
 
         Example
         ```
@@ -4548,7 +4548,7 @@ Context:
         readonly currentFile: null | File
         ```
 
-        Retrieves file data from the current Penpot context. Requires `content:read` permission.
+        Retrieves file data from the current Logos context. Requires `content:read` permission.
 
         Returns
 
@@ -4563,7 +4563,7 @@ Context:
         readonly currentPage: null | Page
         ```
 
-        The current page in the Penpot context. Requires `content:read` permission.
+        The current page in the Logos context. Requires `content:read` permission.
 
         Example
         ```
@@ -4574,7 +4574,7 @@ Context:
         readonly viewport: Viewport
         ```
 
-        The viewport settings in the Penpot context.
+        The viewport settings in the Logos context.
 
         Example
         ```
@@ -4602,7 +4602,7 @@ Context:
         readonly library: LibraryContext
         ```
 
-        The library context in the Penpot context, including both local and connected libraries. Requires `library:read` permission.
+        The library context in the Logos context, including both local and connected libraries. Requires `library:read` permission.
 
         Example
         ```
@@ -4613,7 +4613,7 @@ Context:
         readonly fonts: FontsContext
         ```
 
-        The fonts context in the Penpot context, providing methods to manage fonts. Requires `content:read` permission.
+        The fonts context in the Logos context, providing methods to manage fonts. Requires `content:read` permission.
 
         Example
         ```
@@ -4624,7 +4624,7 @@ Context:
         readonly currentUser: User
         ```
 
-        The current user in the Penpot context. Requires `user:read` permission.
+        The current user in the Logos context. Requires `user:read` permission.
 
         Example
         ```
@@ -4635,7 +4635,7 @@ Context:
         readonly activeUsers: ActiveUser[]
         ```
 
-        An array of active users in the Penpot context. Requires `user:read` permission.
+        An array of active users in the Logos context. Requires `user:read` permission.
 
         Example
         ```
@@ -4646,7 +4646,7 @@ Context:
         readonly theme: Theme
         ```
 
-        The current theme (light or dark) in Penpot.
+        The current theme (light or dark) in Logos.
 
         Example
         ```
@@ -4663,7 +4663,7 @@ Context:
         selection: Shape[]
         ```
 
-        The currently selected shapes in Penpot. Requires `content:read` permission.
+        The currently selected shapes in Logos. Requires `content:read` permission.
 
         Example
         ```
@@ -4675,7 +4675,7 @@ Context:
         shapesColors(shapes): (Color & ColorShapeInfo)[]
         ```
 
-        * Retrieves colors applied to the given shapes in Penpot. Requires `content:read` permission.
+        * Retrieves colors applied to the given shapes in Logos. Requires `content:read` permission.
 
           Parameters
           + shapes: Shape[]
@@ -4711,7 +4711,7 @@ Context:
         uploadMediaUrl(name, url): Promise<ImageData>
         ```
 
-        * Uploads media to Penpot and retrieves its image data. Requires `content:write` permission.
+        * Uploads media to Logos and retrieves its image data. Requires `content:write` permission.
 
           Parameters
           + name: string
@@ -4727,14 +4727,14 @@ Context:
 
           Example
           ```
-          const imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');console.log(imageData);// to insert the image in a shape we can doconst board = penpot.createBoard();const shape = penpot.createRectangle();board.appendChild(shape);shape.fills = [{ fillOpacity: 1, fillImage: imageData }];
+          const imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');console.log(imageData);// to insert the image in a shape we can doconst board = logos.createBoard();const shape = logos.createRectangle();board.appendChild(shape);shape.fills = [{ fillOpacity: 1, fillImage: imageData }];
           ```
       uploadMediaData: |-
         ```
         uploadMediaData(name, data, mimeType): Promise<ImageData>
         ```
 
-        * Uploads media to penpot and retrieves the image data. Requires `content:write` permission.
+        * Uploads media to logos and retrieves the image data. Requires `content:write` permission.
 
           Parameters
           + name: string
@@ -4771,7 +4771,7 @@ Context:
 
           Example
           ```
-          const penpotShapesArray = penpot.selection;penpot.group(penpotShapesArray);
+          const logosShapesArray = logos.selection;logos.group(logosShapesArray);
           ```
       ungroup: |-
         ```
@@ -4792,7 +4792,7 @@ Context:
 
           Example
           ```
-          const penpotShapesArray = penpot.selection;// We need to make sure that something is selected, and if the selected shape is a group,if (selected.length && penpot.utils.types.isGroup(penpotShapesArray[0])) {  penpot.group(penpotShapesArray[0]);}
+          const logosShapesArray = logos.selection;// We need to make sure that something is selected, and if the selected shape is a group,if (selected.length && logos.utils.types.isGroup(logosShapesArray[0])) {  logos.group(logosShapesArray[0]);}
           ```
       createRectangle: |-
         ```
@@ -4805,7 +4805,7 @@ Context:
 
           Example
           ```
-          const shape = penpot.createRectangle();// just change the values like thisshape.name = "Example rectangle";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for a image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.borderRadius = 8;shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
+          const shape = logos.createRectangle();// just change the values like thisshape.name = "Example rectangle";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for a image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.borderRadius = 8;shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
           ```
       createBoard: |-
         ```
@@ -4814,13 +4814,13 @@ Context:
 
         * Use this method to create a board. This is the first step before anything else, the container. Requires `content:write` permission.
           Then you can add a gridlayout, flexlayout or add a shape inside the board.
-          Just a heads-up: board is a board in Penpot UI.
+          Just a heads-up: board is a board in Logos UI.
 
           Returns Board
 
           Example
           ```
-          const board = penpot.createBoard();// to add grid layoutboard.addGridLayout();// to add flex layoutboard.addFlexLayout();// to create a shape inside the boardconst shape = penpot.createRectangle();board.appendChild(shape);
+          const board = logos.createBoard();// to add grid layoutboard.addGridLayout();// to add flex layoutboard.addFlexLayout();// to create a shape inside the boardconst shape = logos.createRectangle();board.appendChild(shape);
           ```
       createEllipse: |-
         ```
@@ -4833,7 +4833,7 @@ Context:
 
           Example
           ```
-          const shape = penpot.createEllipse();// just change the values like thisshape.name = "Example ellipse";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for an image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
+          const shape = logos.createEllipse();// just change the values like thisshape.name = "Example ellipse";// for solid colorshape.fills = [{ fillColor: "#7EFFF5" }];// for linear gradient colorshape.fills = [{ fillColorGradient: {   "type": "linear",   "startX": 0.5,   "startY": 0,   "endX": 0.5,   "endY": 1,   "width": 1,   "stops": [     {       "color": "#003ae9",       "opacity": 1,       "offset": 0     },     {       "color": "#003ae9",       "opacity": 0,       "offset": 1     }   ] }}];// for an image fillconst imageData = await context.uploadMediaUrl('example', 'https://example.com/image.jpg');shape.fills = [{ fillOpacity: 1, fillImage: imageData }];shape.strokes = [ {   strokeColor: "#2e3434",   strokeStyle: "solid",   strokeWidth: 2,   strokeAlignment: "center", },];
           ```
       createPath: |-
         ```
@@ -4846,7 +4846,7 @@ Context:
 
           Example
           ```
-          const path = penpot.createPath();path.name = "My path";// for solid colorpath.fills = [{ fillColor: "#7EFFF5" }];
+          const path = logos.createPath();path.name = "My path";// for solid colorpath.fills = [{ fillColor: "#7EFFF5" }];
           ```
       createBoolean: |-
         ```
@@ -4931,7 +4931,7 @@ Context:
 
           Example
           ```
-          const board = penpot.createBoard();let text;text = penpot.createText();// just change the values like thistext.growType = 'auto-height';text.fontFamily = 'Work Sans';text.fontSize = '12';text.fills = [{fillColor: '#9f05ff', fillOpacity: 1}];text.strokes = [{strokeOpacity: 1, strokeStyle: 'solid', strokeWidth: 2, strokeColor: '#deabff', strokeAlignment: 'outer'}];board.appendChild(text);
+          const board = logos.createBoard();let text;text = logos.createText();// just change the values like thistext.growType = 'auto-height';text.fontFamily = 'Work Sans';text.fontSize = '12';text.fills = [{fillColor: '#9f05ff', fillOpacity: 1}];text.strokes = [{strokeOpacity: 1, strokeStyle: 'solid', strokeWidth: 2, strokeColor: '#deabff', strokeAlignment: 'outer'}];board.appendChild(text);
           ```
       generateMarkup: |-
         ```
@@ -4992,7 +4992,7 @@ Context:
 
           Example
           ```
-          const fontfaces = context.generateFontFaces(penpot.selection);console.log(fontfaces);
+          const fontfaces = context.generateFontFaces(logos.selection);console.log(fontfaces);
           ```
       addListener: |-
         ```
@@ -5158,7 +5158,7 @@ ContextGeometryUtils:
     Interface ContextGeometryUtils
     ==============================
 
-    Utility methods for geometric calculations in Penpot.
+    Utility methods for geometric calculations in Logos.
 
     Example
     ```
@@ -5206,7 +5206,7 @@ ContextTypesUtils:
     Interface ContextTypesUtils
     ===========================
 
-    Utility methods for determining the types of Penpot shapes.
+    Utility methods for determining the types of Logos shapes.
 
     Example
     ```
@@ -5402,7 +5402,7 @@ ContextUtils:
     Interface ContextUtils
     ======================
 
-    Utility methods for various operations in Penpot.
+    Utility methods for various operations in Logos.
 
     ```
     interface ContextUtils { 
@@ -5411,7 +5411,7 @@ ContextUtils:
     }
     ```
 
-    Referenced by: Penpot
+    Referenced by: Logos
   members:
     Properties:
       geometry: |-
@@ -5419,20 +5419,20 @@ ContextUtils:
         readonly geometry: ContextGeometryUtils
         ```
 
-        Geometry utility methods for Penpot.
+        Geometry utility methods for Logos.
         Provides methods for geometric calculations, such as finding the center of a group of shapes.
 
         Example
         ```
-        const centerPoint = penpot.utils.geometry.center(shapes);console.log(centerPoint);
+        const centerPoint = logos.utils.geometry.center(shapes);console.log(centerPoint);
         ```
       types: |-
         ```
         readonly types: ContextTypesUtils
         ```
 
-        Type utility methods for Penpot.
-        Provides methods for determining the types of various shapes in Penpot.
+        Type utility methods for Logos.
+        Provides methods for determining the types of various shapes in Logos.
 
         Example
         ```
@@ -5490,7 +5490,7 @@ Ellipse:
     Interface Ellipse
     =================
 
-    Represents an ellipse shape in Penpot.
+    Represents an ellipse shape in Logos.
     This interface extends `ShapeBase` and includes properties specific to ellipses.
 
     ```
@@ -5603,7 +5603,7 @@ Ellipse:
     * ShapeBase
       + Ellipse
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape
+    Referenced by: Context, ContextTypesUtils, Logos, Shape
   members:
     Properties:
       type: |-
@@ -6131,7 +6131,7 @@ Ellipse:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -6307,12 +6307,12 @@ EventsMap:
     Interface EventsMap
     ===================
 
-    Represents a mapping of events to their corresponding types in Penpot.
+    Represents a mapping of events to their corresponding types in Logos.
     This interface provides information about various events that can be triggered in the application.
 
     Example
     ```
-    penpot.on('pagechange', (event) => {  console.log(event);});
+    logos.on('pagechange', (event) => {  console.log(event);});
     ```
 
     ```
@@ -6327,7 +6327,7 @@ EventsMap:
     }
     ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Properties:
       pagechange: |-
@@ -6379,7 +6379,7 @@ Export:
     Interface Export
     ================
 
-    Represents export settings in Penpot.
+    Represents export settings in Logos.
     This interface includes properties for defining export configurations.
 
     ```
@@ -6431,7 +6431,7 @@ File:
     Interface File
     ==============
 
-    File represents a file in the Penpot application.
+    File represents a file in the Logos application.
     It includes properties for the file's identifier, name, and revision number.
 
     ```
@@ -6440,7 +6440,7 @@ File:
         name: string; 
         revn: number; 
         pages: Page[]; 
-        export(exportType: "penpot" | "zip", libraryExportType?: "all" | "merge" | "detach"): Promise<Uint8Array>; 
+        export(exportType: "logos" | "zip", libraryExportType?: "all" | "merge" | "detach"): Promise<Uint8Array>; 
         findVersions(criteria?: { 
             createdBy: User; 
         }): Promise<FileVersion[]>; 
@@ -6459,7 +6459,7 @@ File:
     * PluginData
       + File
 
-    Referenced by: Context, EventsMap, Penpot
+    Referenced by: Context, EventsMap, Logos
   members:
     Properties:
       id: |-
@@ -6493,7 +6493,7 @@ File:
         ```
 
         * Parameters
-          + exportType: "penpot" | "zip"
+          + exportType: "logos" | "zip"
           + libraryExportType: "all" | "merge" | "detach"
 
           Returns Promise<Uint8Array>
@@ -6723,7 +6723,7 @@ Fill:
     Interface Fill
     ==============
 
-    Represents fill properties in Penpot. You can add a fill to any shape except for groups.
+    Represents fill properties in Logos. You can add a fill to any shape except for groups.
     This interface includes properties for defining solid color fills, gradient fills, and image fills.
 
     ```
@@ -6790,7 +6790,7 @@ Flags:
     }
     ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Properties:
       naturalChildOrdering: |-
@@ -6807,7 +6807,7 @@ FlexLayout:
     Interface FlexLayout
     ====================
 
-    Represents a flexible layout configuration in Penpot.
+    Represents a flexible layout configuration in Logos.
     This interface extends `CommonLayout` and includes properties for defining the direction,
     wrapping behavior, and child management of a flex layout.
 
@@ -7070,7 +7070,7 @@ Flow:
     Interface Flow
     ==============
 
-    Defines an interaction flow inside penpot. A flow is defined by a starting board for an interaction.
+    Defines an interaction flow inside logos. A flow is defined by a starting board for an interaction.
 
     ```
     interface Flow { 
@@ -7116,8 +7116,8 @@ Font:
     Interface Font
     ==============
 
-    Represents a font in Penpot, which includes details about the font family, variants, and styling options.
-    This interface provides properties and methods for describing and applying fonts within Penpot.
+    Represents a font in Logos, which includes details about the font family, variants, and styling options.
+    This interface provides properties and methods for describing and applying fonts within Logos.
 
     ```
     interface Font { 
@@ -7226,7 +7226,7 @@ FontVariant:
     Interface FontVariant
     =====================
 
-    Represents a font variant in Penpot, which defines a specific style variation of a font.
+    Represents a font variant in Logos, which defines a specific style variation of a font.
     This interface provides properties for describing the characteristics of a font variant.
 
     ```
@@ -7270,7 +7270,7 @@ FontsContext:
     Interface FontsContext
     ======================
 
-    Represents the context for managing fonts in Penpot.
+    Represents the context for managing fonts in Logos.
     This interface provides methods to interact with fonts, such as retrieving fonts by ID or name.
 
     ```
@@ -7283,7 +7283,7 @@ FontsContext:
     }
     ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Properties:
       all: |-
@@ -7378,7 +7378,7 @@ GridLayout:
     Interface GridLayout
     ====================
 
-    GridLayout represents a grid layout in the Penpot application, extending the common layout interface.
+    GridLayout represents a grid layout in the Logos application, extending the common layout interface.
     It includes properties and methods to manage rows, columns, and child elements within the grid.
 
     ```
@@ -7638,7 +7638,7 @@ GridLayout:
 
           Example
           ```
-          const board = penpot.createBoard();const grid = board.addGridLayout();grid.addRow("flex", 1);
+          const board = logos.createBoard();const grid = board.addGridLayout();grid.addRow("flex", 1);
           ```
       addRowAtIndex: |-
         ```
@@ -7683,7 +7683,7 @@ GridLayout:
 
           Example
           ```
-          const board = penpot.createBoard();const grid = board.addGridLayout();grid.addColumn('percent', 50);
+          const board = logos.createBoard();const grid = board.addGridLayout();grid.addColumn('percent', 50);
           ```
       addColumnAtIndex: |-
         ```
@@ -7822,7 +7822,7 @@ Group:
     Interface Group
     ===============
 
-    Represents a group of shapes in Penpot.
+    Represents a group of shapes in Logos.
     This interface extends `ShapeBase` and includes properties and methods specific to groups.
 
     ```
@@ -7941,7 +7941,7 @@ Group:
     * ShapeBase
       + Group
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape
+    Referenced by: Context, ContextTypesUtils, Logos, Shape
   members:
     Properties:
       type: |-
@@ -8539,7 +8539,7 @@ Group:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -8715,7 +8715,7 @@ GuideColumn:
     Interface GuideColumn
     =====================
 
-    Represents a goard guide for columns in Penpot.
+    Represents a goard guide for columns in Logos.
     This interface includes properties for defining the type, visibility, and parameters of column guides within a board.
 
     ```
@@ -8752,7 +8752,7 @@ GuideColumnParams:
     Interface GuideColumnParams
     ===========================
 
-    Represents parameters for board guide columns in Penpot.
+    Represents parameters for board guide columns in Logos.
     This interface includes properties for defining the appearance and layout of column guides within a board.
 
     ```
@@ -8829,7 +8829,7 @@ GuideRow:
     Interface GuideRow
     ==================
 
-    Represents a board guide for rows in Penpot.
+    Represents a board guide for rows in Logos.
     This interface includes properties for defining the type, visibility, and parameters of row guides within a board.
 
     ```
@@ -8867,7 +8867,7 @@ GuideSquare:
     Interface GuideSquare
     =====================
 
-    Represents a board guide for squares in Penpot.
+    Represents a board guide for squares in Logos.
     This interface includes properties for defining the type, visibility, and parameters of square guides within a board.
 
     ```
@@ -8904,7 +8904,7 @@ GuideSquareParams:
     Interface GuideSquareParams
     ===========================
 
-    Represents parameters for board guide squares in Penpot.
+    Represents parameters for board guide squares in Logos.
     This interface includes properties for defining the appearance and size of square guides within a board.
 
     ```
@@ -8949,7 +8949,7 @@ HistoryContext:
     }
     ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Methods:
       undoBlockBegin: |-
@@ -8986,7 +8986,7 @@ Image:
     Interface Image
     ===============
 
-    Represents an image shape in Penpot.
+    Represents an image shape in Logos.
     This interface extends `ShapeBase` and includes properties specific to image shapes.
 
     ```
@@ -9627,7 +9627,7 @@ Image:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -9803,7 +9803,7 @@ Interaction:
     Interface Interaction
     =====================
 
-    Penpot allows you to prototype interactions by connecting boards, which can act as screens.
+    Logos allows you to prototype interactions by connecting boards, which can act as screens.
 
     ```
     interface Interaction { 
@@ -9856,7 +9856,7 @@ LayoutCellProperties:
     Interface LayoutCellProperties
     ==============================
 
-    Properties for defining the layout of a cell in Penpot.
+    Properties for defining the layout of a cell in Logos.
 
     ```
     interface LayoutCellProperties { 
@@ -9917,7 +9917,7 @@ LayoutChildProperties:
     Interface LayoutChildProperties
     ===============================
 
-    Properties for defining the layout of a child element in Penpot.
+    Properties for defining the layout of a child element in Logos.
 
     ```
     interface LayoutChildProperties { 
@@ -10073,7 +10073,7 @@ Library:
     Interface Library
     =================
 
-    Represents a library in Penpot, containing colors, typographies, and components.
+    Represents a library in Logos, containing colors, typographies, and components.
 
     ```
     interface Library { 
@@ -10123,7 +10123,7 @@ Library:
 
         Example
         ```
-        console.log(penpot.library.local.colors);
+        console.log(logos.library.local.colors);
         ```
       typographies: |-
         ```
@@ -10140,7 +10140,7 @@ Library:
 
         Example
         ```
-        console.log(penpot.library.local.components
+        console.log(logos.library.local.components
         ```
     Methods:
       createColor: |-
@@ -10156,7 +10156,7 @@ Library:
 
           Example
           ```
-          const newColor = penpot.library.local.createColor();console.log(newColor);
+          const newColor = logos.library.local.createColor();console.log(newColor);
           ```
       createTypography: |-
         ```
@@ -10191,7 +10191,7 @@ Library:
 
           Example
           ```
-          const newComponent = penpot.library.local.createComponent([shape1, shape2]);
+          const newComponent = logos.library.local.createComponent([shape1, shape2]);
           ```
       getPluginData: |-
         ```
@@ -10321,7 +10321,7 @@ LibraryColor:
     Interface LibraryColor
     ======================
 
-    Represents a color element from a library in Penpot.
+    Represents a color element from a library in Logos.
     This interface extends `LibraryElement` and includes properties specific to color elements.
 
     ```
@@ -10560,7 +10560,7 @@ LibraryComponent:
     Interface LibraryComponent
     ==========================
 
-    Represents a component element from a library in Penpot.
+    Represents a component element from a library in Logos.
     This interface extends `LibraryElement` and includes properties specific to component elements.
 
     ```
@@ -10654,7 +10654,7 @@ LibraryComponent:
 
         * Creates a new Variant from this standard Component. It creates a VariantContainer, transform this Component into a VariantComponent, duplicates it, and creates a
           set of properties based on the component name and path.
-          Similar to doing it with the contextual menu or the shortcut on the Penpot interface
+          Similar to doing it with the contextual menu or the shortcut on the Logos interface
 
           Returns void
       getPluginData: |-
@@ -10785,7 +10785,7 @@ LibraryVariantComponent:
     Interface LibraryVariantComponent
     =================================
 
-    Represents a component element from a library in Penpot.
+    Represents a component element from a library in Logos.
     This interface extends `LibraryElement` and includes properties specific to component elements.
 
     ```
@@ -10906,7 +10906,7 @@ LibraryVariantComponent:
 
         * Creates a new Variant from this standard Component. It creates a VariantContainer, transform this Component into a VariantComponent, duplicates it, and creates a
           set of properties based on the component name and path.
-          Similar to doing it with the contextual menu or the shortcut on the Penpot interface
+          Similar to doing it with the contextual menu or the shortcut on the Logos interface
 
           Returns void
       addVariant: |-
@@ -11057,7 +11057,7 @@ LibraryElement:
     Interface LibraryElement
     ========================
 
-    Represents an element in a Penpot library.
+    Represents an element in a Logos library.
     This interface provides information about a specific element in a library.
 
     ```
@@ -11237,8 +11237,8 @@ LibrarySummary:
     Interface LibrarySummary
     ========================
 
-    Represents a summary of a Penpot library.
-    This interface provides properties for summarizing various aspects of a Penpot library.
+    Represents a summary of a Logos library.
+    This interface provides properties for summarizing various aspects of a Logos library.
 
     ```
     interface LibrarySummary { 
@@ -11288,7 +11288,7 @@ LibraryTypography:
     Interface LibraryTypography
     ===========================
 
-    Represents a typography element from a library in Penpot.
+    Represents a typography element from a library in Logos.
     This interface extends `LibraryElement` and includes properties specific to typography elements.
 
     ```
@@ -11612,7 +11612,7 @@ LocalStorage:
     }
     ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Methods:
       getItem: |-
@@ -11915,7 +11915,7 @@ Page:
     Interface Page
     ==============
 
-    Page represents a page in the Penpot application.
+    Page represents a page in the Logos application.
     It includes properties for the page's identifier and name, as well as methods for managing shapes on the page.
 
     ```
@@ -11964,7 +11964,7 @@ Page:
     * PluginData
       + Page
 
-    Referenced by: Context, EventsMap, File, Flow, Penpot
+    Referenced by: Context, EventsMap, File, Flow, Logos
   members:
     Properties:
       id: |-
@@ -12015,7 +12015,7 @@ Page:
 
           Example
           ```
-          const shape = penpot.currentPage.getShapeById('shapeId');
+          const shape = logos.currentPage.getShapeById('shapeId');
           ```
       findShapes: |-
         ```
@@ -12048,7 +12048,7 @@ Page:
 
           Example
           ```
-          const shapes = penpot.currentPage.findShapes({ name: 'exampleName' });
+          const shapes = logos.currentPage.findShapes({ name: 'exampleName' });
           ```
       createFlow: |-
         ```
@@ -12069,7 +12069,7 @@ Page:
 
           Example
           ```
-          const flow = penpot.currentPage.createFlow('exampleFlow', board);
+          const flow = logos.currentPage.createFlow('exampleFlow', board);
           ```
       removeFlow: |-
         ```
@@ -12285,7 +12285,7 @@ Path:
     Interface Path
     ==============
 
-    Represents a path shape in Penpot.
+    Represents a path shape in Logos.
     This interface extends `ShapeBase` and includes properties and methods specific to paths.
 
     ```
@@ -12402,7 +12402,7 @@ Path:
     * ShapeBase
       + Path
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape
+    Referenced by: Context, ContextTypesUtils, Logos, Shape
   members:
     Properties:
       type: |-
@@ -12968,7 +12968,7 @@ Path:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -13144,7 +13144,7 @@ PathCommand:
     Interface PathCommand
     =====================
 
-    Represents a path command in Penpot.
+    Represents a path command in Logos.
     This interface includes a property for defining the type of command.
 
     ```
@@ -13291,7 +13291,7 @@ PluginData:
     Interface PluginData
     ====================
 
-    Provides methods for managing plugin-specific data associated with a Penpot shape.
+    Provides methods for managing plugin-specific data associated with a Logos shape.
 
     ```
     interface PluginData { 
@@ -13526,7 +13526,7 @@ Rectangle:
     Interface Rectangle
     ===================
 
-    Represents a rectangle shape in Penpot.
+    Represents a rectangle shape in Logos.
     This interface extends `ShapeBase` and includes properties specific to rectangles.
 
     ```
@@ -13639,7 +13639,7 @@ Rectangle:
     * ShapeBase
       + Rectangle
 
-    Referenced by: Context, ContextTypesUtils, Penpot, Shape
+    Referenced by: Context, ContextTypesUtils, Logos, Shape
   members:
     Properties:
       type: |-
@@ -14169,7 +14169,7 @@ Rectangle:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -14383,7 +14383,7 @@ Shadow:
     Interface Shadow
     ================
 
-    Represents shadow properties in Penpot.
+    Represents shadow properties in Logos.
     This interface includes properties for defining drop shadows and inner shadows, along with their visual attributes.
 
     ```
@@ -14459,7 +14459,7 @@ ShapeBase:
     Interface ShapeBase
     ===================
 
-    Represents the base properties and methods of a shape in Penpot.
+    Represents the base properties and methods of a shape in Logos.
     This interface provides common properties and methods shared by all shapes.
 
     ```
@@ -15100,7 +15100,7 @@ ShapeBase:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -15352,7 +15352,7 @@ Stroke:
     Interface Stroke
     ================
 
-    Represents stroke properties in Penpot. You can add a stroke to any shape except for groups.
+    Represents stroke properties in Logos. You can add a stroke to any shape except for groups.
     This interface includes properties for defining the color, style, width, alignment, and caps of a stroke.
 
     ```
@@ -15451,7 +15451,7 @@ SvgRaw:
     Interface SvgRaw
     ================
 
-    Represents an SVG raw shape in Penpot.
+    Represents an SVG raw shape in Logos.
     This interface extends `ShapeBase` and includes properties specific to raw SVG shapes.
 
     ```
@@ -16090,7 +16090,7 @@ SvgRaw:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -16266,7 +16266,7 @@ Text:
     Interface Text
     ==============
 
-    Text represents a text element in the Penpot application, extending the base shape interface.
+    Text represents a text element in the Logos application, extending the base shape interface.
     It includes various properties to define the text content and its styling attributes.
 
     ```
@@ -16423,7 +16423,7 @@ Text:
     * ShapeBase
       + Text
 
-    Referenced by: Context, ContextTypesUtils, Font, Penpot, Shape, TextRange
+    Referenced by: Context, ContextTypesUtils, Font, Logos, Shape, TextRange
   members:
     Properties:
       id: |-
@@ -17073,7 +17073,7 @@ Text:
         ```
 
         * Combine several standard Components into a VariantComponent. Similar to doing it with the contextual menu
-          on the Penpot interface.
+          on the Logos interface.
           The current shape must be a component main instance.
 
           Parameters
@@ -17595,7 +17595,7 @@ Track:
     Interface Track
     ===============
 
-    Represents a track configuration in Penpot.
+    Represents a track configuration in Logos.
     This interface includes properties for defining the type and value of a track used in layout configurations.
 
     ```
@@ -17632,7 +17632,7 @@ User:
     Interface User
     ==============
 
-    Represents a user in Penpot.
+    Represents a user in Logos.
 
     ```
     interface User { 
@@ -17649,7 +17649,7 @@ User:
     * User
       + ActiveUser
 
-    Referenced by: Comment, CommentThread, Context, File, FileVersion, Penpot
+    Referenced by: Comment, CommentThread, Context, File, FileVersion, Logos
   members:
     Properties:
       id: |-
@@ -17822,7 +17822,7 @@ Viewport:
     Interface Viewport
     ==================
 
-    Viewport represents the viewport in the Penpot application.
+    Viewport represents the viewport in the Logos application.
     It includes the center point, zoom level, and the bounds of the viewport.
 
     ```
@@ -17836,7 +17836,7 @@ Viewport:
     }
     ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members:
     Properties:
       center: |-
@@ -17932,10 +17932,10 @@ BooleanType:
         | "intersection"
     ```
 
-    Represents the boolean operation types available in Penpot.
+    Represents the boolean operation types available in Logos.
     These types define how shapes can be combined or modified using boolean operations.
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members: {}
 Bounds:
   overview: |-
@@ -17997,7 +17997,7 @@ Gradient:
     }
     ```
 
-    Represents a gradient configuration in Penpot.
+    Represents a gradient configuration in Logos.
     A gradient can be either linear or radial and includes properties to define its shape, position, and color stops.
 
     Type declaration
@@ -18043,7 +18043,7 @@ Guide:
     Guide: GuideColumn | GuideRow | GuideSquare
     ```
 
-    Represents a board guide in Penpot.
+    Represents a board guide in Logos.
     This type can be one of several specific board guide types: column, row, or square.
 
     Referenced by: Board, VariantContainer
@@ -18065,7 +18065,7 @@ ImageData:
     }
     ```
 
-    Represents image data in Penpot.
+    Represents image data in Logos.
     This includes properties for defining the image's dimensions, metadata, and aspect ratio handling.
 
     Type declaration
@@ -18099,7 +18099,7 @@ ImageData:
 
         Returns Promise<Uint8Array>
 
-    Referenced by: Color, Context, Fill, LibraryColor, Penpot
+    Referenced by: Color, Context, Fill, LibraryColor, Logos
   members: {}
 LibraryContext:
   overview: |-
@@ -18115,14 +18115,14 @@ LibraryContext:
     }
     ```
 
-    Represents the context of Penpot libraries, including both local and connected libraries.
+    Represents the context of Logos libraries, including both local and connected libraries.
     This type contains references to the local library and an array of connected libraries.
 
     Type declaration
 
     * Readonlylocal: Library
 
-      The local library in the Penpot context.
+      The local library in the Logos context.
 
       Example
       ```
@@ -18130,7 +18130,7 @@ LibraryContext:
       ```
     * Readonlyconnected: Library[]
 
-      An array of connected libraries in the Penpot context.
+      An array of connected libraries in the Logos context.
 
       Example
       ```
@@ -18174,7 +18174,7 @@ LibraryContext:
         const connectedLibrary = await libraryContext.connectLibrary('library-id');
         ```
 
-    Referenced by: Context, Penpot
+    Referenced by: Context, Logos
   members: {}
 Point:
   overview: |-
@@ -18221,15 +18221,15 @@ Shape:
         | Image
     ```
 
-    Shape represents a union of various shape types used in the Penpot project.
+    Shape represents a union of various shape types used in the Logos project.
     This type allows for different shapes to be handled under a single type umbrella.
 
     Example
     ```
-    let shape: Shape;if (penpot.utils.types.isRectangle(shape)) {  console.log(shape.type);}
+    let shape: Shape;if (logos.utils.types.isRectangle(shape)) {  console.log(shape.type);}
     ```
 
-    Referenced by: Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Penpot, Rectangle, ShapeBase, SvgRaw, Text, ToggleOverlay, VariantContainer, Viewport
+    Referenced by: Board, Boolean, Context, ContextGeometryUtils, ContextTypesUtils, Ellipse, EventsMap, FlexLayout, GridLayout, Group, Image, Interaction, Library, LibraryComponent, LibraryTypography, LibraryVariantComponent, OpenOverlay, OverlayAction, Page, Path, Logos, Rectangle, ShapeBase, SvgRaw, Text, ToggleOverlay, VariantContainer, Viewport
   members: {}
 StrokeCap:
   overview: |-
@@ -18247,7 +18247,7 @@ StrokeCap:
         | "diamond-marker"
     ```
 
-    Represents the cap style of a stroke in Penpot.
+    Represents the cap style of a stroke in Logos.
     This type defines various styles for the ends of a stroke.
 
     Referenced by: Stroke
@@ -18263,7 +18263,7 @@ Theme:
 
     This type specifies the possible themes: 'light' or 'dark'.
 
-    Referenced by: Context, EventsMap, Penpot
+    Referenced by: Context, EventsMap, Logos
   members: {}
 TrackType:
   overview: |-
@@ -18278,7 +18278,7 @@ TrackType:
         | "auto"
     ```
 
-    Represents the type of track in Penpot.
+    Represents the type of track in Logos.
     This type defines various track types that can be used in layout configurations.
 
     Referenced by: GridLayout, Track

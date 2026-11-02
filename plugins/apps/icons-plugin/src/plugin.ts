@@ -1,11 +1,11 @@
 import type { PluginMessageEvent, PluginUIEvent } from './model.js';
 
-penpot.ui.open('FEATHER ICONS PLUGIN', `?theme=${penpot.theme}`, {
+logos.ui.open('FEATHER ICONS PLUGIN', `?theme=${logos.theme}`, {
   width: 292,
   height: 540,
 });
 
-penpot.ui.onMessage<PluginUIEvent>((message) => {
+logos.ui.onMessage<PluginUIEvent>((message) => {
   if (message.type === 'insert-icon') {
     const { name, svg } = message.content;
 
@@ -13,19 +13,19 @@ penpot.ui.onMessage<PluginUIEvent>((message) => {
       return;
     }
 
-    const icon = penpot.createShapeFromSvg(svg);
+    const icon = logos.createShapeFromSvg(svg);
     if (icon) {
       icon.name = name;
-      icon.x = penpot.viewport.center.x;
-      icon.y = penpot.viewport.center.y;
+      icon.x = logos.viewport.center.x;
+      icon.y = logos.viewport.center.y;
     }
   }
 });
 
-penpot.on('themechange', (theme) => {
+logos.on('themechange', (theme) => {
   sendMessage({ type: 'theme', content: theme });
 });
 
 function sendMessage(message: PluginMessageEvent) {
-  penpot.ui.sendMessage(message);
+  logos.ui.sendMessage(message);
 }

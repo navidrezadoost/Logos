@@ -168,19 +168,19 @@ export class ExecuteCodeTaskHandler extends TaskHandler<ExecuteCodeTaskParams> {
 
     /**
      * Persistent context object that maintains state between code executions.
-     * Contains the penpot API, storage object, and custom console implementation.
+     * Contains the logos API, storage object, and custom console implementation.
      */
     private readonly context: any;
 
     constructor() {
         super();
 
-        // initialize context, making penpot, penpotUtils, storage and the custom console available
+        // initialize context, making logos, logosUtils, storage and the custom console available
         this.context = {
-            penpot: penpot,
+            logos: logos,
             storage: {},
             console: new ExecuteCodeTaskConsole(),
-            penpotUtils: LogosUtils,
+            logosUtils: LogosUtils,
         };
     }
 

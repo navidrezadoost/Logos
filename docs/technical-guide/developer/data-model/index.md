@@ -1,9 +1,9 @@
 ---
 title: 3.02. Data model
-desc: Learn about self-hosting, configuration, developer tools, data models, architecture, and integrations. View Penpot's technical guide. Free to use!
+desc: Learn about self-hosting, configuration, developer tools, data models, architecture, and integrations. View Logos's technical guide. Free to use!
 ---
 
-# Penpot Data Model
+# Logos Data Model
 
 This is the conceptual data model. The actual representations of those entities
 slightly differ, depending on the environment (frontend app, backend RPC calls
@@ -163,8 +163,8 @@ Shape <-- Shape : parent
 @enduml
 
 A <code class="language-text">Shape</code> is the most important entity of the model. Represents one of the
-[layers of our design](https://help.penpot.app/user-guide/layer-basics), and it
-corresponds with one SVG node, augmented with Penpot special features.
+[layers of our design](https://help.logos.app/user-guide/layer-basics), and it
+corresponds with one SVG node, augmented with Logos special features.
 
 We have code to render a <code class="language-text">Shape</code> into a SVG tag, with more or less additions
 depending on the environment (editable in the workspace, interactive in the
@@ -172,7 +172,7 @@ viewer, minimal in the shape exporter or the handoff, or with metadata in the
 file export).
 
 Also have code that imports any SVG file and convert elements back into shapes.
-If it's a SVG exported by Penpot, it reads the metadata to reconstruct the
+If it's a SVG exported by Logos, it reads the metadata to reconstruct the
 shapes exactly as they were. If not, it infers the atributes with a best effort
 approach.
 

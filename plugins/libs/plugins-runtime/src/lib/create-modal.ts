@@ -1,5 +1,5 @@
 import type { OpenUIOptions } from './models/open-ui-options.model.js';
-import type { Theme } from '@penpot/plugin-types';
+import type { Theme } from '@logos/plugin-types';
 import type { PluginModalElement } from './modal/plugin-modal.js';
 
 import { parseTranslate } from './parse-translate';

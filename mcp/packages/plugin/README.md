@@ -1,8 +1,8 @@
-# Penpot MCP Plugin
+# Logos MCP Plugin
 
-This project contains a Penpot plugin that accompanies the Penpot MCP server.
+This project contains a Logos plugin that accompanies the Logos MCP server.
 It connects to the MCP server via WebSocket, subsequently allowing the MCP
-server to execute tasks in Penpot using the Plugin API.
+server to execute tasks in Logos using the Plugin API.
 
 ## Setup
 

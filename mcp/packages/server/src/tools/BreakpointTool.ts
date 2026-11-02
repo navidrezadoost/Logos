@@ -64,7 +64,7 @@ function buildBreakpointCode(
   const scaleContents = ${scaleContents};
 
   // Resolve source frame
-  const source = penpot.currentPage.getShapeById(sourceId);
+  const source = logos.currentPage.getShapeById(sourceId);
   if (!source) {
     return { error: "Frame not found: " + sourceId };
   }

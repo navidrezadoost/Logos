@@ -9,7 +9,7 @@ import type {
 } from '../app/model';
 import { filter, fromEvent, map, merge, take } from 'rxjs';
 import { FormsModule } from '@angular/forms';
-import { Shape } from '@penpot/plugin-types';
+import { Shape } from '@logos/plugin-types';
 
 @Component({
   imports: [RouterModule, CommonModule, FormsModule],

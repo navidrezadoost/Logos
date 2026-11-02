@@ -1,7 +1,7 @@
 # Types Generator
 
 This subproject contains helper scripts used in the development of the
-Penpot MCP server for generate the types yaml.
+Logos MCP server for generate the types yaml.
 
 ## Setup
 

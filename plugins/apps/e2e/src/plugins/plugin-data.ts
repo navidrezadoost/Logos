@@ -1,5 +1,5 @@
 export default function () {
-  const rectangle = penpot.createRectangle();
+  const rectangle = logos.createRectangle();
 
   rectangle?.setPluginData('testData', 'test');
   return rectangle?.getPluginData('testData');

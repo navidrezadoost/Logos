@@ -1,33 +1,56 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { svgerVitePlugin } from "svger-cli/vite";
 import path from "path";
 
-// Serve the pre-built render-wasm Emscripten artefacts directly from the
-// existing frontend public directory during development.
-// This avoids duplicating the WASM build output.
-const FRONTEND_PUBLIC = path.resolve(
-  __dirname,
-  "../frontend/resources/public"
-);
+// Pre-built WASM/static assets live in logos-app/dist/ (committed build output).
+const STATIC_ASSETS = path.resolve(__dirname, "dist");
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    svgerVitePlugin({
+      source: "./src/icons/toolbar",
+      output: "./src/components/icons",
+      framework: "react",
+      typescript: true,
+      hmr: true,
+    }),
+    svgerVitePlugin({
+      source: "./src/icons/system",
+      output: "./src/components/icons/system",
+      framework: "react",
+      typescript: true,
+      hmr: true,
+    }),
+    react(),
+  ],
 
   server: {
-    port: 5174,
-    // Allow Vite to serve files from the sibling frontend resources directory.
+    port: 8888,
+    host: "127.0.0.1",
+    strictPort: true,
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
+      "/assets/by-id": {
+        target: "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
+    },
     fs: {
-      allow: [__dirname, FRONTEND_PUBLIC],
+      allow: [__dirname, STATIC_ASSETS],
     },
   },
 
-  // During dev, expose the sibling public directory at the root so that
-  // `/js/render-wasm.js` and `/js/render-wasm.wasm` resolve correctly.
-  publicDir: FRONTEND_PUBLIC,
+  publicDir: STATIC_ASSETS,
 
   // Mark the Emscripten WASM artefact as external so Vite doesn't try to
   // bundle it.  The browser will fetch it lazily at runtime.
   build: {
+    outDir: "build",
+    emptyOutDir: true,
     rollupOptions: {
       external: [/render-wasm\.(js|wasm)$/],
     },

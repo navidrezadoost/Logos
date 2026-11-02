@@ -31,6 +31,7 @@ pub const EPSILON: f64 = 1e-6;
 
 /// A 2-dimensional point or vector.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
 pub struct Point {
     pub x: f64,

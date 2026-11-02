@@ -3,7 +3,7 @@ import { createPluginManager } from './plugin-manager';
 import { loadManifestCode, getValidUrl } from './parse-manifest.js';
 import { PluginModalElement } from './modal/plugin-modal.js';
 import { openUIApi } from './api/openUI.api.js';
-import type { Context, Theme } from '@penpot/plugin-types';
+import type { Context, Theme } from '@logos/plugin-types';
 import type { Manifest } from './models/manifest.model.js';
 
 vi.mock('./parse-manifest.js', () => ({

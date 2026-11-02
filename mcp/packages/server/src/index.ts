@@ -4,7 +4,7 @@ import { LogosMcpServer } from "./LogosMcpServer";
 import { createLogger, logFilePath } from "./logger";
 
 /**
- * Entry point for Penpot MCP Server
+ * Entry point for Logos MCP Server
  *
  * Creates and starts the MCP server instance, handling any startup errors
  * gracefully and ensuring proper process termination.
@@ -28,16 +28,20 @@ async function main(): Promise<void> {
             } else if (args[i] === "--help" || args[i] === "-h") {
                 logger.info("Usage: node dist/index.js [options]");
                 logger.info("Options:");
-                logger.info("  --multi-user           Enable multi-user mode (default: single-user)");
                 logger.info("  --help, -h             Show this help message");
                 logger.info("");
-                logger.info("Note that configuration is mostly handled through environment variables.");
+                logger.info("Local mode only. Remote and multi-user modes are disabled pending security approval.");
+                logger.info("Set LOGOS_MCP_LOCAL_TOKEN to a secret of at least 32 bytes.");
                 logger.info("Refer to the README for more information.");
                 process.exit(0);
             }
         }
 
-        const server = new LogosMcpServer(multiUser);
+        if (multiUser) {
+            throw new Error("Multi-user MCP mode is disabled pending separate security approval");
+        }
+
+        const server = new LogosMcpServer();
         await server.start();
 
         // keep the process alive

@@ -31,6 +31,7 @@ import { PrototypeOverlay } from "../prototype/PrototypeOverlay";
 import { DRAG_COMPONENT_TYPE } from "../assets/AssetsPanel";
 import { workerPool } from "../../worker";
 import { createRect } from "../../types/shapes";
+import { theme } from "../../theme/colors";
 
 const WASM_JS_URL: string =
   typeof __RENDER_WASM_JS__ !== "undefined" ? __RENDER_WASM_JS__ : "/js/render-wasm.js";
@@ -56,11 +57,26 @@ export function Canvas(): React.ReactElement {
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [drag, setDrag] = useState<DragState | null>(null);
 
+  // Hand-tool pan drag (stored in a ref to avoid re-render every frame)
+  const panDragRef = useRef<{ startClientX: number; startClientY: number; startPanX: number; startPanY: number } | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
+
+  // Scale-tool drag (ref to avoid per-frame re-renders)
+  interface ScaleDrag {
+    shapeId: string;
+    origX: number; origY: number; origW: number; origH: number;
+    /** Canvas-space center of the shape at drag start. */
+    cx: number; cy: number;
+    /** Distance from mouse to center at drag start (canvas coords). */
+    startDist: number;
+  }
+  const scaleDragRef = useRef<ScaleDrag | null>(null);
+
   const shapes = useCurrentPageShapes();
   const clearSelection = useSelectionStore((s) => s.clearSelection);
-  const { select } = useSelectionStore();
-  const { zoom, panX, panY, activeTool, setTool } = useUiStore();
-  const { addRect, addShape, addVectorNetwork, addInstanceShape } = useDocumentStore();
+  const { select, selectRange } = useSelectionStore();
+  const { zoom, panX, panY, activeTool, setTool, setPan } = useUiStore();
+  const { addRect, addShape, addVectorNetwork, addInstanceShape, updateShape } = useDocumentStore();
   const { createInstance, components } = useComponentStore();
 
   // Pen tool state
@@ -149,10 +165,17 @@ export function Canvas(): React.ReactElement {
     };
   }
 
-  const isDrawTool = activeTool === "rect" || activeTool === "ellipse";
+  // All drag-to-draw tools (share the DragState / preview overlay)
+  const isDrawTool =
+    activeTool === "rect"      || activeTool === "ellipse"  ||
+    activeTool === "frame"     || activeTool === "selection" ||
+    activeTool === "slice"     || activeTool === "line"      ||
+    activeTool === "arrow"     || activeTool === "polygon"   ||
+    activeTool === "star";
   const isPenTool = activeTool === "path";
   const isPrototypeTool = activeTool === "prototype";
   const isDevTool = activeTool === "dev";
+  const isHandTool = activeTool === "hand";
 
   // Prototype store
   const proto = useProtoStore();
@@ -250,14 +273,47 @@ export function Canvas(): React.ReactElement {
         pen.startAnchorDrag(pen.anchors.length, x, y); // index after add
         return;
       }
+      // ── Scale tool — begin uniform scale drag ────────────────────────────────
+      if (activeTool === "scale") {
+        // Hit-test: find the topmost shape under the cursor
+        const hit = [...shapes].reverse().find(
+          (s) => x >= s.bounds.x && x <= s.bounds.x + s.bounds.w &&
+                 y >= s.bounds.y && y <= s.bounds.y + s.bounds.h
+        );
+        if (hit) {
+          // Select it if not already selected
+          select(hit.id);
+          const cx = hit.bounds.x + hit.bounds.w / 2;
+          const cy = hit.bounds.y + hit.bounds.h / 2;
+          const dx = x - cx;
+          const dy = y - cy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          scaleDragRef.current = {
+            shapeId: hit.id,
+            origX: hit.bounds.x, origY: hit.bounds.y,
+            origW: hit.bounds.w, origH: hit.bounds.h,
+            cx, cy,
+            startDist: dist > 1 ? dist : 1, // avoid division by zero
+          };
+        }
+        e.preventDefault();
+        return;
+      }
+      // ── Hand tool — begin pan drag ─────────────────────────────────────────
+      if (isHandTool) {
+        panDragRef.current = { startClientX: e.clientX, startClientY: e.clientY, startPanX: panX, startPanY: panY };
+        setIsPanning(true);
+        e.preventDefault();
+        return;
+      }
 
-      // ── Rect / ellipse drag ─────────────────────────────────────────────────
+      // ── Rect / ellipse / frame / slice / etc. drag ────────────────────────
       if (!isDrawTool) return;
       setDrag({ startX: x, startY: y, currentX: x, currentY: y });
       e.preventDefault();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, isDrawTool, isPrototypeTool, pen, zoom, commitPen, panX, panY, proto, shapes]
+    [isPenTool, isDrawTool, isPrototypeTool, isHandTool, pen, zoom, commitPen, panX, panY, proto, shapes]
   );
 
   const handleMouseMove = useCallback(
@@ -291,11 +347,35 @@ export function Canvas(): React.ReactElement {
         return;
       }
 
+      // ── Hand tool pan ─────────────────────────────────────────────────────
+      if (isHandTool && panDragRef.current) {
+        const dx = e.clientX - panDragRef.current.startClientX;
+        const dy = e.clientY - panDragRef.current.startClientY;
+        setPan(panDragRef.current.startPanX + dx, panDragRef.current.startPanY + dy);
+        return;
+      }
+
+      // ── Scale tool — live resize ──────────────────────────────────────────
+      if (activeTool === "scale" && scaleDragRef.current) {
+        const sd = scaleDragRef.current;
+        const ddx = x - sd.cx;
+        const ddy = y - sd.cy;
+        const newDist = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (newDist < 1) return;
+        const factor = newDist / sd.startDist;
+        const newW = Math.max(2, sd.origW * factor);
+        const newH = Math.max(2, sd.origH * factor);
+        updateShape(sd.shapeId, {
+          bounds: { x: sd.cx - newW / 2, y: sd.cy - newH / 2, w: newW, h: newH },
+        });
+        return;
+      }
+
       if (!drag) return;
       setDrag((d) => d ? { ...d, currentX: x, currentY: y } : null);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, isPrototypeTool, isDevTool, pen, drag, panX, panY, zoom, proto, devMode, shapes]
+    [isPenTool, isPrototypeTool, isDevTool, isHandTool, pen, drag, panX, panY, zoom, proto, devMode, shapes, setPan]
   );
 
   const handleMouseUp = useCallback(
@@ -304,6 +384,19 @@ export function Canvas(): React.ReactElement {
 
       if (isPenTool) {
         pen.endAnchorDrag();
+        return;
+      }
+
+      // ── Hand tool — end pan drag ─────────────────────────────────────────
+      if (isHandTool) {
+        panDragRef.current = null;
+        setIsPanning(false);
+        return;
+      }
+
+      // ── Scale tool — end drag ────────────────────────────────────────────
+      if (activeTool === "scale") {
+        scaleDragRef.current = null;
         return;
       }
 
@@ -330,11 +423,65 @@ export function Canvas(): React.ReactElement {
       if (activeTool === "rect") {
         const id = addRect(bounds);
         select(id);
+
       } else if (activeTool === "ellipse") {
         const id = crypto.randomUUID();
         const count = shapes.filter((s) => s.type === "ellipse").length + 1;
         const shape = createRect(id, `Ellipse ${count}`, bounds, "#0000ff");
         addShape({ ...shape, type: "ellipse" });
+        select(id);
+
+      } else if (activeTool === "frame") {
+        const id = crypto.randomUUID();
+        const count = shapes.filter((s) => s.type === "frame").length + 1;
+        const shape = createRect(id, `Frame ${count}`, bounds, "#ffffff");
+        addShape({ ...shape, type: "frame" });
+        select(id);
+
+      } else if (activeTool === "selection") {
+        // Marquee — select all shapes whose bounds intersect the drag rect
+        const hitIds = shapes
+          .filter((s) =>
+            s.bounds.x < minX + w && s.bounds.x + s.bounds.w > minX &&
+            s.bounds.y < minY + h && s.bounds.y + s.bounds.h > minY
+          )
+          .map((s) => s.id);
+        if (hitIds.length > 0) selectRange(hitIds);
+        setTool("select");
+        return; // don't revert tool again below
+
+      } else if (activeTool === "slice") {
+        const id = crypto.randomUUID();
+        const count = shapes.filter((s) => s.name?.startsWith("Slice")).length + 1;
+        const shape = createRect(id, `Slice ${count}`, bounds, "#0eaeff");
+        addShape({ ...shape, type: "rect", fills: [{ type: "solid", color: "#0eaeff", opacity: 0.1 }] });
+        select(id);
+
+      } else if (activeTool === "line" || activeTool === "arrow") {
+        const label = activeTool === "arrow" ? "Arrow" : "Line";
+        const count = shapes.filter((s) => s.name?.startsWith(label)).length + 1;
+        const id = addVectorNetwork(
+          [{ x: drag.startX, y: drag.startY }, { x: drag.currentX, y: drag.currentY }],
+          [{ s: 0, e: 1 }]
+        );
+        // Rename to Line/Arrow N
+        const created = useDocumentStore.getState().shapes[id];
+        if (created) addShape({ ...created, name: `${label} ${count}` });
+        select(id);
+
+      } else if (activeTool === "polygon") {
+        // Placeholder: equilateral triangle inscribed in the drag bounds
+        const id = crypto.randomUUID();
+        const count = shapes.filter((s) => s.name?.startsWith("Polygon")).length + 1;
+        const shape = createRect(id, `Polygon ${count}`, bounds, "#7c3aed");
+        addShape({ ...shape, type: "path" });
+        select(id);
+
+      } else if (activeTool === "star") {
+        const id = crypto.randomUUID();
+        const count = shapes.filter((s) => s.name?.startsWith("Star")).length + 1;
+        const shape = createRect(id, `Star ${count}`, bounds, "#d97706");
+        addShape({ ...shape, type: "path" });
         select(id);
       }
 
@@ -342,14 +489,17 @@ export function Canvas(): React.ReactElement {
       setTool("select");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, isPrototypeTool, pen, drag, activeTool, addRect, addShape, select, setTool, shapes, clearSelection, commitPen]
+    [isPenTool, isPrototypeTool, isHandTool, pen, drag, activeTool, addRect, addShape, addVectorNetwork, select, selectRange, setTool, shapes, clearSelection, commitPen]
   );
 
   const cursor =
-    activeTool === "hand" ? "grab"
-    : isDrawTool ? "crosshair"
-    : isPenTool ? "crosshair"
-    : isPrototypeTool ? "crosshair"
+    isPanning                                    ? "grabbing"
+    : isHandTool                                 ? "grab"
+    : scaleDragRef.current                       ? "nwse-resize"
+    : activeTool === "scale"                     ? "crosshair"
+    : isDrawTool           ? "crosshair"
+    : isPenTool            ? "crosshair"
+    : isPrototypeTool      ? "crosshair"
     : activeTool === "text" ? "text"
     : "default";
 
@@ -363,7 +513,7 @@ export function Canvas(): React.ReactElement {
         return {
           position: "absolute" as const,
           left: x, top: y, width: w, height: h,
-          border: "1px solid #89b4fa",
+          border: `1px solid ${theme.accent}`,
           background: "rgba(137,180,250,0.12)",
           pointerEvents: "none" as const,
           boxSizing: "border-box" as const,
@@ -374,7 +524,7 @@ export function Canvas(): React.ReactElement {
   return (
     <div
       ref={containerRef}
-      style={{ flex: 1, position: "relative", overflow: "hidden", background: "#313244", cursor }}
+      style={{ flex: 1, position: "relative", overflow: "hidden", background: theme.canvas, cursor }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -471,7 +621,7 @@ export function Canvas(): React.ReactElement {
             position: "absolute", bottom: 8, right: 172,
             padding: "2px 8px", borderRadius: "4px",
             fontSize: "11px", fontFamily: "monospace",
-            background: "#cba6f7", color: "#1e1e2e",
+            background: theme.accent, color: theme.onAccent,
           }}
         >
           ⚡ WebGPU
@@ -553,12 +703,12 @@ function PenOverlay({ anchors, segments, cursor, zoom, panX, panY }: PenOverlayP
     >
       {/* Committed path segments */}
       {pathD && (
-        <path d={pathD} fill="none" stroke="#89b4fa" strokeWidth={1.5} />
+        <path d={pathD} fill="none" stroke={theme.accent} strokeWidth={1.5} />
       )}
 
       {/* Live preview segment */}
       {previewD && (
-        <path d={previewD} fill="none" stroke="#89b4fa" strokeWidth={1.5} strokeDasharray="4 3" />
+        <path d={previewD} fill="none" stroke={theme.accent} strokeWidth={1.5} strokeDasharray="4 3" />
       )}
 
       {/* Anchor dots */}
@@ -573,7 +723,7 @@ function PenOverlay({ anchors, segments, cursor, zoom, panX, panY }: PenOverlayP
             cy={sy}
             r={highlight ? ANCHOR_R + 2 : ANCHOR_R}
             fill={highlight ? "#a6e3a1" : "#1e1e2e"}
-            stroke={highlight ? "#a6e3a1" : "#89b4fa"}
+            stroke={highlight ? theme.success : theme.accent}
             strokeWidth={1.5}
           />
         );

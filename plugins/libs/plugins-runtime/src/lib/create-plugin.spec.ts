@@ -2,7 +2,7 @@ import { describe, it, vi, expect, beforeEach, afterEach } from 'vitest';
 import { createPlugin } from './create-plugin';
 import { createPluginManager } from './plugin-manager.js';
 import { createSandbox } from './create-sandbox.js';
-import type { Context } from '@penpot/plugin-types';
+import type { Context } from '@logos/plugin-types';
 import type { Manifest } from './models/manifest.model.js';
 
 vi.mock('./plugin-manager.js', () => ({

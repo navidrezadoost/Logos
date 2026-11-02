@@ -11,6 +11,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useAiStore, type AiTab, type AiMessage, type InferenceMode } from "../../stores/aiStore";
+import { theme } from "../../theme/colors";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles (CSS-in-JS objects)
@@ -22,17 +23,17 @@ const PANEL: React.CSSProperties = {
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: "#181825",
-    borderLeft: "1px solid #313244",
+    background: theme.panel,
+    borderLeft: `1px solid ${theme.border}`,
     fontFamily: "'Inter', system-ui, sans-serif",
     fontSize: 13,
-    color: "#cdd6f4",
+    color: theme.text,
     overflow: "hidden",
 };
 
 const HEADER: React.CSSProperties = {
     padding: "12px 16px 0",
-    borderBottom: "1px solid #313244",
+    borderBottom: `1px solid ${theme.border}`,
     flexShrink: 0,
 };
 
@@ -65,8 +66,8 @@ const TAB_BASE: React.CSSProperties = {
 
 const TAB_ACTIVE: React.CSSProperties = {
     ...TAB_BASE,
-    color: "#89b4fa",
-    borderBottomColor: "#89b4fa",
+    color: theme.accent,
+    borderBottomColor: theme.accent,
 };
 
 const BODY: React.CSSProperties = {
@@ -81,7 +82,7 @@ const CONTROLS: React.CSSProperties = {
     display: "flex",
     flexDirection: "column",
     gap: 8,
-    borderBottom: "1px solid #313244",
+    borderBottom: `1px solid ${theme.border}`,
     flexShrink: 0,
 };
 
@@ -95,10 +96,10 @@ const TEXTAREA: React.CSSProperties = {
     width: "100%",
     minHeight: 64,
     padding: "8px 10px",
-    background: "#1e1e2e",
-    border: "1px solid #313244",
+    background: theme.panelHover,
+    border: `1px solid ${theme.border}`,
     borderRadius: 6,
-    color: "#cdd6f4",
+    color: theme.text,
     fontSize: 13,
     fontFamily: "inherit",
     resize: "vertical",
@@ -109,10 +110,10 @@ const TEXTAREA: React.CSSProperties = {
 const INPUT: React.CSSProperties = {
     width: "100%",
     padding: "6px 10px",
-    background: "#1e1e2e",
-    border: "1px solid #313244",
+    background: theme.panelHover,
+    border: `1px solid ${theme.border}`,
     borderRadius: 6,
-    color: "#cdd6f4",
+    color: theme.text,
     fontSize: 13,
     fontFamily: "inherit",
     outline: "none",
@@ -121,8 +122,8 @@ const INPUT: React.CSSProperties = {
 
 const BTN_PRIMARY: React.CSSProperties = {
     padding: "7px 14px",
-    background: "#89b4fa",
-    color: "#1e1e2e",
+    background: theme.accent,
+    color: theme.onAccent,
     border: "none",
     borderRadius: 6,
     fontSize: 13,
@@ -136,7 +137,7 @@ const BTN_GHOST: React.CSSProperties = {
     padding: "4px 8px",
     background: "transparent",
     color: "#6c7086",
-    border: "1px solid #313244",
+    border: `1px solid ${theme.border}`,
     borderRadius: 4,
     fontSize: 11,
     cursor: "pointer",
@@ -167,14 +168,14 @@ function MessageBubble({ msg }: { msg: AiMessage }) {
         lineHeight: 1.5,
         wordBreak: "break-word",
         alignSelf: isUser ? "flex-end" : "flex-start",
-        background: isError ? "#3b1a1a" : isUser ? "#1a2744" : "#1e1e2e",
-        border: `1px solid ${isError ? "#f38ba8" : isUser ? "#45475a" : "#313244"}`,
-        color: isError ? "#f38ba8" : "#cdd6f4",
+        background: isError ? "#3b1a1a" : isUser ? "#1a2744" : theme.panelHover,
+        border: `1px solid ${isError ? theme.error : isUser ? theme.borderStrong : theme.border}`,
+        color: isError ? theme.error : theme.text,
     };
 
     return (
         <div style={bubbleStyle}>
-            <span style={{ fontWeight: 600, color: isUser ? "#89b4fa" : "#a6adc8", fontSize: 10, display: "block", marginBottom: 2 }}>
+            <span style={{ fontWeight: 600, color: isUser ? theme.accent : theme.textSecondary, fontSize: 10, display: "block", marginBottom: 2 }}>
                 {isUser ? "You" : isError ? "Error" : "AI"}
             </span>
             {msg.content}
@@ -224,8 +225,8 @@ function GenerateTab() {
         ...BTN_GHOST,
         padding: "3px 10px",
         fontSize: 11,
-        borderColor:  inferenceMode === mode ? "#89b4fa" : "#313244",
-        color:        inferenceMode === mode ? "#89b4fa" : "#6c7086",
+        borderColor:  inferenceMode === mode ? theme.accent : theme.border,
+        color:        inferenceMode === mode ? theme.accent : theme.textDim,
         background:   inferenceMode === mode ? "#1a2744" : "transparent",
     } as React.CSSProperties);
 
@@ -239,16 +240,16 @@ function GenerateTab() {
             </div>
             {/* Model download progress (only shown during local model load) */}
             {inferenceMode === "local" && llmProgress && (
-                <div style={{ fontSize: 10, color: "#89b4fa", padding: "2px 0" }}>
+                <div style={{ fontSize: 10, color: theme.accent, padding: "2px 0" }}>
                     {llmProgress.label}
                     {llmProgress.total > 0 && (
                         <div style={{
                             marginTop: 3, height: 3, borderRadius: 2,
-                            background: "#313244", overflow: "hidden",
+                            background: theme.surface, overflow: "hidden",
                         }}>
                             <div style={{
                                 height: "100%", borderRadius: 2,
-                                background: "#89b4fa",
+                                background: theme.accent,
                                 width: `${Math.round(llmProgress.loaded / llmProgress.total * 100)}%`,
                             }} />
                         </div>

@@ -5,7 +5,7 @@ import { TextResponse } from "../ToolResponse";
 import "reflect-metadata";
 import { LogosMcpServer } from "../LogosMcpServer";
 import { ExecuteCodePluginTask } from "../tasks/ExecuteCodePluginTask";
-import { ExecuteCodeTaskParams } from "@penpot/mcp-common";
+import { ExecuteCodeTaskParams } from "@logos/mcp-common";
 
 /**
  * Arguments class for ExecuteCodeTool
@@ -25,7 +25,7 @@ export class ExecuteCodeArgs {
 }
 
 /**
- * Tool for executing JavaScript code in the Penpot plugin context
+ * Tool for executing JavaScript code in the Logos plugin context
  */
 export class ExecuteCodeTool extends Tool<ExecuteCodeArgs> {
     /**
@@ -43,10 +43,10 @@ export class ExecuteCodeTool extends Tool<ExecuteCodeArgs> {
 
     public getToolDescription(): string {
         return (
-            "Executes JavaScript code in the Penpot plugin context.\n" +
-            "IMPORTANT: Before using this tool, make sure you have read the 'Penpot High-Level Overview' and know " +
-            "which Penpot API functionality is necessary and how to use it.\n" +
-            "You have access two main objects: `penpot` (the Penpot API, of type `Penpot`), `penpotUtils`, " +
+            "Executes JavaScript code in the Logos plugin context.\n" +
+            "IMPORTANT: Before using this tool, make sure you have read the 'Logos High-Level Overview' and know " +
+            "which Logos API functionality is necessary and how to use it.\n" +
+            "You have access two main objects: `logos` (the Logos API, of type `Logos`), `logosUtils`, " +
             "and `storage`.\n" +
             "`storage` is an object in which arbitrary data can be stored, simply by adding a new attribute; " +
             "stored attributes can be referenced in future calls to this tool, so any intermediate results that " +

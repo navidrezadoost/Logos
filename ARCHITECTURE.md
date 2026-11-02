@@ -1,6 +1,6 @@
 # Logos Architecture
 
-> Logos is a fork of [Penpot](https://penpot.app) — an open-source design and prototyping platform. This document describes the full technical architecture: algorithms, subsystems, data flows, and implementation patterns.
+> Logos is a fork of [Logos](https://logos.app) — an open-source design and prototyping platform. This document describes the full technical architecture: algorithms, subsystems, data flows, and implementation patterns.
 
 ---
 
@@ -8,18 +8,16 @@
 
 1. [High-Level Overview](#1-high-level-overview)
 2. [Frontend — React/TypeScript SPA](#2-frontend--reacttypescript-spa)
-3. [Backend — Clojure API Server](#3-backend--clojure-api-server)
-4. [Common — Shared Logic](#4-common--shared-logic)
-5. [WebAssembly Renderer](#5-webassembly-renderer)
-6. [Real-Time Collaboration](#6-real-time-collaboration)
-7. [Plugin System](#7-plugin-system)
-8. [MCP Tool Server](#8-mcp-tool-server)
-9. [Exporter](#9-exporter)
-10. [Authentication & Session Flow](#10-authentication--session-flow)
-11. [State Management — PTK](#11-state-management--ptk)
-12. [File Format & CRDT](#12-file-format--crdt)
-13. [Duotone Icon System](#13-duotone-icon-system)
-14. [Infrastructure & Deployment](#14-infrastructure--deployment)
+3. [Backend — Go API Server](#3-backend--go-api-server)
+4. [WebAssembly Renderer](#4-webassembly-renderer)
+5. [Real-Time Collaboration](#5-real-time-collaboration)
+6. [Plugin System](#6-plugin-system)
+7. [MCP Tool Server](#7-mcp-tool-server)
+8. [Authentication & Session Flow](#8-authentication--session-flow)
+9. [State Management — Zustand](#9-state-management--zustand)
+10. [File Format & CRDT](#10-file-format--crdt)
+11. [Duotone Icon System](#11-duotone-icon-system)
+12. [Infrastructure & Deployment](#12-infrastructure--deployment)
 
 ---
 
@@ -29,10 +27,10 @@
 Browser (React + TypeScript SPA — logos-app)
        │  HTTP RPC + WebSocket
        ▼
-Clojure Backend (API + WebSocket)
+Go Backend (HTTP API + WebSocket notifications)
        │
        ├── PostgreSQL  (persistent data)
-       ├── Redis       (pub/sub, sessions, rate-limiting)
+       ├── Redis/Valkey (pub/sub, sessions, rate-limiting)
        └── S3 / object store (media assets)
 ```
 
@@ -41,11 +39,9 @@ Clojure Backend (API + WebSocket)
 | Layer | Language | Build Tool |
 |---|---|---|
 | **Frontend SPA** | **TypeScript 5 + React 18** | **Vite 6** |
-| Backend | Clojure (JVM) | deps.edn / Integrant |
-| Shared schemas | Clojure (Malli) + generated TypeScript | `bin/generate-types` |
+| **Backend** | **Go 1.23** | **go build** |
 | Renderer | Rust → WebAssembly | cargo / wasm-pack |
 | Shaders | WGSL | naga / wgpu pipeline |
-| Exporter | ClojureScript (Node.js) | shadow-cljs |
 | Plugins | TypeScript (sandboxed iframe) | esbuild / vite |
 | MCP server | TypeScript | tsup / Node.js |
 | Migrations | PostgreSQL / SQL | Flyway |
@@ -54,29 +50,26 @@ Clojure Backend (API + WebSocket)
 
 | Language | Role | Approx. % |
 |---|---|---|
-| **TypeScript** | Frontend SPA, workers, MCP server, Plugin SDK | **~45%** |
-| **Clojure** | Backend server, shared schemas (`common/`), exporter | **~35%** |
-| **Rust** | Layout engine, renderer, rebase, vector graphics, WASM | **~15%** |
-| WGSL | WebGPU compute & render shaders | ~3% |
-| SQL | PostgreSQL migrations | ~2% |
+| **TypeScript** | Frontend SPA, workers, MCP server, Plugin SDK | **~50%** |
+| **Go** | Backend HTTP/WS, DB, auth, background tasks, file export | **~30%** |
+| **Rust** | Layout engine, renderer, rebase, vector graphics, WASM | **~17%** |
+| WGSL | WebGPU compute & render shaders | ~2% |
+| SQL | PostgreSQL migrations | ~1% |
 
 ### Development Ports
 
 | Service | Port | Command |
 |---|---|---|
 | **logos-app dev server** | **5173** | **`logos dev`** |
-| Backend HTTP | 3449 | `bash scripts/start-dev-local` |
-| nREPL (backend) | 6061 | auto-started by Integrant |
+| Go backend HTTP | 8080 | `make run-go-backend` |
 
 ---
 
 ## 2. Frontend — React/TypeScript SPA
 
-> **Migration complete (CS1–CS2)**: The ClojureScript frontend (`frontend/`) has been superseded
-> by `logos-app/`, a Vite + React 18 + TypeScript 5 application backed by the same Rust/WASM
-> rendering core.  The `common/` shared library is now pure Clojure (JVM); TypeScript consumer
-> types are auto-generated from Malli schemas by `bin/generate-types`.  No ClojureScript
-> toolchain is required to work on `logos-app/` or `backend/`.
+> **Migration complete (CS1–CS2)**: The ClojureScript frontend (`frontend/`) has been
+> superseded by `logos-app/`, a Vite + React 18 + TypeScript 5 application backed by the
+> same Rust/WASM rendering core.
 
 ### 2.1 Technology Stack
 
@@ -146,7 +139,7 @@ See `logos-app/src/plugins/README.md` for the full specification.
 - Permissions granted at `connectPlugin()` time; cannot be escalated at runtime
 - Push events: `selectionChange`, `pageChange`, `documentChange`
 
-### 2.7 Thumbnail Rasterizer
+### 2.6 Thumbnail Rasterizer
 
 A separate `rasterizer.js` chunk runs in a `<iframe>` sandboxed context:
 1. Dashboard requests a thumbnail via `postMessage`
@@ -156,45 +149,55 @@ A separate `rasterizer.js` chunk runs in a `<iframe>` sandboxed context:
 
 ---
 
-## 3. Backend — Clojure API Server
+## 3. Backend — Go API Server
+
+The backend is a single statically-linked Go binary (~20 MB). There is no JVM, no Clojure, and no runtime dependency beyond the OS libc.
 
 ### 3.1 Technology Stack
 
-- **Integrant** — component lifecycle (start/stop, dependency graph defined in `backend/src/app/config.clj`)
-- **Yetti** / Jetty — HTTP server
-- **next.jdbc** — PostgreSQL adapter
-- **Carmine** — Redis client
-- **Buddy** — JWT / session auth
+| Component | Library |
+|---|---|
+| HTTP router | [chi v5](https://github.com/go-chi/chi) |
+| PostgreSQL | [pgx v5](https://github.com/jackc/pgx) |
+| Redis/Valkey | [rueidis](https://github.com/redis/rueidis) |
+| Object storage | local FS or S3-compatible (MinIO) |
+| Password hashing | Argon2id (golang.org/x/crypto) — compatible with former Clojure backend |
+| Session tokens | JWE (JOSE) + Transit JSON — interoperable with the former Clojure backend |
+| Auth | Cookie-based sessions + API access tokens |
 
 ### 3.2 RPC Command System
 
-All API calls are **RPC commands** — plain Clojure maps dispatched by `:type` key.
+All API calls are **HTTP RPC commands** dispatched by URL path.
 
 ```
-HTTP POST /api/rpc/command/<cmd-name>
-         → backend reads body as Transit-JSON
-         → resolves handler in app.rpc.<module>/<cmd-name>
-         → calls handler with (ctx params) → returns Transit
+POST/GET /api/rpc/command/<cmd-name>
+         → JSON body parsed by handler
+         → handler executes (ctx, pool, params)
+         → returns JSON response
 ```
 
-Handler namespaces:
-- `app.rpc.commands.auth` — login, logout, register, OAuth
-- `app.rpc.commands.files` — CRUD for design files
-- `app.rpc.commands.projects` — project management
-- `app.rpc.commands.profile` — user profile
-- `app.rpc.commands.media` — image upload / transcoding
-- `app.rpc.commands.search` — full-text search via PostgreSQL `tsvector`
+The 25 ported RPC namespaces:
+
+| Session | Namespaces |
+|---|---|
+| G1 | `profile`, `teams`, `teams_invitations`, `projects` |
+| G2 | `files`, `files_create`, `files_share`, `viewer` |
+| G3 | `auth`, `ldap`, `access_token`, `verify_token` |
+| G4 | `files_update`, `comments`, `media`, `fonts` |
+| G5 | `binfile`, `files_thumbnails`, `files_snapshot`, `webhooks` |
+| G6 | `search`, `audit`, `demo`, `feedback`, `management` |
 
 ### 3.3 Middleware Stack
 
 ```
-SSL termination (reverse proxy)
+Reverse proxy (TLS termination)
   → Content-Security-Policy headers
   → Rate limiter (per-IP, per-user via Redis)
-  → Session cookie validation
-  → Transit JSON decoder
-  → RPC dispatch
-  → Error handler → Transit JSON encoder
+  → Session cookie / Authorization header validation
+  → JSON body parser
+  → Chi router dispatch
+  → Handler
+  → JSON response encoder
 ```
 
 ### 3.4 Database Schema
@@ -203,109 +206,72 @@ Key tables (PostgreSQL):
 
 | Table | Purpose |
 |---|---|
-| `profile` | User accounts |
+| `profile` | User accounts (Argon2id hashed passwords, `is_demo` flag) |
 | `team` | Workspaces / organisations |
 | `team_profile_rel` | Team membership + role |
 | `project` | Grouping of files |
-| `file` | Design file metadata |
-| `file_data` | Binary (Transit) serialisation of the file's shape tree |
-| `file_object_thumbnail` | Per-frame/object thumbnail metadata |
+| `file` | Design file metadata (`revn` sequence, `vern` conflict sentinel) |
+| `file_data` | Raw CRDT state blob (Transit+zstd from Clojure; Go stores JSON) |
 | `file_change` | Append-only log of CRDT operations |
+| `file_tagged_object_thumbnail` | Per-frame/object thumbnail metadata |
+| `file_thumbnail` | File-level thumbnail metadata |
 | `share_link` | Shareable view links |
-| `media_object` | Uploaded images/videos |
+| `file_media_object` | Uploaded images/videos linked to a file |
+| `team_font_variant` | Custom font files uploaded per team |
+| `comment_thread` | Collaboration comment threads on a canvas |
+| `comment` | Individual comment messages |
+| `webhook` | Outbound webhook configurations per team |
+| `webhook_delivery` | Webhook dispatch log + error tracking |
+| `audit_log` | Frontend user action events (optional; feature-flagged) |
 
-### 3.5 Task Queue / Background Workers
+### 3.5 Operational Transform Rebase
 
-Implemented via `app.worker` namespace using database-backed job queues:
-- `file-media-gc` — garbage-collect orphaned media
-- `file-snapshot` — periodically compact CRDT history
-- `send-email` — async email delivery (Sendgrid or SMTP)
-- `object-storage-gc` — remove orphaned S3 objects
+The `internal/rebase` package implements a pure-Go OT rebase engine that is
+byte-for-byte compatible with the original Clojure (`rebase.cljc`) and Rust
+(`logos-rebase`) implementations. It covers the full 5×5 conflict matrix:
 
-### 3.6 Email Templates
+| Type | mod-obj | del-obj | add-obj | mov-obj | mov-pages |
+|---|---|---|---|---|---|
+| **mod-obj** | merge set-ops | drop incoming | preserve | preserve | preserve |
+| **del-obj** | preserve | preserve | preserve | drop competing | preserve |
+| **add-obj** | preserve | preserve | preserve (adjust idx) | preserve | preserve |
+| **mov-obj** | preserve | drop incoming | preserve | adjust index | preserve |
+| **mov-pages** | preserve | preserve | preserve | preserve | merge |
 
-Located in `backend/resources/app/email/`. Each template is an HTML + text pair. Template variables are Clojure maps rendered with Selmer.
+20 unit tests mirror the full Rust test suite.
 
----
+### 3.6 .logos File Format (binfile)
 
-## 4. Common — Shared Logic
+The `internal/binfile` package handles the `.logos` v3 ZIP archive format.
+Go-generated archives include:
+- `manifest.json` — format version + `go-extension: true` flag
+- `files/{id}/attrs.json` — file metadata
+- `files/{id}/changes.json` — Go change history (JSON-encoded)
+- `files/{id}/data.bin` — raw Clojure CRDT blob (preserved for round-trips)
+- `files/{id}/pages.json` — ordered page UUIDs
+- `media/{id}.json` + `media/{id}` — media metadata and raw blobs
 
-`common/` is a library compiled for both JVM (backend) and JS (frontend/exporter).
+8 round-trip tests validate the full import/export cycle.
 
-### 4.1 Shape Data Model
+### 3.7 Background Tasks
 
-`app.common.types.shape` — every shape is a plain Clojure map. Core keys:
-
-```clojure
-{:id     uuid
- :type   :rect | :path | :text | :group | :frame | :image | :bool | :svg-raw | :component
- :name   string
- :x :y  number   ;; absolute position
- :width :height  number
- :rotation number  ;; degrees
- :transform   Matrix   ;; optional affine transform
- :fills   [{:fill-color :fill-opacity ...}]
- :strokes [{:stroke-color :stroke-width ...}]
- :shadow  [...shadow-attrs]
- :blur    {:type :blur, :value n}
- :constraints-h :left|:right|:leftright|:center|:scale
- :constraints-v :top|:bottom|:topbottom|:center|:scale}
-```
-
-### 4.2 Path Algorithms
-
-`app.common.path.*` — Bézier path manipulation:
-
-- **Segment operations**: split, join, add/remove nodes
-- **Boolean ops** (`app.common.path.bool`): union, intersection, difference, exclusion — implemented using the Sutherland-Hodgman and Greiner-Hormann polygon clipping algorithms adapted for cubic Bézier curves
-- **Curve approximation**: recursive de Casteljau subdivision to approximate Bézier arcs with line segments for hit-testing
-
-### 4.3 Geometry
-
-`app.common.geom.*`:
-
-- `app.common.geom.rect` — axis-aligned bounding box (AABB) operations
-- `app.common.geom.point` — 2D vector arithmetic
-- `app.common.geom.matrix` — 3×3 affine transform matrices (multiply, invert, apply-to-point)
-- `app.common.geom.shapes` — bounding box of a transformed shape considering strokes
-- Hit-testing: point-in-polygon (ray casting for closed paths), point-near-segment for strokes
-
-### 4.4 Layout Engine
-
-`app.common.types.shape.layout` — implements CSS Flexbox semantics for "Auto Layout" frames:
-
-- **Main axis** determination (row / column / row-reverse / column-reverse)
-- **Cross axis** alignment (align-items: start / center / end / stretch)
-- **Gap** computation including "space-between" / "space-around"
-- Children are positioned by solving the layout independently of the SVG renderer — results are applied as `:x :y` updates to child shapes
-
-### 4.5 Components (Main/Copy)
-
-`app.common.types.component`:
-
-- Every component has a **main copy** stored in the component library file
-- **Copies** spread across files hold `:component-id` + `:component-file` references
-- Sync algorithm (`app.common.logic.component-sync`): walks the shape tree recursively, computes a diff between main and copy, applies non-locally-overridden attributes (a "deep merge" with override tracking)
+Implemented as goroutines started at server startup:
+- `broadcastFileChange` — Redis pub/sub fan-out to WebSocket clients
+- `DispatchEvent` — async webhook delivery with retry + deactivation logic
 
 ---
 
-## 5. WebAssembly Renderer
+## 4. WebAssembly Renderer
 
 `render-wasm/` — Rust crate compiled to WASM via `wasm-bindgen`.
 
-### 5.1 Architecture
+### 4.1 Architecture
 
 ```
-ClojureScript  →  JS wrappers (render_wasm.cljs)
-                         │
-                   wasm-bindgen glue
-                         │
-                   Rust render loop
-                         │
-                   Skia (Skia-safe crate) → GPU canvas
+TypeScript (logos-app) → wasm-bindgen glue → Rust render loop → Skia (GPU canvas)
 ```
 
-### 5.2 Key Algorithms
+### 4.2 Key Algorithms
 
 - **Shape rasterisation**: each shape type (rect, path, text, image) dispatched to a Skia `Canvas` draw call
 - **Layer compositing**: blend modes (`multiply`, `screen`, `overlay`, etc.) applied using Skia's `Paint::set_blend_mode`
@@ -313,75 +279,77 @@ ClojureScript  →  JS wrappers (render_wasm.cljs)
 - **Anti-aliasing**: MSAA via Skia's GPU backend when WebGL2 is available; software rasteriser fallback
 - **Viewport culling**: AABB intersection test against the current viewport before issuing draw calls
 
-### 5.3 Build
+### 4.3 Build
 
 ```bash
-cd render-wasm
-wasm-pack build --target web --out-dir ../frontend/target/wasm
+make build-wasm
+# Output → logos-app/public/logos-layout/
 ```
 
 ---
 
-## 6. Real-Time Collaboration
+## 5. Real-Time Collaboration
 
-### 6.1 Transport
+### 5.1 Transport
 
 WebSocket connection per workspace session to backend endpoint `/ws/notifications`.
 
-### 6.2 CRDT Operations
+### 5.2 CRDT Operations
 
-`app.common.files.changes` — every edit produces a vector of **change operations**:
+Every edit produces a vector of **change operations**:
 
-```clojure
-{:type :add-obj   :id uuid :obj shape-map}
-{:type :mod-obj   :id uuid :operations [{:type :set :attr :x :val 100}]}
-{:type :del-obj   :id uuid}
-{:type :mov-objects :parent-id uuid :shapes [uuid...]}
+```json
+{"type": "add-obj",   "id": "<uuid>", "obj": { ... shape fields ... }}
+{"type": "mod-obj",   "id": "<uuid>", "operations": [{"type": "set", "attr": "x", "val": 100}]}
+{"type": "del-obj",   "id": "<uuid>"}
+{"type": "mov-objects","parentId": "<uuid>", "shapes": ["<uuid>", ...]}
 ```
 
 Changes are sent to the backend RPC `update-file`. Backend:
-1. Validates and applies changes to the canonical file state
-2. Appends changes to `file_change` log (append-only)
-3. Broadcasts changes to all other active sessions via Redis pub/sub
+1. Acquires a row-level lock (`SELECT … FOR UPDATE`) on the file
+2. Checks `vern` (concurrent edit sentinel) and `revn` (change revision)
+3. Loads competing change-sets from `file_change`; runs OT rebase if needed
+4. Inserts the rebased change-set into `file_change`
+5. Broadcasts to all other active sessions via Redis pub/sub
 
-### 6.3 Conflict Resolution
+### 5.3 Conflict Resolution
 
-- **Last-write-wins** per attribute: concurrent edits to different attributes of the same shape merge cleanly
-- **Presence**: each client sends cursor position / selection as ephemeral presence events (not persisted); displayed as coloured cursors on collaborators' screens
+- **Last-write-wins** per attribute: concurrent edits to different attributes of the same shape merge cleanly via the OT rebase engine
+- **Presence**: each client sends cursor position / selection as ephemeral events (not persisted); displayed as coloured cursors
 
 ---
 
-## 7. Plugin System
+## 6. Plugin System
 
 `plugins/` — TypeScript SDK for third-party plugins.
 
-### 7.1 Sandboxing
+### 6.1 Sandboxing
 
 Each plugin runs in a **sandboxed `<iframe>`** served from a separate origin. Communication with the host app uses `postMessage` with a structured API.
 
-### 7.2 Plugin Lifecycle
+### 6.2 Plugin Lifecycle
 
-1. Manifest loaded (`plugin.cljs` in host) — specifies name, host, permissions
+1. Manifest loaded — specifies name, host, permissions
 2. Host creates `<iframe>` pointing to plugin URL
-3. Plugin calls `penpot.ui.open()` to show a panel inside the app
-4. API calls (`penpot.selection.get()`, `penpot.page.createShape()`, etc.) are serialised as messages, executed in the host context, and results returned
+3. Plugin calls `logos.ui.open()` to show a panel inside the app
+4. API calls are serialised as messages, executed in the host context, and results returned
 
-### 7.3 API Surface
+### 6.3 API Surface
 
 Key namespaces exposed to plugins:
-- `penpot.selection` — get/set selected shapes
-- `penpot.page` — create, update, delete shapes
-- `penpot.viewport` — pan/zoom
-- `penpot.library` — read shared styles/components
-- `penpot.theme` — current dark/light theme
+- `logos.selection` — get/set selected shapes
+- `logos.page` — create, update, delete shapes
+- `logos.viewport` — pan/zoom
+- `logos.library` — read shared styles/components
+- `logos.theme` — current dark/light theme
 
 ---
 
-## 8. MCP Tool Server
+## 7. MCP Tool Server
 
 `mcp/` — Model Context Protocol server enabling AI agents to interact with Logos.
 
-### 8.1 Architecture
+### 7.1 Architecture
 
 ```
 AI Agent (e.g. Claude)  ←→  MCP Protocol (stdio/SSE)
@@ -393,11 +361,11 @@ AI Agent (e.g. Claude)  ←→  MCP Protocol (stdio/SSE)
                           Logos frontend canvas
 ```
 
-### 8.2 Key Classes
+### 7.2 Key Classes
 
 | File | Class | Role |
 |---|---|---|
-| `server/src/LogosMcpServer.ts` | `LogosMcpServer` | Lifecyle, tool registry, WebSocket bridge |
+| `server/src/LogosMcpServer.ts` | `LogosMcpServer` | Lifecycle, tool registry, WebSocket bridge |
 | `server/src/PluginBridge.ts` | `PluginBridge` | Per-session WebSocket ↔ browser plugin channel |
 | `server/src/tools/ExecuteCodeTool.ts` | `ExecuteCodeTool` | Runs arbitrary JS in the Logos plugin context |
 | `server/src/tools/ExportShapeTool.ts` | `ExportShapeTool` | Exports a shape as SVG/PNG |
@@ -405,7 +373,7 @@ AI Agent (e.g. Claude)  ←→  MCP Protocol (stdio/SSE)
 | `server/src/tools/ImportImageTool.ts` | `ImportImageTool` | Imports an image into the current page |
 | `plugin/src/LogosUtils.ts` | `LogosUtils` | Base64 helpers, shape serialisation utilities |
 
-### 8.3 Session Flow
+### 7.3 Session Flow
 
 1. MCP client starts the server process
 2. `LogosMcpServer` starts an HTTP server for the browser plugin to connect via WebSocket
@@ -416,204 +384,177 @@ AI Agent (e.g. Claude)  ←→  MCP Protocol (stdio/SSE)
 
 ---
 
-## 9. Exporter
+## 8. Authentication & Session Flow
 
-`exporter/` — a headless Node.js ClojureScript process for server-side export.
+### 8.1 Cookie-Based Sessions
 
-### 9.1 How It Works
-
-1. Backend spawns the exporter process via `java.lang.ProcessBuilder`
-2. Exporter receives a file ID + export parameters over stdin (Transit)
-3. Loads a headless Chromium (via Playwright) and navigates to the viewer URL with auth token
-4. Captures the rendered SVG/canvas and converts to the requested format (PNG, SVG, PDF)
-5. Returns binary output on stdout back to the backend, which streams it to the HTTP response
-
----
-
-## 10. Authentication & Session Flow
-
-### 10.1 Cookie-Based Sessions
-
-1. `POST /api/rpc/command/login-with-password` → backend validates credentials → sets `auth-token` HttpOnly cookie (SameSite=Lax)
-2. All subsequent requests carry the cookie → middleware extracts it → validates JWT → populates `::session/profile-id` in request context
+1. `POST /api/rpc/command/login-with-password` → Go backend validates Argon2id hash → creates JWE session token → sets `auth-token` HttpOnly cookie (SameSite=Lax)
+2. All subsequent requests carry the cookie → middleware decrypts JWE → populates `profileID` in request context
 3. Frontend detects auth state via `GET /api/rpc/command/get-profile`
 
-### 10.2 OAuth Providers
+### 8.2 Token Format
 
-Supported: GitHub, GitLab, Google, OpenID Connect generic.
+- **JWE (JSON Web Encryption)** with `ver=1` header — interoperable with the former Clojure backend
+- **Transit JSON** payload encoding — keywords (`~:`), UUIDs (`~u`), timestamps (`~t`) match Clojure conventions exactly
+- **Argon2id** password hashing — PHC string format `$argon2id$v=19$m=32768,t=3,p=2$…` matches `buddy-hashers` default parameters
 
-Flow: frontend redirects to `/api/rpc/command/auth/oauth/<provider>` → backend issues provider redirect → callback at `/api/rpc/command/auth/oauth/<provider>/callback` → creates/links profile → sets session cookie → redirects to `/#/auth/verify-token`.
+### 8.3 API Access Tokens
 
-### 10.3 CORS / Same-Site Dev Config
-
-In local dev with split ports (frontend :8888, backend :3449):
-- Backend `allowed-origins` includes `http://localhost:8888`
-- Cookie `SameSite=Lax` allows cross-port same-host cookies
-- `valid-location?` in routes.cljs accepts any `http://localhost` origin
+API tokens are stored in `access_token` table with configurable expiry. The `Authorization: Bearer <token>` header is an alternative to the session cookie for programmatic API access.
 
 ---
 
-## 11. State Management — PTK
+## 9. State Management — Zustand
 
-PTK (Potok) is the event-driven architecture used throughout the frontend.
+The `logos-app` frontend uses **Zustand** stores for all client-side state.
 
-### 11.1 Core Concepts
+### 9.1 Core Stores
 
 ```
-App State (atom)    ←── deref ── Rumext components
-     │
-     └── PTK events (records implementing protocols)
-             │
-        `:update`   → pure function (state → state)
-        `:watch`    → returns an observable of more events
-        `:effect`   → side effects (DOM, network, etc.)
+documentStore  — pages array, shapes map (id → Shape)
+selectionStore — Set<id> of selected shape IDs
+uiStore        — activeTool, panel visibility flags
 ```
 
-### 11.2 Event Lifecycle
+### 9.2 Collaboration Sync
 
-```clojure
-(defrecord MoveShape [id delta]
-  ptk/UpdateEvent
-  (update [_ state]
-    (update-in state [:workspace-data :shapes id] move-by delta))
+Changes from `update-file` responses (rebased change-sets from the server) are applied to `documentStore` via a reducer. WebSocket push events from other collaborators follow the same path.
 
-  ptk/WatchEvent
-  (watch [_ state stream]
-    (rx/of (sync-shape-to-server id))))
-```
+### 9.3 Undo/Redo
 
-Events are dispatched via `st/emit!`. The PTK store processes them serially, ensuring consistent state transitions.
-
-### 11.3 Undo/Redo
-
-Every workspace mutation generates a **change log entry**. Undo replays the inverse operations (using `:undo-changes` alongside `:redo-changes` in each operation record). The stack is capped at 50 steps per session.
+Every workspace mutation produces an inverse change-set stored in a bounded stack (50 steps). Undo replays the inverse ops against `documentStore`; the inverse is also sent to the server via `update-file` to keep the server state consistent.
 
 ---
 
-## 12. File Format & CRDT
+## 10. File Format & CRDT
 
-### 12.1 Binary Format
+### 10.1 Change Log (Event Sourcing)
 
-Design files are serialised as **Transit-JSON** (a superset of JSON with efficient typed extensions for UUIDs, dates, etc.) then optionally gzip-compressed before storage in PostgreSQL as `BYTEA`.
-
-### 12.2 Change Log (Event Sourcing)
-
-Every `update-file` call appends to `file_change`. This enables:
+Design files are stored as an **append-only log** in `file_change`. This enables:
 - **Collaboration**: broadcast deltas to other clients
 - **History / time travel**: replay changes up to a revision
-- **Compaction**: background worker snaps the full state periodically and truncates old log entries
+- **Compaction**: labeled `file_change` rows act as snapshots; the `restore-file-snapshot` RPC replays history back to a snapshot
 
-### 12.3 CRDT Properties
+### 10.2 Storage Encoding
 
-The change model is a **state-based CRDT**:
-- Each attribute last-write-wins (via server timestamp / version counter)
-- Structural operations (add/delete shapes, reorder layers) are ordered by the server's log sequence
-- No operational transform required; conflicts produce deterministic merged state
+| Writer | Encoding | `file_change.changes` format |
+|---|---|---|
+| Clojure backend | Transit+zstd BLOB | Binary — skipped by Go rebase (conservative) |
+| Go backend | JSON | `[{"type":"add-obj", ...}]` array |
 
----
+During the migration window, the Go backend loads only JSON-parseable rows for OT rebase. Clojure-encoded rows are skipped, preserving correctness at the cost of potentially producing a wider rebase window.
 
-## 13. Duotone Icon System
+### 10.3 .logos v3 Archive Format
 
-`frontend/src/app/main/ui/ds/foundations/assets/duotone_icon.cljs`
-
-### 13.1 Overview
-
-- ~4000 SVG icons from the Duotone Font Awesome Pro set, embedded as ClojureScript
-- Icons are used in: layer panel sidebar (`layer_item.cljs`), keyboard shortcut hints (`shortcuts.cljs`), component browser (`component.cljs`)
-
-### 13.2 Implementation
-
-- `frontend/resources/images/icons/duotone/` — source SVG files
-- `frontend/scripts/generate-duotone-icons.mjs` — reads SVGs and generates the 4768-line ClojureScript file
-- Each icon is a `(defn icon-name [])` Rumext component rendering the SVG inline
-- Supports foreground/background color via CSS `currentColor` on two `<path>` elements with different `opacity`
+See §3.6 for the full archive structure. The `go-extension: true` manifest flag allows:
+- Clojure importers to skip Go-specific entries (unknown JSON keys are ignored)
+- Go importers to switch on Go-specific behaviour (e.g. read `changes.json`)
 
 ---
 
-## 14. Infrastructure & Deployment
+## 11. Duotone Icon System
 
-### 14.1 Docker Compose (Dev & Self-Hosted)
+`logos-app/src/assets/icons/`
 
-`docker/` contains:
-- `images/penpot/backend/` — Clojure backend JVM image
-- `images/penpot/frontend/` — Nginx serving built JS/CSS assets
-- `images/penpot/exporter/` — Node.js exporter
-- PostgreSQL and Redis as sidecar containers
+- ~4000 SVG icons from the Duotone Font Awesome Pro set, re-exported as React components
+- Icons support foreground/background color via CSS `currentColor` on two `<path>` elements with different `opacity`
+- Used in: layers panel sidebar, keyboard shortcut hints, component browser
 
-### 14.2 Helm Chart (Kubernetes)
+---
 
-`deploy/helm/` provides a production-grade Helm chart with:
-- Separate `Deployment` per service (frontend, backend, exporter)
-- `HorizontalPodAutoscaler` for backend
-- `PersistentVolumeClaims` for PostgreSQL
-- Configmap for `PENPOT_*` environment variables
+## 12. Infrastructure & Deployment
 
-### 14.3 Key Environment Variables (Backend)
+### 12.1 Docker
+
+> **Note:** Release Docker images and the production `docker-compose.yaml` have been removed
+> from the repository pending the community edition release. They will be recreated under the
+> `logos/` Docker Hub namespace when the first stable release is cut.
+
+Development containers remain in `docker/devenv/` (local dev environment) and `docker/gitpod/`
+(Gitpod workspace).
+
+The Go backend produces a single ~20 MB statically-linked binary with no JVM dependency. A
+future `Dockerfile.backend` will be a simple two-stage build:
+
+```dockerfile
+FROM golang:1.23-alpine AS builder
+WORKDIR /src
+COPY backend-go/ .
+RUN CGO_ENABLED=0 go build -trimpath -o /bin/logos-backend ./cmd/server
+
+FROM debian:bookworm-slim
+COPY --from=builder /bin/logos-backend /bin/logos-backend
+ENTRYPOINT ["/bin/logos-backend"]
+```
+
+### 12.2 Helm Chart (Kubernetes)
+
+> **Note:** The Helm chart (`deploy/helm/`) has been removed along with the Docker images.
+> It will be re-created for the community release with up-to-date image references and
+> enterprise feature gates.
+
+### 12.3 Key Environment Variables (Go Backend)
 
 | Variable | Purpose |
 |---|---|
-| `PENPOT_PUBLIC_URI` | Public URL of the instance |
-| `PENPOT_DATABASE_URI` | PostgreSQL JDBC URL |
-| `PENPOT_REDIS_URI` | Redis connection string |
-| `PENPOT_STORAGE_BACKEND` | `fs` or `s3` |
-| `PENPOT_FLAGS` | Feature flags (e.g. `enable-registration`) |
-| `PENPOT_SECRET_KEY` | JWT signing secret |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `REDIS_URL` | Redis/Valkey connection string |
+| `LOGOS_SECRET_KEY` | Master key for token derivation (HKDF-Blake2b-512) |
+| `BACKEND_GO_ADDR` | HTTP listen address (default `:8080`) |
+| `STORAGE_BACKEND` | `fs` (default) or `s3` |
+| `STORAGE_LOCAL_DIR` | Root directory for local storage |
+| `STORAGE_S3_BUCKET` | S3/MinIO bucket name |
+| `LOGOS_ENABLE_AUDIT_LOG` | Enable `audit_log` writes (`true`/`false`) |
+| `LOGOS_ENABLE_DEMO_USERS` | Enable demo user creation endpoint |
+| `LOGOS_ENABLE_USER_FEEDBACK` | Enable feedback submission endpoint |
 
-### 14.4 CI / CD
+### 12.4 CI / CD
 
-`run-ci.sh` — runs tests across backend (Clojure), frontend (ClojureScript vitest), common library, and plugins.
-
-`netlify.toml` — docs site deployment config.
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `logos-app.yml` | Push to main / logos-app paths | TypeScript type-check + Vite build |
+| `typecheck.yml` | Rust type changes | Verify rust-generated TypeScript types are up-to-date |
+| `benchmark-memory.yml` | Nightly 02:00 UTC | Heap regression benchmark (Go backend + Playwright) |
+| `release.yml` | Tag push | Build + publish Docker images |
+| `rust.yml` | Push to main / rust paths | Rust test suite |
 
 ---
 
 ## Appendix: Key File Map
 
 ```
-frontend/
-  src/app/
-    config.cljs              ← reads runtime JS globals
-    main.cljs                ← app entry point
-    main/
-      ui/routes.cljs         ← client-side router
-      data/workspace/        ← workspace PTK events
-      ui/workspace/          ← Rumext canvas components
-      ui/dashboard/          ← Dashboard page
-      ui/ds/                 ← Design System components
-        foundations/assets/
-          duotone_icon.cljs  ← 4000+ icon components
-  resources/public/
-    index.html               ← HTML shell
-    js/config.js             ← runtime config (generated)
+logos-app/src/
+  components/canvas/     Canvas.tsx — WASM bridge + Canvas 2D fallback
+  components/toolbar/    Toolbar.tsx — tool selection
+  components/layers/     LayersPanel.tsx — virtualised shape tree
+  stores/documentStore.ts
+  stores/selectionStore.ts
+  stores/uiStore.ts
+  render-wasm/scene.ts   — 104-byte WASM ABI
+  worker/                — layout, snap, serialize workers
 
-backend/
-  src/app/
-    config.clj               ← Integrant component map
-    rpc/commands/            ← API RPC handlers
-    db.clj                   ← DB helpers (next.jdbc)
-    redis.clj                ← Redis client
-    worker/                  ← background job processors
-  scripts/
-    start-dev-local          ← local dev start script
-    _env.local               ← local env overrides
+backend-go/
+  cmd/server/main.go     — entry point, config, dependency injection
+  cmd/gen-benchmark/     — .logos fixture generator (CI use)
+  internal/
+    auth/                — Argon2id hashing, JWE tokens, Transit JSON
+    binfile/             — .logos v3 ZIP export/import
+    config/              — environment variable loading
+    db/                  — pgx connection pool helpers
+    email/               — email stub (stdout logger)
+    handler/             — all 25 RPC command handlers
+    perms/               — project/file permission helpers
+    rebase/              — pure-Go OT rebase engine (20 tests)
+    server/              — Chi router, route wiring
+    storage/             — local FS + S3 object storage
 
-common/
-  src/app/common/
-    types/shape.cljc          ← shape data model
-    geom/                     ← geometry algorithms
-    path/                     ← Bézier / boolean ops
-    types/component.cljc      ← component model
-    files/changes.cljc        ← CRDT change operations
-
-render-wasm/
-  src/                        ← Rust Skia renderer
-  build.rs                    ← wasm-bindgen build
+rust/
+  logos-layout/          — Flexbox/Grid layout engine (WASM)
+  logos-types/           — Canonical type definitions + TS code generator
+  logos-rebase/          — OT rebase (rlib; Go fallback used by backend)
+  render-wasm/           — Skia-based WebGPU/Canvas renderer
 
 mcp/
-  packages/server/src/
-    LogosMcpServer.ts         ← MCP server entry
-    PluginBridge.ts           ← WebSocket ↔ browser
-    tools/                    ← individual MCP tools
-  packages/plugin/src/
-    LogosUtils.ts             ← plugin utilities
+  packages/server/src/LogosMcpServer.ts
+  packages/plugin/src/LogosUtils.ts
 ```

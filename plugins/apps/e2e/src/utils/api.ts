@@ -2,7 +2,7 @@ import { FileRpc } from '../models/file-rpc.model';
 
 const apiUrl = 'http://localhost:3449';
 
-export async function PenpotApi() {
+export async function LogosApi() {
   if (!process.env['E2E_LOGIN_EMAIL']) {
     throw new Error('E2E_LOGIN_EMAIL not set');
   }

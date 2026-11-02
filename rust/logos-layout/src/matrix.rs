@@ -42,6 +42,7 @@ const EPSILON: f64 = 1e-6;
 ///
 /// Stored flat; the translation component lives in `(e, f)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[repr(C)]
 pub struct Matrix {
     pub a: f64,

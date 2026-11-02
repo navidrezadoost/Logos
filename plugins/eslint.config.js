@@ -16,7 +16,7 @@ export default [
       globals: {
         ...globals.browser,
         ...globals.node,
-        penpot: 'readonly',
+        logos: 'readonly',
         repairIntrinsics: 'readonly',
         hardenIntrinsics: 'readonly',
         Compartment: 'readonly',

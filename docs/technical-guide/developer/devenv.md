@@ -1,197 +1,202 @@
 ---
 title: 3.03. Dev environment
-desc: Dive into Penpot's development environment. Learn about self-hosting, configuration, developer tools, architecture, and more. See the Penpot Technical Guide!
+desc: Set up the Logos Community Edition development environment with Docker or natively.
 ---
 
-# Development environment
+# Development Environment
 
-## System requirements
+Logos offers two paths for local development: a **Docker devenv** (everything in one container —
+recommended for first-time setup or full-stack work) and a **native setup** (recommended for
+fast iteration on a single layer).
 
-You need to have <code class="language-bash">docker</code> and <code class="language-bash">docker-compose V2</code> installed on your system
-in order to correctly set up the development environment.
+---
 
-You can [look here][1] for complete instructions.
+## System Requirements
 
-[1]: /technical-guide/getting-started/#install-with-docker
+| Tool | Minimum | Purpose |
+|---|---|---|
+| Docker + Compose V2 | Latest stable | devenv containers |
+| Go | 1.22 | Backend development |
+| Node.js | 20 LTS | Frontend / MCP / Plugins |
+| Rust (stable) | 1.75 | Core engine, WASM renderer |
+| PostgreSQL | 14+ | Database (devenv includes one) |
+| Redis / Valkey | 7+ | Pub/Sub + cache (devenv includes one) |
 
+---
 
-Optionally, to improve performance, you can also increase the maximum number of
-user files able to be watched for changes with inotify:
+## Option A — Docker devenv (recommended)
+
+The devenv container bundles PostgreSQL, Valkey, MailCatcher, Go, Node.js, and Rust.
+It uses [tmux](https://github.com/tmux/tmux/wiki) to run all services in one terminal.
 
 ```bash
-echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
-```
-
-
-## Getting Started
-
-**The interactive development environment requires some familiarity of [tmux](https://github.com/tmux/tmux/wiki).**
-
-To start it, clone penpot repository, and execute:
-
-```bash
-./manage.sh pull-devenv
+# From the repository root:
 ./manage.sh run-devenv
 ```
 
-This will do the following:
+This will:
+1. Build the devenv image if not already built
+2. Start PostgreSQL, Valkey, and MailCatcher in the background
+3. Attach your terminal to a tmux session inside the devenv container
 
-1. Pull the latest devenv image from dockerhub.
-2. Start all the containers in the background.
-3. Attach the terminal to the **devenv** container and execute the tmux session.
-4. The tmux session automatically starts all the necessary services.
+Once the session starts, browse to **http://localhost:3449** for the application.
 
-This is an incomplete list of devenv related subcommands found on
-manage.sh script:
-
-```bash
-./manage.sh build-devenv-local # builds the local devenv docker image (called by run-devenv automatically when needed)
-./manage.sh start-devenv       # starts background running containers
-./manage.sh run-devenv         # enters to new tmux session inside of one of the running containers
-./manage.sh stop-devenv        # stops background running containers
-./manage.sh drop-devenv        # removes all the containers, volumes and networks used by the devenv
-```
-
-Having the container running and tmux opened inside the container,
-you are free to execute commands and open as many shells as you want.
-
-You can create a new shell just pressing the **Ctr+b c** shortcut. And
-**Ctrl+b w** for switch between windows, **Ctrl+b &** for kill the
-current window.
-
-For more info: https://tmuxcheatsheet.com/
-
-It may take a minute or so, but once all of the services have started, you can
-connect to penpot by browsing to http://localhost:3449 .
-
-<!-- ## Inside the tmux session -->
-
-<!-- By default, the tmux session opens 5 windows: -->
-
-<!-- - **gulp** (0): responsible of build, watch (and other related) of -->
-<!--   styles, images, fonts and templates. -->
-<!-- - **frontend** (1): responsible of cljs compilation process of frontend. -->
-<!--   **storybook** (2): local storybook development server -->
-<!-- - **exporter** (3): responsible of cljs compilation process of exporter. -->
-<!-- - **backend** (4): responsible of starting the backend jvm process. -->
-
-
-### Frontend
-
-The frontend build process is located on the tmux **window 0** and
-**window 1**. On **window 0** we have the gulp process responsible
-for watching and building styles, fonts, icon-spreads and templates.
-
-On **window 1** we can find the **shadow-cljs** process that is
-responsible for watching and building frontend clojurescript code.
-
-In addition to the watch process you probably want to be able to open a REPL
-process on the frontend application. In order to do this you can split the
-window (`Ctrl+b "`) and execute:
+### manage.sh subcommands
 
 ```bash
-cd penpot/frontend
-npx shadow-cljs cljs-repl main
+./manage.sh build-devenv-local   # build the devenv image locally
+./manage.sh start-devenv         # start background containers
+./manage.sh run-devenv           # attach to tmux inside devenv
+./manage.sh stop-devenv          # stop all containers
+./manage.sh drop-devenv          # remove containers, volumes, and networks
 ```
 
-In order to have the REPL working you need to have an active browser session
-with the penpot application opened (otherwise, you will get the error
-`No application has connected to the REPL server.`).
+### tmux shortcuts
 
-Finally, in case you want to connect to the REPL from your IDE, you can set it
-up to use nREPL with the port `3447` and the host `localhost` (you can see the
-port in the startup message of the shadow-cljs process in **window 1**). You
-will also need to call `(shadow/repl :main)` in the REPL to start the connection,
-as explained [here](https://shadow-cljs.github.io/docs/UsersGuide.html#_server_options).
+| Shortcut | Action |
+|---|---|
+| `Ctrl+b c` | New window |
+| `Ctrl+b w` | Window list |
+| `Ctrl+b &` | Kill current window |
+| `Ctrl+b "` | Split pane horizontally |
+| `Ctrl+b %` | Split pane vertically |
+| `Ctrl+b d` | Detach (containers keep running) |
 
+For a full reference: https://tmuxcheatsheet.com/
 
-### Storybook
+---
 
-The storybook local server is started on tmux **window 2** and will listen
-for changes in the styles, components or stories defined in the folders
-under the design system namespace: `app.main.ui.ds`.
+## Option B — Native setup
 
-You can open the broser on http://localhost:6006/ to see it.
-
-For more information about storybook check:
-
-https://help.penpot.app/technical-guide/developer/ui/#storybook
-
-### Exporter
-
-The exporter build process is located in the **window 3** and in the
-same way as frontend application, it is built and watched using
-**shadow-cljs**.
-
-The main difference is that exporter will be executed in a nodejs, on
-the server side instead of browser.
-
-The window is split into two slices. The top slice shows the build process and
-on the bottom slice has a shell ready to execute the generated bundle.
-
-You can start the exporter process executing:
+### 1. Backend (Go)
 
 ```bash
-node target/app.js
+# Start PostgreSQL and Valkey (or use Docker):
+docker run -d -p 5432:5432 -e POSTGRES_USER=logos -e POSTGRES_PASSWORD=logos \
+  -e POSTGRES_DB=logos postgres:16-alpine
+docker run -d -p 6379:6379 valkey/valkey:7-alpine
+
+# Configure and start the backend
+export DATABASE_URL="postgres://logos:logos@localhost:5432/logos"
+export REDIS_URL="redis://localhost:6379"
+export LOGOS_SECRET_KEY="dev-secret-at-least-32-characters"
+
+cd backend-go
+go run ./cmd/server -migrate   # apply migrations
+go run ./cmd/server             # start server on :6060
 ```
 
-This process does not start automatically.
-
-
-### Backend
-
-The backend related process is located in the tmux **window 4**, and
-you can go directly to it using <code class="language-bash">ctrl+b 4</code> shortcut.
-
-By default the backend will be started in a non-interactive mode for convenience
-but you can press <code class="language-bash">Ctrl+c</code> to exit and execute the following to start the repl:
+### 2. Frontend (TypeScript)
 
 ```bash
-./scripts/repl
+cd logos-app
+npm ci
+npm run dev   # http://localhost:3449 (proxies /api to :6060)
 ```
 
-On the REPL you have these helper functions:
-- <code class="language-bash">(start)</code>: start all the environment
-- <code class="language-bash">(stop)</code>: stops the environment
-- <code class="language-bash">(restart)</code>: stops, reload and start again.
+The dev server configuration in `vite.config.ts` proxies all `/api` requests to
+`http://localhost:6060`, so the Go backend must be running.
 
-And many other that are defined in the <code class="language-bash">dev/user.clj</code> file.
+### 3. Rust WASM renderer (when modifying render-wasm)
 
-If an exception is raised or an error occurs when code is reloaded, just use
-<code class="language-bash">(repl/refresh-all)</code> to finish loading the code correctly and then use
-<code class="language-bash">(restart)</code> again.
-
-## Email
-
-To test email sending, the devenv includes [MailCatcher](https://mailcatcher.me/),
-a SMTP server that is used for develop. It does not send any mail outbounds.
-Instead, it stores them in memory and allows to browse them via a web interface
-similar to a webmail client. Simply navigate to:
-
-[http://localhost:1080](http://localhost:1080)
-
-## Create user
-
-You can register a new user manually, or create new users automatically with this script. From your tmux instance, run:
-
-
-```sh
-cd penpot/backend/scripts
-python3 manage.py create-profile
+```bash
+cd render-wasm
+wasm-pack build --target web --release
+# The output (render-wasm/pkg/) is automatically picked up by Vite.
 ```
 
-You can also skip tutorial and walkthrough steps:
+---
 
-```sh
-python3 manage.py create-profile --skip-tutorial --skip-walkthrough
-python3 manage.py create-profile -n "Jane Doe" -e jane@example.com -p secretpassword --skip-tutorial --skip-walkthrough
+## Email Testing
+
+The devenv includes **MailCatcher** — a local SMTP server that captures all outgoing
+email without delivering it. Open the web interface at:
+
+```
+http://localhost:1080
 ```
 
-## Team Feature Flags
+This covers all transactional emails: registration, password recovery, magic links,
+and team invitations.
 
-To test a Feature Flag, you can enable or disable them by team through the `dbg` page:
+When running natively, set `LOGOS_SMTP_HOST=localhost` and start MailCatcher separately:
 
-1. Create a new team or navigate to an existing team in Penpot.
-2. Copy the `team-id` from the URL (e.g., `?team-id=1234bd95-69dd-805c-8005-c015415436ae`). If no team is selected, the default profile team will be used.
-3. Go to [http://localhost:3449/dbg](http://localhost:3449/dbg).
-4. Open the Feature Flag panel, enter the `team-id` and the `feature` name in either the enable or disable section, and click `Submit`.
+```bash
+gem install mailcatcher
+mailcatcher   # SMTP on :1025, web UI on :1080
+export LOGOS_SMTP_HOST=localhost
+export LOGOS_SMTP_PORT=1025
+```
+
+---
+
+## Creating a Test User
+
+```bash
+# From the backend-go directory with DATABASE_URL set:
+curl -X POST http://localhost:6060/api/rpc/command/register-profile \
+  -H "Content-Type: application/json" \
+  -d '{"email":"dev@example.com","fullname":"Dev User","password":"devpassword"}'
+```
+
+Or register through the UI at http://localhost:3449.
+
+---
+
+## Feature Flags
+
+Feature flags are injected at runtime via the `LOGOS_FLAGS` environment variable and
+can be toggled per-team through the debug page at **http://localhost:3449/dbg**.
+
+Common flags:
+
+| Flag | Effect |
+|---|---|
+| `enable-plugins` | Enable the plugin panel and sandbox |
+| `enable-storybook` | Show Storybook link in the dashboard |
+| `enable-ai` | Enable AI assistant panel |
+| `enable-dev-mode` | Enable developer mode panel (CSS export, redlines) |
+
+---
+
+## Running the Test Suite
+
+```bash
+# Backend
+cd backend-go
+go test ./...                          # unit tests
+TEST_DATABASE_URL=... go test ./...    # + integration tests
+
+# Frontend
+cd logos-app
+npx vitest run
+
+# Rust
+cd rust
+cargo test --workspace
+```
+
+---
+
+## Troubleshooting
+
+**Port 3449 / 6060 already in use:**
+```bash
+lsof -i :3449    # find the process
+kill -9 <pid>
+```
+
+**Database connection refused:**
+- Check `DATABASE_URL` is set correctly
+- Verify PostgreSQL is running: `pg_isready -h localhost -p 5432`
+- In devenv: `./manage.sh start-devenv` to restart containers
+
+**WASM not found / stale:**
+```bash
+cd render-wasm && wasm-pack build --target web --release
+```
+
+**Go module cache issues:**
+```bash
+cd backend-go && go clean -modcache && go mod download
+```

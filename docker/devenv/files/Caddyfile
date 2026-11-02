@@ -12,6 +12,6 @@ http://localhost:3450 {
 	reverse_proxy localhost:4449
 }
 
-http://penpot-devenv-main:3450 {
+http://logos-devenv-main:3450 {
 	reverse_proxy localhost:4449
 }

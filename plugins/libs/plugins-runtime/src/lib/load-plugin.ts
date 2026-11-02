@@ -1,4 +1,4 @@
-import type { Context } from '@penpot/plugin-types';
+import type { Context } from '@logos/plugin-types';
 
 import { loadManifest } from './parse-manifest.js';
 import { Manifest } from './models/manifest.model.js';

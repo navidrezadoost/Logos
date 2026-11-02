@@ -1,15 +1,7 @@
 #!/bin/bash
-
-set -e
-
-echo "################ test common ################"
-pushd common
-pnpm install
-pnpm run fmt:clj:check
-pnpm run lint:clj
-clojure -M:dev:test
-pnpm run test
-popd
+# Logos CI test runner — Go + Rust + TypeScript
+# Zero Clojure. Run from the repository root.
+set -euo pipefail
 
 echo "################ build + test logos-app (React/TypeScript) ################"
 pushd logos-app
@@ -18,24 +10,21 @@ npx tsc --noEmit
 npx vitest run
 popd
 
-echo "################ test backend ################"
-pushd backend
-pnpm install
-pnpm run fmt:clj:check
-pnpm run lint:clj
-clojure -M:dev:test --reporter kaocha.report/documentation
+echo "################ build + test Go backend ################"
+pushd backend-go
+go build ./...
+go vet ./...
+go test ./...
 popd
 
-echo "################ test exporter ################"
-pushd exporter
-pnpm install
-pnpm run fmt:clj:check
-pnpm run lint:clj
-popd
-
-echo "################ test render-wasm ################"
+echo "################ test render-wasm (Rust) ################"
 pushd render-wasm
 cargo fmt --check
 ./lint --debug
 ./test
 popd
+
+echo "################ test Rust workspace ################"
+cargo test --workspace --manifest-path rust/Cargo.toml
+
+echo "################ all checks passed ################"

@@ -1,0 +1,35 @@
+import React from "react";
+import type { SVGProps } from "react";
+
+export interface SelectionProps extends SVGProps<SVGSVGElement> {
+  size?: number | string;
+}
+
+const Selection = React.forwardRef<SVGSVGElement, SelectionProps>(
+  ({ size, className, style, ...props }, ref) => {
+    const dimensions = size ? { width: size, height: size } : {
+      width: props.width || 24,
+      height: props.height || 24
+    };
+
+    return (
+      <svg
+        ref={ref}
+        viewBox="0 0 640 640"
+        xmlns="http://www.w3.org/2000/svg"
+        width={dimensions.width}
+        height={dimensions.height}
+        fill={props.fill || "currentColor"}
+        className={className}
+        style={style}
+        {...props}
+      >
+        <path fill="currentColor" d="M192 64L192 402.7L402.7 192L240 192L240 128L466.7 128C495.2 99.6 515.6 79.2 528 66.7L573.3 112C560.9 124.4 540.5 144.8 512 173.3L512 448L576 448L576 512L512 512L512 576L448 576L448 237.3L237.3 448L400 448L400 512L128 512L128 192L64 192L64 128L128 128L128 64L192 64z"/>
+      </svg>
+    );
+  }
+);
+
+Selection.displayName = "Selection";
+
+export default Selection;

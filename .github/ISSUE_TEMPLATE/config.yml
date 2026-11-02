@@ -4,7 +4,7 @@ contact_links:
     url: https://github.com/navidrezadoost/Logos/discussions
     about: Ask questions, share ideas, and connect with other Logos users
   - name: Documentation
-    url: https://help.penpot.app/
+    url: https://help.logos.app/
     about: Check the documentation before filing an issue
   - name: Security Vulnerabilities
     url: https://github.com/navidrezadoost/Logos/security/advisories/new

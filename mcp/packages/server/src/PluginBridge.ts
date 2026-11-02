@@ -1,24 +1,21 @@
 import { WebSocket, WebSocketServer } from "ws";
-import * as http from "http";
 import { PluginTask } from "./PluginTask";
-import { PluginTaskResponse, PluginTaskResult } from "@penpot/mcp-common";
+import { PluginTaskResponse, PluginTaskResult } from "@logos/mcp-common";
 import { createLogger } from "./logger";
 import type { LogosMcpServer } from "./LogosMcpServer";
 
 interface ClientConnection {
     socket: WebSocket;
-    userToken: string | null;
 }
 
 /**
- * Manages WebSocket connections to Penpot plugin instances and handles plugin tasks
+ * Manages WebSocket connections to Logos plugin instances and handles plugin tasks
  * over these connections.
  */
 export class PluginBridge {
     private readonly logger = createLogger("PluginBridge");
     private readonly wsServer: WebSocketServer;
     private readonly connectedClients: Map<WebSocket, ClientConnection> = new Map();
-    private readonly clientsByToken: Map<string, ClientConnection> = new Map();
     private readonly pendingTasks: Map<string, PluginTask<any, any>> = new Map();
     private readonly taskTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
@@ -27,7 +24,7 @@ export class PluginBridge {
         private port: number,
         private taskTimeoutSecs: number = 30
     ) {
-        this.wsServer = new WebSocketServer({ port: port });
+        this.wsServer = new WebSocketServer({ port, host: mcpServer.host });
         this.setupWebSocketHandlers();
     }
 
@@ -35,66 +32,63 @@ export class PluginBridge {
      * Sets up WebSocket connection handlers for plugin communication.
      *
      * Manages client connections and provides bidirectional communication
-     * channel between the MCP mcpServer and Penpot plugin instances.
+     * channel between the MCP mcpServer and Logos plugin instances.
      */
     private setupWebSocketHandlers(): void {
-        this.wsServer.on("connection", (ws: WebSocket, request: http.IncomingMessage) => {
-            // extract userToken from query parameters
-            const url = new URL(request.url!, `ws://${request.headers.host}`);
-            const userToken = url.searchParams.get("userToken");
-
-            // require userToken if running in multi-user mode
-            if (this.mcpServer.isMultiUserMode() && !userToken) {
-                this.logger.warn("Connection attempt without userToken in multi-user mode - rejecting");
-                ws.close(1008, "Missing userToken parameter");
-                return;
-            }
-
-            if (userToken) {
-                this.logger.info("New WebSocket connection established (token provided)");
-            } else {
-                this.logger.info("New WebSocket connection established");
-            }
-
-            // register the client connection with both indexes
-            const connection: ClientConnection = { socket: ws, userToken };
-            this.connectedClients.set(ws, connection);
-            if (userToken) {
-                // ensure only one connection per userToken
-                if (this.clientsByToken.has(userToken)) {
-                    this.logger.warn("Duplicate connection for given user token; rejecting new connection");
-                    ws.close(1008, "Duplicate connection for given user token; close previous connection first.");
+        this.wsServer.on("connection", (ws: WebSocket) => {
+            let authenticated = false;
+            this.logger.info("WebSocket connection opened; awaiting local authentication");
+            const authTimeout = setTimeout(() => {
+                if (!authenticated && ws.readyState === WebSocket.OPEN) {
+                    ws.close(1008, "Local authentication required");
                 }
+            }, 5000);
 
-                this.clientsByToken.set(userToken, connection);
-            }
-
-            ws.on("message", (data: Buffer) => {
-                this.logger.debug("Received WebSocket message: %s", data.toString());
+            ws.on("message", (data) => {
                 try {
-                    const response: PluginTaskResponse<any> = JSON.parse(data.toString());
+                    const messageText = Buffer.isBuffer(data)
+                        ? data.toString("utf8")
+                        : Array.isArray(data)
+                          ? Buffer.concat(data).toString("utf8")
+                          : Buffer.from(data as ArrayBuffer).toString("utf8");
+                    const message = JSON.parse(messageText);
+                    if (!authenticated) {
+                        if (
+                            message?.type !== "logos.mcp.auth" ||
+                            !this.mcpServer.isLocalTokenValid(message?.token)
+                        ) {
+                            ws.close(1008, "Invalid local authentication");
+                            return;
+                        }
+
+                        authenticated = true;
+                        clearTimeout(authTimeout);
+                        this.connectedClients.set(ws, { socket: ws });
+                        ws.send(JSON.stringify({ type: "logos.mcp.auth", ok: true }));
+                        this.logger.info("Authenticated local plugin WebSocket connection");
+                        return;
+                    }
+
+                    const response: PluginTaskResponse<any> = message;
                     this.handlePluginTaskResponse(response);
                 } catch (error) {
-                    this.logger.error(error, "Failure while processing WebSocket message");
+                    this.logger.warn(error, "Rejected malformed WebSocket message");
+                    if (!authenticated && ws.readyState === WebSocket.OPEN) {
+                        ws.close(1008, "Invalid local authentication");
+                    }
                 }
             });
 
             ws.on("close", () => {
+                clearTimeout(authTimeout);
                 this.logger.info("WebSocket connection closed");
-                const connection = this.connectedClients.get(ws);
                 this.connectedClients.delete(ws);
-                if (connection?.userToken) {
-                    this.clientsByToken.delete(connection.userToken);
-                }
             });
 
             ws.on("error", (error) => {
                 this.logger.error(error, "WebSocket connection error");
-                const connection = this.connectedClients.get(ws);
+                clearTimeout(authTimeout);
                 this.connectedClients.delete(ws);
-                if (connection?.userToken) {
-                    this.clientsByToken.delete(connection.userToken);
-                }
             });
         });
 
@@ -138,45 +132,30 @@ export class PluginBridge {
     /**
      * Determines the client connection to use for executing a task.
      *
-     * In single-user mode, returns the single connected client.
-     * In multi-user mode, returns the client matching the session's userToken.
+     * Returns the single authenticated local plugin connection.
      *
      * @returns The client connection to use
      * @throws Error if no suitable connection is found or if configuration is invalid
      */
     private getClientConnection(): ClientConnection {
-        if (this.mcpServer.isMultiUserMode()) {
-            const sessionContext = this.mcpServer.getSessionContext();
-            if (!sessionContext?.userToken) {
-                throw new Error("No userToken found in session context. Multi-user mode requires authentication.");
-            }
-
-            const connection = this.clientsByToken.get(sessionContext.userToken);
-            if (!connection) {
-                throw new Error(
-                    `No plugin instance connected for user token. Please ensure the plugin is running and connected with the correct token.`
-                );
-            }
-
-            return connection;
-        } else {
-            // single-user mode: return the single connected client
-            if (this.connectedClients.size === 0) {
-                throw new Error(
-                    `No Penpot plugin instances are currently connected. Please ensure the plugin is running and connected.`
-                );
-            }
-            if (this.connectedClients.size > 1) {
-                throw new Error(
-                    `Multiple (${this.connectedClients.size}) Penpot MCP Plugin instances are connected. ` +
-                        `Ask the user to ensure that only one instance is connected at a time.`
-                );
-            }
-
-            // return the first (and only) connection
-            const connection = this.connectedClients.values().next().value;
-            return <ClientConnection>connection;
+        if (this.connectedClients.size === 0) {
+            throw new Error(
+                "No authenticated Logos plugin is connected. Authenticate the local plugin connection first."
+            );
         }
+
+        if (this.connectedClients.size > 1) {
+            throw new Error("More than one authenticated local plugin is connected; disconnect extras first.");
+        }
+
+        return this.connectedClients.values().next().value as ClientConnection;
+    }
+
+    public async stop(): Promise<void> {
+        for (const client of this.wsServer.clients) {
+            client.close(1001, "MCP server shutting down");
+        }
+        await new Promise<void>((resolve) => this.wsServer.close(() => resolve()));
     }
 
     /**

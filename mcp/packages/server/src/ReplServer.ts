@@ -33,6 +33,14 @@ export class ReplServer {
      * Sets up Express middleware for request parsing and static content.
      */
     private setupMiddleware(): void {
+        this.app.use((req, res, next) => {
+            if (!this.pluginBridge.mcpServer.isLocalRequestAuthorized(req.headers.authorization)) {
+                res.setHeader("WWW-Authenticate", "Bearer");
+                res.status(401).send("Unauthorized");
+                return;
+            }
+            next();
+        });
         this.app.use(express.json());
     }
 
@@ -85,12 +93,13 @@ export class ReplServer {
      * Begins listening on the configured port and logs server startup information.
      */
     public async start(): Promise<void> {
-        return new Promise((resolve) => {
-            this.server = this.app.listen(this.port, () => {
+        return new Promise((resolve, reject) => {
+            this.server = this.app.listen(this.port, this.pluginBridge.mcpServer.host, () => {
                 this.logger.info(`REPL server started on port ${this.port}`);
                 this.logger.info(`REPL interface URL: http://${this.pluginBridge.mcpServer.host}:${this.port}`);
                 resolve();
             });
+            this.server.once("error", reject);
         });
     }
 

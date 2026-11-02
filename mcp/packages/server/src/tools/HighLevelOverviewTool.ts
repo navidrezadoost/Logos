@@ -15,8 +15,8 @@ export class HighLevelOverviewTool extends Tool<EmptyToolArgs> {
 
     public getToolDescription(): string {
         return (
-            "Returns basic high-level instructions on the usage of Penpot-related tools and the Penpot API. " +
-            "If you have already read the 'Penpot High-Level Overview', you must not call this tool."
+            "Returns basic high-level instructions on the usage of Logos-related tools and the Logos API. " +
+            "If you have already read the 'Logos High-Level Overview', you must not call this tool."
         );
     }
 

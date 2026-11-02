@@ -10,7 +10,7 @@ importers:
             "@modelcontextprotocol/sdk":
                 specifier: ^1.24.0
                 version: 1.25.3(hono@4.11.7)(zod@4.3.6)
-            "@penpot-mcp/common":
+            "@logos-mcp/common":
                 specifier: file:../common
                 version: file:../common
             class-transformer:
@@ -25,7 +25,7 @@ importers:
             js-yaml:
                 specifier: ^4.1.1
                 version: 4.1.1
-            penpot-mcp:
+            logos-mcp:
                 specifier: file:..
                 version: file:..
             pino:
@@ -574,7 +574,7 @@ packages:
             "@cfworker/json-schema":
                 optional: true
 
-    "@penpot-mcp/common@file:../common":
+    "@logos-mcp/common@file:../common":
         resolution: { directory: ../common, type: directory }
 
     "@pinojs/redact@0.4.0":
@@ -1385,7 +1385,7 @@ packages:
                 integrity: sha512-7jdwVIRtsP8MYpdXSwOS0YdD0Du+qOoF/AEPIt88PcCFrZCzx41oxku1jD88hZBwbNUIEfpqvuhjFaMAqMTWnA==,
             }
 
-    penpot-mcp@file:..:
+    logos-mcp@file:..:
         resolution: { directory: .., type: directory }
 
     pino-abstract-transport@2.0.0:
@@ -2073,9 +2073,9 @@ snapshots:
             - hono
             - supports-color
 
-    "@penpot-mcp/common@file:../common":
+    "@logos-mcp/common@file:../common":
         dependencies:
-            penpot-mcp: file:..
+            logos-mcp: file:..
 
     "@pinojs/redact@0.4.0": {}
 
@@ -2527,7 +2527,7 @@ snapshots:
 
     path-to-regexp@8.3.0: {}
 
-    penpot-mcp@file:..:
+    logos-mcp@file:..:
         dependencies:
             concurrently: 8.2.2
             kill-port: 2.0.1

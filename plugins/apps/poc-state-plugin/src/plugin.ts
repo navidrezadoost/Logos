@@ -1,15 +1,15 @@
-import { Variants } from '@penpot/plugin-types';
+import { Variants } from '@logos/plugin-types';
 
 const GRID = [5, 5];
 
-penpot.ui.open('Plugin name', '', {
+logos.ui.open('Plugin name', '', {
   width: 500,
   height: 600,
 });
 
-penpot.ui.onMessage<{ content: string; data: unknown }>(async (message) => {
+logos.ui.onMessage<{ content: string; data: unknown }>(async (message) => {
   if (message.content === 'close') {
-    penpot.closePlugin();
+    logos.closePlugin();
   } else if (message.content === 'ready') {
     init();
   } else if (message.content === 'change-name') {
@@ -87,24 +87,24 @@ penpot.ui.onMessage<{ content: string; data: unknown }>(async (message) => {
   }
 });
 
-penpot.on('pagechange', () => {
-  const page = penpot.currentPage;
+logos.on('pagechange', () => {
+  const page = logos.currentPage;
   const shapes = page?.findShapes();
 
-  penpot.ui.sendMessage({
+  logos.ui.sendMessage({
     type: 'page',
     content: { page, shapes },
   });
 });
 
-penpot.on('filechange', () => {
-  const file = penpot.currentFile;
+logos.on('filechange', () => {
+  const file = logos.currentFile;
 
   if (!file) {
     return;
   }
 
-  penpot.ui.sendMessage({
+  logos.ui.sendMessage({
     type: 'file',
     content: {
       id: file.id,
@@ -112,39 +112,39 @@ penpot.on('filechange', () => {
   });
 });
 
-penpot.on('selectionchange', () => {
-  const selection = penpot.selection;
+logos.on('selectionchange', () => {
+  const selection = logos.selection;
   const data: string | null =
     selection.length === 1 ? selection[0].getPluginData('counter') : null;
   const counter = data ? parseInt(data, 10) : 0;
-  penpot.ui.sendMessage({ type: 'selection', content: { selection, counter } });
+  logos.ui.sendMessage({ type: 'selection', content: { selection, counter } });
 });
 
-penpot.on('themechange', (theme) => {
-  penpot.ui.sendMessage({ type: 'theme', content: theme });
+logos.on('themechange', (theme) => {
+  logos.ui.sendMessage({ type: 'theme', content: theme });
 });
 
 function init() {
-  const page = penpot.currentPage;
-  const file = penpot.currentFile;
+  const page = logos.currentPage;
+  const file = logos.currentFile;
 
   if (!page || !file) {
     return;
   }
 
-  const selection = penpot.selection;
+  const selection = logos.selection;
   const data: string | null =
     selection.length === 1 ? selection[0].getPluginData('counter') : null;
   const counter = data ? parseInt(data, 10) : 0;
 
-  penpot.ui.sendMessage({
+  logos.ui.sendMessage({
     type: 'init',
     content: {
       name: page.name,
       pageId: page.id,
       fileId: file.id,
       revn: file.revn,
-      theme: penpot.theme,
+      theme: logos.theme,
       selection,
       counter,
     },
@@ -152,19 +152,19 @@ function init() {
 }
 
 function changeName(data: { id: string; name: string }) {
-  const shape = penpot.currentPage?.getShapeById('' + data.id);
+  const shape = logos.currentPage?.getShapeById('' + data.id);
   if (shape) {
     shape.name = data.name;
   }
 }
 
 function createRect() {
-  const shape = penpot.createRectangle();
-  const center = penpot.viewport.center;
+  const shape = logos.createRectangle();
+  const center = logos.viewport.center;
   shape.x = center.x;
   shape.y = center.y;
 
-  penpot.on(
+  logos.on(
     'shapechange',
     (s) => {
       console.log('change', s.name, s.x, s.y);
@@ -176,45 +176,45 @@ function createRect() {
 }
 
 function moveX(data: { id: string }) {
-  const shape = penpot.currentPage?.getShapeById('' + data.id);
+  const shape = logos.currentPage?.getShapeById('' + data.id);
   if (shape) {
     shape.x += 100;
   }
 }
 
 function moveY(data: { id: string }) {
-  const shape = penpot.currentPage?.getShapeById('' + data.id);
+  const shape = logos.currentPage?.getShapeById('' + data.id);
   if (shape) {
     shape.y += 100;
   }
 }
 
 function resizeW(data: { id: string }) {
-  const shape = penpot.currentPage?.getShapeById('' + data.id);
+  const shape = logos.currentPage?.getShapeById('' + data.id);
   if (shape) {
     shape.resize(shape.width * 2, shape.height);
   }
 }
 
 function resizeH(data: { id: string }) {
-  const shape = penpot.currentPage?.getShapeById('' + data.id);
+  const shape = logos.currentPage?.getShapeById('' + data.id);
   if (shape) {
     shape.resize(shape.width, shape.height * 2);
   }
 }
 
 function loremIpsum() {
-  const selection = penpot.selection;
+  const selection = logos.selection;
 
   for (const shape of selection) {
-    if (penpot.utils.types.isText(shape)) {
+    if (logos.utils.types.isText(shape)) {
       shape.characters = `Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nam id mauris ut felis finibus congue. Ut odio ipsum, condimentum id tellus sit amet, dapibus sagittis ligula. Pellentesque hendrerit, nulla sit amet aliquet scelerisque, orci nunc commodo tellus, quis hendrerit nisl massa non tellus.
 
 Phasellus fringilla tortor elit, ac dictum tellus posuere sodales. Ut eget imperdiet ante. Nunc eros magna, tincidunt non finibus in, tempor elementum nunc. Sed commodo magna in arcu aliquam efficitur.`;
-    } else if (penpot.utils.types.isRectangle(shape)) {
+    } else if (logos.utils.types.isRectangle(shape)) {
       const width = Math.ceil(shape.width);
       const height = Math.ceil(shape.height);
-      penpot
+      logos
         .uploadMediaUrl(
           'placeholder',
           `https://picsum.photos/${width}/${height}`,
@@ -254,19 +254,19 @@ function addIcon() {
                id="path1034" />
           </g>
 </svg>`;
-  const shape = penpot.createShapeFromSvg(iconStr);
+  const shape = logos.createShapeFromSvg(iconStr);
   if (shape) {
-    const center = penpot.viewport.center;
+    const center = logos.viewport.center;
     shape.x = center.x;
     shape.y = center.y;
   }
 }
 
 function createGrid() {
-  const board = penpot.createBoard();
+  const board = logos.createBoard();
   board.name = 'Board Grid';
 
-  const viewport = penpot.viewport;
+  const viewport = logos.viewport;
   board.x = viewport.center.x - 150;
   board.y = viewport.center.y - 200;
   board.resize(300, 400);
@@ -295,7 +295,7 @@ function createGrid() {
   // create text
   for (let row = 0; row < numRows; row++) {
     for (let col = 0; col < numCols; col++) {
-      const text = penpot.createText(`${row + 1} - ${col + 1}`);
+      const text = logos.createText(`${row + 1} - ${col + 1}`);
       if (text) {
         text.growType = 'auto-width';
         grid.appendChild(text, row + 1, col + 1);
@@ -305,14 +305,14 @@ function createGrid() {
 }
 
 function createColors() {
-  const board = penpot.createBoard();
+  const board = logos.createBoard();
   board.name = 'Palette';
 
-  const viewport = penpot.viewport;
+  const viewport = logos.viewport;
   board.x = viewport.center.x - 150;
   board.y = viewport.center.y - 200;
 
-  const colors = penpot.library.local.colors.sort((a, b) =>
+  const colors = logos.library.local.colors.sort((a, b) =>
     a.name.toLowerCase() > b.name.toLowerCase()
       ? 1
       : a.name.toLowerCase() < b.name.toLowerCase()
@@ -379,7 +379,7 @@ function createColors() {
         return;
       }
 
-      const board = penpot.createBoard();
+      const board = logos.createBoard();
       grid.appendChild(board, row + 1, col + 1);
       board.fills = [color.asFill()];
       board.strokes = [
@@ -395,7 +395,7 @@ function createColors() {
       flex.alignItems = 'center';
       flex.justifyContent = 'center';
 
-      const text = penpot.createText(color.name);
+      const text = logos.createText(color.name);
       if (text) {
         text.growType = 'auto-width';
         board.appendChild(text);
@@ -405,20 +405,20 @@ function createColors() {
 }
 
 function increaseCounter() {
-  const selection = penpot.selection;
+  const selection = logos.selection;
   const data: string | null =
     selection.length === 1 ? selection[0].getPluginData('counter') : null;
   let counter = data ? parseInt(data, 10) : 0;
   counter++;
 
   selection[0].setPluginData('counter', '' + counter);
-  penpot.ui.sendMessage({ type: 'update-counter', content: { counter } });
+  logos.ui.sendMessage({ type: 'update-counter', content: { counter } });
 }
 
 function wordStyles() {
-  const selection = penpot.selection;
+  const selection = logos.selection;
 
-  if (selection.length >= 1 && penpot.utils.types.isText(selection[0])) {
+  if (selection.length >= 1 && logos.utils.types.isText(selection[0])) {
     const shape = selection[0];
     const text = shape.characters;
 
@@ -452,8 +452,8 @@ function wordStyles() {
 }
 
 function rotateSelection() {
-  const selection = penpot.selection;
-  const center = penpot.utils.geometry.center(selection);
+  const selection = logos.selection;
+  const center = logos.utils.geometry.center(selection);
 
   selection.forEach((shape) => {
     shape.rotate(10, center);
@@ -461,12 +461,12 @@ function rotateSelection() {
 }
 
 function createImage(data: Uint8Array, mimeType: string) {
-  penpot
+  logos
     .uploadMediaData('image', data, mimeType)
     .then((data) => {
-      const shape = penpot.createRectangle();
-      const x = penpot.viewport.center.x - data.width / 2;
-      const y = penpot.viewport.center.y - data.height / 2;
+      const shape = logos.createRectangle();
+      const x = logos.viewport.center.x - data.width / 2;
+      const y = logos.viewport.center.y - data.height / 2;
       shape.resize(data.width, data.height);
       shape.x = x;
       shape.y = y;
@@ -476,18 +476,18 @@ function createImage(data: Uint8Array, mimeType: string) {
 }
 
 function createMargins() {
-  const page = penpot.currentPage;
-  const selected = penpot.selection && penpot.selection[0];
+  const page = logos.currentPage;
+  const selected = logos.selection && logos.selection[0];
 
-  if (selected && penpot.utils.types.isBoard(selected)) {
+  if (selected && logos.utils.types.isBoard(selected)) {
     const { width, height } = selected;
     selected.addRulerGuide('vertical', 10);
     selected.addRulerGuide('vertical', width - 10);
     selected.addRulerGuide('horizontal', 10);
     selected.addRulerGuide('horizontal', height - 10);
   } else if (page) {
-    console.log('bound', penpot.viewport.bounds);
-    const { x, y, width, height } = penpot.viewport.bounds;
+    console.log('bound', logos.viewport.bounds);
+    const { x, y, width, height } = logos.viewport.bounds;
     page.addRulerGuide('vertical', x + 100);
     page.addRulerGuide('vertical', x + width - 50);
     page.addRulerGuide('horizontal', y + 100);
@@ -496,11 +496,11 @@ function createMargins() {
 }
 
 async function addComment() {
-  const shape = penpot.selection[0];
+  const shape = logos.selection[0];
 
   if (shape) {
     const content = shape.name + ' - ' + Date.now();
-    const cthr = await penpot.currentPage?.findCommentThreads();
+    const cthr = await logos.currentPage?.findCommentThreads();
     const th = cthr && cthr[0];
 
     if (th) {
@@ -512,29 +512,29 @@ async function addComment() {
       }
     } else {
       console.log('Create new thread', content);
-      await penpot.currentPage?.addCommentThread(content, shape.center);
+      await logos.currentPage?.addCommentThread(content, shape.center);
     }
   }
 }
 
 async function exportFile() {
-  const data = await penpot.currentFile?.export('penpot');
+  const data = await logos.currentFile?.export('logos');
 
   if (data) {
-    penpot.ui.sendMessage({
+    logos.ui.sendMessage({
       type: 'start-download',
-      name: 'Export.penpot',
+      name: 'Export.logos',
       content: data,
     });
   }
 }
 
 async function exportSelected() {
-  const selection = await penpot.selection[0];
+  const selection = await logos.selection[0];
 
   if (selection) {
     const data = await selection.export({ type: 'png', skipChildren: true });
-    penpot.ui.sendMessage({
+    logos.ui.sendMessage({
       type: 'start-download',
       name: 'export.png',
       content: data,
@@ -543,25 +543,25 @@ async function exportSelected() {
 }
 
 async function resizeModal() {
-  penpot.ui.resize(1920, 1080);
+  logos.ui.resize(1920, 1080);
 }
 
 async function saveLocalStorage() {
-  const oldvalue = penpot.localStorage.getItem('test');
+  const oldvalue = logos.localStorage.getItem('test');
   const newvalue = oldvalue ? parseInt(oldvalue, 10) + 1 : 1;
   console.log(newvalue);
-  penpot.localStorage.setItem('test', newvalue);
+  logos.localStorage.setItem('test', newvalue);
 }
 
 function getVariantsFromSelection(): Variants | null {
-  const shape = penpot.selection?.[0];
+  const shape = logos.selection?.[0];
   if (!shape) return null;
 
-  if (penpot.utils.types.isVariantContainer(shape)) {
+  if (logos.utils.types.isVariantContainer(shape)) {
     return shape.variants;
   } else {
     const component = shape.component();
-    if (component && penpot.utils.types.isVariantComponent(component)) {
+    if (component && logos.utils.types.isVariantComponent(component)) {
       return component.variants;
     }
   }
@@ -569,7 +569,7 @@ function getVariantsFromSelection(): Variants | null {
 }
 
 function transformInVariant() {
-  const component = penpot.selection?.[0].component();
+  const component = logos.selection?.[0].component();
 
   if (component && !component.isVariant()) {
     component.transformInVariant();
@@ -577,15 +577,15 @@ function transformInVariant() {
 }
 
 function combineSelectedAsVariants() {
-  if (penpot.selection) {
-    const ids: string[] = penpot.selection.map((item) => item.id);
-    penpot.selection[0]?.combineAsVariants(ids);
+  if (logos.selection) {
+    const ids: string[] = logos.selection.map((item) => item.id);
+    logos.selection[0]?.combineAsVariants(ids);
   }
 }
 
 function addVariant() {
-  const shape = penpot.selection?.[0];
-  if (penpot.utils.types.isVariantContainer(shape)) {
+  const shape = logos.selection?.[0];
+  if (logos.utils.types.isVariantContainer(shape)) {
     shape.variants?.addVariant();
   }
 }
@@ -603,15 +603,15 @@ function renameProperty(pos: number, name: string) {
 }
 
 function setVariantProperty(pos: number, value: string) {
-  const component = penpot.selection && penpot.selection[0].component();
+  const component = logos.selection && logos.selection[0].component();
 
-  if (component && penpot.utils.types.isVariantComponent(component)) {
+  if (component && logos.utils.types.isVariantComponent(component)) {
     component.setVariantProperty(pos, value);
   }
 }
 
 function switchVariant(pos: number, value: string) {
-  const shape = penpot.selection && penpot.selection[0];
+  const shape = logos.selection && logos.selection[0];
 
   if (shape?.isVariantHead()) {
     shape.switchVariant(pos, value);

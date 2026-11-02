@@ -57,34 +57,34 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
         code: (x, y, w) => `
 (async () => {
   const pad = 60;
-  const frame = penpot.createFrame();
+  const frame = logos.createFrame();
   frame.name = "Hero Section";
   frame.x = ${x}; frame.y = ${y};
   frame.width = ${w}; frame.height = 480;
   frame.fills = [{ fillType: 'solid', fillColor: '#1e1e2e', fillOpacity: 1 }];
 
-  const heading = penpot.createText("The Future of Design");
+  const heading = logos.createText("The Future of Design");
   heading.name = "Heading";
   heading.x = ${x} + pad; heading.y = ${y} + 120;
   heading.width = ${w} - pad * 2; heading.height = 64;
   heading.fontSize = 48; heading.fontWeight = "700";
   heading.fills = [{ fillType: 'solid', fillColor: '#cdd6f4', fillOpacity: 1 }];
 
-  const sub = penpot.createText("Open-source design, powered by Rust and AI.");
+  const sub = logos.createText("Open-source design, powered by Rust and AI.");
   sub.name = "Subheading";
   sub.x = ${x} + pad; sub.y = ${y} + 200;
   sub.width = ${w} - pad * 2; sub.height = 36;
   sub.fontSize = 20; sub.fontWeight = "400";
   sub.fills = [{ fillType: 'solid', fillColor: '#a6adc8', fillOpacity: 1 }];
 
-  const btn1 = penpot.createRect();
+  const btn1 = logos.createRect();
   btn1.name = "Primary CTA";
   btn1.x = ${x} + pad; btn1.y = ${y} + 280;
   btn1.width = 160; btn1.height = 48;
   btn1.fills = [{ fillType: 'solid', fillColor: '#89b4fa', fillOpacity: 1 }];
   btn1.borderRadius = 8;
 
-  const btn2 = penpot.createRect();
+  const btn2 = logos.createRect();
   btn2.name = "Secondary CTA";
   btn2.x = ${x} + pad + 176; btn2.y = ${y} + 280;
   btn2.width = 160; btn2.height = 48;
@@ -103,50 +103,50 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
   const fw = Math.min(${w}, 400);
   const cx = ${x} + (${w} - fw) / 2;
 
-  const frame = penpot.createFrame();
+  const frame = logos.createFrame();
   frame.name = "Login Form";
   frame.x = cx; frame.y = ${y};
   frame.width = fw; frame.height = 420;
   frame.fills = [{ fillType: 'solid', fillColor: '#1e1e2e', fillOpacity: 1 }];
   frame.borderRadius = 12;
 
-  const title = penpot.createText("Sign in");
+  const title = logos.createText("Sign in");
   title.name = "Title"; title.x = cx + 32; title.y = ${y} + 40;
   title.width = fw - 64; title.height = 40;
   title.fontSize = 28; title.fontWeight = "700";
   title.fills = [{ fillType: 'solid', fillColor: '#cdd6f4', fillOpacity: 1 }];
 
   // Email field
-  const emailLabel = penpot.createText("Email");
+  const emailLabel = logos.createText("Email");
   emailLabel.name = "Email Label"; emailLabel.x = cx + 32; emailLabel.y = ${y} + 108;
   emailLabel.width = fw - 64; emailLabel.height = 20; emailLabel.fontSize = 13;
   emailLabel.fills = [{ fillType: 'solid', fillColor: '#a6adc8', fillOpacity: 1 }];
 
-  const emailInput = penpot.createRect();
+  const emailInput = logos.createRect();
   emailInput.name = "Email Input"; emailInput.x = cx + 32; emailInput.y = ${y} + 132;
   emailInput.width = fw - 64; emailInput.height = 44;
   emailInput.fills = [{ fillType: 'solid', fillColor: '#313244', fillOpacity: 1 }];
   emailInput.borderRadius = 6;
 
   // Password field
-  const pwLabel = penpot.createText("Password");
+  const pwLabel = logos.createText("Password");
   pwLabel.name = "Password Label"; pwLabel.x = cx + 32; pwLabel.y = ${y} + 200;
   pwLabel.width = fw - 64; pwLabel.height = 20; pwLabel.fontSize = 13;
   pwLabel.fills = [{ fillType: 'solid', fillColor: '#a6adc8', fillOpacity: 1 }];
 
-  const pwInput = penpot.createRect();
+  const pwInput = logos.createRect();
   pwInput.name = "Password Input"; pwInput.x = cx + 32; pwInput.y = ${y} + 224;
   pwInput.width = fw - 64; pwInput.height = 44;
   pwInput.fills = [{ fillType: 'solid', fillColor: '#313244', fillOpacity: 1 }];
   pwInput.borderRadius = 6;
 
-  const submitBtn = penpot.createRect();
+  const submitBtn = logos.createRect();
   submitBtn.name = "Submit Button"; submitBtn.x = cx + 32; submitBtn.y = ${y} + 300;
   submitBtn.width = fw - 64; submitBtn.height = 48;
   submitBtn.fills = [{ fillType: 'solid', fillColor: '#89b4fa', fillOpacity: 1 }];
   submitBtn.borderRadius = 8;
 
-  const submitLabel = penpot.createText("Sign in");
+  const submitLabel = logos.createText("Sign in");
   submitLabel.name = "Submit Label"; submitLabel.x = cx + 32; submitLabel.y = ${y} + 312;
   submitLabel.width = fw - 64; submitLabel.height = 24; submitLabel.fontSize = 15;
   submitLabel.fontWeight = "600"; submitLabel.textAlign = "center";
@@ -170,35 +170,35 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
   for (let i = 0; i < cols; i++) {
     const cx = ${x} + gap + i * (cardW + gap);
 
-    const card = penpot.createFrame();
+    const card = logos.createFrame();
     card.name = "Card " + (i + 1);
     card.x = cx; card.y = ${y} + gap;
     card.width = cardW; card.height = cardH;
     card.fills = [{ fillType: 'solid', fillColor: '#1e1e2e', fillOpacity: 1 }];
     card.borderRadius = 12;
 
-    const img = penpot.createRect();
+    const img = logos.createRect();
     img.name = "Image " + (i + 1);
     img.x = cx; img.y = ${y} + gap;
     img.width = cardW; img.height = 140;
     img.fills = [{ fillType: 'solid', fillColor: '#313244', fillOpacity: 1 }];
     img.borderRadius = 12;
 
-    const cardTitle = penpot.createText("Card Title " + (i + 1));
+    const cardTitle = logos.createText("Card Title " + (i + 1));
     cardTitle.name = "Card Title " + (i + 1);
     cardTitle.x = cx + 16; cardTitle.y = ${y} + gap + 152;
     cardTitle.width = cardW - 32; cardTitle.height = 24;
     cardTitle.fontSize = 16; cardTitle.fontWeight = "600";
     cardTitle.fills = [{ fillType: 'solid', fillColor: '#cdd6f4', fillOpacity: 1 }];
 
-    const body = penpot.createText("Short description of the card content.");
+    const body = logos.createText("Short description of the card content.");
     body.name = "Body " + (i + 1);
     body.x = cx + 16; body.y = ${y} + gap + 180;
     body.width = cardW - 32; body.height = 40;
     body.fontSize = 13;
     body.fills = [{ fillType: 'solid', fillColor: '#a6adc8', fillOpacity: 1 }];
 
-    const cta = penpot.createRect();
+    const cta = logos.createRect();
     cta.name = "CTA " + (i + 1);
     cta.x = cx + 16; cta.y = ${y} + gap + 232;
     cta.width = 96; cta.height = 32;
@@ -216,13 +216,13 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
         label: "Navigation bar",
         code: (x, y, w) => `
 (async () => {
-  const nav = penpot.createFrame();
+  const nav = logos.createFrame();
   nav.name = "Navigation Bar";
   nav.x = ${x}; nav.y = ${y};
   nav.width = ${w}; nav.height = 64;
   nav.fills = [{ fillType: 'solid', fillColor: '#181825', fillOpacity: 1 }];
 
-  const logo = penpot.createText("Logos");
+  const logo = logos.createText("Logos");
   logo.name = "Logo"; logo.x = ${x} + 24; logo.y = ${y} + 18;
   logo.width = 80; logo.height = 28;
   logo.fontSize = 20; logo.fontWeight = "700";
@@ -232,7 +232,7 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
   const itemW = 80;
   const startX = ${x} + ${w} - items.length * (itemW + 8) - 24;
   items.forEach((label, i) => {
-    const item = penpot.createText(label);
+    const item = logos.createText(label);
     item.name = label;
     item.x = startX + i * (itemW + 8); item.y = ${y} + 20;
     item.width = itemW; item.height = 24;
@@ -257,14 +257,14 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
     { label: "Message", row: 2, tall: true },
   ];
 
-  const frame = penpot.createFrame();
+  const frame = logos.createFrame();
   frame.name = "Contact Form";
   frame.x = cx; frame.y = ${y};
   frame.width = fw; frame.height = 480;
   frame.fills = [{ fillType: 'solid', fillColor: '#1e1e2e', fillOpacity: 1 }];
   frame.borderRadius = 12;
 
-  const title = penpot.createText("Get in touch");
+  const title = logos.createText("Get in touch");
   title.name = "Title"; title.x = cx + 32; title.y = ${y} + 32;
   title.width = fw - 64; title.height = 40;
   title.fontSize = 26; title.fontWeight = "700";
@@ -273,12 +273,12 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
   let offsetY = ${y} + 96;
   const created = ["Contact Form"];
   for (const f of fields) {
-    const lbl = penpot.createText(f.label);
+    const lbl = logos.createText(f.label);
     lbl.name = f.label + " Label"; lbl.x = cx + 32; lbl.y = offsetY;
     lbl.width = fw - 64; lbl.height = 18; lbl.fontSize = 13;
     lbl.fills = [{ fillType: 'solid', fillColor: '#a6adc8', fillOpacity: 1 }];
 
-    const inp = penpot.createRect();
+    const inp = logos.createRect();
     inp.name = f.label + " Input"; inp.x = cx + 32; inp.y = offsetY + 22;
     inp.width = fw - 64; inp.height = f.tall ? 100 : 44;
     inp.fills = [{ fillType: 'solid', fillColor: '#313244', fillOpacity: 1 }];
@@ -288,7 +288,7 @@ const TEMPLATES: Array<{ keywords: string[]; label: string; code: Template }> = 
     created.push(f.label + " Input");
   }
 
-  const btn = penpot.createRect();
+  const btn = logos.createRect();
   btn.name = "Send Button"; btn.x = cx + 32; btn.y = offsetY;
   btn.width = fw - 64; btn.height = 48;
   btn.fills = [{ fillType: 'solid', fillColor: '#89b4fa', fillOpacity: 1 }];
@@ -341,14 +341,14 @@ export class GenerateLayoutTool extends Tool<GenerateLayoutArgs> {
             // Fallback: generate a generic frame with a label
             const fallbackCode = `
 (async () => {
-  const frame = penpot.createFrame();
+  const frame = logos.createFrame();
   frame.name = "Generated Frame";
   frame.x = ${x}; frame.y = ${y};
   frame.width = ${width}; frame.height = 400;
   frame.fills = [{ fillType: 'solid', fillColor: '#1e1e2e', fillOpacity: 1 }];
   frame.borderRadius = 8;
 
-  const label = penpot.createText(${JSON.stringify(args.prompt)});
+  const label = logos.createText(${JSON.stringify(args.prompt)});
   label.name = "Prompt Label";
   label.x = ${x} + 32; label.y = ${y} + 32;
   label.width = ${width} - 64; label.height = 40;

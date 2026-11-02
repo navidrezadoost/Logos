@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer';
-import { PenpotApi } from './api';
+import { LogosApi } from './api';
 import { getFileUrl } from './get-file-url';
 import { idObjectToArray } from './clean-id';
 import { Shape } from '../models/shape.model';
@@ -45,11 +45,11 @@ function replaceIds(shapes: Shape[]) {
 }
 
 export async function Agent() {
-  console.log('Initializing Penpot API...');
-  const penpotApi = await PenpotApi();
+  console.log('Initializing Logos API...');
+  const logosApi = await LogosApi();
 
   console.log('Creating file...');
-  const file = await penpotApi.createFile();
+  const file = await logosApi.createFile();
   console.log('File created with id:', file['~:id']);
 
   const fileUrl = getFileUrl(file);
@@ -64,7 +64,7 @@ export async function Agent() {
   console.log('Setting authentication cookie...');
   page.setCookie({
     name: 'auth-token',
-    value: penpotApi.getAuth().split('=')[1],
+    value: logosApi.getAuth().split('=')[1],
     domain: 'localhost',
     path: '/',
     expires: (Date.now() + 3600 * 1000) / 1000,
@@ -85,7 +85,7 @@ export async function Agent() {
 
   const finish = async () => {
     console.log('Deleting file and closing browser...');
-    await penpotApi.deleteFile(file['~:id']);
+    await logosApi.deleteFile(file['~:id']);
     await browser.close();
     console.log('Clean up done.');
   };

@@ -43,7 +43,7 @@ export const VOCAB_SIZE = 8192;
 
 // Merges are ordered by decreasing corpus frequency (higher priority → smaller ID).
 // These were derived by running BPE over a corpus of:
-//   • CSSspecification text, Figma plugin source, Sketch symbols exports,
+//   • CSSspecification text, design tool plugin source, Sketch symbols exports,
 //     common design-system READMEs, and W3C design-token spec.
 
 const MERGE_TABLE: readonly [string, number][] = [

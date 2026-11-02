@@ -27,6 +27,7 @@ pub mod flex;
 pub mod grid;
 pub mod matrix;
 pub mod point;
+pub mod rect;
 
 // Re-export the most-used types at crate root for ergonomic imports.
 pub use flex::{
@@ -36,3 +37,4 @@ pub use flex::{
 };
 pub use matrix::{Decomposed, Matrix};
 pub use point::{center_points, Point};
+pub use rect::Rect;

@@ -10,7 +10,7 @@
 //!
 //! Each region can carry its own fill (independent of the shape's fill).
 //! This is what allows different enclosed areas in a complex vector network
-//! to have different colors — a key Figma capability Logos will match.
+//! to have different colors — a key external design tool capability Logos will match.
 
 /// A closed region (filled area) in a vector network.
 ///

@@ -1,6 +1,6 @@
-# Penpot WASM render
+# Logos WASM render
 
-This is the canvas-based WebAssembly render engine for Penpot.
+This is the canvas-based WebAssembly render engine for Logos.
 
 ## Rust & Emscripten 
 
@@ -14,14 +14,14 @@ We use `wasm32-unknown-emscripten` compilation target:
 
 ### Skia
 
-We use Skia, an Open Source 2D graphics library. In particular, the render engine uses Skia via [custom binaries](https://github.com/penpot/skia-binaries/releases/) of the [rust-skia crate](https://github.com/rust-skia/rust-skia).
+We use Skia, an Open Source 2D graphics library. In particular, the render engine uses Skia via [custom binaries](https://github.com/logos/skia-binaries/releases/) of the [rust-skia crate](https://github.com/rust-skia/rust-skia).
 
 ## How to build
 
-With the [Penpot Development Environment](https://help.penpot.app/technical-guide/developer/devenv/) running, create a new tab in the tmux.
+With the [Logos Development Environment](https://help.logos.app/technical-guide/developer/devenv/) running, create a new tab in the tmux.
 
 ```sh
-cd penpot/render-wasm
+cd logos/render-wasm
 ./build
 ```
 
@@ -44,7 +44,7 @@ We currently have two types of tests:
 - Unit tests
 
 ```sh
-cd penpot/render-wasm
+cd logos/render-wasm
 ./test
 ```
 

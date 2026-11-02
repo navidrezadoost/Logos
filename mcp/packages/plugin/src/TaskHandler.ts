@@ -1,5 +1,5 @@
 /**
- * Represents a task received from the MCP server in the Penpot MCP plugin
+ * Represents a task received from the MCP server in the Logos MCP plugin
  */
 export class Task<TParams = any> {
     public isResponseSent: boolean = false;
@@ -35,7 +35,7 @@ export class Task<TParams = any> {
         };
 
         // Send to main.ts which will forward to MCP server via WebSocket
-        penpot.ui.sendMessage(response);
+        logos.ui.sendMessage(response);
         console.log("Sent task response:", response);
         this.isResponseSent = true;
     }
@@ -50,7 +50,7 @@ export class Task<TParams = any> {
 }
 
 /**
- * Abstract base class for task handlers in the Penpot MCP plugin.
+ * Abstract base class for task handlers in the Logos MCP plugin.
  *
  * @template TParams - The type of parameters this handler expects
  */

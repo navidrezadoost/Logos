@@ -1,28 +1,28 @@
 export default function () {
   function group() {
-    const selected = penpot.selection;
+    const selected = logos.selection;
 
-    if (selected.length && !penpot.utils.types.isGroup(selected[0])) {
-      return penpot.group(selected);
+    if (selected.length && !logos.utils.types.isGroup(selected[0])) {
+      return logos.group(selected);
     }
   }
 
   function ungroup() {
-    const selected = penpot.selection;
+    const selected = logos.selection;
 
-    if (selected.length && penpot.utils.types.isGroup(selected[0])) {
-      return penpot.ungroup(selected[0]);
+    if (selected.length && logos.utils.types.isGroup(selected[0])) {
+      return logos.ungroup(selected[0]);
     }
   }
 
-  const rectangle = penpot.createRectangle();
-  rectangle.x = penpot.viewport.center.x;
-  rectangle.y = penpot.viewport.center.y;
-  const rectangle2 = penpot.createRectangle();
-  rectangle2.x = penpot.viewport.center.x + 100;
-  rectangle2.y = penpot.viewport.center.y + 100;
+  const rectangle = logos.createRectangle();
+  rectangle.x = logos.viewport.center.x;
+  rectangle.y = logos.viewport.center.y;
+  const rectangle2 = logos.createRectangle();
+  rectangle2.x = logos.viewport.center.x + 100;
+  rectangle2.y = logos.viewport.center.y + 100;
 
-  penpot.selection = [rectangle, rectangle2];
+  logos.selection = [rectangle, rectangle2];
 
   group();
   ungroup();
