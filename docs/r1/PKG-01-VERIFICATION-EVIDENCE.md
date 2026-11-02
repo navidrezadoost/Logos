@@ -2,6 +2,7 @@
 
 **Status:** Focused verification passed; canonical schema/deployment provenance remains open  
 **Base commit:** `d387cc83fd3f45d1ffe019bf86b1c52dcf27c866` (`origin/main`, after PKG-00–02 merges)  
+**Verification commit:** `f0ac2795118767b6045d8c36fec9a79174673520`  
 **Branch/worktree:** `r1/pkg01-verification` — `/home/navidrezadoost/Documents/Github/Logos-r1-pkg01-verification`
 
 ## Schema provenance and isolation
