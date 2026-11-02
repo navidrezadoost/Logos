@@ -1,6 +1,6 @@
 # R1 PKG-02 — Runtime Verification Follow-up
 
-**Status:** Verification incomplete; remote MCP remains disabled; no rollout approval
+**Status:** Local Node 20 transport suite and server type-check pass; full workspace/plugin/proxy/deployment gates remain open
 **Base commit:** `ddae16ad048cf429b386f14e66095ba8faddb256` (`origin/main`, after PRs #27–32)
 **Branch/worktree:** `r1/pkg02-mcp-runtime-followup` — `/home/navidrezadoost/Documents/Github/Logos-r1-pkg02-mcp-runtime-followup`
 
@@ -16,21 +16,26 @@ The merged implementation requires a per-run local bearer for MCP HTTP/SSE/REPL,
 | `docker-compose config --format json` with a generated disposable token (`docker-compose` 5.6.0) | **Pass** — six services resolve; all 21 host-published ports use `127.0.0.1`; no MCP upstream ports 4400–4402 are host-published. Compose emitted an unset `CURRENT_USER_ID` warning. |
 | `docker-compose config` without `LOGOS_MCP_LOCAL_TOKEN` | **Expected fail-closed** — configuration rejects the missing per-run token before startup. |
 | Temporary Node 20 container mapped to host `127.0.0.1:55440` | **Previously recorded in merged PKG-02 evidence; not rerun in this follow-up pass.** The recorded check showed a host loopback response and the container was removed. |
-| `pnpm install --offline --frozen-lockfile` | **Blocked** — local store lacks lockfile-pinned packages (observed `concurrently@9.2.1`). Lockfile remains unchanged. |
-| `pnpm install --frozen-lockfile` | **Blocked** — repeated registry tarball `ETIMEDOUT` warnings; this attempt reached the 180-second tool timeout. No lockfile change. |
-| `pnpm --filter mcp-server types:check` / `pnpm --filter mcp-plugin types:check` | **Blocked** — `tsc` absent because dependencies are unavailable. |
-| `pnpm --filter mcp-server test:security` | **Blocked** — `esbuild` absent; actual listener assertions did not execute. |
-| `gh run list` for the pushed follow-up branch | **Blocked** — GitHub Actions API connection reset; no hosted run result was verified. |
+| Actual `node dist/index.js` with token unset / host `0.0.0.0` | **Pass** — each process exited 1 with the expected missing-token / non-loopback error. |
+| Full `pnpm install --frozen-lockfile` in Node 20/pnpm 10.28.2 | **Blocked** — registry returns 404 for locked `@logos/plugin-styles@1.4.1` (no auth header); this repo contains local `@logos/plugin-styles@1.4.2` and `@logos/plugin-types@1.4.2`. No versions/lockfile changed. |
+| Filtered lockfile installs for MCP server/common | **Pass** — server/common dependency sets installed without the plugin-only 404. pnpm warned that esbuild/sharp build scripts were ignored; esbuild's binary was available and the security suite ran. |
+| `pnpm --filter mcp-common build` then `pnpm --filter mcp-server types:check` | **Pass** — server type-check succeeds when the shared package's `dist` declarations are built first. The workflow now includes this build step. |
+| `pnpm --filter mcp-server test:security` | **Pass** — 4 tests, 0 failures, Node 20.11.1/pnpm 10.28.2; listener bound to `127.0.0.1` on ephemeral ports. |
+| Isolated actual Caddy/Nginx/MCP harness using the repository Caddyfile/Nginx config | **Pass, scoped** — Caddy 2.10.2 and Nginx 1.22.1; host publishes only `127.0.0.1:3450`. Through both proxies, unauthorized HTTP/SSE/REPL/pairing was denied; authorized MCP initialize/tools/list, pairing, and WebSocket auth worked; replay/unpaired WebSockets closed with 1008. Host listener was removed at shutdown. |
+| Separate container on the test bridge | **Pass** — Compose-style `logos-devenv-main` alias reached Caddy/Nginx but unauthenticated MCP requests returned 401; raw MCP HTTP/WS/REPL upstream ports 4401–4403 refused bridge connections. |
+| `gh run list` for the pushed follow-up branch | **Blocked** — GitHub Actions API connection reset; hosted CI status was not verified. |
 
-An earlier online frozen install attempt timed out against `registry.npmjs.org`. No dependency/lockfile version was changed.
+Earlier default Docker-bridge installs also timed out. Host-network access enabled the targeted server install and tests, but the full plugin workspace still needs an authorized source for its locked 1.4.1 `@logos/*` packages. Do not substitute the repository's 1.4.2 packages or change the lock without approval.
 
 ## Remaining runtime/exposure gates
 
-- Run the type checks and actual listener suite in a dependency-provisioned Node 20 environment. The follow-up adds assertions for missing-token/off-loopback constructor failure, successful authenticated MCP HTTP (`200`), and authenticated/unauthenticated legacy SSE `/sse` and `/messages`. They are authored and syntax-checked, but unexecuted; existing coverage includes invalid bearer, pairing expiry/replay, WebSocket task-before-auth, REPL authorization, and shutdown listener cleanup.
-- The test asserts constructor fail-closed behavior, not a spawned process exit status; record that distinction when reporting results.
-- The Compose/Caddy/Nginx path is not running in this environment. Host-port config and a generic Docker port smoke test pass, but the full proxy/upgrade path is not tested. Caddy/Nginx binaries and the mutable `logos/devenv:latest` runtime are unavailable here.
-- Compose binds Caddy on the container interface so Docker forwarding works while host-published ports stay loopback-only. Other containers on the Compose bridge can reach that proxy; verify the bridge trust boundary and actual ingress in an isolated stack.
+- The executed suite covers missing-token/off-loopback constructor rejection; missing/wrong bearer and query-token bypass; a valid MCP initialize/notifications/tools-list flow; unauthenticated and authenticated SSE `/sse`/`/messages`; REPL auth; one-time pairing expiry and replay; forged WebSocket task before auth; and shutdown listener cleanup. The listener assertions passed locally.
+- The listener test includes constructor fail-closed assertions; separate process-level checks confirm missing-token and non-loopback startup exit 1. Pairing expiry is covered by the helper and by an expired-code WebSocket rejection using a controlled clock; replay is rejected on a live WebSocket. The bearer token itself has no expiry field in this local profile.
+- The isolated harness ran the repository's actual Caddyfile and Nginx config, but not the full `logos/devenv:latest` image or all Compose services. The Caddy TLS site on 3449 and a restart cycle were not tested.
+- The harness confirms the Docker bridge distinction: sibling containers using the Compose alias can reach the Caddy/Nginx edge despite loopback-only host publication, but unauthenticated requests are denied and raw MCP upstream listeners remain loopback-only. An IP-based Host header to Caddy returned an empty `200` with no body rather than routing to MCP; no protected data was returned. Review accepted Host behavior before treating arbitrary bridge clients as trusted. Production bridge membership and ingress rules remain unknown.
 - Production hosts, firewall/security-group rules, ingress routes and deployed versions remain unknown. The local listener inventory showed no Logos process; this is not production evidence.
 - The one-time pairing code is per-connection and single-use but is not bound to a persistent plugin identity. Keep remote access disabled; do not distribute the local profile or relax auth for clients lacking bearer support.
+
+The local bearer is a per-run static secret with no expiry field; invalid bearer requests are denied. The one-minute expiry applies to plugin pairing codes and was tested with controlled helper timestamps.
 
 No production rollout is authorized.
