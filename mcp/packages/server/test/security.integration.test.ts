@@ -101,6 +101,32 @@ test("all local MCP transports require authentication and cannot bind off-loopba
         assert.notEqual(authenticatedMcp.status, 401);
         await authenticatedMcp.body?.cancel();
 
+        const unauthenticatedSse = await fetch(`${base}/sse`, {
+            headers: { accept: "text/event-stream" },
+        });
+        assert.equal(unauthenticatedSse.status, 401);
+        await unauthenticatedSse.body?.cancel();
+
+        const unauthenticatedSseMessage = await fetch(`${base}/messages?sessionId=missing`, { method: "POST" });
+        assert.equal(unauthenticatedSseMessage.status, 401);
+        await unauthenticatedSseMessage.body?.cancel();
+
+        const authenticatedSseMessage = await fetch(`${base}/messages?sessionId=missing`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${token}` },
+        });
+        assert.equal(authenticatedSseMessage.status, 400);
+        await authenticatedSseMessage.body?.cancel();
+
+        const authenticatedSse = await fetch(`${base}/sse`, {
+            headers: {
+                authorization: `Bearer ${token}`,
+                accept: "text/event-stream",
+            },
+        });
+        assert.equal(authenticatedSse.status, 200);
+        await authenticatedSse.body?.cancel();
+
         const unauthenticatedRepl = await fetch(`${replBase}/execute`, { method: "POST" });
         assert.equal(unauthenticatedRepl.status, 401);
         await unauthenticatedRepl.body?.cancel();
