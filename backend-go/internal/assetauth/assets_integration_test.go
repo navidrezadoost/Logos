@@ -175,6 +175,21 @@ func TestAssetByIDHandlerEnforcesResourceAuthorization(t *testing.T) {
 			t.Fatalf("%s: unauthorized response disclosed asset metadata or bytes", name)
 		}
 	}
+	assertForbidden := func(name string, h http.HandlerFunc, method, path string, body []byte) {
+		t.Helper()
+		req := httptest.NewRequest(method, path, bytes.NewReader(body))
+		req = req.WithContext(auth.WithProfileID(req.Context(), otherID))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s: expected 403, got %d %s", name, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), privateAssetFixture) ||
+			strings.Contains(rec.Body.String(), mediaID) ||
+			rec.Header().Get("Content-Type") == "image/png" {
+			t.Fatalf("%s: denied metadata endpoint disclosed asset details", name)
+		}
+	}
 
 	assertAllowed("file owner", request(ownerID, mediaID, ""))
 	assertAllowed("project reader", request(memberID, mediaID, ""))
@@ -192,6 +207,27 @@ func TestAssetByIDHandlerEnforcesResourceAuthorization(t *testing.T) {
 	assertHidden("other profile photo remains private", request(memberID, profilePhotoID, ""))
 	assertHidden("unmapped storage bucket", request(ownerID, unknownBucketID, ""))
 	assertHidden("unmapped storage bucket anonymous", request("", unknownBucketID, ""))
+	assertForbidden("media metadata endpoint", handler.GetFileMediaObjectsHandler(pool), http.MethodGet,
+		"/api/rpc/command/get-file-media-objects?file-id="+fileID, nil)
+	assertForbidden("object thumbnail metadata endpoint", handler.GetFileObjectThumbnailsHandler(pool), http.MethodGet,
+		"/api/rpc/command/get-file-object-thumbnails?file-id="+fileID, nil)
+	assertForbidden("file thumbnail metadata endpoint", handler.GetFileThumbnailHandler(pool), http.MethodGet,
+		"/api/rpc/command/get-file-thumbnail?file-id="+fileID, nil)
+	assertForbidden("thumbnail preview endpoint", handler.GetFileDataForThumbnailHandler(pool), http.MethodGet,
+		"/api/rpc/command/get-file-data-for-thumbnail?file-id="+fileID, nil)
+	assertForbidden("font metadata endpoint", handler.GetFontVariantsHandler(pool), http.MethodGet,
+		"/api/rpc/command/get-font-variants?team-id="+teamID, nil)
+	unauthorizedExport, _ := json.Marshal(map[string]string{"fileId": fileID})
+	assertForbidden("native archive export endpoint", handler.ExportBinfileHandler(pool, storage.Backend(store)), http.MethodPost,
+		"/api/rpc/command/export-binfile", unauthorizedExport)
+	unauthorizedViewer := httptest.NewRequest(http.MethodGet,
+		"/api/rpc/command/get-view-only-bundle?file-id="+fileID, nil)
+	unauthorizedViewer = unauthorizedViewer.WithContext(auth.WithProfileID(unauthorizedViewer.Context(), otherID))
+	unauthorizedViewerRec := httptest.NewRecorder()
+	handler.GetViewOnlyBundleHandler(pool).ServeHTTP(unauthorizedViewerRec, unauthorizedViewer)
+	if unauthorizedViewerRec.Code != http.StatusForbidden {
+		t.Fatalf("unauthorized view-only bundle: expected 403, got %d", unauthorizedViewerRec.Code)
+	}
 
 	shareBody, _ := json.Marshal(map[string]any{
 		"fileId": fileID, "whoComment": "all", "whoInspect": "all", "pages": []string{},
