@@ -4,6 +4,7 @@
 **Verification status:** Partial; Go is green, Rust and React remain blocked by local dependency/toolchain availability  
 **Rollout approval:** Not approved / not applicable to CI-only changes  
 **Base commit:** `ac57a34cd0b5869aaa9580c4773c79e908aa4a95`  
+**Implementation commit:** `32c6a5f07c724c9bc91644c3e5151757145d076d`  
 **Branch/worktree:** `r1/pkg00-baseline` — `/home/navidrezadoost/Documents/Github/Logos-r1-stabilization`  
 **Report scope:** PKG-00 only. A31/A32 implementation is on separate R1 package branches.
 
