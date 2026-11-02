@@ -9,6 +9,7 @@ logos-wasm/dist/
 backend/logs/
 backend/scripts/_env.local
 Cargo.lock
+!rust/Cargo.lock
 # Frontend build outputs
 frontend/resources/public/css/
 frontend/resources/public/fonts/
