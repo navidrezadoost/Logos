@@ -161,7 +161,7 @@ func createTestTeamAndProject(t *testing.T, pool *db.Pool, profileID string) (st
 	req2 := httptest.NewRequest(http.MethodPost, "/api/rpc/command/create-project", bytes.NewReader(projBody))
 	req2 = req2.WithContext(auth.WithProfileID(req2.Context(), profileID))
 	rec2 := httptest.NewRecorder()
-	handler.CreateProjectHandler(pool).ServeHTTP(rec2, req2)
+	handler.CreateProjectHandler(pool, nil).ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("create project: %d %s", rec2.Code, rec2.Body.String())
 	}

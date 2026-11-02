@@ -100,8 +100,8 @@ func createTestProfile(t *testing.T, pool *db.Pool) string {
 	t.Helper()
 	var id string
 	err := pool.QueryRow(context.Background(), `
-		INSERT INTO profile (email, fullname, lang, theme)
-		VALUES ('test-'||gen_random_uuid()||'@example.com', 'Test User', 'en', 'default')
+		INSERT INTO profile (email, password, fullname, lang, theme)
+		VALUES ('test-'||gen_random_uuid()||'@example.com', 'test-only-not-an-auth-credential', 'Test User', 'en', 'default')
 		RETURNING id`).Scan(&id)
 	if err != nil {
 		t.Fatalf("create test profile: %v", err)
