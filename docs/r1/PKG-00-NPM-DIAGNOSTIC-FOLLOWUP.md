@@ -54,7 +54,7 @@ Error groups and locations:
 - `src/render-webgpu/llm-pipeline.ts`: missing `GPUBufferUsageFlags`, `GPUComputePipelineDescriptor`, and three `GPUQueue.onSubmittedWorkDone` declarations.
 - `src/stores/aiStore.ts:318`: nullable `requestWebGPUDevice()` result dereferenced without a null check.
 
-This was a real TypeScript build failure under the pinned install, not a download failure. The generated icon index formatting and `tsconfig.tsbuildinfo` created during the first build were restored/removed. A separate package-scoped correction branch, `r1/pkg00-react-build-fix` at `ae54bb91`, addresses these errors; its Node 20 `npm run build` (including `tsc -b` and Vite) passes. See `docs/r1/PKG-00-REACT-BUILD-FOLLOWUP.md` on that branch. This diagnostics branch remains documentation-only.
+This was a real TypeScript build failure under the pinned install, not a download failure. The generated icon index formatting and `tsconfig.tsbuildinfo` created during the first build were restored/removed. The separate package-scoped correction branch `r1/pkg00-react-build-fix` addresses these errors; its Node 20 `npm run build` (including `tsc -b` and Vite) passes. The current head (`ea5022fe`) also fixes the CI sync from `build/` to `dist/`; the full workspace bundle remains incomplete. See `docs/r1/PKG-00-REACT-BUILD-FOLLOWUP.md` on that branch. This diagnostics branch remains documentation-only.
 
 ## Independent Cargo access check
 
@@ -79,6 +79,10 @@ doc-tests: 28 passed; 0 failed
 
 This verifies the `rust/` domain workspace on Cargo/rustc 1.93.0. The root workspace (`cargo test --workspace --locked`, including `render-wasm`) remains unverified: its complete locked dependency cache was not restored; a root-cache HTTPS transfer for `anyhow 1.0.101` timed out part-way through. This is still a transport/cache blocker, not a Rust compilation result. GitHub-hosted CI status remains unavailable.
 
-The temporary Node containers were removed. Both React and the `rust/` domain workspace now pass locally with existing locks; root Rust workspace CI and the release artifact remain unresolved. Do not alter dependencies, regenerate locks, or weaken TLS; M0 remains open.
+## Release artifact path
+
+The React correction branch also resolved a CI output-directory mismatch: Vite writes `logos-app/build/`, while `logos-app CI` uploaded `logos-app/dist/` without syncing the build. The workflow now runs `scripts/sync-spa-to-dist.py` before upload. That sync created `dist/index.html` and `dist/assets/`, but reported `Missing workspace bundles in dist/js/. Ensure dist/js/main.js exists.` Therefore only the React SPA shell is evidenced; the full design workspace/WASM artifact remains incomplete. Separately, `.github/workflows/release.yml` still targets absent `logos-desktop` paths. The supported production frontend/server entrypoint remains unverified.
+
+The temporary Node containers were removed. Both React and the `rust/` domain workspace now pass locally with existing locks; root Rust workspace CI and a complete release artifact remain unresolved. Do not alter dependencies, regenerate locks, or weaken TLS; M0 remains open.
 
 No rollout approval is implied; M0 remains open.
