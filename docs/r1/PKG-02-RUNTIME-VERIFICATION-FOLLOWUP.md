@@ -46,9 +46,9 @@ If the release owner cannot restore/identify the intended public packages, a min
 
 #### Disposable local-workspace compatibility spike
 
-A scratch copy of `main` at `fcd57a9a` was created under `/tmp/opencode`. It linked the package-ready local 1.4.2 type/style outputs into a temporary MCP workspace, changed only the scratch manifest to `workspace:*`, and generated a scratch lockfile. On Node `v20.20.2` / pnpm `10.28.2`, a frozen install passed; `mcp-common` build, MCP server type-check, MCP listener tests (4/4), `mcp-plugin` type-check, and `mcp-plugin` Vite build all passed. This verifies source/API compatibility of the local 1.4.2 outputs with the current MCP plugin surface in a candidate workspace arrangement.
+A scratch copy of `main` at `fcd57a9a` was created under `/tmp/opencode`. The package-ready type output was copied as in `build-types.mjs`; the styles CSS was bundled with esbuild using the options from `build-css.mjs`. Those local 1.4.2 outputs were added to the scratch MCP workspace and the scratch plugin manifest used `workspace:*`. A temporary lock was generated there, then a frozen install was rerun. On Node `v20.20.2` / pnpm `10.28.2`, install, `mcp-common` build, MCP server type-check, MCP listener tests (4/4), `mcp-plugin` type-check, and `mcp-plugin` Vite build all passed. This is compatibility evidence for the local 1.4.2 package-ready outputs with the current MCP plugin surface in a candidate workspace arrangement.
 
-This does **not** prove equivalence to any unavailable published 1.4.1 artifact or authorize a repository manifest/lock change. The registry-published contract remains the documented current contract; a local workspace switch requires owner approval and a separately reviewed PR.
+This did not run a publish process and does **not** prove equivalence to an unavailable published 1.4.1 artifact. All manifest/workspace/lock changes were confined to `/tmp/opencode`; the repository remains unchanged. The documented registry-published contract is still the current contract; a local workspace switch requires owner approval and a separately reviewed PR.
 
 ## Remaining runtime/exposure gates
 
