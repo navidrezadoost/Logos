@@ -29,10 +29,14 @@ Earlier default Docker-bridge installs also timed out. Host-network access enabl
 
 ### Workspace package contract investigation
 
-- `pnpm --version` in the Node 20 test container was `10.28.2`. There is no repository-root `pnpm-workspace.yaml`; the two existing workspace files are `mcp/pnpm-workspace.yaml` and `plugins/pnpm-workspace.yaml`.
-- `mcp/pnpm-workspace.yaml` includes only `mcp/packages/common`, `server`, and `plugin`. `plugins/pnpm-workspace.yaml` separately includes `plugins/libs/**`; the local packages there are not members of the MCP workspace.
-- `mcp/packages/plugin/package.json` pins `@logos/plugin-styles` and `@logos/plugin-types` to exact `1.4.1`; `mcp/pnpm-lock.yaml` resolves both from the registry. The corresponding local manifests at `plugins/libs/plugins-styles/package.json` and `plugins/libs/plugin-types/package.json` are `1.4.2`.
-- The full frozen install's registry 404 therefore reflects an unavailable locked version (or missing authorized registry access), not just the earlier network timeout. Whether MCP should consume published `1.4.1` packages or workspace-link the local `1.4.2` packages is not established. I made no manifest/lock changes; owner approval is needed before choosing either contract.
+- `pnpm --version` in the Node 20 test container was `10.28.2`. There is no repository-root `pnpm-workspace.yaml`; `mcp/pnpm-workspace.yaml` and `plugins/pnpm-workspace.yaml` are separate roots. The MCP workspace contains only `mcp/packages/{common,server,plugin}`; the plugin workspace separately includes `plugins/libs/**`.
+
+| Package | MCP manifest/lock | Local workspace package | Documented source and observed result |
+|---|---|---|---|
+| `@logos/plugin-styles` | Exact `1.4.1`; lock resolves registry tarball `1.4.1` | `plugins/libs/plugins-styles/package.json` is `1.4.2`, outside the MCP workspace | README says `npm install @logos/plugin-styles`; full frozen install gets registry 404 for locked 1.4.1 with no authorization header. |
+| `@logos/plugin-types` | Exact `1.4.1`; lock resolves registry tarball `1.4.1` | `plugins/libs/plugin-types/package.json` is `1.4.2`, outside the MCP workspace | README says `npm install @logos/plugin-types`; the full install stops at the styles 404 before independently confirming this tarball. |
+
+No in-repository publish script/workflow was found. `plugins/.npmrc` only sets `ignore-workspace-root-check`; root and MCP `.npmrc` files are absent, and no npm/GitHub token was present in the test container. This points to a documented registry-published contract, but the owner, publication status of 1.4.1, and any external/private registry/auth process remain unverified. Local 1.4.2 is not proof of compatibility and was not substituted. I made no manifest/lock changes; owner confirmation is needed before choosing a registry or workspace-link contract.
 
 ## Remaining runtime/exposure gates
 
