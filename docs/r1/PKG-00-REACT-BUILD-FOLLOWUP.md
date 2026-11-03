@@ -38,7 +38,7 @@ No lockfile or dependency versions changed. The app has no unit-test/spec suite;
 
 `vite.config.ts` sets `build.outDir` to `build/`; the separate `scripts/sync-spa-to-dist.py` copies that SPA into `dist/`. Before this correction, `logos-app CI` ran `npm run build` and uploaded `logos-app/dist/` without running the sync step. The workflow now runs the sync step before uploading.
 
-The sync script succeeded locally and created `dist/index.html` plus `dist/assets/`, but it warned: `Missing workspace bundles in dist/js/. Ensure dist/js/main.js exists.` It did not create `dist/workspace.html`; the React shell redirects workspace routes there, and `sync-logos-workspace.py` exits before writing it when `main.js` is absent. Thus this output is a React dashboard shell, not the complete design editor/WASM artifact.
+The sync script succeeded locally and created `dist/index.html` plus `dist/assets/`, but it warned: `Missing workspace bundles in dist/js/. Ensure dist/js/main.js exists.` It did not create `dist/workspace.html`; the React shell redirects workspace routes there, and `sync-logos-workspace.py` exits before writing it when `main.js` is absent. `sync-spa-to-dist.py` invokes that workspace sync with `check=False`, so it returns success while producing only the partial React shell.
 
 ### `dist/js/main.js` producer/consumer finding
 
@@ -47,5 +47,7 @@ The sync script succeeded locally and created `dist/index.html` plus `dist/asset
 - **Historical lead:** Before Go transition commit `ea3b966b`, the repository had a ClojureScript `frontend/`; that commit removed its source. Historical `frontend/resources/public/js/` contained only `config.js`, two WASM files, and translations—not `main.js`. `manage.sh` still has a stale `build-frontend-bundle` function that expects `frontend/target/dist`, but the `frontend/` producer is absent from current main.
 
 This identifies a missing/retired workspace-bundle producer, not an npm or React compilation failure. No placeholder bundle was created. Whether the legacy workspace consumer is obsolete or must be restored from a separately owned/pinned build source requires an owner decision. The desktop release workflow still points at absent `logos-desktop`; the supported production frontend/server entrypoint remains unverified.
+
+The producer/consumer history is now traceable: before transition commit `ea3b966b`, `frontend/package.json` built `main` and `worker` with `shadow-cljs release`, and `manage.sh` packaged `frontend/target/dist`. That `frontend/` source/build tree was removed in the Go transition; the current `manage.sh` target is stale. Current `Makefile build-wasm` only produces the layout WASM module and does not regenerate the legacy `main.js` bundle. The source currently expresses a React-dashboard-plus-workspace composition, but no supported release owner has confirmed that composition remains the intended product.
 
 No production rollout is authorized.
