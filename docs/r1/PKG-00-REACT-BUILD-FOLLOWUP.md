@@ -38,6 +38,14 @@ No lockfile or dependency versions changed. The app has no unit-test/spec suite;
 
 `vite.config.ts` sets `build.outDir` to `build/`; the separate `scripts/sync-spa-to-dist.py` copies that SPA into `dist/`. Before this correction, `logos-app CI` ran `npm run build` and uploaded `logos-app/dist/` without running the sync step. The workflow now runs the sync step before uploading.
 
-The sync script succeeded locally and created `dist/index.html` plus `dist/assets/`, but it warned: `Missing workspace bundles in dist/js/. Ensure dist/js/main.js exists.` Thus the React dashboard shell is buildable, while the complete design workspace/WASM payload is still not available from the current checkout. `dist/` contains no tracked source artifact in this branch. The desktop release workflow still points at absent `logos-desktop`; the supported production frontend/server entrypoint remains unverified.
+The sync script succeeded locally and created `dist/index.html` plus `dist/assets/`, but it warned: `Missing workspace bundles in dist/js/. Ensure dist/js/main.js exists.` It did not create `dist/workspace.html`; the React shell redirects workspace routes there, and `sync-logos-workspace.py` exits before writing it when `main.js` is absent. Thus this output is a React dashboard shell, not the complete design editor/WASM artifact.
+
+### `dist/js/main.js` producer/consumer finding
+
+- **Consumer:** `logos-app/scripts/sync-logos-workspace.py` requires `dist/js/main.js` and references the legacy module set (`main-auth.js`, `main-dashboard.js`, `main-settings.js`, `main-viewer.js`, `main-workspace.js`, `main.js`, `rasterizer.js`, `render-wasm.js`, `render.js`, `shared.js`, and `util-highlight.js`). `LegacyHashRedirect.tsx` and `src/main.tsx` route workspace hashes to `/workspace.html`.
+- **Current producer:** None found in the current tree. `npm run build` emits only Vite `build/`; `sync-spa-to-dist.py` copies that shell into `dist/`. `Makefile`'s WASM target builds the layout WASM package under `logos-app/public/logos-layout/`, not the legacy JS module set. The current checkout has no tracked `frontend/resources/public/js` or `logos-app/dist` artifacts.
+- **Historical lead:** Before Go transition commit `ea3b966b`, the repository had a ClojureScript `frontend/`; that commit removed its source. Historical `frontend/resources/public/js/` contained only `config.js`, two WASM files, and translations—not `main.js`. `manage.sh` still has a stale `build-frontend-bundle` function that expects `frontend/target/dist`, but the `frontend/` producer is absent from current main.
+
+This identifies a missing/retired workspace-bundle producer, not an npm or React compilation failure. No placeholder bundle was created. Whether the legacy workspace consumer is obsolete or must be restored from a separately owned/pinned build source requires an owner decision. The desktop release workflow still points at absent `logos-desktop`; the supported production frontend/server entrypoint remains unverified.
 
 No production rollout is authorized.
