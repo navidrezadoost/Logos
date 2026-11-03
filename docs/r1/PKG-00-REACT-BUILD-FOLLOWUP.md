@@ -50,4 +50,6 @@ This identifies a missing/retired workspace-bundle producer, not an npm or React
 
 The producer/consumer history is now traceable: before transition commit `ea3b966b`, `frontend/package.json` built `main` and `worker` with `shadow-cljs release`, and `manage.sh` packaged `frontend/target/dist`. That `frontend/` source/build tree was removed in the Go transition; the current `manage.sh` target is stale. Current `Makefile build-wasm` only produces the layout WASM module and does not regenerate the legacy `main.js` bundle. The source currently expresses a React-dashboard-plus-workspace composition, but no supported release owner has confirmed that composition remains the intended product.
 
+**Evidence-based recommendation:** Treat the current source-level entrypoint as a composition (React dashboard/auth shell plus a separately produced legacy design-workspace asset bundle), because workspace routes and shell synchronization explicitly depend on that bundle. Do not call this a supported/releasable product until the product/release owner identifies the bundle producer, version, and deployment consumer—or explicitly deprecates those workspace capabilities after compatibility review. No legacy module was restored, removed, or replaced in this follow-up.
+
 No production rollout is authorized.
