@@ -72,7 +72,9 @@ else
     #        -gseparate-dwarf
     #        -gsplit-dwarf
     #        -gsource-map
-    export EMCC_CFLAGS="-g $EMCC_CFLAGS"\n    CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS+=" -C link-arg=-sVERBOSE=1 -C link-arg=-sMALLOC=$EM_MALLOC"\n    export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS
+    export EMCC_CFLAGS="-g $EMCC_CFLAGS"
+    CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS+=" -C link-arg=-sVERBOSE=1 -C link-arg=-sMALLOC=$EM_MALLOC"
+    export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS
 fi
 
 function clean {
