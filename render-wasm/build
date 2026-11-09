@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 
-if [ ! -f /opt/emsdk/emsdk_env.sh ]; then
-    echo "WARNING: EMSDK not found at /opt/emsdk/emsdk_env.sh — skipping WASM build."
+EMSDK_DIR="${EMSDK:-/opt/emsdk}"
+
+if [ ! -f "$EMSDK_DIR/emsdk_env.sh" ]; then
+    echo "WARNING: EMSDK not found at $EMSDK_DIR/emsdk_env.sh — skipping WASM build."
     echo "To build render-wasm, install EMSDK: https://emscripten.org/docs/getting_started/downloads.html"
     exit 0
 fi
 
-EMSDK_QUIET=1 . /opt/emsdk/emsdk_env.sh
+EMSDK_QUIET=1 . "$EMSDK_DIR/emsdk_env.sh"
 
 _SCRIPT_DIR=$(dirname $0);
 pushd $_SCRIPT_DIR;
@@ -17,7 +19,7 @@ set -ex;
 
 setup;
 build;
-copy_artifacts "../frontend/resources/public/js";
+copy_artifacts "../logos-app/dist/js";
 copy_shared_artifact;
 
 exit $?;

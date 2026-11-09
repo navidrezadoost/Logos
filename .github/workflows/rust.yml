@@ -29,7 +29,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.0
-          targets: wasm32-unknown-unknown
+          targets: wasm32-unknown-emscripten
           components: rustfmt
 
       - name: Cache Cargo artifacts
@@ -101,5 +101,28 @@ jobs:
       - name: Test Rust domain workspace
         run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
 
-      - name: Check renderer WASM target
-        run: cargo check --manifest-path render-wasm/Cargo.toml --target wasm32-unknown-unknown --locked
+      - name: Install Node.js for renderer packaging
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Install Emscripten SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          emsdk_dir="${RUNNER_TEMP}/emsdk"
+          git clone --depth 1 --branch 4.0.6 https://github.com/emscripten-core/emsdk.git "$emsdk_dir"
+          test "$(git -C "$emsdk_dir" rev-parse HEAD)" = "24fc909c0da13ef641d5ae75e89b5a97f25e37aa"
+          "$emsdk_dir/emsdk" install 4.0.6
+          "$emsdk_dir/emsdk" activate 4.0.6
+          echo "EMSDK=$emsdk_dir" >> "$GITHUB_ENV"
+
+      - name: Build renderer WASM with Emscripten
+        run: NODE_ENV=production ./render-wasm/build
+
+      - name: Verify renderer artifacts
+        run: |
+          test -s logos-app/dist/js/render-wasm.js
+          test -s logos-app/dist/js/render-wasm.wasm
+          test -s logos-app/dist/js/worker/render.js
+          test -s logos-app/dist/js/shared.js
