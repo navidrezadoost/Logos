@@ -10,6 +10,17 @@ fi
 
 EMSDK_QUIET=1 . "$EMSDK_DIR/emsdk_env.sh"
 
+# Use the same LLVM/Clang toolchain for bindgen and Emscripten.
+export LIBCLANG_PATH="$EMSDK_DIR/upstream/lib"
+
+if ! find "$LIBCLANG_PATH" -maxdepth 1 \
+    -name 'libclang.so*' -print -quit | grep -q .; then
+    echo "ERROR: libclang.so not found in $LIBCLANG_PATH"
+    exit 1
+fi
+
+echo "LibClang path: $LIBCLANG_PATH"
+
 _SCRIPT_DIR=$(dirname $0);
 pushd $_SCRIPT_DIR;
 
