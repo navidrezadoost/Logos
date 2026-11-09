@@ -7,6 +7,8 @@
 ///
 /// Shapes whose bounds are entirely covered by previously-accumulated opaque
 /// regions are skipped, saving GPU work on occluded content.
+use skia_safe::Contains;
+
 use crate::math::Rect;
 
 pub struct OpaqueCoverage {
