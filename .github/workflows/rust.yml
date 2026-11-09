@@ -39,8 +39,64 @@ jobs:
             . -> target
             rust -> rust/target
 
+      - name: Capture HarfBuzz and Skia link diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf 'SKIA_USE_SYSTEM_LIBRARIES=%s\n' "${SKIA_USE_SYSTEM_LIBRARIES:-<unset>}"
+          printf 'SKIA_SOURCE_DIR=%s\n' "${SKIA_SOURCE_DIR:-<unset>}"
+          printf 'SKIA_LIBRARY_SEARCH_PATH=%s\n' "${SKIA_LIBRARY_SEARCH_PATH:-<unset>}"
+          if [[ -n "${SKIA_BINARIES_URL:-}" ]]; then
+            echo 'SKIA_BINARIES_URL=<set; value redacted>'
+          else
+            echo 'SKIA_BINARIES_URL=<unset; crate default applies>'
+          fi
+
+          for package in libharfbuzz-dev libharfbuzz0b; do
+            dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Status}\n' "$package" 2>/dev/null || echo "$package: not installed"
+          done
+          pkg-config --modversion harfbuzz || echo 'pkg-config harfbuzz: unavailable'
+          pkg-config --libs harfbuzz || echo 'pkg-config harfbuzz libs: unavailable'
+          ldconfig -p | grep -E 'libharfbuzz(\.so|\.so\.)' || echo 'ldconfig: no HarfBuzz library entry'
+
+          if [[ -d target/debug/build ]]; then
+            while IFS= read -r file; do
+              case "$file" in
+                */output)
+                  echo "Skia build-script directives: $file"
+                  grep -E '^cargo:rustc-link-(lib|search)=|^cargo:rerun-if-env-changed=SKIA_USE_SYSTEM_LIBRARIES' "$file" || true
+                  ;;
+                */key.txt|*/tag.txt)
+                  printf '%s=' "$file"
+                  cat "$file"
+                  ;;
+              esac
+            done < <(find target/debug/build -type f \
+              \( -path '*/skia-bindings-*/output' \
+              -o -path '*/skia-bindings-*/out/skia/key.txt' \
+              -o -path '*/skia-bindings-*/out/skia/tag.txt' \) -print | sort)
+
+            args_gn=$(find target/debug/build -type f -path '*/skia-bindings-*/out/skia/args.gn' -print -quit)
+            if [[ -n "$args_gn" ]]; then
+              echo "Skia GN HarfBuzz flags: $args_gn"
+              grep -E 'skia_use_(system_)?harfbuzz|skia_enable_skparagraph|skia_use_system_icu' "$args_gn" || true
+            else
+              echo 'No args.gn present in restored Skia output'
+            fi
+
+            echo 'Cached Skia static libraries:'
+            find target/debug/build -type f -path '*/skia-bindings-*/out/skia/lib*.a' \
+              -printf '%p %s bytes\n' | sort
+            find target/debug/build -type f -path '*/skia-bindings-*/out/skia/lib*.a' \
+              -print0 | xargs -0 -r sha256sum
+          else
+            echo 'No restored target/debug/build directory'
+          fi
+
       - name: Test root workspace (render-wasm)
-        run: cargo test --workspace --locked
+        # Same locked test; -vv retains build-script directives and the final linker command.
+        run: cargo test --workspace --locked -vv
 
       - name: Test Rust domain workspace
         run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
