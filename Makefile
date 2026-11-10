@@ -88,8 +88,7 @@ generate-rust-types:
 	$(CARGO) run \
 		--manifest-path $(RUST_DIR)/Cargo.toml \
 		--package logos-types \
-		--bin generate-types \
-		--features logos-types/ts
+		--bin generate-types
 	@if [ "$$CHECK" = "1" ]; then \
 		git diff --exit-code logos-app/src/types/rust-generated/ || \
 			(echo "ERROR: Generated types changed. Run make generate-rust-types and commit."; exit 1); \
