@@ -169,6 +169,7 @@ jobs:
             rootCreated: false,
             shapeParented: false,
             rootChildrenSet: false,
+            expectedPixel: [0, 0, 255, 255],
             renderCompleted: false,
             webglVersion: null,
             webglRenderer: null,
@@ -393,8 +394,15 @@ jobs:
               });
               state.glErrorsAfterRead = drainGlErrors(gl);
               const interiorPixels = state.pixels.filter(({ inside }) => inside);
-              if (interiorPixels.every(({ rgba }) => rgba.every((channel) => channel === 0))) {
-                throw new Error(`rectangle samples were blank: ${JSON.stringify(state.pixels)}`);
+              const matchesExpectedBlue = ({ rgba }) => rgba.every(
+                (channel, index) => Math.abs(channel - state.expectedPixel[index]) <= 2
+              );
+              if (!interiorPixels.some(matchesExpectedBlue)) {
+                throw new Error(`expected blue ${state.expectedPixel} inside rectangle; samples: ${JSON.stringify(state.pixels)}`);
+              }
+              const backgroundPixel = state.pixels.find(({ inside }) => !inside);
+              if (!backgroundPixel || backgroundPixel.rgba.some((channel) => channel !== 0)) {
+                throw new Error(`expected transparent background outside rectangle; sample: ${JSON.stringify(backgroundPixel)}`);
               }
               if (state.glErrorsAfterRead.length) {
                 throw new Error(`WebGL errors during readback: ${state.glErrorsAfterRead.join(", ")}`);
@@ -414,6 +422,7 @@ jobs:
               framebuffer: state.framebufferAfterRender,
               framebufferStatus: state.framebufferStatus,
               viewport: state.viewportAtReadback,
+              expectedPixel: state.expectedPixel,
               pixels: state.pixels,
               glErrors: {
                 afterContext: state.glErrorsAfterContext,
