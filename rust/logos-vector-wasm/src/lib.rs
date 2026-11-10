@@ -308,6 +308,17 @@ pub unsafe extern "C" fn logos_vn_find_regions(ptr: *const u8, len: u32) -> u32 
 mod tests {
     use super::*;
 
+    // The C ABI exposes one process-global output buffer. Production calls are
+    // serialized by the vector-network worker's synchronous message handler;
+    // keep each test's call/read/free sequence equally atomic.
+    static ABI_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_abi_tests() -> std::sync::MutexGuard<'static, ()> {
+        ABI_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn sq_net_json(x0: f64, y0: f64, x1: f64, y1: f64) -> VnetJson {
         VnetJson {
             anchors: vec![
@@ -329,6 +340,7 @@ mod tests {
                    net_b: VnetJson, region_b: Vec<usize>,
                    op: &str) -> VnetOutputJson
     {
+        let _abi_guard = lock_abi_tests();
         let input = BoolOpInput {
             net_a, net_b, region_a, region_b,
             op: op.to_string(),
@@ -414,6 +426,7 @@ mod tests {
         let json = serde_json::to_vec(&input).unwrap();
         let ptr = json.as_ptr();
         let len = json.len() as u32;
+        let _abi_guard = lock_abi_tests();
         let out_len = unsafe { logos_vn_find_regions(ptr, len) };
         let out_ptr = logos_vn_output_ptr();
         let out_slice = unsafe { std::slice::from_raw_parts(out_ptr, out_len as usize) };
@@ -437,6 +450,7 @@ mod tests {
         let json = serde_json::to_vec(&input).unwrap();
         let ptr = json.as_ptr();
         let len = json.len() as u32;
+        let _abi_guard = lock_abi_tests();
         let out_len = unsafe { logos_vn_boolean_op(ptr, len) };
         let out_ptr = logos_vn_output_ptr();
         let out_slice = unsafe { std::slice::from_raw_parts(out_ptr, out_len as usize) };
