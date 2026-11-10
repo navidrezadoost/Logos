@@ -120,9 +120,137 @@ jobs:
       - name: Build renderer WASM with Emscripten
         run: NODE_ENV=production ./render-wasm/build
 
-      - name: Verify renderer artifacts
+      - name: Verify renderer artifacts and browser initialization
+        working-directory: logos-app
+        shell: bash
         run: |
-          test -s logos-app/dist/js/render-wasm.js
-          test -s logos-app/dist/js/render-wasm.wasm
-          test -s logos-app/dist/js/worker/render.js
-          test -s logos-app/dist/js/shared.js
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          assets = Path("dist/js")
+          js = assets / "render-wasm.js"
+          wasm = assets / "render-wasm.wasm"
+          worker = assets / "worker/render.js"
+          shared = assets / "shared.js"
+          for asset in (js, wasm, worker, shared):
+              if not asset.is_file() or asset.stat().st_size == 0:
+                  raise SystemExit(f"Missing or empty renderer asset: {asset}")
+          if not wasm.read_bytes().startswith(b"\0asm"):
+              raise SystemExit(f"Invalid WebAssembly magic: {wasm}")
+          if "render-wasm.wasm?version=" not in js.read_text(encoding="utf-8"):
+              raise SystemExit(f"Renderer loader does not reference the packaged WASM URL: {js}")
+          if "export const " not in shared.read_text(encoding="utf-8"):
+              raise SystemExit(f"Shared module does not contain generated exports: {shared}")
+          PY
+
+          cat > dist/renderer-smoke.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>Logos renderer smoke test</title>
+          <canvas id="canvas" width="320" height="240"></canvas>
+          <pre id="status" data-status="pending">pending</pre>
+          <script type="module">
+          const status = document.getElementById("status");
+          try {
+            const jsResponse = await fetch("/js/render-wasm.js", { method: "HEAD" });
+            const wasmResponse = await fetch("/js/render-wasm.wasm", { method: "HEAD" });
+            if (!jsResponse.ok || !wasmResponse.ok) {
+              throw new Error(`renderer URLs returned ${jsResponse.status}/${wasmResponse.status}`);
+            }
+
+            const source = await (await fetch("/js/render-wasm.js")).text();
+            const blobUrl = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+            let factory;
+            try {
+              ({ default: factory } = await import(blobUrl));
+            } finally {
+              URL.revokeObjectURL(blobUrl);
+            }
+            if (typeof factory !== "function") throw new Error("Emscripten factory export missing");
+
+            const module = await factory({ locateFile: () => "/js/render-wasm.wasm" });
+            const canvas = document.getElementById("canvas");
+            const gl = canvas.getContext("webgl2", { alpha: true, preserveDrawingBuffer: true });
+            if (!gl) throw new Error("WebGL2 context unavailable");
+            const context = module.GL.registerContext(gl, { majorVersion: 2 });
+            module.GL.makeContextCurrent(context);
+            module._init(canvas.width, canvas.height);
+            module._set_render_options(0, 1);
+            module._set_browser(0);
+
+            module._init_shapes_pool(1);
+            module._use_shape(0, 0, 0, 1);
+            module._set_shape_type(3);
+            module._set_shape_selrect(50, 50, 250, 150);
+            module._set_shape_rotation(0);
+            module._set_shape_transform(1, 0, 0, 1, 0, 0);
+            module._set_shape_clip_content(false);
+            const ptr = module._alloc_bytes(12);
+            module.HEAPU8.fill(0, ptr, ptr + 12);
+            module.HEAPU8[ptr] = 1;
+            new DataView(module.HEAPU8.buffer, ptr + 8, 4).setUint32(0, 0xff0000ff, true);
+            module._set_shape_fills();
+            module._free_bytes();
+            module._render_sync();
+            gl.finish();
+
+            const pixel = new Uint8Array(4);
+            gl.readPixels(100, 120, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+            if (pixel.every((channel) => channel === 0)) {
+              throw new Error(`renderer produced a blank pixel: ${Array.from(pixel)}`);
+            }
+            status.dataset.status = "passed";
+            status.textContent = `renderer initialized and drew pixel ${Array.from(pixel)}`;
+          } catch (error) {
+            status.dataset.status = "failed";
+            status.textContent = String(error?.stack ?? error);
+          }
+          </script>
+          HTML
+
+          npm ci
+          npm run build
+
+          for asset in render-wasm.js render-wasm.wasm worker/render.js shared.js; do
+            test -s "build/js/$asset"
+          done
+
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+
+          ./node_modules/.bin/vite preview --host 127.0.0.1 --port 4173 \
+            >"$RUNNER_TEMP/logos-vite-preview.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/renderer-smoke.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/renderer-smoke.html >/dev/null
+
+          "$chrome_bin" \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --enable-webgl \
+            --ignore-gpu-blocklist \
+            --use-gl=angle \
+            --use-angle=swiftshader \
+            --enable-unsafe-swiftshader \
+            --virtual-time-budget=15000 \
+            --dump-dom http://127.0.0.1:4173/renderer-smoke.html \
+            >"$RUNNER_TEMP/renderer-smoke-dom.html" \
+            2>"$RUNNER_TEMP/renderer-smoke-chrome.log"
+          if ! grep -q 'data-status="passed"' "$RUNNER_TEMP/renderer-smoke-dom.html"; then
+            cat "$RUNNER_TEMP/renderer-smoke-dom.html"
+            cat "$RUNNER_TEMP/renderer-smoke-chrome.log"
+            exit 1
+          fi
