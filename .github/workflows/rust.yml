@@ -165,6 +165,9 @@ jobs:
             contextCurrent: false,
             rendererInitialized: false,
             shapeSubmitted: false,
+            rootCreated: false,
+            shapeParented: false,
+            rootChildrenSet: false,
             renderCompleted: false,
             webglVersion: null,
             webglRenderer: null,
@@ -234,7 +237,8 @@ jobs:
                 "GL", "HEAPU8", "_init", "_set_render_options", "_set_browser",
                 "_init_shapes_pool", "_use_shape", "_set_shape_type", "_set_shape_selrect",
                 "_set_shape_rotation", "_set_shape_transform", "_set_shape_clip_content",
-                "_alloc_bytes", "_set_shape_fills", "_free_bytes", "_render_sync",
+                "_set_parent", "_set_children_1", "_alloc_bytes", "_set_shape_fills",
+                "_free_bytes", "_render_sync",
               ];
               state.moduleExports = Object.fromEntries(required.map((name) => [name, typeof module[name]]));
               const missing = required.filter((name) => !(name in module));
@@ -266,7 +270,12 @@ jobs:
               module._set_browser(0);
             });
             await checkpoint("initialize shape pool", async () => {
-              module._init_shapes_pool(1);
+              module._init_shapes_pool(2);
+            });
+            await checkpoint("create nil-UUID scene root", async () => {
+              // render_sync() traverses the nil-UUID root and its explicit children list.
+              module._use_shape(0, 0, 0, 0);
+              state.rootCreated = true;
             });
             await checkpoint("configure rectangle", async () => {
               module._use_shape(0, 0, 0, 1);
@@ -275,6 +284,8 @@ jobs:
               module._set_shape_rotation(0);
               module._set_shape_transform(1, 0, 0, 1, 0, 0);
               module._set_shape_clip_content(false);
+              module._set_parent(0, 0, 0, 0);
+              state.shapeParented = true;
             });
             await checkpoint("allocate and populate fill buffer", async () => {
               const ptr = module._alloc_bytes(12);
@@ -287,6 +298,11 @@ jobs:
               module._set_shape_fills();
               module._free_bytes();
               state.shapeSubmitted = true;
+            });
+            await checkpoint("attach rectangle to scene root", async () => {
+              module._use_shape(0, 0, 0, 0);
+              module._set_children_1(0, 0, 0, 1);
+              state.rootChildrenSet = true;
             });
             await checkpoint("render rectangle", async () => {
               module._render_sync();
