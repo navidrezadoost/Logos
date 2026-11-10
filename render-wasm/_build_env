@@ -93,24 +93,69 @@ function build {
 }
 
 function copy_artifacts {
-    DEST=$1;
+    local dest="$1"
+    local output_dir="target/wasm32-unknown-emscripten/$BUILD_MODE/deps"
+    local js="$output_dir/render_wasm.js"
+    local wasm="$output_dir/render_wasm.wasm"
 
-    mkdir -p "$DEST/worker";
+    if [ ! -s "$js" ]; then
+        echo "ERROR: Missing renderer JavaScript: $js" >&2
+        return 1
+    fi
+    if [ ! -s "$wasm" ]; then
+        echo "ERROR: Missing renderer WebAssembly: $wasm" >&2
+        return 1
+    fi
 
-    cp target/wasm32-unknown-emscripten/$BUILD_MODE/render_wasm.js "$DEST/$BUILD_NAME.js";
-    cp target/wasm32-unknown-emscripten/$BUILD_MODE/render_wasm.wasm "$DEST/$BUILD_NAME.wasm";
+    local wasm_magic
+    wasm_magic="$(od -An -N4 -tx1 "$wasm" | tr -d ' \n')"
+    if [ "$wasm_magic" != "0061736d" ]; then
+        echo "ERROR: Invalid WebAssembly magic in $wasm (got $wasm_magic)" >&2
+        return 1
+    fi
 
-    sed -i "s/render_wasm.wasm/$BUILD_NAME.wasm?version=$VERSION_TAG/g" "$DEST/$BUILD_NAME.js";
+    mkdir -p "$dest/worker"
 
-    pnpx esbuild target/wasm32-unknown-emscripten/$BUILD_MODE/render_wasm.js \
+    cp "$js" "$dest/$BUILD_NAME.js"
+    cp "$wasm" "$dest/$BUILD_NAME.wasm"
+
+    sed -i "s/render_wasm.wasm/$BUILD_NAME.wasm?version=$VERSION_TAG/g" "$dest/$BUILD_NAME.js"
+
+    pnpx esbuild "$js" \
         --log-level=error \
-        --outfile="$DEST/worker/render.js" \
+        --outfile="$dest/worker/render.js" \
         --platform=neutral \
         --format=iife \
-        --global-name=WasmModule;
+        --global-name=WasmModule
+
+    test -s "$dest/$BUILD_NAME.js"
+    test -s "$dest/$BUILD_NAME.wasm"
+    test -s "$dest/worker/render.js"
 }
 
 function copy_shared_artifact {
-    SHARED_FILE=$(find target/wasm32-unknown-emscripten -name render_wasm_shared.js | head -n 1);
-    cp $SHARED_FILE ../logos-app/dist/js/shared.js;
+    local build_dir="target/wasm32-unknown-emscripten/$BUILD_MODE/build"
+    local -a candidates=()
+
+    if [ ! -d "$build_dir" ]; then
+        echo "ERROR: Renderer Cargo build directory not found: $build_dir" >&2
+        return 1
+    fi
+
+    mapfile -d '' -t candidates < <(
+        find "$build_dir" -type f -path '*/render-*/out/render_wasm_shared.js' -print0
+    )
+    if [ "${#candidates[@]}" -ne 1 ]; then
+        echo "ERROR: Expected one render_wasm_shared.js from the renderer build under $build_dir; found ${#candidates[@]}" >&2
+        return 1
+    fi
+
+    local shared_file="${candidates[0]}"
+    if [ ! -s "$shared_file" ]; then
+        echo "ERROR: Renderer shared module is missing or empty: $shared_file" >&2
+        return 1
+    fi
+
+    cp "$shared_file" ../logos-app/dist/js/shared.js
+    test -s ../logos-app/dist/js/shared.js
 }
