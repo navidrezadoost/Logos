@@ -156,6 +156,7 @@ jobs:
           let stage = "not-started";
           let lastPassedStage = "none";
           let gl = null;
+          let targetFramebuffer = null;
           const state = {
             jsFetched: false,
             wasmFetched: false,
@@ -171,6 +172,22 @@ jobs:
             renderCompleted: false,
             webglVersion: null,
             webglRenderer: null,
+            drawingBufferSize: null,
+            targetFramebuffer: null,
+            initialFramebufferBindings: null,
+            framebufferAfterInit: null,
+            framebufferAfterRender: null,
+            framebufferStatus: null,
+            initialViewport: null,
+            viewportAfterInit: null,
+            viewportAfterRender: null,
+            viewportAtReadback: null,
+            readBuffer: null,
+            contextLostAfterRender: null,
+            glErrorsAfterContext: [],
+            glErrorsAfterInit: [],
+            glErrorsAfterRender: [],
+            glErrorsAfterRead: [],
             locateFile: "/js/render-wasm.wasm",
             moduleExports: null,
             wasmMemoryBytes: null,
@@ -192,6 +209,28 @@ jobs:
             lastPassedStage = name;
             console.log(`[renderer-smoke] PASS ${name}`);
             return result;
+          }
+
+          function framebufferName(framebuffer) {
+            return framebuffer === null ? "default" : "non-default";
+          }
+
+          function framebufferBindings(context) {
+            return {
+              framebuffer: framebufferName(context.getParameter(context.FRAMEBUFFER_BINDING)),
+              draw: framebufferName(context.getParameter(context.DRAW_FRAMEBUFFER_BINDING)),
+              read: framebufferName(context.getParameter(context.READ_FRAMEBUFFER_BINDING)),
+            };
+          }
+
+          function drainGlErrors(context) {
+            const errors = [];
+            for (let i = 0; i < 16; i += 1) {
+              const error = context.getError();
+              if (error === context.NO_ERROR) break;
+              errors.push(`0x${error.toString(16)}`);
+            }
+            return errors;
           }
 
           try {
@@ -250,6 +289,8 @@ jobs:
               if (!context) throw new Error("WebGL2 context unavailable");
               state.webglVersion = context.getParameter(context.VERSION);
               state.webglRenderer = context.getParameter(context.RENDERER);
+              state.drawingBufferSize = [context.drawingBufferWidth, context.drawingBufferHeight];
+              state.contextLost = context.isContextLost();
               return context;
             });
             const contextHandle = await checkpoint("register WebGL context", async () => {
@@ -260,10 +301,18 @@ jobs:
             await checkpoint("make WebGL context current", async () => {
               module.GL.makeContextCurrent(contextHandle);
               state.contextCurrent = true;
+              targetFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+              state.targetFramebuffer = framebufferName(targetFramebuffer);
+              state.initialFramebufferBindings = framebufferBindings(gl);
+              state.initialViewport = Array.from(gl.getParameter(gl.VIEWPORT));
+              state.glErrorsAfterContext = drainGlErrors(gl);
             });
             await checkpoint("initialize renderer", async () => {
               module._init(canvas.width, canvas.height);
               state.rendererInitialized = true;
+              state.framebufferAfterInit = framebufferBindings(gl);
+              state.viewportAfterInit = Array.from(gl.getParameter(gl.VIEWPORT));
+              state.glErrorsAfterInit = drainGlErrors(gl);
             });
             await checkpoint("configure renderer", async () => {
               module._set_render_options(0, 1);
@@ -288,11 +337,15 @@ jobs:
               state.shapeParented = true;
             });
             await checkpoint("allocate and populate fill buffer", async () => {
-              const ptr = module._alloc_bytes(12);
-              module.HEAPU8.fill(0, ptr, ptr + 12);
+              // The 4-byte ABI header is followed by Rust's 160-byte RawFillData enum.
+              const fillRecordBytes = 160;
+              const totalBytes = 4 + fillRecordBytes;
+              const ptr = module._alloc_bytes(totalBytes);
+              module.HEAPU8.fill(0, ptr, ptr + totalBytes);
               module.HEAPU8[ptr] = 1;
+              module.HEAPU8[ptr + 4] = 0; // RawFillData::Solid
               new DataView(module.HEAPU8.buffer, ptr + 8, 4).setUint32(0, 0xff0000ff, true);
-              state.fillBuffer = ptr;
+              state.fillBuffer = { ptr, bytes: totalBytes, rawRecordBytes: fillRecordBytes };
             });
             await checkpoint("submit rectangle fill", async () => {
               module._set_shape_fills();
@@ -308,13 +361,43 @@ jobs:
               module._render_sync();
               gl.finish();
               state.renderCompleted = true;
+              state.framebufferAfterRender = framebufferBindings(gl);
+              state.viewportAfterRender = Array.from(gl.getParameter(gl.VIEWPORT));
+              state.contextLostAfterRender = gl.isContextLost();
+              state.glErrorsAfterRender = drainGlErrors(gl);
             });
             await checkpoint("read rendered pixel", async () => {
-              const pixel = new Uint8Array(4);
-              gl.readPixels(100, 120, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-              state.pixel = Array.from(pixel);
-              if (pixel.every((channel) => channel === 0)) {
-                throw new Error(`renderer produced a blank pixel: ${state.pixel}`);
+              // Skia's Target surface wraps the framebuffer active when Rust
+              // initializes GpuState. Restore that target before readback.
+              gl.bindFramebuffer(gl.FRAMEBUFFER, targetFramebuffer);
+              if (targetFramebuffer === null) gl.readBuffer(gl.BACK);
+              state.readbackFramebuffer = framebufferName(gl.getParameter(gl.READ_FRAMEBUFFER_BINDING));
+              state.framebufferStatus = `0x${gl.checkFramebufferStatus(gl.FRAMEBUFFER).toString(16)}`;
+              state.readBuffer = `0x${gl.getParameter(gl.READ_BUFFER).toString(16)}`;
+              state.viewportAtReadback = Array.from(gl.getParameter(gl.VIEWPORT));
+              if (state.framebufferStatus !== `0x${gl.FRAMEBUFFER_COMPLETE.toString(16)}`) {
+                throw new Error(`incomplete renderer framebuffer: ${state.framebufferStatus}`);
+              }
+              const points = [
+                { x: 100, y: 120, inside: true },
+                { x: 160, y: 120, inside: true },
+                { x: 200, y: 120, inside: true },
+                { x: 100, y: 70, inside: true },
+                { x: 200, y: 70, inside: true },
+                { x: 10, y: 10, inside: false },
+              ];
+              state.pixels = points.map(({ x, y, inside }) => {
+                const pixel = new Uint8Array(4);
+                gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+                return { x, y, inside, rgba: Array.from(pixel) };
+              });
+              state.glErrorsAfterRead = drainGlErrors(gl);
+              const interiorPixels = state.pixels.filter(({ inside }) => inside);
+              if (interiorPixels.every(({ rgba }) => rgba.every((channel) => channel === 0))) {
+                throw new Error(`rectangle samples were blank: ${JSON.stringify(state.pixels)}`);
+              }
+              if (state.glErrorsAfterRead.length) {
+                throw new Error(`WebGL errors during readback: ${state.glErrorsAfterRead.join(", ")}`);
               }
             });
             await checkpoint("check browser console errors", async () => {
@@ -328,7 +411,16 @@ jobs:
               lastPassedStage,
               webglVersion: state.webglVersion,
               webglRenderer: state.webglRenderer,
-              pixel: state.pixel,
+              framebuffer: state.framebufferAfterRender,
+              framebufferStatus: state.framebufferStatus,
+              viewport: state.viewportAtReadback,
+              pixels: state.pixels,
+              glErrors: {
+                afterContext: state.glErrorsAfterContext,
+                afterInit: state.glErrorsAfterInit,
+                afterRender: state.glErrorsAfterRender,
+                afterRead: state.glErrorsAfterRead,
+              },
               browserErrors,
             }, null, 2);
           } catch (error) {
