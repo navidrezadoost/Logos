@@ -10,6 +10,7 @@ fi
 
 export BUILD_NAME="${BUILD_NAME:-render-wasm}"
 export CARGO_BUILD_TARGET=${CARGO_BUILD_TARGET:-"wasm32-unknown-emscripten"};
+_RENDER_TARGET_DIR="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 export SKIA_BINARIES_URL=${SKIA_BINARIES_URL:-"https://github.com/logos/skia-binaries/releases/download/0.87.0/skia-binaries-e551f334ad5cbdf43abf-wasm32-unknown-emscripten-gl-svg-textlayout-binary-cache-webp.tar.gz"}
 
 # 256 MB of initial heap to perform less
@@ -94,7 +95,7 @@ function build {
 
 function copy_artifacts {
     local dest="$1"
-    local output_dir="target/wasm32-unknown-emscripten/$BUILD_MODE/deps"
+    local output_dir="$_RENDER_TARGET_DIR/wasm32-unknown-emscripten/$BUILD_MODE/deps"
     local js="$output_dir/render_wasm.js"
     local wasm="$output_dir/render_wasm.wasm"
 
@@ -134,7 +135,7 @@ function copy_artifacts {
 }
 
 function copy_shared_artifact {
-    local build_dir="target/wasm32-unknown-emscripten/$BUILD_MODE/build"
+    local build_dir="$_RENDER_TARGET_DIR/wasm32-unknown-emscripten/$BUILD_MODE/build"
     local -a candidates=()
 
     if [ ! -d "$build_dir" ]; then
