@@ -367,19 +367,14 @@ fn main() {
         eprintln!("  wrote {name}");
     }
 
-    // ── Write barrel index ───────────────────────────────────────────────────
-    let mut barrel = format!("{HEADER}\n");
-    for name in files.keys() {
-        let stem = name.trim_end_matches(".ts");
-        barrel.push_str(&format!("export * from \"./{stem}\";\n"));
-    }
-    barrel.push('\n');
-    std::fs::write(out_dir.join("index.ts"), &barrel)
-        .expect("Failed to write index.ts");
-    eprintln!("  wrote index.ts");
+    // `index.ts` contains the manually curated compatibility exports (notably
+    // `compat.ts`). A flat barrel generated from Rust modules would replace
+    // those aliases and break the React wire-format surface, so leave it to
+    // its owner until the generator can model that dependency-aware API.
+    eprintln!("  preserved hand-maintained index.ts");
 
     eprintln!(
-        "[generate-types] done — {} type files + index.ts",
+        "[generate-types] done — {} Rust type files; index.ts preserved",
         files.len()
     );
 }
