@@ -32,7 +32,7 @@ export EM_MALLOC="dlmalloc"
 # EMCC_CFLAGS is inherited by every C/C++ invocation from Skia's Ninja build.
 # Keep it compile-safe: Emscripten link-only options must go through Rust's
 # final linker invocation, not the compilation of Skia's native sources.
-export EMCC_CFLAGS=""
+export EMCC_CFLAGS="-sSUPPORT_LONGJMP=wasm"
 
 # Cargo passes these arguments only when linking wasm32-unknown-emscripten.
 # Use an absolute path because Cargo's link working directory may differ.
@@ -43,9 +43,10 @@ _WASM_LINK_OPTIONS=(
     "-sASSERTIONS=1"
     "-sALLOW_TABLE_GROWTH=1"
     "-sALLOW_MEMORY_GROWTH=1"
+    "-sSUPPORT_LONGJMP=wasm"
     "-sINITIAL_HEAP=${EM_INITIAL_HEAP}"
     "-sMEMORY_GROWTH_GEOMETRIC_STEP=${EM_MEMORY_GROWTH_GEOMETRIC_STEP}"
-    "-sERROR_ON_UNDEFINED_SYMBOLS=0"
+    "-sERROR_ON_UNDEFINED_SYMBOLS=1"
     "-sMAX_WEBGL_VERSION=2"
     "-sEXPORT_NAME=createRustSkiaModule"
     "-sEXPORTED_RUNTIME_METHODS=GL,stringToUTF8,HEAPU8,HEAP32,HEAPU32,HEAPF32"
@@ -88,7 +89,7 @@ function setup {
 }
 
 function build {
-    cargo build $CARGO_PARAMS;
+    cargo build -vv $CARGO_PARAMS;
 }
 
 function copy_artifacts {
