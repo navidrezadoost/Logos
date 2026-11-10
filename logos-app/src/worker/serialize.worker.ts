@@ -25,7 +25,8 @@
  * |--------|------|--------------|----------------------------------------|
  * | Total  | 104  |              |                                        |
  *
- * Fills are serialized separately (8 bytes per fill via applySolidFill).
+ * Fills are serialized separately using the 160-byte Rust RawFillData ABI
+ * record via applySolidFill.
  *
  * Message protocol
  * ─────────────────

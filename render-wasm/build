@@ -1,23 +1,152 @@
 #!/usr/bin/env bash
 
-if [ ! -f /opt/emsdk/emsdk_env.sh ]; then
-    echo "WARNING: EMSDK not found at /opt/emsdk/emsdk_env.sh — skipping WASM build."
+EMSDK_DIR="${EMSDK:-/opt/emsdk}"
+
+if [ ! -f "$EMSDK_DIR/emsdk_env.sh" ]; then
+    echo "WARNING: EMSDK not found at $EMSDK_DIR/emsdk_env.sh — skipping WASM build."
     echo "To build render-wasm, install EMSDK: https://emscripten.org/docs/getting_started/downloads.html"
     exit 0
 fi
 
-EMSDK_QUIET=1 . /opt/emsdk/emsdk_env.sh
+EMSDK_QUIET=1 . "$EMSDK_DIR/emsdk_env.sh"
+set -e
 
-_SCRIPT_DIR=$(dirname $0);
-pushd $_SCRIPT_DIR;
+_EMSDK_ROOT="${EMSDK:-$EMSDK_DIR}"
+_EMSCRIPTEN_SYSTEM="$_EMSDK_ROOT/upstream/emscripten/system"
+_EMSCRIPTEN_COMPAT="$_EMSCRIPTEN_SYSTEM/include/compat"
+
+if [ ! -f "$_EMSCRIPTEN_COMPAT/xlocale.h" ]; then
+    echo "ERROR: Emscripten compatibility header not found: $_EMSCRIPTEN_COMPAT/xlocale.h"
+    exit 1
+fi
+
+_find_libclang_file() {
+    local root="$1"
+    [ -d "$root" ] || return 1
+    find "$root" -maxdepth 7 \( -type f -o -type l \) \
+        \( -name 'libclang.so' -o -name 'libclang.so.*' -o -name 'libclang-[0-9]*.so*' \) \
+        -print -quit 2>/dev/null
+}
+
+_LIBCLANG_FILE=""
+if [ -n "${LIBCLANG_PATH:-}" ] && [ -d "$LIBCLANG_PATH" ]; then
+    _LIBCLANG_FILE="$(_find_libclang_file "$LIBCLANG_PATH" || true)"
+fi
+for _root in "$_EMSDK_ROOT/upstream" /usr/lib/llvm-*/lib /usr/lib /usr/local/lib; do
+    [ -n "$_LIBCLANG_FILE" ] && break
+    _LIBCLANG_FILE="$(_find_libclang_file "$_root" || true)"
+done
+
+if [ -z "$_LIBCLANG_FILE" ]; then
+    echo "ERROR: no LibClang shared library found under the Emscripten SDK or system LLVM library paths"
+    exit 1
+fi
+
+# Bindgen's clang-sys loader needs the directory, and this load/version call
+# confirms the selected C API library is usable before the Skia source build.
+export LIBCLANG_PATH="$(dirname "$_LIBCLANG_FILE")"
+echo "LibClang shared library: $_LIBCLANG_FILE"
+python3 - "$_LIBCLANG_FILE" <<'PY'
+import ctypes
+import sys
+
+class CXString(ctypes.Structure):
+    _fields_ = [("data", ctypes.c_void_p), ("private_flags", ctypes.c_uint)]
+
+libclang = ctypes.CDLL(sys.argv[1])
+libclang.clang_getClangVersion.restype = CXString
+libclang.clang_getCString.argtypes = [CXString]
+libclang.clang_getCString.restype = ctypes.c_char_p
+libclang.clang_disposeString.argtypes = [CXString]
+version = libclang.clang_getClangVersion()
+print("Loaded LibClang:", libclang.clang_getCString(version).decode())
+libclang.clang_disposeString(version)
+PY
+
+echo "Emscripten target: wasm32-unknown-emscripten"
+echo "Emscripten sysroot: $_EMSDK_ROOT/upstream/emscripten/cache/sysroot"
+echo "Emscripten compiler: $(command -v emcc)"
+emcc --version
+if command -v clang >/dev/null 2>&1; then
+    echo "Emscripten Clang: $(command -v clang)"
+    clang --version | head -n 2
+fi
+if command -v llvm-config >/dev/null 2>&1; then
+    echo "LLVM config version: $(llvm-config --version)"
+fi
+
+# Bindgen's Emscripten platform setup omits system/include/compat, although
+# libc++'s locale headers include xlocale.h from that directory.
+export BINDGEN_EXTRA_CLANG_ARGS="${BINDGEN_EXTRA_CLANG_ARGS:+$BINDGEN_EXTRA_CLANG_ARGS }-isystem$_EMSCRIPTEN_COMPAT"
+
+# Show Emscripten's actual target/sysroot/include search path without building Skia.
+em++ -v -E -x c++ /dev/null -o /dev/null
+
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_REPO_DIR="$(cd "$_SCRIPT_DIR/.." && pwd)"
+pushd "$_SCRIPT_DIR"
 
 . ./_build_env
 
 set -ex;
 
+# Exercise the same target headers through Bindgen before Skia's costly source build.
+_BINDGEN_VERSION="$(awk '$0 == "name = \"bindgen\"" { getline; gsub(/[^0-9.]/, ""); print; exit }' "$_REPO_DIR/Cargo.lock")"
+if [ -z "$_BINDGEN_VERSION" ]; then
+    echo "ERROR: bindgen version not found in the locked workspace Cargo.lock"
+    exit 1
+fi
+_BINDGEN_PROBE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/logos-bindgen-preflight.XXXXXX")"
+trap 'rm -rf "$_BINDGEN_PROBE_DIR"' EXIT
+mkdir -p "$_BINDGEN_PROBE_DIR/src"
+cat > "$_BINDGEN_PROBE_DIR/Cargo.toml" <<EOF
+[package]
+name = "logos-bindgen-preflight"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bindgen = "=${_BINDGEN_VERSION}"
+EOF
+cat > "$_BINDGEN_PROBE_DIR/probe.hpp" <<'EOF'
+#include <locale>
+EOF
+cat > "$_BINDGEN_PROBE_DIR/src/main.rs" <<'EOF'
+use std::{env, path::PathBuf};
+
+fn main() {
+    let header = env::args().nth(1).expect("header path required");
+    let system = PathBuf::from(env::var("EMSDK").expect("EMSDK must be set"))
+        .join("upstream/emscripten/system");
+    let mut builder = bindgen::Builder::default()
+        .header(header)
+        .clang_arg("-nobuiltininc")
+        .clang_arg("-fvisibility=default")
+        .clang_arg("--target=wasm32-unknown-emscripten")
+        .clang_arg("-D__EMSCRIPTEN__")
+        .clang_arg("-std=c++17")
+        .clang_args(["-x", "c++"])
+        .clang_arg("-v");
+    for include in [
+        "lib/libc/musl/arch/emscripten",
+        "lib/libc/musl/arch/generic",
+        "lib/libcxx/include",
+        "lib/libc/musl/include",
+        "include",
+    ] {
+        builder = builder.clang_arg(format!("-isystem{}", system.join(include).display()));
+    }
+    builder.generate().expect("Emscripten Bindgen preflight failed");
+    println!("Emscripten Bindgen preflight passed");
+}
+EOF
+env -u CARGO_BUILD_TARGET CARGO_TARGET_DIR="$_REPO_DIR/target" \
+    cargo run --offline --manifest-path "$_BINDGEN_PROBE_DIR/Cargo.toml" -- \
+    "$_BINDGEN_PROBE_DIR/probe.hpp"
+
 setup;
 build;
-copy_artifacts "../frontend/resources/public/js";
+copy_artifacts "../logos-app/dist/js";
 copy_shared_artifact;
 
 exit $?;

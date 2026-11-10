@@ -10,6 +10,7 @@ fi
 
 export BUILD_NAME="${BUILD_NAME:-render-wasm}"
 export CARGO_BUILD_TARGET=${CARGO_BUILD_TARGET:-"wasm32-unknown-emscripten"};
+_RENDER_TARGET_DIR="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
 export SKIA_BINARIES_URL=${SKIA_BINARIES_URL:-"https://github.com/logos/skia-binaries/releases/download/0.87.0/skia-binaries-e551f334ad5cbdf43abf-wasm32-unknown-emscripten-gl-svg-textlayout-binary-cache-webp.tar.gz"}
 
 # 256 MB of initial heap to perform less
@@ -29,20 +30,37 @@ export EM_MEMORY_GROWTH_GEOMETRIC_STEP="0.8"
 # Default: dlmalloc
 export EM_MALLOC="dlmalloc"
 
-export EMCC_CFLAGS="--no-entry \
-    --js-library src/js/wapi.js \
-    -sASSERTIONS=1 \
-    -sALLOW_TABLE_GROWTH=1 \
-    -sALLOW_MEMORY_GROWTH=1 \
-    -sINITIAL_HEAP=$EM_INITIAL_HEAP \
-    -sMEMORY_GROWTH_GEOMETRIC_STEP=$EM_MEMORY_GROWTH_GEOMETRIC_STEP \
-    -sERROR_ON_UNDEFINED_SYMBOLS=0 \
-    -sMAX_WEBGL_VERSION=2 \
-    -sEXPORT_NAME=createRustSkiaModule \
-    -sEXPORTED_RUNTIME_METHODS=GL,stringToUTF8,HEAPU8,HEAP32,HEAPU32,HEAPF32 \
-    -sENVIRONMENT=web \
-    -sMODULARIZE=1 \
-    -sEXPORT_ES6=1";
+# EMCC_CFLAGS is inherited by every C/C++ invocation from Skia's Ninja build.
+# Keep it compile-safe: Emscripten link-only options must go through Rust's
+# final linker invocation, not the compilation of Skia's native sources.
+export EMCC_CFLAGS="-sSUPPORT_LONGJMP=wasm"
+
+# Cargo passes these arguments only when linking wasm32-unknown-emscripten.
+# Use an absolute path because Cargo's link working directory may differ.
+_WAPI_JS_LIBRARY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src/js/wapi.js"
+_WASM_LINK_OPTIONS=(
+    "--no-entry"
+    "--js-library=${_WAPI_JS_LIBRARY}"
+    "-sASSERTIONS=1"
+    "-sALLOW_TABLE_GROWTH=1"
+    "-sALLOW_MEMORY_GROWTH=1"
+    "-sSUPPORT_LONGJMP=wasm"
+    "-sINITIAL_HEAP=${EM_INITIAL_HEAP}"
+    "-sMEMORY_GROWTH_GEOMETRIC_STEP=${EM_MEMORY_GROWTH_GEOMETRIC_STEP}"
+    "-sERROR_ON_UNDEFINED_SYMBOLS=1"
+    "-sMAX_WEBGL_VERSION=2"
+    "-sEXPORT_NAME=createRustSkiaModule"
+    "-sEXPORTED_RUNTIME_METHODS=GL,stringToUTF8,HEAPU8,HEAP32,HEAPU32,HEAPF32"
+    "-sENVIRONMENT=web"
+    "-sMODULARIZE=1"
+    "-sEXPORT_ES6=1"
+)
+
+export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="${CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS:-}"
+for _flag in "${_WASM_LINK_OPTIONS[@]}"; do
+    CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS+=" -C link-arg=${_flag}"
+done
+export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS
 
 export EM_CACHE="/tmp/emsdk_cache";
 
@@ -56,7 +74,9 @@ else
     #        -gseparate-dwarf
     #        -gsplit-dwarf
     #        -gsource-map
-    export EMCC_CFLAGS="-g $EMCC_CFLAGS -sVERBOSE=1 -sMALLOC=$EM_MALLOC"
+    export EMCC_CFLAGS="-g $EMCC_CFLAGS"
+    CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS+=" -C link-arg=-sVERBOSE=1 -C link-arg=-sMALLOC=$EM_MALLOC"
+    export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS
 fi
 
 function clean {
@@ -70,28 +90,73 @@ function setup {
 }
 
 function build {
-    cargo build $CARGO_PARAMS;
+    cargo build -vv $CARGO_PARAMS;
 }
 
 function copy_artifacts {
-    DEST=$1;
+    local dest="$1"
+    local output_dir="$_RENDER_TARGET_DIR/wasm32-unknown-emscripten/$BUILD_MODE/deps"
+    local js="$output_dir/render_wasm.js"
+    local wasm="$output_dir/render_wasm.wasm"
 
-    mkdir -p $DEST;
+    if [ ! -s "$js" ]; then
+        echo "ERROR: Missing renderer JavaScript: $js" >&2
+        return 1
+    fi
+    if [ ! -s "$wasm" ]; then
+        echo "ERROR: Missing renderer WebAssembly: $wasm" >&2
+        return 1
+    fi
 
-    cp target/wasm32-unknown-emscripten/$BUILD_MODE/render_wasm.js $DEST/$BUILD_NAME.js;
-    cp target/wasm32-unknown-emscripten/$BUILD_MODE/render_wasm.wasm $DEST/$BUILD_NAME.wasm;
+    local wasm_magic
+    wasm_magic="$(od -An -N4 -tx1 "$wasm" | tr -d ' \n')"
+    if [ "$wasm_magic" != "0061736d" ]; then
+        echo "ERROR: Invalid WebAssembly magic in $wasm (got $wasm_magic)" >&2
+        return 1
+    fi
 
-    sed -i "s/render_wasm.wasm/$BUILD_NAME.wasm?version=$VERSION_TAG/g" $DEST/$BUILD_NAME.js;
+    mkdir -p "$dest/worker"
 
-    pnpx esbuild target/wasm32-unknown-emscripten/$BUILD_MODE/render_wasm.js \
+    cp "$js" "$dest/$BUILD_NAME.js"
+    cp "$wasm" "$dest/$BUILD_NAME.wasm"
+
+    sed -i "s/render_wasm.wasm/$BUILD_NAME.wasm?version=$VERSION_TAG/g" "$dest/$BUILD_NAME.js"
+
+    pnpx esbuild "$js" \
         --log-level=error \
-        --outfile=$DEST/worker/render.js \
+        --outfile="$dest/worker/render.js" \
         --platform=neutral \
         --format=iife \
-        --global-name=WasmModule;
+        --global-name=WasmModule
+
+    test -s "$dest/$BUILD_NAME.js"
+    test -s "$dest/$BUILD_NAME.wasm"
+    test -s "$dest/worker/render.js"
 }
 
 function copy_shared_artifact {
-    SHARED_FILE=$(find target/wasm32-unknown-emscripten -name render_wasm_shared.js | head -n 1);
-    cp $SHARED_FILE ../frontend/src/app/render_wasm/api/shared.js;
+    local build_dir="$_RENDER_TARGET_DIR/wasm32-unknown-emscripten/$BUILD_MODE/build"
+    local -a candidates=()
+
+    if [ ! -d "$build_dir" ]; then
+        echo "ERROR: Renderer Cargo build directory not found: $build_dir" >&2
+        return 1
+    fi
+
+    mapfile -d '' -t candidates < <(
+        find "$build_dir" -type f -path '*/render-*/out/render_wasm_shared.js' -print0
+    )
+    if [ "${#candidates[@]}" -ne 1 ]; then
+        echo "ERROR: Expected one render_wasm_shared.js from the renderer build under $build_dir; found ${#candidates[@]}" >&2
+        return 1
+    fi
+
+    local shared_file="${candidates[0]}"
+    if [ ! -s "$shared_file" ]; then
+        echo "ERROR: Renderer shared module is missing or empty: $shared_file" >&2
+        return 1
+    fi
+
+    cp "$shared_file" ../logos-app/dist/js/shared.js
+    test -s ../logos-app/dist/js/shared.js
 }

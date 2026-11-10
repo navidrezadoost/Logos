@@ -106,9 +106,10 @@ export const FILL_TYPE = {
   image:   0x03,
 } as const;
 
-// The size of one RawFillData in bytes:
-//   1 (discriminant u8) + 3 (padding to align 4) + 4 (largest payload: color u32) = 8
-export const RAW_FILL_DATA_SIZE = 8;
+// Rust RawFillData uses repr(C, u8, align(4)). Its largest variant is
+// RawGradientData (156 bytes), preceded by the 4-byte discriminant/alignment
+// prefix, so even a solid fill occupies the complete 160-byte enum record.
+export const RAW_FILL_DATA_SIZE = 160;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module singleton
@@ -296,10 +297,11 @@ export function cleanUp(mod: RenderWasmModule, canvas: HTMLCanvasElement): void 
  *
  *   Offset 0  : u8  — num_fills
  *   Offset 1-3: --- padding
- *   For each fill (RAW_FILL_DATA_SIZE = 8 bytes):
+ *   For each fill (RAW_FILL_DATA_SIZE = 160 bytes):
  *     Offset 0  : u8  — discriminant (0 = solid, 1 = linear, …)
  *     Offset 1-3: --- padding (align 4)
- *     Offset 4-7: u32 — color (ARGB, little-endian)
+ *     Offset 4-7: solid u32 color (ARGB, little-endian)
+ *     Offset 8-159: zeroed storage for the largest RawGradientData variant
  *
  * @param mod   The loaded Emscripten module.
  * @param color 32-bit ARGB colour, e.g. 0xFF0000FF for opaque blue.
@@ -307,10 +309,11 @@ export function cleanUp(mod: RenderWasmModule, canvas: HTMLCanvasElement): void 
 export function applySolidFill(mod: RenderWasmModule, color: number): void {
   const NUM_FILLS = 1;
   const HEADER_SIZE = 4; // num_fills u8 + 3 padding bytes
-  const totalBytes = HEADER_SIZE + NUM_FILLS * RAW_FILL_DATA_SIZE; // 4 + 8 = 12
+  const totalBytes = HEADER_SIZE + NUM_FILLS * RAW_FILL_DATA_SIZE;
 
   const ptr = mod._alloc_bytes(totalBytes);
   const heap = mod.HEAPU8;
+  heap.fill(0, ptr, ptr + totalBytes);
 
   // Header
   heap[ptr + 0] = NUM_FILLS; // num_fills

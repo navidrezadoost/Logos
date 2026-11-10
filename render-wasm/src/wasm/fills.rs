@@ -122,4 +122,28 @@ mod tests {
             RawFillData::Solid(solid::RawSolidData { color: 0xfffabada })
         );
     }
+
+    #[test]
+    fn test_solid_fill_javascript_abi_record() {
+        let record_size = std::mem::size_of::<RawFillData>();
+        assert_eq!(record_size, 160);
+
+        let color = 0xff0000ff_u32;
+        let mut input = vec![0_u8; 4 + record_size];
+        input[0] = 1; // one fill
+        input[4] = 0; // RawFillData::Solid discriminant
+        input[8..12].copy_from_slice(&color.to_le_bytes());
+
+        assert_eq!(&input[8..12], &[0xff, 0x00, 0x00, 0xff]);
+        assert!(input[1..4].iter().all(|byte| *byte == 0));
+        assert!(input[5..8].iter().all(|byte| *byte == 0));
+        assert!(input[12..].iter().all(|byte| *byte == 0));
+
+        let fills = parse_fills_from_bytes(&input[4..], input[0] as usize);
+        assert_eq!(fills.len(), 1);
+        assert_eq!(
+            RawFillData::try_from(&input[4..]).unwrap(),
+            RawFillData::Solid(solid::RawSolidData { color })
+        );
+    }
 }
