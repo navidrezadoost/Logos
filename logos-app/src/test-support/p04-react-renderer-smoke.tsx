@@ -146,7 +146,7 @@ async function run(): Promise<void> {
   expectColor(initialInside, expectedColor, "initial fixture interior");
   expectColor(initialOutside, [0, 0, 0, 0], "initial fixture transparent background");
 
-  const host = document.querySelector("#app > div") as HTMLDivElement;
+  const host = canvas.parentElement as HTMLDivElement;
   const bounds = host.getBoundingClientRect();
   const mouse = (type: string, x: number, y: number) => host.dispatchEvent(new MouseEvent(type, {
     bubbles: true,
