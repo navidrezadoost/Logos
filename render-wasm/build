@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
+set -Ee
 
 EMSDK_DIR="${EMSDK:-/opt/emsdk}"
 
-if [ ! -f "$EMSDK_DIR/emsdk_env.sh" ]; then
-    echo "WARNING: EMSDK not found at $EMSDK_DIR/emsdk_env.sh — skipping WASM build."
-    echo "To build render-wasm, install EMSDK: https://emscripten.org/docs/getting_started/downloads.html"
-    exit 0
+if [[ ! -r "$EMSDK_DIR/emsdk_env.sh" ]]; then
+    echo "ERROR: EMSDK not found at $EMSDK_DIR/emsdk_env.sh; refusing to skip required renderer build." >&2
+    exit 1
 fi
 
-EMSDK_QUIET=1 . "$EMSDK_DIR/emsdk_env.sh"
-set -e
+EMSDK_QUIET=1 source "$EMSDK_DIR/emsdk_env.sh"
+set -o pipefail
+
+if ! command -v emcc >/dev/null 2>&1; then
+    echo "ERROR: EMSDK environment did not provide emcc." >&2
+    exit 1
+fi
+
+_EMCC_VERSION_OUTPUT="$(emcc --version 2>&1)" || {
+    echo "ERROR: unable to query emcc version." >&2
+    exit 1
+}
+_EMCC_VERSION="$(grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' <<<"$_EMCC_VERSION_OUTPUT" | head -n 1 || true)"
+_EXPECTED_EMSCRIPTEN_VERSION="4.0.6"
+if [[ "$_EMCC_VERSION" != "$_EXPECTED_EMSCRIPTEN_VERSION" ]]; then
+    echo "ERROR: expected Emscripten $_EXPECTED_EMSCRIPTEN_VERSION; got ${_EMCC_VERSION:-unknown}." >&2
+    exit 1
+fi
 
 _EMSDK_ROOT="${EMSDK:-$EMSDK_DIR}"
 _EMSCRIPTEN_SYSTEM="$_EMSDK_ROOT/upstream/emscripten/system"
@@ -66,7 +82,7 @@ PY
 echo "Emscripten target: wasm32-unknown-emscripten"
 echo "Emscripten sysroot: $_EMSDK_ROOT/upstream/emscripten/cache/sysroot"
 echo "Emscripten compiler: $(command -v emcc)"
-emcc --version
+echo "Emscripten version: $_EMCC_VERSION"
 if command -v clang >/dev/null 2>&1; then
     echo "Emscripten Clang: $(command -v clang)"
     clang --version | head -n 2
