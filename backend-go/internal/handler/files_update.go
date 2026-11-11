@@ -6,10 +6,9 @@
 // Change-set format
 // ─────────────────
 // The Clojure backend encodes file_change.changes with app.util.blob/encode
-// (Transit+zstd).  The Go backend stores plain JSON bytes in the same bytea
-// column. When loading competing changes for OT rebase, Go attempts a JSON
-// parse; rows encoded by Clojure are skipped (treated as no competition from
-// that revision), giving a conservative but correct result.
+// (Transit+zstd). The Go backend stores plain JSON bytes in the same bytea
+// column. A stale update is rejected if any competing history cannot be
+// decoded; rebasing without the complete history would risk overwriting edits.
 //
 // File CRDT state
 // ───────────────
@@ -25,15 +24,18 @@
 // Redis broadcast
 // ───────────────
 // Messages are JSON-encoded and published on:
-//   <file-id>               — all changes (legacy / full-file subscribers)
-//   <file-id>:page:<page-id> — per-page changes (P2.1)
-//   <file-id>:meta           — meta notification for other pages (P2.1)
-//   <team-id>               — library changes when file is_shared
+//
+//	<file-id>               — all changes (legacy / full-file subscribers)
+//	<file-id>:page:<page-id> — per-page changes (P2.1)
+//	<file-id>:meta           — meta notification for other pages (P2.1)
+//	<team-id>               — library changes when file is_shared
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -52,19 +54,19 @@ import (
 
 // libraryChangeTypes mirrors app.rpc.commands.files-update/library-change-types.
 var libraryChangeTypes = map[rebase.Type]bool{
-	"add-color":           true,
-	"mod-color":           true,
-	"del-color":           true,
-	"add-media":           true,
-	"mod-media":           true,
-	"del-media":           true,
-	"add-component":       true,
-	"mod-component":       true,
-	"del-component":       true,
-	"restore-component":   true,
-	"add-typography":      true,
-	"mod-typography":      true,
-	"del-typography":      true,
+	"add-color":         true,
+	"mod-color":         true,
+	"del-color":         true,
+	"add-media":         true,
+	"mod-media":         true,
+	"del-media":         true,
+	"add-component":     true,
+	"mod-component":     true,
+	"del-component":     true,
+	"restore-component": true,
+	"add-typography":    true,
+	"mod-typography":    true,
+	"del-typography":    true,
 }
 
 // ─── Request / response types ─────────────────────────────────────────────────
@@ -218,8 +220,10 @@ func UpdateFileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 			competing, err := loadCompetingChangeSets(r.Context(), tx, file.ID, baseRevn, file.Revn)
 			if err != nil {
 				log.Printf("[update-file] competing load error: %v", err)
-				// non-fatal — proceed without rebase (conservative)
-			} else if len(competing) > 0 {
+				writeError(w, http.StatusConflict, "change-history-unavailable")
+				return
+			}
+			if len(competing) > 0 {
 				changes = rebase.RebaseChangeSet(changes, competing)
 				rebased = true
 			}
@@ -317,14 +321,28 @@ func UpdateFileHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 
 // ─── Competing / lagged change helpers ───────────────────────────────────────
 
-// loadCompetingChangeSets fetches the change-sets from (baseRevn, currentRevn]
-// for OT rebase.  Rows with non-JSON encoding (Clojure blobs) are skipped.
+// CompetingChangeHistoryError reports a revision that cannot safely be used
+// for rebase because its stored change-set is malformed or unavailable.
+type CompetingChangeHistoryError struct {
+	FileID string
+	Revn   int64
+	Err    error
+}
+
+func (e *CompetingChangeHistoryError) Error() string {
+	return fmt.Sprintf("file %s competing change history at revision %d: %v", e.FileID, e.Revn, e.Err)
+}
+
+func (e *CompetingChangeHistoryError) Unwrap() error { return e.Err }
+
+// loadCompetingChangeSets fetches the complete history from (baseRevn,
+// currentRevn] for OT rebase. Missing revisions and non-JSON legacy encodings
+// are errors: silently skipping one would produce an unsafe rebase.
 func loadCompetingChangeSets(ctx context.Context, tx pgx.Tx, fileID string, baseRevn, currentRevn int64) ([][]rebase.Change, error) {
 	rows, err := tx.Query(ctx,
-		`SELECT changes
+		`SELECT revn, changes
 		   FROM file_change
 		  WHERE file_id = $1 AND revn > $2 AND revn <= $3
-		    AND changes IS NOT NULL
 		  ORDER BY revn ASC`,
 		fileID, baseRevn, currentRevn,
 	)
@@ -334,19 +352,63 @@ func loadCompetingChangeSets(ctx context.Context, tx pgx.Tx, fileID string, base
 	defer rows.Close()
 
 	var result [][]rebase.Change
+	expectedRevn := baseRevn + 1
 	for rows.Next() {
+		var revn int64
 		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
-			continue
+		if err := rows.Scan(&revn, &raw); err != nil {
+			return nil, fmt.Errorf("scan competing change history for file %s: %w", fileID, err)
 		}
-		var cs []rebase.Change
-		if err := json.Unmarshal(raw, &cs); err != nil {
-			// Skip Clojure-encoded rows — conservative: treat as no competition.
-			continue
+		if revn != expectedRevn {
+			return nil, &CompetingChangeHistoryError{
+				FileID: fileID,
+				Revn:   expectedRevn,
+				Err:    fmt.Errorf("missing revision (next stored revision is %d)", revn),
+			}
+		}
+		cs, err := decodeCompetingChangeSet(fileID, revn, raw)
+		if err != nil {
+			return nil, err
 		}
 		result = append(result, cs)
+		expectedRevn++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate competing change history for file %s: %w", fileID, err)
+	}
+	if expectedRevn <= currentRevn {
+		return nil, &CompetingChangeHistoryError{
+			FileID: fileID,
+			Revn:   expectedRevn,
+			Err:    errors.New("revision is missing"),
+		}
 	}
 	return result, nil
+}
+
+func decodeCompetingChangeSet(fileID string, revn int64, raw []byte) ([]rebase.Change, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, &CompetingChangeHistoryError{
+			FileID: fileID,
+			Revn:   revn,
+			Err:    errors.New("changes is not a JSON array"),
+		}
+	}
+	var changes []rebase.Change
+	if err := json.Unmarshal(trimmed, &changes); err != nil {
+		return nil, &CompetingChangeHistoryError{FileID: fileID, Revn: revn, Err: err}
+	}
+	for index, change := range changes {
+		if change.Type == "" {
+			return nil, &CompetingChangeHistoryError{
+				FileID: fileID,
+				Revn:   revn,
+				Err:    fmt.Errorf("change %d has no type", index),
+			}
+		}
+	}
+	return changes, nil
 }
 
 // loadLaggedChanges returns all file_change rows after baseRevn for the client

@@ -58,7 +58,7 @@ func New(deps Deps) http.Handler {
 		registerRPC(r, deps)
 	})
 
-	r.Get("/ws/notifications", handler.NotificationsHandler(deps.Redis))
+	r.Get("/ws/notifications", handler.NotificationsHandler(deps.Pool, deps.Redis))
 
 	// ── Assets (storage object serving) ─────────────────────────────────────
 	r.Get("/assets/by-id/{id}", handler.AssetByIDHandler(deps.Pool, deps.Storage))
