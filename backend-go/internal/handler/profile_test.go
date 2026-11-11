@@ -1,6 +1,6 @@
 // Integration tests for the profile handler family.
 //
-// Requires a running PostgreSQL instance (with the Logos schema applied).
+// Requires a disposable PostgreSQL instance (with the Logos schema applied).
 // Set TEST_DATABASE_URL to run; tests are skipped otherwise.
 //
 // Example:
@@ -145,6 +145,12 @@ func TestUpdateProfileRoundTrip(t *testing.T) {
 	if err := row.Scan(&profileID, &origFullname); err != nil {
 		t.Skip("no profiles in database")
 	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(),
+			`UPDATE profile SET fullname = $1 WHERE id = $2`, origFullname, profileID); err != nil {
+			t.Errorf("restore test profile fullname: %v", err)
+		}
+	})
 
 	newName := "GoCopilot-TestUser"
 
@@ -174,10 +180,6 @@ func TestUpdateProfileRoundTrip(t *testing.T) {
 	if p.FullName != newName {
 		t.Errorf("after PATCH fullname want %q, got %q", newName, p.FullName)
 	}
-
-	// Restore original name so repeated test runs are idempotent.
-	_ = pool.QueryRow(context.Background(),
-		`UPDATE profile SET fullname = $1 WHERE id = $2`, origFullname, profileID)
 }
 
 // TestUpdateProfilePropsUnauthenticated checks 401 without session.
