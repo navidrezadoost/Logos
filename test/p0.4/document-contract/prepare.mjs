@@ -16,6 +16,8 @@ const shapeId = before.pages[pageId].rootShapeIds[0];
 const oldShape = before.shapes[shapeId];
 const updatedBounds = { ...oldShape.bounds, x: oldShape.bounds.x + 5 };
 const change = encodeGeometryChange(before, shapeId, updatedBounds);
+const staleBounds = { ...oldShape.bounds, x: oldShape.bounds.x + 10 };
+const staleChange = encodeGeometryChange(before, shapeId, staleBounds);
 
 const request = {
   id: fileId,
@@ -24,13 +26,25 @@ const request = {
   vern: 0,
   changes: [change],
 };
-const input = { fileId, name: "P04 fixture persistence proof", request };
+const staleRequest = {
+  ...request,
+  "session-id": randomUUID(),
+  changes: [staleChange],
+};
+const input = {
+  fileId,
+  name: "P04 fixture persistence proof",
+  request,
+  staleRequest,
+  browserFileId: randomUUID(),
+  browserName: "P05 browser persistence proof",
+};
 const expected = {
   fileId,
   pageId,
   shapeId,
   oldBounds: oldShape.bounds,
-  updatedBounds,
+  finalBounds: staleBounds,
   expectedFill: oldShape.fills[0],
   expectedExtension: before.unknownFieldsById[shapeId]["extension-p0"],
   expectedRootOrder: before.pages[pageId].rootShapeIds,

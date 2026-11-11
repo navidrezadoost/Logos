@@ -1,0 +1,109 @@
+name: P0.5 browser persistence boundary
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "backend-go/internal/handler/files_p04_persistence_integration_test.go"
+      - "backend-go/internal/handler/files_p05_browser_persistence_integration_test.go"
+      - "backend-go/internal/handler/files.go"
+      - "backend-go/internal/handler/files_create.go"
+      - "backend-go/internal/handler/files_update.go"
+      - "backend-go/internal/server/**"
+      - "backend-go/internal/auth/**"
+      - "backend-go/internal/perms/**"
+      - "backend-go/migrations/**"
+      - "backend-go/go.mod"
+      - "backend-go/go.sum"
+      - "logos-app/src/api/**"
+      - "logos-app/src/stores/documentStore.ts"
+      - "logos-app/src/test-support/p04-document-adapter.ts"
+      - "logos-app/src/test-support/p05-browser-persistence-smoke.tsx"
+      - "logos-app/test-harness/p05-browser-persistence-smoke.html"
+      - "logos-app/package.json"
+      - "logos-app/package-lock.json"
+      - "logos-app/vite.p05-browser-persistence.config.ts"
+      - "test/fixtures/p0-document-compat/**"
+      - "test/p0.4/document-contract/**"
+      - "test/p0.5/browser-persistence/**"
+      - ".github/workflows/p05-browser-persistence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-persistence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+        env:
+          POSTGRES_DB: logos_p04_browser
+          POSTGRES_USER: logos
+          POSTGRES_PASSWORD: p05-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logos -d logos_p04_browser"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend-go/go.mod
+          cache-dependency-path: backend-go/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Download Go modules
+        working-directory: backend-go
+        run: go mod download
+
+      - name: Verify PostgreSQL client
+        run: psql --version
+
+      - name: Install locked React application dependencies
+        working-directory: logos-app
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Locate headless browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "No Chrome/Chromium binary installed on this runner" >&2
+            exit 1
+          fi
+          echo "P05_BROWSER_BIN=$chrome_bin" >> "$GITHUB_ENV"
+
+      - name: Verify React adapter types
+        working-directory: logos-app
+        run: ./node_modules/.bin/tsc --noEmit
+
+      - name: Initialize fresh disposable historical test schema
+        env:
+          TEST_DATABASE_URL: postgres://logos:p05-only@127.0.0.1:5432/logos_p04_browser?sslmode=disable
+        run: bash test/p0.5/browser-persistence/initialize-disposable-db-schema.sh
+
+      - name: Run HTTP, stale-revision, and headless-browser persistence proof
+        env:
+          TEST_DATABASE_URL: postgres://logos:p05-only@127.0.0.1:5432/logos_p04_browser?sslmode=disable
+          P05_BROWSER_EVIDENCE_OUT: ${{ runner.temp }}/p05-browser-persistence-dom.html
+        run: bash test/p0.5/browser-persistence/run-browser-api-proof.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p05-browser-persistence-evidence
+          path: ${{ runner.temp }}/p05-browser-persistence-dom.html
+          if-no-files-found: warn
