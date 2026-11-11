@@ -1,0 +1,41 @@
+{
+  "fixtureStatus": "documented-expectation-not-yet-fed-through-scene-adapter",
+  "shapeId": "f0000000-0000-4000-8000-000000000003",
+  "parentId": null,
+  "baseProps": {
+    "recordBytes": 104,
+    "offsets": {
+      "id": 0,
+      "parentId": 16,
+      "shapeType": 32,
+      "flags": 33,
+      "blendMode": 34,
+      "constraintH": 35,
+      "constraintV": 36,
+      "opacityF32LE": 40,
+      "rotationF32LE": 44,
+      "transformSixF32LE": 48,
+      "selrectFourF32LE": 72,
+      "cornersFourF32LE": 88
+    },
+    "shapeTypeRect": 3,
+    "flags": 0,
+    "blendModeNormal": 0,
+    "constraintsNone": 255,
+    "opacity": 1,
+    "rotation": 0,
+    "transform": [1, 0, 0, 1, 0, 0],
+    "selrectXYXY": [10, 20, 90, 60],
+    "corners": [0, 0, 0, 0]
+  },
+  "fill": {
+    "headerBytes": 4,
+    "recordBytes": 160,
+    "totalBytes": 164,
+    "discriminantSolid": 0,
+    "colorArgb": "0xff336699",
+    "colorBytesLittleEndian": [153, 102, 51, 255],
+    "zeroRanges": [[1, 4], [5, 8], [12, 164]]
+  },
+  "expectedSemantics": {"interior": "opaque #336699", "outside": "transparent"}
+}

@@ -365,4 +365,28 @@ mod tests {
         let s = Shape::new(id, ShapeType::Circle, "Ellipse");
         assert!(!s.has_fills());
     }
+
+    #[test]
+    fn p0_compatibility_fixture_matches_rust_shape_contract() {
+        let fixture =
+            include_str!("../../../test/fixtures/p0-document-compat/rust-domain-shape.json");
+        let shape: Shape = serde_json::from_str(fixture).expect("valid P0 Rust shape fixture");
+
+        assert_eq!(shape.id.to_string(), "f0000000-0000-4000-8000-000000000003");
+        assert_eq!(shape.shape_type, ShapeType::Rect);
+        assert_eq!(shape.selrect.x, 10.0);
+        assert_eq!(shape.selrect.y, 20.0);
+        assert_eq!(shape.selrect.width, 80.0);
+        assert_eq!(shape.selrect.height, 40.0);
+        assert_eq!(
+            shape.parent_id.unwrap().to_string(),
+            "00000000-0000-0000-0000-000000000000"
+        );
+        assert_eq!(shape.fills.len(), 1);
+
+        let encoded = serde_json::to_value(&shape).expect("serialize P0 Rust shape fixture");
+        assert_eq!(encoded["type"], "rect");
+        assert_eq!(encoded["selrect"]["width"], 80.0);
+        assert_eq!(encoded["fills"][0]["fill-type"], "solid");
+    }
 }
