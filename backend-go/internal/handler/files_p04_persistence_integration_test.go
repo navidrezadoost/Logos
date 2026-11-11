@@ -176,6 +176,28 @@ func TestP04FixturePersistenceSaveReloadIntegration(t *testing.T) {
 	if before["id"] != input.FileID || before["revn"] != float64(0) {
 		t.Fatalf("before save identity/revision = %v/%v, want %s/0", before["id"], before["revn"], input.FileID)
 	}
+	for _, conflict := range []struct {
+		field string
+		value int
+		code  string
+	}{
+		{field: "vern", value: 1, code: "vern-conflict"},
+		{field: "revn", value: 1, code: "revn-conflict"},
+	} {
+		var conflictRequest map[string]any
+		if err := json.Unmarshal(input.Request, &conflictRequest); err != nil {
+			t.Fatalf("decode conflict request: %v", err)
+		}
+		conflictRequest[conflict.field] = conflict.value
+		conflictBody, err := json.Marshal(conflictRequest)
+		if err != nil {
+			t.Fatalf("encode %s conflict request: %v", conflict.field, err)
+		}
+		status, body := request(http.MethodPost, "/api/rpc/command/update-file", conflictBody, ownerCookie)
+		if status != http.StatusUnprocessableEntity || !bytes.Contains(body, []byte(conflict.code)) {
+			t.Fatalf("%s conflict status/body=%d/%s, want 422 with %q", conflict.field, status, body, conflict.code)
+		}
+	}
 	writeFileDetail(t, beforePath, before)
 
 	var updateMeta struct {
