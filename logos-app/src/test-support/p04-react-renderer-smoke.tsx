@@ -91,24 +91,17 @@ async function run(): Promise<void> {
   diagnostics.wasmLoaded = true;
 
   const renderer = loaded as RenderWasmModule & {
-    _set_children_1: (a: number, b: number, c: number, d: number) => void;
+    _render_sync_shape: (a: number, b: number, c: number, d: number) => void;
   };
-  if (typeof renderer._set_children_1 !== "function") {
-    throw new Error("Rust renderer does not export _set_children_1 for the nil-root bridge");
+  if (typeof renderer._render_sync_shape !== "function") {
+    throw new Error("Rust renderer does not export _render_sync_shape for the test-only root adapter");
   }
   let renderCount = 0;
 
-  // Test-only nil-root bridge. Production syncScene currently reinitializes the
-  // pool with only React shapes and does not attach the root's ordered children.
-  // This harness supplies the existing ABI root relationship without changing
-  // Canvas, scene.ts, or renderer algorithms.
-  const initPool = renderer._init_shapes_pool.bind(renderer);
-  renderer._init_shapes_pool = (count: number) => {
-    initPool(count + 1);
-    renderer._use_shape(0, 0, 0, 0);
-  };
-
-  const renderSync = renderer._render_sync.bind(renderer);
+  // Test-only entrypoint adapter. Rust's existing render_sync_shape API creates
+  // the nil root when absent and renders the serialized React shape. Production
+  // scene.ts currently calls full-scene _render_sync without building that root
+  // child list; this smoke does not silently promote the adapter into product code.
   renderer._render_sync = () => {
     renderCount++;
     diagnostics.renderCount = renderCount;
@@ -118,9 +111,7 @@ async function run(): Promise<void> {
       throw new Error("P04 slice requires exactly one nil-root child");
     }
     const [a, b, c, d] = uuidToU32x4(currentPage.rootShapeIds[0]);
-    renderer._use_shape(0, 0, 0, 0);
-    renderer._set_children_1(a, b, c, d);
-    renderSync();
+    renderer._render_sync_shape(a, b, c, d);
   };
 
   let targetFramebuffer: WebGLFramebuffer | null = null;
