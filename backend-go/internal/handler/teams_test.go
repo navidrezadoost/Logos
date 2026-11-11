@@ -14,8 +14,8 @@ import (
 	"github.com/logos-design/logos/backend-go/internal/handler"
 )
 
-// TestGetTeamsHandler_NoAuth verifies that unauthenticated requests are rejected.
-func TestGetTeamsHandler_NoAuth(t *testing.T) {
+// TestGetTeamsHandler_AnonymousReturnsEmpty verifies the anonymous bootstrap contract.
+func TestGetTeamsHandler_AnonymousReturnsEmpty(t *testing.T) {
 	pool := openTestDB(t)
 	h := handler.GetTeamsHandler(pool, nil)
 
@@ -23,8 +23,15 @@ func TestGetTeamsHandler_NoAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var teams []map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&teams); err != nil {
+		t.Fatalf("decode anonymous teams: %v", err)
+	}
+	if len(teams) != 0 {
+		t.Fatalf("expected no teams for anonymous profile, got %d", len(teams))
 	}
 }
 
