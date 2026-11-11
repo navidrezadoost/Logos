@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/logos-design/logos/backend-go/internal/auth"
@@ -94,11 +95,13 @@ func GetTeamsHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		// Fetch the profile's default-team-id first.
-		var defaultTeamID string
-		_ = pool.QueryRow(r.Context(),
-			`SELECT default_team_id FROM profile WHERE id = $1 AND deleted_at IS NULL`,
-			profileID).Scan(&defaultTeamID)
+		// default_team_id is nullable (including after its FK's ON DELETE SET NULL).
+		// Preserve SQL NULL instead of scanning it into an empty UUID string.
+		defaultTeamID, err := profileDefaultTeamID(r.Context(), pool, profileID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
 
 		teams, err := getTeams(r.Context(), pool, profileID, defaultTeamID)
 		if err != nil {
@@ -109,12 +112,12 @@ func GetTeamsHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	}
 }
 
-func getTeams(ctx context.Context, pool *db.Pool, profileID, defaultTeamID string) ([]*Team, error) {
+func getTeams(ctx context.Context, pool *db.Pool, profileID string, defaultTeamID pgtype.UUID) ([]*Team, error) {
 	const q = `
 		SELECT t.id, t.name, t.photo_id, t.is_default, t.features,
 		       t.created_at, t.modified_at,
 		       tp.is_owner, tp.is_admin, tp.can_edit,
-		       (t.id = $1) AS is_default_team
+		       COALESCE(t.id = $1, false) AS is_default_team
 		  FROM team_profile_rel AS tp
 		  JOIN team AS t ON (t.id = tp.team_id)
 		 WHERE t.deleted_at IS NULL
@@ -220,10 +223,10 @@ func GetTeamInfoHandler(pool *db.Pool) http.HandlerFunc {
 
 func getTeam(ctx context.Context, pool *db.Pool, profileID, teamID, fileID string) (*Team, error) {
 	// Resolve the caller's default-team-id for the is_default_team column.
-	var defaultTeamID string
-	_ = pool.QueryRow(ctx,
-		`SELECT default_team_id FROM profile WHERE id = $1 AND deleted_at IS NULL`,
-		profileID).Scan(&defaultTeamID)
+	defaultTeamID, err := profileDefaultTeamID(ctx, pool, profileID)
+	if err != nil {
+		return nil, err
+	}
 
 	var q string
 	var args []any
@@ -232,7 +235,7 @@ func getTeam(ctx context.Context, pool *db.Pool, profileID, teamID, fileID strin
 		SELECT t.id, t.name, t.photo_id, t.is_default, t.features,
 		       t.created_at, t.modified_at,
 		       tp.is_owner, tp.is_admin, tp.can_edit,
-		       (t.id = $1) AS is_default_team
+		       COALESCE(t.id = $1, false) AS is_default_team
 		  FROM team_profile_rel AS tp
 		  JOIN team AS t ON (t.id = tp.team_id)
 		 WHERE t.deleted_at IS NULL
@@ -253,6 +256,17 @@ func getTeam(ctx context.Context, pool *db.Pool, profileID, teamID, fileID strin
 
 	row := pool.QueryRow(ctx, q, args...)
 	return scanTeamRow(row)
+}
+
+func profileDefaultTeamID(ctx context.Context, pool *db.Pool, profileID string) (pgtype.UUID, error) {
+	var defaultTeamID pgtype.UUID
+	err := pool.QueryRow(ctx,
+		`SELECT default_team_id FROM profile WHERE id = $1 AND deleted_at IS NULL`,
+		profileID).Scan(&defaultTeamID)
+	if err == pgx.ErrNoRows {
+		return pgtype.UUID{}, nil
+	}
+	return defaultTeamID, err
 }
 
 // ─── GET /api/rpc/command/get-team-members ───────────────────────────────────

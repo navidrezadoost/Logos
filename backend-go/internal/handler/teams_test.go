@@ -67,6 +67,14 @@ func TestGetTeamsHandler_Integration(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create team failed: %d", rec.Code)
 	}
+	var createdTeam map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&createdTeam); err != nil {
+		t.Fatalf("decode created team: %v", err)
+	}
+	teamID, _ := createdTeam["id"].(string)
+	if teamID == "" {
+		t.Fatal("create team response has no id")
+	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/api/rpc/command/get-teams", nil)
 	req2 = req2.WithContext(auth.WithProfileID(req2.Context(), profileID))
@@ -75,6 +83,60 @@ func TestGetTeamsHandler_Integration(t *testing.T) {
 
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	var teams []map[string]any
+	if err := json.NewDecoder(rec2.Body).Decode(&teams); err != nil {
+		t.Fatalf("decode teams: %v", err)
+	}
+	if len(teams) != 1 {
+		t.Fatalf("expected one team for profile with no default_team_id, got %d", len(teams))
+	}
+	if isDefault, ok := teams[0]["is-default-team"].(bool); ok && isDefault {
+		t.Fatal("team without profile default_team_id must not be marked default")
+	}
+
+	// A non-null profile default must still be marked, rather than treating all
+	// teams as non-default after making the nullable path safe.
+	if _, err := pool.Exec(context.Background(), `UPDATE profile SET default_team_id = $1 WHERE id = $2`, teamID, profileID); err != nil {
+		t.Fatalf("set profile default_team_id: %v", err)
+	}
+	req3 := httptest.NewRequest(http.MethodGet, "/api/rpc/command/get-teams", nil)
+	req3 = req3.WithContext(auth.WithProfileID(req3.Context(), profileID))
+	rec3 := httptest.NewRecorder()
+	handler.GetTeamsHandler(pool, nil).ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("get-teams after setting default: %d %s", rec3.Code, rec3.Body.String())
+	}
+	var teamsWithDefault []map[string]any
+	if err := json.NewDecoder(rec3.Body).Decode(&teamsWithDefault); err != nil {
+		t.Fatalf("decode teams with default: %v", err)
+	}
+	if len(teamsWithDefault) != 1 || teamsWithDefault[0]["is-default-team"] != true {
+		t.Fatalf("expected configured default team to be marked true, got %#v", teamsWithDefault)
+	}
+}
+
+func TestGetTeamHandler_IntegrationWithNullDefaultTeam(t *testing.T) {
+	pool := openTestDB(t)
+	profileID := createTestProfile(t, pool)
+	teamID, _ := createTestTeamAndProject(t, pool, profileID)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/rpc/command/get-team?id="+teamID, nil)
+	req = req.WithContext(auth.WithProfileID(req.Context(), profileID))
+	rec := httptest.NewRecorder()
+	handler.GetTeamHandler(pool, nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for profile with no default_team_id, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var team map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&team); err != nil {
+		t.Fatalf("decode team: %v", err)
+	}
+	if team["id"] != teamID {
+		t.Fatalf("get-team returned id %v, want %s", team["id"], teamID)
+	}
+	if isDefault, ok := team["is-default-team"].(bool); ok && isDefault {
+		t.Fatal("team without profile default_team_id must not be marked default")
 	}
 }
 
