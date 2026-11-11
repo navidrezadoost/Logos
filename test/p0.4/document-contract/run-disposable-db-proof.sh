@@ -18,7 +18,11 @@ if not database.startswith("logos_p04"):
     raise SystemExit("ERROR: P0.4 persistence proof requires a database name beginning with logos_p04")
 PY
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp/opencode}/logos-p04-document-proof.XXXXXX")"
+TMP_ROOT="${TMPDIR:-/tmp/opencode}"
+if [[ ! -d "$TMP_ROOT" ]]; then
+    TMP_ROOT="${RUNNER_TEMP:-/tmp}"
+fi
+TMP="$(mktemp -d "$TMP_ROOT/logos-p04-document-proof.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 node --experimental-strip-types --test "$ROOT/test/p0.4/document-contract/adapter.test.mjs"
