@@ -1,0 +1,32 @@
+name: P0.4 producer fail-closed checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "render-wasm/build"
+      - "render-wasm/scripts/**"
+      - "render-wasm/tests/**"
+      - ".github/workflows/p04-producer-gate.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "render-wasm/build"
+      - "render-wasm/scripts/**"
+      - "render-wasm/tests/**"
+      - ".github/workflows/p04-producer-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  failure-paths:
+    name: Test required-tool and artifact failure paths
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Run synthetic failure-path checks only
+        run: bash render-wasm/tests/build-gate.sh
