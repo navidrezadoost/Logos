@@ -26,6 +26,8 @@ on:
       - "test/fixtures/p0-document-compat/**"
       - "test/p0.4/document-contract/**"
       - "test/p0.5/browser-persistence/**"
+      - "docs/r1/P0.4-DOCUMENT-PERSISTENCE-CONTRACT-PROOF.md"
+      - "docs/r1/P0.5-BROWSER-API-PERSISTENCE-BOUNDARY.md"
       - ".github/workflows/p05-browser-persistence.yml"
   workflow_dispatch:
 
