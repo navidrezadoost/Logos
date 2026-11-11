@@ -183,10 +183,20 @@ async function run(): Promise<void> {
     const next = useDocumentStore.getState().shapes[shapeId];
     return next?.bounds.x > 10 ? next : null;
   }, "one React geometry update");
-  await new Promise((resolve) => window.setTimeout(resolve, 50));
-
-  const oldArea = sample(gl, targetFramebuffer, 15, readbackY(40));
-  const newArea = sample(gl, targetFramebuffer, 30, readbackY(40));
+  diagnostics.updatedBounds = updatedShape.bounds;
+  const { oldArea, newArea } = await waitFor(() => {
+    try {
+      const oldPixel = sample(gl, targetFramebuffer, 15, readbackY(40));
+      const newPixel = sample(gl, targetFramebuffer, 30, readbackY(40));
+      diagnostics.postEditSamples = { oldPixel, newPixel };
+      const oldClear = oldPixel.every((channel) => channel === 0);
+      const newColor = newPixel.every((channel, index) => Math.abs(channel - expectedColor[index]) <= 2);
+      return oldClear && newColor ? { oldArea: oldPixel, newArea: newPixel } : null;
+    } catch (error) {
+      diagnostics.postEditReadError = String(error);
+      return null;
+    }
+  }, "renderer to apply geometry update");
   expectColor(oldArea, [0, 0, 0, 0], "post-edit old rectangle edge");
   expectColor(newArea, expectedColor, "post-edit rectangle interior");
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
@@ -200,6 +210,7 @@ async function run(): Promise<void> {
   status.textContent = JSON.stringify({
     runtime: "existing React Canvas + current Rust/WASM renderer",
     adapterVersion: projection.adapterVersion,
+    loadedResources: performance.getEntriesByType("resource").map((entry) => entry.name),
     unknownExtension: unknown,
     uuid: shapeId,
     rootOrder: projection.pages[projection.currentPageId].rootShapeIds,
