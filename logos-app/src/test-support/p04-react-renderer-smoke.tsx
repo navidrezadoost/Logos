@@ -11,6 +11,8 @@ import { projectP04RendererFixture } from "./p04-renderer-fixture";
 
 const status = document.getElementById("p04-status") as HTMLPreElement;
 const browserErrors: string[] = [];
+const diagnostics: Record<string, unknown> = {};
+let stage = "setup";
 window.addEventListener("error", (event) => browserErrors.push(event.error?.stack ?? event.message));
 window.addEventListener("unhandledrejection", (event) => browserErrors.push(String(event.reason)));
 const originalConsoleError = console.error.bind(console);
@@ -21,7 +23,7 @@ console.error = (...args: unknown[]) => {
 
 function fail(error: unknown): void {
   status.dataset.status = "failed";
-  status.textContent = JSON.stringify({ error: String(error), browserErrors }, null, 2);
+  status.textContent = JSON.stringify({ stage, error: String(error), diagnostics, browserErrors }, null, 2);
 }
 
 function waitFor<T>(read: () => T | null | undefined, label: string, timeout = 15000): Promise<T> {
@@ -63,11 +65,16 @@ function expectColor(actual: number[], expected: number[], label: string): void 
 }
 
 async function run(): Promise<void> {
+  stage = "project fixture";
   const projection = projectP04RendererFixture(sourceFixture);
   const shapeId = projection.pages[projection.currentPageId].rootShapeIds[0];
   const shape = projection.shapes[shapeId];
   const unknown = projection.unknownFieldsById[shapeId]["extension-p0"] as { sentinel?: string };
   if (unknown?.sentinel !== "preserve-me") throw new Error("fixture extension sidecar did not preserve sentinel");
+  diagnostics.adapterVersion = projection.adapterVersion;
+  diagnostics.fileId = projection.documentId;
+  diagnostics.shapeId = shapeId;
+  diagnostics.unknownExtension = unknown;
 
   useDocumentStore.setState({
     pages: projection.pages,
@@ -78,8 +85,10 @@ async function run(): Promise<void> {
   useUiStore.setState({ activeTool: "scale", zoom: 1, panX: 0, panY: 0 });
   useSelectionStore.setState({ selectedIds: [] });
 
+  stage = "load Rust/WASM module";
   const loaded = await loadRenderWasm("/js/render-wasm.js", "/js/render-wasm.wasm");
   if (!loaded) throw new Error("React canvas could not load the committed Rust/WASM renderer");
+  diagnostics.wasmLoaded = true;
 
   const renderer = loaded as RenderWasmModule & {
     _set_children_1: (a: number, b: number, c: number, d: number) => void;
@@ -118,9 +127,11 @@ async function run(): Promise<void> {
     const gl = canvas?.getContext("webgl2") as WebGL2RenderingContext | null;
     if (!gl) throw new Error("React canvas did not acquire WebGL2 before Rust init");
     targetFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    diagnostics.canvasSizeAtInit = [width, height];
     init(width, height);
   };
 
+  stage = "mount existing Canvas";
   createRoot(document.getElementById("app")!).render(
     <div style={{ width: 320, height: 240, display: "flex" }}><Canvas /></div>,
   );
@@ -130,11 +141,12 @@ async function run(): Promise<void> {
     () => Array.from(document.querySelectorAll("span")).find((item) => item.textContent?.includes("render-wasm / Skia")),
     "Rust/WASM mode badge",
   );
+  stage = "wait for Canvas dimensions";
   if (document.querySelector('span[title^="Phase 5: WebGPU"]')) {
     throw new Error("WebGPU renderer activated; this smoke must exercise the existing Skia/WebGL path");
   }
   await waitFor(() => canvas.width === 320 && canvas.height === 240 ? true : null, "fixture canvas dimensions");
-  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await new Promise((resolve) => window.setTimeout(resolve, 50));
 
   const gl = canvas.getContext("webgl2") as WebGL2RenderingContext | null;
   if (!gl) throw new Error("React Canvas WebGL2 context is missing");
@@ -145,6 +157,8 @@ async function run(): Promise<void> {
   const initialOutside = sample(gl, targetFramebuffer, 5, readbackY(5));
   expectColor(initialInside, expectedColor, "initial fixture interior");
   expectColor(initialOutside, [0, 0, 0, 0], "initial fixture transparent background");
+  diagnostics.initialInside = initialInside;
+  diagnostics.initialOutside = initialOutside;
 
   const host = canvas.parentElement as HTMLDivElement;
   const bounds = host.getBoundingClientRect();
@@ -156,6 +170,7 @@ async function run(): Promise<void> {
     buttons: type === "mouseup" ? 0 : 1,
   }));
 
+  stage = "select fixture in scale tool";
   mouse("mousedown", 90, 60);
   const selected = useSelectionStore.getState().selectedIds;
   if (selected.length !== 1 || selected[0] !== shapeId) {
@@ -163,18 +178,24 @@ async function run(): Promise<void> {
   }
   mouse("mousemove", 80, 60);
   mouse("mouseup", 80, 60);
+  stage = "wait for React geometry update";
   const updatedShape = await waitFor(() => {
     const next = useDocumentStore.getState().shapes[shapeId];
     return next?.bounds.x > 10 ? next : null;
   }, "one React geometry update");
-  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  await new Promise((resolve) => window.setTimeout(resolve, 50));
 
   const oldArea = sample(gl, targetFramebuffer, 15, readbackY(40));
   const newArea = sample(gl, targetFramebuffer, 30, readbackY(40));
   expectColor(oldArea, [0, 0, 0, 0], "post-edit old rectangle edge");
   expectColor(newArea, expectedColor, "post-edit rectangle interior");
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
+  diagnostics.selectedIds = selected;
+  diagnostics.updatedBounds = updatedShape.bounds;
+  diagnostics.oldAreaAfterEdit = oldArea;
+  diagnostics.newAreaAfterEdit = newArea;
 
+  stage = "complete";
   status.dataset.status = "passed";
   status.textContent = JSON.stringify({
     runtime: "existing React Canvas + current Rust/WASM renderer",
