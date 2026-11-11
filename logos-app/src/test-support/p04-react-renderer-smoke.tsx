@@ -96,6 +96,7 @@ async function run(): Promise<void> {
   if (typeof renderer._set_children_1 !== "function") {
     throw new Error("Rust renderer does not export _set_children_1 for the nil-root bridge");
   }
+  let renderCount = 0;
 
   // Test-only nil-root bridge. Production syncScene currently reinitializes the
   // pool with only React shapes and does not attach the root's ordered children.
@@ -109,6 +110,8 @@ async function run(): Promise<void> {
 
   const renderSync = renderer._render_sync.bind(renderer);
   renderer._render_sync = () => {
+    renderCount++;
+    diagnostics.renderCount = renderCount;
     const store = useDocumentStore.getState();
     const currentPage = store.pages[store.currentPageId];
     if (!currentPage || currentPage.rootShapeIds.length !== 1) {
