@@ -140,8 +140,9 @@ async function run(): Promise<void> {
   if (!gl) throw new Error("React Canvas WebGL2 context is missing");
   if (targetFramebuffer === undefined) throw new Error("React Canvas did not capture the renderer target framebuffer");
   const expectedColor = [51, 102, 153, 255];
-  const initialInside = sample(gl, targetFramebuffer, 50, 40);
-  const initialOutside = sample(gl, targetFramebuffer, 5, 5);
+  const readbackY = (logicalY: number) => canvas.height - 1 - logicalY;
+  const initialInside = sample(gl, targetFramebuffer, 50, readbackY(40));
+  const initialOutside = sample(gl, targetFramebuffer, 5, readbackY(5));
   expectColor(initialInside, expectedColor, "initial fixture interior");
   expectColor(initialOutside, [0, 0, 0, 0], "initial fixture transparent background");
 
@@ -168,8 +169,8 @@ async function run(): Promise<void> {
   }, "one React geometry update");
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-  const oldArea = sample(gl, targetFramebuffer, 15, 40);
-  const newArea = sample(gl, targetFramebuffer, 30, 40);
+  const oldArea = sample(gl, targetFramebuffer, 15, readbackY(40));
+  const newArea = sample(gl, targetFramebuffer, 30, readbackY(40));
   expectColor(oldArea, [0, 0, 0, 0], "post-edit old rectangle edge");
   expectColor(newArea, expectedColor, "post-edit rectangle interior");
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
