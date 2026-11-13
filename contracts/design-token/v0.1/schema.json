@@ -235,8 +235,8 @@
     "operation": {
       "oneOf": [
         { "type": "object", "required": ["kind", "definition"], "properties": { "kind": { "const": "createToken" }, "definition": { "$ref": "#/$defs/tokenDefinition" } }, "additionalProperties": false },
-        { "type": "object", "required": ["kind", "target", "context", "expectedValue", "nextValue"], "properties": { "kind": { "const": "setTokenValue" }, "target": { "$ref": "#/$defs/tokenReference" }, "context": { "$ref": "#/$defs/contextMap" }, "expectedValue": { "anyOf": [{ "$ref": "#/$defs/expression" }, { "type": "null" }] }, "nextValue": { "$ref": "#/$defs/expression" } }, "additionalProperties": false },
-        { "type": "object", "required": ["kind", "shapeId", "propertyPath", "expectedProperty", "nextProperty"], "properties": { "kind": { "const": "setProperty" }, "shapeId": { "$ref": "#/$defs/uuid" }, "propertyPath": { "type": "string", "minLength": 1 }, "expectedProperty": { "anyOf": [{ "$ref": "#/$defs/propertyValue" }, { "type": "null" }] }, "nextProperty": { "$ref": "#/$defs/propertyValue" } }, "additionalProperties": false }
+        { "type": "object", "required": ["kind", "target", "context", "expectedValue", "nextValue"], "properties": { "kind": { "const": "setTokenValue" }, "target": { "$ref": "#/$defs/tokenReference" }, "context": { "$ref": "#/$defs/contextMap" }, "expectedValue": { "$ref": "#/$defs/expression" }, "nextValue": { "$ref": "#/$defs/expression" } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "shapeId", "propertyPath", "expectedProperty", "nextProperty"], "properties": { "kind": { "const": "setProperty" }, "shapeId": { "$ref": "#/$defs/uuid" }, "propertyPath": { "type": "string", "minLength": 1 }, "expectedProperty": { "$ref": "#/$defs/propertyValue" }, "nextProperty": { "$ref": "#/$defs/propertyValue" } }, "additionalProperties": false }
       ]
     },
     "userIntent": {
@@ -294,14 +294,27 @@
     },
     "impactSummary": {
       "type": "object",
-      "required": ["createdTokens", "updatedTokens", "boundProperties", "affectedPropertyPaths", "contextsEvaluated"],
+      "required": ["createdTokens", "updatedTokens", "boundProperties", "affectedPropertyPaths", "contextsEvaluated", "propertyPreviews"],
       "properties": {
         "createdTokens": { "type": "integer", "minimum": 0 },
         "updatedTokens": { "type": "integer", "minimum": 0 },
         "boundProperties": { "type": "integer", "minimum": 0 },
         "affectedPropertyPaths": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "maxItems": 10000 },
         "contextsEvaluated": { "type": "array", "items": { "$ref": "#/$defs/contextMap" }, "maxItems": 128 },
+        "propertyPreviews": { "type": "array", "items": { "$ref": "#/$defs/propertyPreview" }, "maxItems": 16384 },
         "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      },
+      "additionalProperties": false
+    },
+    "propertyPreview": {
+      "type": "object",
+      "required": ["shapeId", "propertyPath", "context", "propertyValue", "resolution"],
+      "properties": {
+        "shapeId": { "$ref": "#/$defs/uuid" },
+        "propertyPath": { "type": "string", "minLength": 1 },
+        "context": { "$ref": "#/$defs/contextMap" },
+        "propertyValue": { "$ref": "#/$defs/propertyValue" },
+        "resolution": { "$ref": "#/$defs/resolveResult" }
       },
       "additionalProperties": false
     },

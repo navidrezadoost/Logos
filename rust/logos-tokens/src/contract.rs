@@ -246,7 +246,12 @@ pub struct TokenSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ModeStrategy {
     Inherit,
     Explicit { mode_id: Uuid },
@@ -268,9 +273,9 @@ pub enum PropertyValue {
     Binding {
         target: TokenReference,
         mode_strategy: ModeStrategy,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         fallback: Option<TypedValue>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         local_override: Option<TypedValue>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         extensions: Extensions,
@@ -409,7 +414,12 @@ pub struct DocumentProperty {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum ProposedOperation {
     CreateToken {
         definition: TokenDefinition,
@@ -448,7 +458,7 @@ pub struct ProposedPlan {
     pub extensions: Extensions,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ImpactSummary {
     pub created_tokens: usize,
@@ -456,8 +466,19 @@ pub struct ImpactSummary {
     pub bound_properties: usize,
     pub affected_property_paths: Vec<String>,
     pub contexts_evaluated: Vec<ContextMap>,
+    pub property_previews: Vec<PropertyPreview>,
     #[serde(default)]
     pub diagnostics: Vec<Diagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PropertyPreview {
+    pub shape_id: Uuid,
+    pub property_path: String,
+    pub context: ContextMap,
+    pub property_value: PropertyValue,
+    pub resolution: ResolveResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -468,7 +489,7 @@ pub enum ValidationStatus {
     NeedsConfirmation,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ValidationResult {
     pub protocol_version: String,

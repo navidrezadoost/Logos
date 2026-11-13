@@ -42,6 +42,22 @@ display and import/export; renaming or regrouping does not change identity.
 Collections/modes, sets, groups and context dimensions are optional. A
 document with only direct values and no token metadata is valid.
 
+For proposed operations, `createToken` requires a previously unused
+`(namespace, UUID, setId)` identity. `setTokenValue` and `setProperty` must
+include an exact `expectedValue` or `expectedProperty`; `null` or omission is
+invalid. Repeated writes compare against the preceding operation's preview
+value. `DocumentContext.revision` and plan base revision are checked against
+the immutable token snapshot revision, and client assumptions cannot substitute
+for either check. This proposal only updates properties already present in the
+provided context; creating new document properties is unsupported.
+
+A `READY` validation result includes one resolver-backed property preview for
+each affected property and requested preview context. Each includes the
+proposed property value and the Rust resolver's effective value, source,
+dependency trace, effective context, and diagnostics. Any unresolved property
+rejects the plan. The preview operates on cloned in-memory token and document
+contexts; it does not commit or mutate source state.
+
 ## 2. Proposed resolution semantics
 
 These rules are encoded in the reference vectors but remain subject to Chief
