@@ -253,6 +253,39 @@ test("Canvas 2D rejects unsupported shapes before clearing or drawing", () => {
   }
 });
 
+test("Canvas 2D and Rust fail closed for component, instance, and future types in mixed scenes", () => {
+  const known = structuredClone(fixture.shapes[fixture.page.rootShapeIds[1]]);
+  for (const [index, discriminator] of ["component", "instance", "future-shape"].entries()) {
+    const unsupported = {
+      ...known,
+      id: `00000000-0000-4000-8000-00000000006${index}`,
+      type: discriminator,
+    };
+
+    const context = makeCanvas2DRecorder();
+    assert.throws(
+      () => syncScene2D(context, [known, unsupported], 320, 240),
+      (error) => error instanceof UnsupportedCanvas2DShapeError
+        && error.shapeId === unsupported.id
+        && error.discriminator === discriminator,
+    );
+    assert.deepEqual(context.calls, [], `${discriminator} partially mutated Canvas 2D`);
+
+    const module = makeFakeModule();
+    assert.throws(
+      () => syncScene(module, [known, unsupported], 320, 240),
+      (error) => error instanceof UnsupportedRendererShapeError
+        && error.shapeId === unsupported.id
+        && error.discriminator === discriminator,
+    );
+    assert.equal(module.calls.resize, 0);
+    assert.deepEqual(module.calls.pool, []);
+    assert.deepEqual(module.calls.baseRecords, []);
+    assert.equal(module.calls.fills, 0);
+    assert.equal(module.calls.render, 0);
+  }
+});
+
 test("Canvas 2D keeps explicit ellipse and vector-network drawing paths", () => {
   const ellipseContext = makeCanvas2DRecorder();
   const ellipse = {
