@@ -14,6 +14,7 @@ let syncScene;
 let syncScene2D;
 let UnsupportedRendererShapeError;
 let UnsupportedCanvas2DShapeError;
+let rendererFailureStatus;
 let selectCurrentPageShapes;
 let useDocumentStore;
 
@@ -28,6 +29,7 @@ before(async () => {
   });
   ({ syncScene, syncScene2D, UnsupportedRendererShapeError, UnsupportedCanvas2DShapeError } =
     await viteServer.ssrLoadModule("/src/render-wasm/scene.ts"));
+  ({ rendererFailureStatus } = await viteServer.ssrLoadModule("/src/render-wasm/renderer-status.ts"));
   ({ selectCurrentPageShapes, useDocumentStore } = await viteServer.ssrLoadModule("/src/stores/documentStore.ts"));
 });
 
@@ -312,4 +314,29 @@ test("Canvas 2D keeps explicit ellipse and vector-network drawing paths", () => 
   assert.deepEqual(vectorContext.calls.filter(([name]) => name === "fillRect"), [
     ["fillRect", 0, 0, 320, 240],
   ], "vector-network was approximated with a shape-sized rectangle");
+});
+
+test("renderer failures map to stable editor statuses without leaking raw engine messages", () => {
+  const unsupported = rendererFailureStatus(
+    new UnsupportedCanvas2DShapeError("shape-123", "component"),
+    "wasm",
+    true,
+  );
+  assert.deepEqual(unsupported, {
+    state: "UNSUPPORTED_SHAPE",
+    backend: "canvas2d",
+    code: "LOGOS_RENDER_UNSUPPORTED_SHAPE",
+    shapeId: "shape-123",
+    shapeType: "component",
+    frameDisposition: "previous",
+  });
+
+  const failure = rendererFailureStatus(new Error("private wasm stack payload"), "wasm", true);
+  assert.deepEqual(failure, {
+    state: "RENDER_FAILED",
+    backend: "wasm",
+    code: "LOGOS_RENDER_FAILED",
+    frameDisposition: "unverified",
+  });
+  assert.equal(JSON.stringify(failure).includes("private wasm stack payload"), false);
 });

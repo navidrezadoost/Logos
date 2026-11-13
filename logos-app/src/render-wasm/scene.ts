@@ -29,6 +29,7 @@ import {
   applySolidFill,
 } from "./module";
 import { type Shape, hexToARGB } from "../types/shapes";
+import { UnsupportedShapeRenderError } from "./renderer-status";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants — must match Rust RawShapeType enum (render-wasm/src/wasm/shapes/mod.rs)
@@ -46,14 +47,12 @@ const SHAPE_TYPE_MAP: Record<string, number> = {
   "svg-raw": 7,
 };
 
-export class UnsupportedRendererShapeError extends Error {
-  readonly shapeId: string;
+export class UnsupportedRendererShapeError extends UnsupportedShapeRenderError {
   readonly discriminator: string;
 
   constructor(shapeId: string, discriminator: string) {
-    super(`Cannot upload shape ${shapeId}: unsupported renderer discriminator "${discriminator}"`);
+    super(shapeId, discriminator, "wasm");
     this.name = "UnsupportedRendererShapeError";
-    this.shapeId = shapeId;
     this.discriminator = discriminator;
   }
 }
@@ -233,14 +232,12 @@ const CANVAS_2D_SHAPE_TYPES = new Set<string>([
   "vector-network",
 ]);
 
-export class UnsupportedCanvas2DShapeError extends Error {
-  readonly shapeId: string;
+export class UnsupportedCanvas2DShapeError extends UnsupportedShapeRenderError {
   readonly discriminator: string;
 
   constructor(shapeId: string, discriminator: string) {
-    super(`Canvas 2D cannot render shape ${shapeId} with discriminator "${discriminator}"`);
+    super(shapeId, discriminator, "canvas2d");
     this.name = "UnsupportedCanvas2DShapeError";
-    this.shapeId = shapeId;
     this.discriminator = discriminator;
   }
 }
