@@ -1,0 +1,100 @@
+{
+  "fixtureVersion": "renderer-scene-projection/v1",
+  "page": {
+    "id": "00000000-0000-4000-8000-000000000010",
+    "rootShapeIds": [
+      "00000000-0000-4000-8000-000000000030",
+      "00000000-0000-4000-8000-000000000020"
+    ]
+  },
+  "shapes": {
+    "00000000-0000-4000-8000-000000000020": {
+      "id": "00000000-0000-4000-8000-000000000020",
+      "type": "frame",
+      "name": "Outer frame",
+      "parentId": null,
+      "children": [
+        "00000000-0000-4000-8000-000000000021",
+        "00000000-0000-4000-8000-000000000022",
+        "00000000-0000-4000-8000-000000000023"
+      ],
+      "bounds": { "x": 20, "y": 20, "w": 120, "h": 120 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000021": {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "type": "rect",
+      "name": "Top red child",
+      "parentId": "00000000-0000-4000-8000-000000000020",
+      "children": [],
+      "bounds": { "x": 30, "y": 30, "w": 40, "h": 40 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [{ "type": "solid", "color": "#ff0000", "opacity": 1 }],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000022": {
+      "id": "00000000-0000-4000-8000-000000000022",
+      "type": "rect",
+      "name": "Blue child",
+      "parentId": "00000000-0000-4000-8000-000000000020",
+      "children": [],
+      "bounds": { "x": 40, "y": 40, "w": 40, "h": 40 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [{ "type": "solid", "color": "#0000ff", "opacity": 1 }],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000023": {
+      "id": "00000000-0000-4000-8000-000000000023",
+      "type": "frame",
+      "name": "Nested frame",
+      "parentId": "00000000-0000-4000-8000-000000000020",
+      "children": ["00000000-0000-4000-8000-000000000024"],
+      "bounds": { "x": 80, "y": 65, "w": 40, "h": 40 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000024": {
+      "id": "00000000-0000-4000-8000-000000000024",
+      "type": "rect",
+      "name": "Nested green child",
+      "parentId": "00000000-0000-4000-8000-000000000023",
+      "children": [],
+      "bounds": { "x": 90, "y": 75, "w": 15, "h": 15 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [{ "type": "solid", "color": "#00ff00", "opacity": 1 }],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000030": {
+      "id": "00000000-0000-4000-8000-000000000030",
+      "type": "rect",
+      "name": "Top yellow root",
+      "parentId": null,
+      "children": [],
+      "bounds": { "x": 45, "y": 45, "w": 20, "h": 20 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [{ "type": "solid", "color": "#ffff00", "opacity": 1 }],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    }
+  }
+}

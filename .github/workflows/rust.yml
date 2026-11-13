@@ -668,3 +668,66 @@ jobs:
             ${{ runner.temp }}/renderer-compatibility-smoke-dom.html
             ${{ runner.temp }}/renderer-compatibility-smoke-chrome.log
             ${{ runner.temp }}/renderer-compatibility-preview.log
+
+      - name: Build hierarchical renderer browser smoke
+        working-directory: logos-app
+        run: ./node_modules/.bin/vite build --config vite.hierarchy-renderer-smoke.config.ts
+
+      - name: Verify hierarchical projection in actual Rust renderer
+        working-directory: logos-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+
+          ./node_modules/.bin/vite preview \
+            --config vite.hierarchy-renderer-smoke.config.ts \
+            --host 127.0.0.1 --port 4176 \
+            >"$RUNNER_TEMP/hierarchy-renderer-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4176/test-harness/a8-hierarchical-renderer-smoke.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4176/test-harness/a8-hierarchical-renderer-smoke.html >/dev/null
+
+          "$chrome_bin" \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --enable-webgl \
+            --disable-features=WebGPU \
+            --ignore-gpu-blocklist \
+            --use-gl=angle \
+            --use-angle=swiftshader \
+            --enable-unsafe-swiftshader \
+            --virtual-time-budget=45000 \
+            --dump-dom http://127.0.0.1:4176/test-harness/a8-hierarchical-renderer-smoke.html \
+            >"$RUNNER_TEMP/hierarchy-renderer-smoke-dom.html" \
+            2>"$RUNNER_TEMP/hierarchy-renderer-smoke-chrome.log"
+
+          if ! grep -q 'data-status="passed"' "$RUNNER_TEMP/hierarchy-renderer-smoke-dom.html"; then
+            cat "$RUNNER_TEMP/hierarchy-renderer-smoke-dom.html"
+            cat "$RUNNER_TEMP/hierarchy-renderer-smoke-chrome.log"
+            cat "$RUNNER_TEMP/hierarchy-renderer-preview.log"
+            exit 1
+          fi
+
+      - name: Preserve hierarchical renderer browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hierarchical-renderer-browser-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/hierarchy-renderer-smoke-dom.html
+            ${{ runner.temp }}/hierarchy-renderer-smoke-chrome.log
+            ${{ runner.temp }}/hierarchy-renderer-preview.log
