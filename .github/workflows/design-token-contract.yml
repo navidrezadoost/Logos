@@ -7,6 +7,9 @@ on:
       - 'contracts/design-token/v0.1/**'
       - 'test/design-token-contract/**'
       - 'docs/architecture/DT-C1-EXECUTABLE-TOKEN-CONTRACT.md'
+      - 'rust/logos-tokens/**'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - '.github/workflows/design-token-contract.yml'
   push:
     branches: [main]
@@ -14,6 +17,9 @@ on:
       - 'contracts/design-token/v0.1/**'
       - 'test/design-token-contract/**'
       - 'docs/architecture/DT-C1-EXECUTABLE-TOKEN-CONTRACT.md'
+      - 'rust/logos-tokens/**'
+      - 'rust/Cargo.toml'
+      - 'rust/Cargo.lock'
       - '.github/workflows/design-token-contract.yml'
 
 permissions:
@@ -32,3 +38,5 @@ jobs:
           cache-dependency-path: test/design-token-contract/package-lock.json
       - run: npm ci --prefix test/design-token-contract
       - run: npm test --prefix test/design-token-contract
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path rust/Cargo.toml -p logos-tokens --locked

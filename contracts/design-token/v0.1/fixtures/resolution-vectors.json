@@ -1,0 +1,5341 @@
+{
+  "contractVersion": "0.1.0",
+  "status": "PROPOSED",
+  "cases": [
+    {
+      "id": "direct-no-tokens",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "literal",
+            "value": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#2563eb",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#2563eb",
+            "alpha": 1
+          }
+        },
+        "source": "DIRECT",
+        "diagnostics": [],
+        "dependencyTrace": [],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "token-literal",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "color/primary",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#123456",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#000000",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#123456",
+            "alpha": 1
+          }
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "multi-hop-alias",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "semantic/primary",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "22222222-2222-4222-8222-222222222222"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "22222222-2222-4222-8222-222222222222",
+              "namespace": "document:test",
+              "name": "primitive/primary",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "33333333-3333-4333-8333-333333333333"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "33333333-3333-4333-8333-333333333333",
+              "namespace": "document:test",
+              "name": "primitive/value",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#16a34a",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#000000",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#16a34a",
+            "alpha": 1
+          }
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "22222222-2222-4222-8222-222222222222"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "33333333-3333-4333-8333-333333333333"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "missing-with-fallback",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#6b7280",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#6b7280",
+            "alpha": 1
+          }
+        },
+        "source": "FALLBACK",
+        "diagnostics": [
+          {
+            "code": "MISSING_TOKEN",
+            "severity": "warning",
+            "message": "MISSING_TOKEN",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "missing-without-fallback",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "MISSING_TOKEN",
+            "severity": "error",
+            "message": "MISSING_TOKEN",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "circular-alias-fallback",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "a",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "22222222-2222-4222-8222-222222222222"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "22222222-2222-4222-8222-222222222222",
+              "namespace": "document:test",
+              "name": "b",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "11111111-1111-4111-8111-111111111111"
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#6b7280",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#6b7280",
+            "alpha": 1
+          }
+        },
+        "source": "FALLBACK",
+        "diagnostics": [
+          {
+            "code": "ALIAS_CYCLE",
+            "severity": "warning",
+            "message": "ALIAS_CYCLE",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "22222222-2222-4222-8222-222222222222"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "22222222-2222-4222-8222-222222222222"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "alias-budget-33",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "10000000-0000-4000-8000-000000000001",
+              "namespace": "document:test",
+              "name": "chain/0",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000002"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000002",
+              "namespace": "document:test",
+              "name": "chain/1",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000003"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000003",
+              "namespace": "document:test",
+              "name": "chain/2",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000004"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000004",
+              "namespace": "document:test",
+              "name": "chain/3",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000005"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000005",
+              "namespace": "document:test",
+              "name": "chain/4",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000006"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000006",
+              "namespace": "document:test",
+              "name": "chain/5",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000007"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000007",
+              "namespace": "document:test",
+              "name": "chain/6",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000008"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000008",
+              "namespace": "document:test",
+              "name": "chain/7",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000009"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000009",
+              "namespace": "document:test",
+              "name": "chain/8",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000010"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000010",
+              "namespace": "document:test",
+              "name": "chain/9",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000011"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000011",
+              "namespace": "document:test",
+              "name": "chain/10",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000012"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000012",
+              "namespace": "document:test",
+              "name": "chain/11",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000013"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000013",
+              "namespace": "document:test",
+              "name": "chain/12",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000014"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000014",
+              "namespace": "document:test",
+              "name": "chain/13",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000015"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000015",
+              "namespace": "document:test",
+              "name": "chain/14",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000016"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000016",
+              "namespace": "document:test",
+              "name": "chain/15",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000017"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000017",
+              "namespace": "document:test",
+              "name": "chain/16",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000018"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000018",
+              "namespace": "document:test",
+              "name": "chain/17",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000019"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000019",
+              "namespace": "document:test",
+              "name": "chain/18",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000020"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000020",
+              "namespace": "document:test",
+              "name": "chain/19",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000021"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000021",
+              "namespace": "document:test",
+              "name": "chain/20",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000022"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000022",
+              "namespace": "document:test",
+              "name": "chain/21",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000023"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000023",
+              "namespace": "document:test",
+              "name": "chain/22",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000024"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000024",
+              "namespace": "document:test",
+              "name": "chain/23",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000025"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000025",
+              "namespace": "document:test",
+              "name": "chain/24",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000026"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000026",
+              "namespace": "document:test",
+              "name": "chain/25",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000027"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000027",
+              "namespace": "document:test",
+              "name": "chain/26",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000028"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000028",
+              "namespace": "document:test",
+              "name": "chain/27",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000029"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000029",
+              "namespace": "document:test",
+              "name": "chain/28",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000030"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000030",
+              "namespace": "document:test",
+              "name": "chain/29",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000031"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000031",
+              "namespace": "document:test",
+              "name": "chain/30",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000032"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000032",
+              "namespace": "document:test",
+              "name": "chain/31",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000033"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000033",
+              "namespace": "document:test",
+              "name": "chain/32",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "reference",
+                    "target": {
+                      "namespace": "document:test",
+                      "tokenId": "10000000-0000-4000-8000-000000000034"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "10000000-0000-4000-8000-000000000034",
+              "namespace": "document:test",
+              "name": "chain/33",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#16a34a",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "10000000-0000-4000-8000-000000000001"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "ALIAS_BUDGET",
+            "severity": "error",
+            "message": "ALIAS_BUDGET",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000001"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000002"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000003"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000004"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000005"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000006"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000007"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000008"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000009"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000010"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000011"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000012"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000013"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000014"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000015"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000016"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000017"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000018"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000019"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000020"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000021"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000022"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000023"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000024"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000025"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000026"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000027"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000028"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000029"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000030"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000031"
+              },
+              {
+                "namespace": "document:test",
+                "tokenId": "10000000-0000-4000-8000-000000000032"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000001"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000002"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000003"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000004"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000005"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000006"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000007"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000008"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000009"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000010"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000011"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000012"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000013"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000014"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000015"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000016"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000017"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000018"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000019"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000020"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000021"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000022"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000023"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000024"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000025"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000026"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000027"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000028"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000029"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000030"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000031"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "10000000-0000-4000-8000-000000000032"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "mode-inherit-nearest",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "surface",
+              "type": "color",
+              "values": [
+                {
+                  "when": {
+                    "mode": "light"
+                  },
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#ffffff",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                },
+                {
+                  "when": {
+                    "mode": "dark"
+                  },
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#111111",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ],
+              "collectionId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            }
+          ],
+          "collections": [
+            {
+              "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "name": "Theme",
+              "modeDimension": "mode",
+              "defaultModeId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              "modes": [
+                {
+                  "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                  "option": "light"
+                },
+                {
+                  "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                  "option": "dark"
+                }
+              ]
+            }
+          ],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#000000",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [
+              {
+                "mode": "dark"
+              }
+            ],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#111111",
+            "alpha": 1
+          }
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {
+          "mode": "dark"
+        }
+      }
+    },
+    {
+      "id": "multi-axis-specificity",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "brand/primary",
+              "type": "color",
+              "values": [
+                {
+                  "when": {
+                    "brand": "acme",
+                    "mode": "dark"
+                  },
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#123456",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#000000",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {
+              "brand": "acme"
+            },
+            "ancestorsNearestFirst": [
+              {
+                "mode": "dark"
+              }
+            ],
+            "page": {
+              "brand": "page"
+            },
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#123456",
+            "alpha": 1
+          }
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {
+          "brand": "acme",
+          "mode": "dark"
+        }
+      }
+    },
+    {
+      "id": "ordered-set-precedence",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "surface",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#ffffff",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "surface",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#333333",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ],
+              "setId": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+            },
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "surface",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#000000",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ],
+              "setId": "ffffffff-ffff-4fff-8fff-ffffffffffff"
+            }
+          ],
+          "collections": [],
+          "sets": [
+            {
+              "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+              "name": "base",
+              "when": {}
+            },
+            {
+              "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+              "name": "brand",
+              "when": {
+                "brand": "acme"
+              }
+            },
+            {
+              "id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
+              "name": "contrast",
+              "when": {
+                "contrast": "high"
+              }
+            }
+          ],
+          "contextDimensions": [],
+          "activeSetIds": [
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            "ffffffff-ffff-4fff-8fff-ffffffffffff"
+          ]
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#ffffff",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {
+              "brand": "acme",
+              "contrast": "high"
+            },
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#000000",
+            "alpha": 1
+          }
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {
+          "brand": "acme",
+          "contrast": "high"
+        }
+      }
+    },
+    {
+      "id": "local-override-precedence",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "color/primary",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#2563eb",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#000000",
+                "alpha": 1
+              }
+            },
+            "localOverride": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#ef4444",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#ef4444",
+            "alpha": 1
+          }
+        },
+        "source": "LOCAL_OVERRIDE",
+        "diagnostics": [],
+        "dependencyTrace": [],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "rename-stable-id",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "brand/main",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#16a34a",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            },
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#000000",
+                "alpha": 1
+              }
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "color",
+          "value": {
+            "space": "srgb",
+            "hex": "#16a34a",
+            "alpha": 1
+          }
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "dimension-divided-by-dimension",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "ratio",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "divide",
+                    "arguments": [
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "dimension",
+                          "value": 12,
+                          "unit": "px"
+                        }
+                      },
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "dimension",
+                          "value": 3,
+                          "unit": "px"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "number",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "number",
+          "value": 4
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "time-unit-normalization",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "duration",
+              "type": "dimension",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "add",
+                    "arguments": [
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "dimension",
+                          "value": 1,
+                          "unit": "s"
+                        }
+                      },
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "dimension",
+                          "value": 500,
+                          "unit": "ms"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "dimension",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "dimension",
+          "value": 1500,
+          "unit": "ms"
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "dimension-times-scalar",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "space",
+              "type": "dimension",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "multiply",
+                    "arguments": [
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "number",
+                          "value": 3
+                        }
+                      },
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "dimension",
+                          "value": 4,
+                          "unit": "px"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "dimension",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "dimension",
+          "value": 12,
+          "unit": "px"
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "unit-mismatch",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "bad-units",
+              "type": "dimension",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "add",
+                    "arguments": [
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "dimension",
+                          "value": 1,
+                          "unit": "px"
+                        }
+                      },
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "dimension",
+                          "value": 1,
+                          "unit": "ms"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "dimension",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "TYPE_MISMATCH",
+            "severity": "error",
+            "message": "TYPE_MISMATCH",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "divide-by-zero",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "zero",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "divide",
+                    "arguments": [
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "number",
+                          "value": 1
+                        }
+                      },
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "number",
+                          "value": 0
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "number",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "DIVISION_BY_ZERO",
+            "severity": "error",
+            "message": "DIVISION_BY_ZERO",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "numeric-range",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "overflow",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "multiply",
+                    "arguments": [
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "number",
+                          "value": 1000000000000
+                        }
+                      },
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "number",
+                          "value": 2
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "number",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "NUMERIC_RANGE",
+            "severity": "error",
+            "message": "NUMERIC_RANGE",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "context-budget",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {
+              "dim-0": "v0",
+              "dim-1": "v1",
+              "dim-2": "v2",
+              "dim-3": "v3",
+              "dim-4": "v4",
+              "dim-5": "v5",
+              "dim-6": "v6",
+              "dim-7": "v7"
+            },
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {
+              "ninth": "value"
+            }
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "CONTEXT_BUDGET",
+            "severity": "error",
+            "message": "CONTEXT_BUDGET",
+            "tokenChain": []
+          }
+        ],
+        "dependencyTrace": [],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "duplicate-definition",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "one",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#111111",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "two",
+              "type": "color",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#222222",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "INVALID_SNAPSHOT",
+            "severity": "error",
+            "message": "INVALID_SNAPSHOT"
+          }
+        ],
+        "dependencyTrace": [],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "context-conflict",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "ambiguous",
+              "type": "color",
+              "values": [
+                {
+                  "when": {
+                    "brand": "acme"
+                  },
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#111111",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                },
+                {
+                  "when": {
+                    "mode": "dark"
+                  },
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "color",
+                      "value": {
+                        "space": "srgb",
+                        "hex": "#222222",
+                        "alpha": 1
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "color",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {
+              "brand": "acme",
+              "mode": "dark"
+            },
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "CONTEXT_CONFLICT",
+            "severity": "error",
+            "message": "CONTEXT_CONFLICT",
+            "tokenChain": [
+              {
+                "namespace": "document:test",
+                "tokenId": "11111111-1111-4111-8111-111111111111"
+              }
+            ]
+          }
+        ],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          }
+        ],
+        "effectiveContext": {
+          "brand": "acme",
+          "mode": "dark"
+        }
+      }
+    },
+    {
+      "id": "expression-depth-budget",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "deep",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "add",
+                    "arguments": [
+                      {
+                        "kind": "operation",
+                        "operator": "add",
+                        "arguments": [
+                          {
+                            "kind": "operation",
+                            "operator": "add",
+                            "arguments": [
+                              {
+                                "kind": "operation",
+                                "operator": "add",
+                                "arguments": [
+                                  {
+                                    "kind": "operation",
+                                    "operator": "add",
+                                    "arguments": [
+                                      {
+                                        "kind": "operation",
+                                        "operator": "add",
+                                        "arguments": [
+                                          {
+                                            "kind": "operation",
+                                            "operator": "add",
+                                            "arguments": [
+                                              {
+                                                "kind": "operation",
+                                                "operator": "add",
+                                                "arguments": [
+                                                  {
+                                                    "kind": "operation",
+                                                    "operator": "add",
+                                                    "arguments": [
+                                                      {
+                                                        "kind": "operation",
+                                                        "operator": "add",
+                                                        "arguments": [
+                                                          {
+                                                            "kind": "operation",
+                                                            "operator": "add",
+                                                            "arguments": [
+                                                              {
+                                                                "kind": "operation",
+                                                                "operator": "add",
+                                                                "arguments": [
+                                                                  {
+                                                                    "kind": "operation",
+                                                                    "operator": "add",
+                                                                    "arguments": [
+                                                                      {
+                                                                        "kind": "operation",
+                                                                        "operator": "add",
+                                                                        "arguments": [
+                                                                          {
+                                                                            "kind": "operation",
+                                                                            "operator": "add",
+                                                                            "arguments": [
+                                                                              {
+                                                                                "kind": "operation",
+                                                                                "operator": "add",
+                                                                                "arguments": [
+                                                                                  {
+                                                                                    "kind": "operation",
+                                                                                    "operator": "add",
+                                                                                    "arguments": [
+                                                                                      {
+                                                                                        "kind": "operation",
+                                                                                        "operator": "add",
+                                                                                        "arguments": [
+                                                                                          {
+                                                                                            "kind": "operation",
+                                                                                            "operator": "add",
+                                                                                            "arguments": [
+                                                                                              {
+                                                                                                "kind": "operation",
+                                                                                                "operator": "add",
+                                                                                                "arguments": [
+                                                                                                  {
+                                                                                                    "kind": "operation",
+                                                                                                    "operator": "add",
+                                                                                                    "arguments": [
+                                                                                                      {
+                                                                                                        "kind": "operation",
+                                                                                                        "operator": "add",
+                                                                                                        "arguments": [
+                                                                                                          {
+                                                                                                            "kind": "operation",
+                                                                                                            "operator": "add",
+                                                                                                            "arguments": [
+                                                                                                              {
+                                                                                                                "kind": "operation",
+                                                                                                                "operator": "add",
+                                                                                                                "arguments": [
+                                                                                                                  {
+                                                                                                                    "kind": "operation",
+                                                                                                                    "operator": "add",
+                                                                                                                    "arguments": [
+                                                                                                                      {
+                                                                                                                        "kind": "operation",
+                                                                                                                        "operator": "add",
+                                                                                                                        "arguments": [
+                                                                                                                          {
+                                                                                                                            "kind": "operation",
+                                                                                                                            "operator": "add",
+                                                                                                                            "arguments": [
+                                                                                                                              {
+                                                                                                                                "kind": "operation",
+                                                                                                                                "operator": "add",
+                                                                                                                                "arguments": [
+                                                                                                                                  {
+                                                                                                                                    "kind": "operation",
+                                                                                                                                    "operator": "add",
+                                                                                                                                    "arguments": [
+                                                                                                                                      {
+                                                                                                                                        "kind": "operation",
+                                                                                                                                        "operator": "add",
+                                                                                                                                        "arguments": [
+                                                                                                                                          {
+                                                                                                                                            "kind": "operation",
+                                                                                                                                            "operator": "add",
+                                                                                                                                            "arguments": [
+                                                                                                                                              {
+                                                                                                                                                "kind": "operation",
+                                                                                                                                                "operator": "add",
+                                                                                                                                                "arguments": [
+                                                                                                                                                  {
+                                                                                                                                                    "kind": "operation",
+                                                                                                                                                    "operator": "add",
+                                                                                                                                                    "arguments": [
+                                                                                                                                                      {
+                                                                                                                                                        "kind": "literal",
+                                                                                                                                                        "value": {
+                                                                                                                                                          "type": "number",
+                                                                                                                                                          "value": 1
+                                                                                                                                                        }
+                                                                                                                                                      },
+                                                                                                                                                      {
+                                                                                                                                                        "kind": "literal",
+                                                                                                                                                        "value": {
+                                                                                                                                                          "type": "number",
+                                                                                                                                                          "value": 1
+                                                                                                                                                        }
+                                                                                                                                                      }
+                                                                                                                                                    ]
+                                                                                                                                                  },
+                                                                                                                                                  {
+                                                                                                                                                    "kind": "literal",
+                                                                                                                                                    "value": {
+                                                                                                                                                      "type": "number",
+                                                                                                                                                      "value": 1
+                                                                                                                                                    }
+                                                                                                                                                  }
+                                                                                                                                                ]
+                                                                                                                                              },
+                                                                                                                                              {
+                                                                                                                                                "kind": "literal",
+                                                                                                                                                "value": {
+                                                                                                                                                  "type": "number",
+                                                                                                                                                  "value": 1
+                                                                                                                                                }
+                                                                                                                                              }
+                                                                                                                                            ]
+                                                                                                                                          },
+                                                                                                                                          {
+                                                                                                                                            "kind": "literal",
+                                                                                                                                            "value": {
+                                                                                                                                              "type": "number",
+                                                                                                                                              "value": 1
+                                                                                                                                            }
+                                                                                                                                          }
+                                                                                                                                        ]
+                                                                                                                                      },
+                                                                                                                                      {
+                                                                                                                                        "kind": "literal",
+                                                                                                                                        "value": {
+                                                                                                                                          "type": "number",
+                                                                                                                                          "value": 1
+                                                                                                                                        }
+                                                                                                                                      }
+                                                                                                                                    ]
+                                                                                                                                  },
+                                                                                                                                  {
+                                                                                                                                    "kind": "literal",
+                                                                                                                                    "value": {
+                                                                                                                                      "type": "number",
+                                                                                                                                      "value": 1
+                                                                                                                                    }
+                                                                                                                                  }
+                                                                                                                                ]
+                                                                                                                              },
+                                                                                                                              {
+                                                                                                                                "kind": "literal",
+                                                                                                                                "value": {
+                                                                                                                                  "type": "number",
+                                                                                                                                  "value": 1
+                                                                                                                                }
+                                                                                                                              }
+                                                                                                                            ]
+                                                                                                                          },
+                                                                                                                          {
+                                                                                                                            "kind": "literal",
+                                                                                                                            "value": {
+                                                                                                                              "type": "number",
+                                                                                                                              "value": 1
+                                                                                                                            }
+                                                                                                                          }
+                                                                                                                        ]
+                                                                                                                      },
+                                                                                                                      {
+                                                                                                                        "kind": "literal",
+                                                                                                                        "value": {
+                                                                                                                          "type": "number",
+                                                                                                                          "value": 1
+                                                                                                                        }
+                                                                                                                      }
+                                                                                                                    ]
+                                                                                                                  },
+                                                                                                                  {
+                                                                                                                    "kind": "literal",
+                                                                                                                    "value": {
+                                                                                                                      "type": "number",
+                                                                                                                      "value": 1
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                ]
+                                                                                                              },
+                                                                                                              {
+                                                                                                                "kind": "literal",
+                                                                                                                "value": {
+                                                                                                                  "type": "number",
+                                                                                                                  "value": 1
+                                                                                                                }
+                                                                                                              }
+                                                                                                            ]
+                                                                                                          },
+                                                                                                          {
+                                                                                                            "kind": "literal",
+                                                                                                            "value": {
+                                                                                                              "type": "number",
+                                                                                                              "value": 1
+                                                                                                            }
+                                                                                                          }
+                                                                                                        ]
+                                                                                                      },
+                                                                                                      {
+                                                                                                        "kind": "literal",
+                                                                                                        "value": {
+                                                                                                          "type": "number",
+                                                                                                          "value": 1
+                                                                                                        }
+                                                                                                      }
+                                                                                                    ]
+                                                                                                  },
+                                                                                                  {
+                                                                                                    "kind": "literal",
+                                                                                                    "value": {
+                                                                                                      "type": "number",
+                                                                                                      "value": 1
+                                                                                                    }
+                                                                                                  }
+                                                                                                ]
+                                                                                              },
+                                                                                              {
+                                                                                                "kind": "literal",
+                                                                                                "value": {
+                                                                                                  "type": "number",
+                                                                                                  "value": 1
+                                                                                                }
+                                                                                              }
+                                                                                            ]
+                                                                                          },
+                                                                                          {
+                                                                                            "kind": "literal",
+                                                                                            "value": {
+                                                                                              "type": "number",
+                                                                                              "value": 1
+                                                                                            }
+                                                                                          }
+                                                                                        ]
+                                                                                      },
+                                                                                      {
+                                                                                        "kind": "literal",
+                                                                                        "value": {
+                                                                                          "type": "number",
+                                                                                          "value": 1
+                                                                                        }
+                                                                                      }
+                                                                                    ]
+                                                                                  },
+                                                                                  {
+                                                                                    "kind": "literal",
+                                                                                    "value": {
+                                                                                      "type": "number",
+                                                                                      "value": 1
+                                                                                    }
+                                                                                  }
+                                                                                ]
+                                                                              },
+                                                                              {
+                                                                                "kind": "literal",
+                                                                                "value": {
+                                                                                  "type": "number",
+                                                                                  "value": 1
+                                                                                }
+                                                                              }
+                                                                            ]
+                                                                          },
+                                                                          {
+                                                                            "kind": "literal",
+                                                                            "value": {
+                                                                              "type": "number",
+                                                                              "value": 1
+                                                                            }
+                                                                          }
+                                                                        ]
+                                                                      },
+                                                                      {
+                                                                        "kind": "literal",
+                                                                        "value": {
+                                                                          "type": "number",
+                                                                          "value": 1
+                                                                        }
+                                                                      }
+                                                                    ]
+                                                                  },
+                                                                  {
+                                                                    "kind": "literal",
+                                                                    "value": {
+                                                                      "type": "number",
+                                                                      "value": 1
+                                                                    }
+                                                                  }
+                                                                ]
+                                                              },
+                                                              {
+                                                                "kind": "literal",
+                                                                "value": {
+                                                                  "type": "number",
+                                                                  "value": 1
+                                                                }
+                                                              }
+                                                            ]
+                                                          },
+                                                          {
+                                                            "kind": "literal",
+                                                            "value": {
+                                                              "type": "number",
+                                                              "value": 1
+                                                            }
+                                                          }
+                                                        ]
+                                                      },
+                                                      {
+                                                        "kind": "literal",
+                                                        "value": {
+                                                          "type": "number",
+                                                          "value": 1
+                                                        }
+                                                      }
+                                                    ]
+                                                  },
+                                                  {
+                                                    "kind": "literal",
+                                                    "value": {
+                                                      "type": "number",
+                                                      "value": 1
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "kind": "literal",
+                                                "value": {
+                                                  "type": "number",
+                                                  "value": 1
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "kind": "literal",
+                                            "value": {
+                                              "type": "number",
+                                              "value": 1
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "kind": "literal",
+                                        "value": {
+                                          "type": "number",
+                                          "value": 1
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "kind": "literal",
+                                    "value": {
+                                      "type": "number",
+                                      "value": 1
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "kind": "literal",
+                                "value": {
+                                  "type": "number",
+                                  "value": 1
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "kind": "literal",
+                            "value": {
+                              "type": "number",
+                              "value": 1
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "kind": "literal",
+                        "value": {
+                          "type": "number",
+                          "value": 1
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "number",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "ERROR",
+        "diagnostics": [
+          {
+            "code": "EXPRESSION_BUDGET",
+            "severity": "error",
+            "message": "EXPRESSION_BUDGET"
+          }
+        ],
+        "dependencyTrace": [],
+        "effectiveContext": {}
+      }
+    },
+    {
+      "id": "wide-dependency-graph-64",
+      "status": "PROPOSED",
+      "input": {
+        "snapshot": {
+          "contractVersion": "0.1.0",
+          "status": "PROPOSED",
+          "revision": "r1",
+          "documentNamespace": "document:test",
+          "tokens": [
+            {
+              "id": "11111111-1111-4111-8111-111111111111",
+              "namespace": "document:test",
+              "name": "wide/sum",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "operation",
+                    "operator": "add",
+                    "arguments": [
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000001"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000002"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000003"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000004"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000005"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000006"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000007"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000008"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000009"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000010"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000011"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000012"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000013"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000014"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000015"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000016"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000017"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000018"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000019"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000020"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000021"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000022"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000023"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000024"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000025"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000026"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000027"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000028"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000029"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000030"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000031"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000032"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000033"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000034"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000035"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000036"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000037"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000038"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000039"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000040"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000041"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000042"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000043"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000044"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000045"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000046"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000047"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000048"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000049"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000050"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000051"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000052"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000053"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000054"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000055"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000056"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000057"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000058"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000059"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000060"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000061"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000062"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000063"
+                        }
+                      },
+                      {
+                        "kind": "reference",
+                        "target": {
+                          "namespace": "document:test",
+                          "tokenId": "20000000-0000-4000-8000-000000000064"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000001",
+              "namespace": "document:test",
+              "name": "leaf/1",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000002",
+              "namespace": "document:test",
+              "name": "leaf/2",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000003",
+              "namespace": "document:test",
+              "name": "leaf/3",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000004",
+              "namespace": "document:test",
+              "name": "leaf/4",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000005",
+              "namespace": "document:test",
+              "name": "leaf/5",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000006",
+              "namespace": "document:test",
+              "name": "leaf/6",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000007",
+              "namespace": "document:test",
+              "name": "leaf/7",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000008",
+              "namespace": "document:test",
+              "name": "leaf/8",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000009",
+              "namespace": "document:test",
+              "name": "leaf/9",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000010",
+              "namespace": "document:test",
+              "name": "leaf/10",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000011",
+              "namespace": "document:test",
+              "name": "leaf/11",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000012",
+              "namespace": "document:test",
+              "name": "leaf/12",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000013",
+              "namespace": "document:test",
+              "name": "leaf/13",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000014",
+              "namespace": "document:test",
+              "name": "leaf/14",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000015",
+              "namespace": "document:test",
+              "name": "leaf/15",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000016",
+              "namespace": "document:test",
+              "name": "leaf/16",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000017",
+              "namespace": "document:test",
+              "name": "leaf/17",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000018",
+              "namespace": "document:test",
+              "name": "leaf/18",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000019",
+              "namespace": "document:test",
+              "name": "leaf/19",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000020",
+              "namespace": "document:test",
+              "name": "leaf/20",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000021",
+              "namespace": "document:test",
+              "name": "leaf/21",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000022",
+              "namespace": "document:test",
+              "name": "leaf/22",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000023",
+              "namespace": "document:test",
+              "name": "leaf/23",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000024",
+              "namespace": "document:test",
+              "name": "leaf/24",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000025",
+              "namespace": "document:test",
+              "name": "leaf/25",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000026",
+              "namespace": "document:test",
+              "name": "leaf/26",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000027",
+              "namespace": "document:test",
+              "name": "leaf/27",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000028",
+              "namespace": "document:test",
+              "name": "leaf/28",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000029",
+              "namespace": "document:test",
+              "name": "leaf/29",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000030",
+              "namespace": "document:test",
+              "name": "leaf/30",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000031",
+              "namespace": "document:test",
+              "name": "leaf/31",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000032",
+              "namespace": "document:test",
+              "name": "leaf/32",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000033",
+              "namespace": "document:test",
+              "name": "leaf/33",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000034",
+              "namespace": "document:test",
+              "name": "leaf/34",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000035",
+              "namespace": "document:test",
+              "name": "leaf/35",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000036",
+              "namespace": "document:test",
+              "name": "leaf/36",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000037",
+              "namespace": "document:test",
+              "name": "leaf/37",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000038",
+              "namespace": "document:test",
+              "name": "leaf/38",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000039",
+              "namespace": "document:test",
+              "name": "leaf/39",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000040",
+              "namespace": "document:test",
+              "name": "leaf/40",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000041",
+              "namespace": "document:test",
+              "name": "leaf/41",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000042",
+              "namespace": "document:test",
+              "name": "leaf/42",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000043",
+              "namespace": "document:test",
+              "name": "leaf/43",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000044",
+              "namespace": "document:test",
+              "name": "leaf/44",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000045",
+              "namespace": "document:test",
+              "name": "leaf/45",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000046",
+              "namespace": "document:test",
+              "name": "leaf/46",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000047",
+              "namespace": "document:test",
+              "name": "leaf/47",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000048",
+              "namespace": "document:test",
+              "name": "leaf/48",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000049",
+              "namespace": "document:test",
+              "name": "leaf/49",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000050",
+              "namespace": "document:test",
+              "name": "leaf/50",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000051",
+              "namespace": "document:test",
+              "name": "leaf/51",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000052",
+              "namespace": "document:test",
+              "name": "leaf/52",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000053",
+              "namespace": "document:test",
+              "name": "leaf/53",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000054",
+              "namespace": "document:test",
+              "name": "leaf/54",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000055",
+              "namespace": "document:test",
+              "name": "leaf/55",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000056",
+              "namespace": "document:test",
+              "name": "leaf/56",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000057",
+              "namespace": "document:test",
+              "name": "leaf/57",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000058",
+              "namespace": "document:test",
+              "name": "leaf/58",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000059",
+              "namespace": "document:test",
+              "name": "leaf/59",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000060",
+              "namespace": "document:test",
+              "name": "leaf/60",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000061",
+              "namespace": "document:test",
+              "name": "leaf/61",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000062",
+              "namespace": "document:test",
+              "name": "leaf/62",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000063",
+              "namespace": "document:test",
+              "name": "leaf/63",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000064",
+              "namespace": "document:test",
+              "name": "leaf/64",
+              "type": "number",
+              "values": [
+                {
+                  "when": {},
+                  "expression": {
+                    "kind": "literal",
+                    "value": {
+                      "type": "number",
+                      "value": 1
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "collections": [],
+          "sets": [],
+          "contextDimensions": [],
+          "activeSetIds": []
+        },
+        "request": {
+          "contractVersion": "0.1.0",
+          "snapshotRevision": "r1",
+          "propertyType": "number",
+          "property": {
+            "kind": "binding",
+            "target": {
+              "namespace": "document:test",
+              "tokenId": "11111111-1111-4111-8111-111111111111"
+            },
+            "modeStrategy": {
+              "kind": "inherit"
+            }
+          },
+          "context": {
+            "explicit": {},
+            "ancestorsNearestFirst": [],
+            "page": {},
+            "document": {}
+          }
+        }
+      },
+      "expectedOutput": {
+        "contractVersion": "0.1.0",
+        "snapshotRevision": "r1",
+        "status": "RESOLVED",
+        "value": {
+          "type": "number",
+          "value": 64
+        },
+        "source": "TOKEN",
+        "diagnostics": [],
+        "dependencyTrace": [
+          {
+            "namespace": "document:test",
+            "tokenId": "11111111-1111-4111-8111-111111111111"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000001"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000002"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000003"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000004"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000005"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000006"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000007"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000008"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000009"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000010"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000011"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000012"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000013"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000014"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000015"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000016"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000017"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000018"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000019"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000020"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000021"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000022"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000023"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000024"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000025"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000026"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000027"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000028"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000029"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000030"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000031"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000032"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000033"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000034"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000035"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000036"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000037"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000038"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000039"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000040"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000041"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000042"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000043"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000044"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000045"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000046"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000047"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000048"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000049"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000050"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000051"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000052"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000053"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000054"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000055"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000056"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000057"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000058"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000059"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000060"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000061"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000062"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000063"
+          },
+          {
+            "namespace": "document:test",
+            "tokenId": "20000000-0000-4000-8000-000000000064"
+          }
+        ],
+        "effectiveContext": {}
+      }
+    }
+  ]
+}

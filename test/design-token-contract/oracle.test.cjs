@@ -4,6 +4,8 @@ const Ajv2020 = require('ajv/dist/2020');
 const schema = require('../../contracts/design-token/v0.1/schema.json');
 const fixtureSchema = require('../../contracts/design-token/v0.1/fixtures/fixtures.schema.json');
 const golden = require('../../contracts/design-token/v0.1/fixtures/golden.json');
+const resolutionVectors = require('../../contracts/design-token/v0.1/fixtures/resolution-vectors.json');
+const resolutionVectorsSchema = require('../../contracts/design-token/v0.1/fixtures/resolution-vectors.schema.json');
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 ajv.addSchema(schema);
@@ -11,6 +13,7 @@ const validateSnapshot = ajv.getSchema(`${schema.$id}#/$defs/tokenSnapshot`);
 const validateRequest = ajv.getSchema(`${schema.$id}#/$defs/resolveRequest`);
 const validateResult = ajv.getSchema(`${schema.$id}#/$defs/resolveResult`);
 const validateFixture = ajv.compile(fixtureSchema);
+const validateResolutionVectors = ajv.compile(resolutionVectorsSchema);
 
 const ids = {
   a: '11111111-1111-4111-8111-111111111111',
@@ -79,6 +82,29 @@ function resolve(snapshot, requestValue) {
   const diagnostics = [];
   const trace = [];
   let budgetNodes = 0;
+  const definitionKeys = new Set();
+  let invalidSnapshot = false;
+  for (const definition of snapshot.tokens) {
+    const key = `${definition.namespace}:${definition.id}:${definition.setId || ''}`;
+    if (definitionKeys.has(key)) invalidSnapshot = true;
+    definitionKeys.add(key);
+  }
+  if (invalidSnapshot) return resultShape('ERROR', undefined, undefined, [], {}, [{ code: 'INVALID_SNAPSHOT', severity: 'error', message: 'INVALID_SNAPSHOT' }]);
+  const shapeIssue = snapshot.tokens.map((token) => token.values.map((item) => expressionShapeIssue(item.expression))).flat().find(Boolean);
+  if (shapeIssue) return resultShape('ERROR', undefined, undefined, [], {}, [{ code: shapeIssue, severity: 'error', message: shapeIssue }]);
+  function expressionShapeIssue(expr, depth = 1, count = { value: 0 }) {
+    count.value += 1;
+    if (count.value > 256 || depth > 32) return 'EXPRESSION_BUDGET';
+    if (expr.kind !== 'operation') return null;
+    const validCount = ['subtract', 'divide'].includes(expr.operator) ? expr.arguments.length === 2 :
+      expr.operator === 'clamp' ? expr.arguments.length === 3 : expr.arguments.length >= 2;
+    if (!validCount) return 'EXPRESSION_INVALID';
+    for (const child of expr.arguments) {
+      const issue = expressionShapeIssue(child, depth + 1, count);
+      if (issue) return issue;
+    }
+    return null;
+  }
   function fail(code) { return { error: error(code, trace.slice()) }; }
   function evalExpr(expr, expectedType, effective, stack, depth) {
     budgetNodes += 1;
@@ -96,26 +122,34 @@ function resolve(snapshot, requestValue) {
     if ((expr.operator === 'clamp' && values.length !== 3) ||
         (['subtract', 'divide'].includes(expr.operator) && values.length !== 2)) return fail('EXPRESSION_INVALID');
     const dimensional = values.filter((v) => v.type === 'dimension');
+    const compatible = (left, right) => left === right || ['ms', 's'].includes(left) && ['ms', 's'].includes(right);
+    const canonical = (v) => v.unit === 's' ? v.value * 1000 : v.value;
     if (['add', 'subtract', 'min', 'max', 'clamp'].includes(expr.operator)) {
       if (!values.every((v) => v.type === values[0].type) ||
-          (values[0].type === 'dimension' && !values.every((v) => v.unit === values[0].unit))) return fail('TYPE_MISMATCH');
+          (values[0].type === 'dimension' && !values.every((v) => compatible(v.unit, values[0].unit)))) return fail('TYPE_MISMATCH');
     }
+    const nums = values.map((v) => v.type === 'dimension' && ['ms', 's'].includes(v.unit) ? canonical(v) : v.value);
     let value;
-    if (expr.operator === 'add') value = values.reduce((n, v) => n + v.value, 0);
-    else if (expr.operator === 'subtract') value = values[0].value - values[1].value;
-    else if (expr.operator === 'min') value = Math.min(...values.map((v) => v.value));
-    else if (expr.operator === 'max') value = Math.max(...values.map((v) => v.value));
-    else if (expr.operator === 'clamp' && values.length === 3) value = Math.max(values[0].value, Math.min(values[1].value, values[2].value));
+    if (expr.operator === 'add') value = nums.reduce((n, v) => n + v, 0);
+    else if (expr.operator === 'subtract') value = nums[0] - nums[1];
+    else if (expr.operator === 'min') value = Math.min(...nums);
+    else if (expr.operator === 'max') value = Math.max(...nums);
+    else if (expr.operator === 'clamp' && values.length === 3) {
+      if (nums[0] > nums[2]) return fail('EXPRESSION_INVALID');
+      value = Math.max(nums[0], Math.min(nums[1], nums[2]));
+    }
     else if (expr.operator === 'multiply') {
       if (dimensional.length > 1) return fail('TYPE_MISMATCH');
       value = values.reduce((n, v) => n * v.value, 1);
     } else if (expr.operator === 'divide') {
       if (values[1].value === 0) return fail('DIVISION_BY_ZERO');
-      if (dimensional.length === 2 && values[0].unit !== values[1].unit) return fail('TYPE_MISMATCH');
-      value = values[0].value / values[1].value;
+      if (dimensional.length === 2 && !compatible(values[0].unit, values[1].unit)) return fail('TYPE_MISMATCH');
+      value = dimensional.length === 2 ? canonical(values[0]) / canonical(values[1]) : nums[0] / nums[1];
     } else return fail('EXPRESSION_INVALID');
-    if (!Number.isFinite(value)) return fail('EXPRESSION_INVALID');
-    const result = values[0].type === 'dimension' ? dimension(value, values[0].unit) : number(value);
+    if (!Number.isFinite(value) || Math.abs(value) > 1_000_000_000_000) return fail('NUMERIC_RANGE');
+    const resultType = expr.operator === 'divide' && dimensional.length === 2 ? 'number' : dimensional.length ? 'dimension' : 'number';
+    const resultUnit = ['ms', 's'].includes(values.find((v) => v.type === 'dimension')?.unit) ? 'ms' : values.find((v) => v.type === 'dimension')?.unit;
+    const result = resultType === 'dimension' ? dimension(value, resultUnit) : number(value);
     if (expectedType && result.type !== expectedType) return fail('TYPE_MISMATCH');
     return { value: result };
   }
@@ -124,11 +158,11 @@ function resolve(snapshot, requestValue) {
   }
   function resolveRef(ref, expectedType, effective, stack, depth) {
     const key = `${ref.namespace}:${ref.tokenId}`;
-    if (stack.includes(key)) return fail('ALIAS_CYCLE');
     if (stack.length >= 32) return fail('ALIAS_BUDGET');
+    trace.push(ref);
+    if (stack.includes(key)) return fail('ALIAS_CYCLE');
     const defs = snapshot.tokens.filter((item) => item.id === ref.tokenId && item.namespace === ref.namespace);
     if (!defs.length) return fail('MISSING_TOKEN');
-    trace.push(ref);
     const baseDefs = defs.filter((item) => !item.setId);
     const overlayDefs = snapshot.activeSetIds.flatMap((setId, index) => {
       const set = snapshot.sets.find((item) => item.id === setId);
@@ -172,10 +206,10 @@ function resolve(snapshot, requestValue) {
   }
   const problem = result.error;
   if (prop.kind === 'binding' && prop.fallback && prop.fallback.type === requestValue.propertyType) {
-    diagnostics.push({ code: problem.code, severity: 'warning', message: problem.code });
+    diagnostics.push({ code: problem.code, severity: 'warning', message: problem.code, tokenChain: trace.slice() });
     return resultShape('RESOLVED', prop.fallback, 'FALLBACK', trace, effective, diagnostics);
   }
-  diagnostics.push({ code: problem.code, severity: 'error', message: problem.code });
+  diagnostics.push({ code: problem.code, severity: 'error', message: problem.code, tokenChain: trace.slice() });
   return resultShape('ERROR', undefined, undefined, trace, effective, diagnostics);
 }
 
@@ -280,6 +314,13 @@ test('proposed golden fixture is versioned, structurally valid, and complete', (
   assert.equal(validateFixture(golden), true, JSON.stringify(validateFixture.errors));
   assert.deepEqual(new Set(golden.vectors.map((v) => v.id)), expectedVectorIds);
   assert.ok(golden.vectors.every((v) => v.status === 'PROPOSED'));
+});
+
+test('full v0.1 request/result fixtures validate and match the JavaScript oracle', () => {
+  assert.equal(validateResolutionVectors(resolutionVectors), true, JSON.stringify(validateResolutionVectors.errors));
+  for (const vector of resolutionVectors.cases) {
+    assert.deepEqual(resolve(vector.input.snapshot, vector.input.request), vector.expectedOutput, `fixture ${vector.id}`);
+  }
 });
 
 for (const vector of golden.vectors) {

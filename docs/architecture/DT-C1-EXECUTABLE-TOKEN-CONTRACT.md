@@ -72,8 +72,12 @@ Architect approval:
    `clamp` takes exactly three; the other operators take at least two. Addition,
    subtraction, min, max and clamp require compatible types and units.
    Multiplication permits at most one dimension and scalar operands. Division
-   requires compatible dimensional units. Division by zero, invalid units,
-   non-finite values and type mismatch fail.
+   of compatible dimensions returns a dimensionless number; number divided by
+   a dimension is unsupported. `ms` and `s` normalize to milliseconds during
+   arithmetic; `px` remains independent. Out-of-range values return
+   `NUMERIC_RANGE` (absolute magnitude limit `1e12`), and zero divisors return
+   `DIVISION_BY_ZERO`. These proposed v0.1 rules have full examples in
+   `docs/architecture/DT-C2-RUST-RESOLVER-COMPATIBILITY.md` and shared vectors.
 8. Proposed hard limits per resolution: 32 alias hops, 32 expression levels,
    256 expression nodes, 8 context dimensions, and 128 preview contexts. Limits
    are versioned contract constants, not document-controlled values.
