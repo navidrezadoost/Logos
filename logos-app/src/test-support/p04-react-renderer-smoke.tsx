@@ -96,6 +96,28 @@ async function run(): Promise<void> {
   if (typeof renderer._render_sync_shape !== "function") {
     throw new Error("Rust renderer does not export _render_sync_shape for the test-only root adapter");
   }
+  let lastBasePropsPointer: number | null = null;
+  const uploadedSelrects: number[][] = [];
+  const allocBytes = renderer._alloc_bytes.bind(renderer);
+  renderer._alloc_bytes = (size) => {
+    const pointer = allocBytes(size);
+    if (size === 104) lastBasePropsPointer = pointer;
+    return pointer;
+  };
+  const setShapeBaseProps = renderer._set_shape_base_props.bind(renderer);
+  renderer._set_shape_base_props = () => {
+    if (lastBasePropsPointer !== null) {
+      const view = new DataView(renderer.HEAPU8.buffer, lastBasePropsPointer, 104);
+      uploadedSelrects.push([
+        view.getFloat32(72, true),
+        view.getFloat32(76, true),
+        view.getFloat32(80, true),
+        view.getFloat32(84, true),
+      ]);
+      diagnostics.uploadedSelrects = [...uploadedSelrects];
+    }
+    setShapeBaseProps();
+  };
   let renderCount = 0;
 
   // Test-only entrypoint adapter. Rust's existing render_sync_shape API creates
