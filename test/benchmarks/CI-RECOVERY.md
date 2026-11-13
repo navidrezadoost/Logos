@@ -77,13 +77,36 @@ the benchmark:
   repaired infrastructure gate now generates five pages and 10,000 change
   rows, but this does not prove that the workspace consumes those rows.
 
-The initial HTTP/browser compatibility check is therefore the first stop. Since
-the browser runtime is absent, login, import, workspace rendering, and heap
-snapshot assertions are **not reached**, not passed. The passing infrastructure
-gate is not a memory benchmark result and supplies no memory-regression
-evidence. Re-enable measurement only after an actual hosted end-to-end run has
-verified backend readiness, login, import, workspace rendering, and this
-generated fixture in the same runtime.
+The initial HTTP/browser compatibility check is therefore the first stop. The
+deterministic `readiness_preflight.js` reports PostgreSQL schema, Redis,
+backend dependency evidence, authentication, authorized project import,
+browser workspace rendering, and Chromium heap collection as separate
+capabilities. It requires more than an HTTP 200: PostgreSQL must contain the
+required auth/import tables and columns, backend dependency connections must
+be independently established, auth must return a session through
+`login-with-password`, import must succeed through the authenticated
+`import-binfile` route with an editable `project-id`, and the editor must expose
+a build ID, workspace canvas, page controls, and visible fixture shapes.
+
+The actual CI database currently lacks the application schema, `LOGOS_SECRET_KEY`
+and a prepared test account are not configured, there is no authorized project
+ID, and the Go backend does not serve the editor UI. Those capabilities report
+specific blockers. When Chromium installation is available, it navigates to
+the configured workspace URL and tests CDP heap collection only after fixture
+verification; unavailable Chromium is reported as a blocker. The infra workflow
+keeps succeeding when these capabilities are blocked, uploads readiness JSON,
+and prints **Memory measurement not run**. No heap snapshot/report is emitted
+or treated as a performance pass. A future measurement job must separately
+report PASSED, FAILED, or BLOCKED based on a real execution and retained report.
+
+The current supported auth API is `prepare-register-profile` with
+`fullname`/`email`/`password`, followed by `register-profile` with its returned
+`token`; login is `login-with-password`. The import route is multipart and
+requires an authenticated profile with edit permission on the destination
+`project-id`. This package does not create a fake login route, change API
+contracts, or provision credentials in hosted CI. The browser measurement
+handoff and metrics are documented in [README.md](README.md); selecting or
+implementing an editor runtime is a separate approved change.
 
 ## Evidence boundaries
 
@@ -91,6 +114,10 @@ generated fixture in the same runtime.
 - Local source inspection: Go server has no `/` UI route; registration/import
   contracts and fixture naming/page-count assumptions differ as above.
 - CI round-trip test: generated Go payload is readable by the Go v3 parser.
+- Current preflight contract: `readiness_preflight.js` independently records
+  the seven capability states and writes a machine-readable readiness report.
+  Its tests reject invalid/missing database URLs without printing credentials.
+  Infrastructure success and measurement status remain separate.
 - Hosted run [#43405395359](https://github.com/navidrezadoost/Logos/actions/runs/43405395359)
   at `f85ced619adc00801a5bf4aff3190cd49d21b3aa` passed in 44 seconds: PostgreSQL
   and Redis readiness, Go backend health/connections, and the generated fixture
@@ -105,3 +132,7 @@ generated fixture in the same runtime.
   on head `aae9e0fa` was triggered by PR #73 and passed the infrastructure gate;
   it explicitly reported “Memory measurement not run” because `GET /` returned
   404. This is infrastructure execution evidence only, not a performance result.
+- The later hosted infrastructure run [#43412424652](https://github.com/navidrezadoost/Logos/actions/runs/43412424652)
+  passed on PR #73 head `42abd22da8bffd4d16a8b208d929879ea798ade9`. It is the
+  current pre-change infrastructure baseline; the readiness-contract changes
+  still require hosted workflow validation on their submitted head.

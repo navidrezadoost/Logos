@@ -1,12 +1,12 @@
 {
   "name": "@logos/benchmarks",
   "version": "1.0.0",
-  "description": "P1.7 memory profiling regression suite for Logos performance CI",
+  "description": "Logos memory benchmark readiness preflight and browser handoff",
   "private": true,
   "scripts": {
-    "generate": "clojure -M:gen-benchmark",
-    "profile": "node memory_profile.js",
-    "profile:headed": "node memory_profile.js --no-headless"
+    "generate": "cd ../../backend-go && go run ./cmd/gen-benchmark --output ../test/benchmarks/fixtures/large-canvas.logos --pages 5 --objects 2000",
+    "preflight": "node readiness_preflight.js",
+    "test:readiness": "node --test readiness_preflight.test.js"
   },
   "dependencies": {
     "playwright": "^1.44.0"

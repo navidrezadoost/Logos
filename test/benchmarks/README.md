@@ -1,97 +1,85 @@
-## P1.7 — Benchmark tooling
+# Memory benchmark readiness and handoff
 
-This directory contains the **P1.7 memory-profiling regression suite** for the
-Logos performance initiative. It ensures that Phase 1 rendering improvements
-(P1.1–P1.6) do not regress as the codebase evolves.
+The scheduled/manual workflow verifies infrastructure and Go `.logos` parser
+compatibility. It currently reports **Memory measurement not run**. No browser
+heap result exists, and the performance gate remains **NOT MEASURED**. See
+[the recovery record](CI-RECOVERY.md) for evidence and blockers.
 
-> **CI status:** the hosted workflow currently validates infrastructure only;
-> it does not produce memory measurements because its Go API target does not
-> serve the login/dashboard/workspace UI expected by this legacy Playwright
-> scenario. See [CI recovery and blocker details](CI-RECOVERY.md).
+## Evidence levels
 
----
+| Capability | Current evidence | Status |
+|---|---|---|
+| Go parser compatibility | Go generator output is read by `binfile.ReadZIP`; generated fixture has five pages and 10,000 Go change rows | Verified format/parser compatibility only |
+| Backend infrastructure | PostgreSQL and Redis readiness; backend health and dependency connections | Verified service readiness only |
+| Application schema | Required auth/import tables and columns are checked independently by preflight | Not initialized in the current CI database |
+| Authentication | Supported Go flow is `prepare-register-profile` followed by `register-profile`; login uses `login-with-password` | Blocked: no prepared test account or signing key in current workflow |
+| Project/import | Authenticated multipart `import-binfile` requires an editable destination `project-id` and `.logos` file | Blocked: no authorized test account/project in current workflow |
+| Browser workspace | Must identify the actual editor build, load the imported fixture, and verify visible shapes and page controls | Blocked: Go API exposes no editor UI |
+| Measurement | Requires a verified workspace and a Chromium/CDP heap snapshot runtime | Not reached |
 
-### Files
+The fixture generator creates 10,000 change-history rows. That count does not
+mean the browser rendered 10,000 shapes.
 
-| File | Purpose |
-|------|---------|
-| `generate_file.clj` | Clojure script that produces `fixtures/large-canvas.logos` (10,000+ shapes, 5 pages) |
-| `memory_profile.js`  | Playwright benchmark: loads fixture, runs undo/redo + page navigation, asserts heap limits |
-| `analyse_snapshot.js`| Heap snapshot parser — reads `.heapsnapshot` JSON, extracts actionable metrics |
-| `deps.edn`           | Clojure deps for the generator (includes `common/` namespaces) |
-| `package.json`       | Node deps (`playwright`) |
+## Infrastructure workflow
 
----
+The infrastructure gate starts only PostgreSQL and Redis from the development
+Compose model. It binds test ports to runner loopback, uses disposable Compose
+token values that are not persisted, starts the Go backend, and validates its
+dependencies. It does not start the privileged development container or
+unrelated services. It also exercises the Go generator/parser compatibility
+test. A green run is not evidence of login, import, rendering, or memory
+performance.
 
-### Prerequisites
+Run the deterministic readiness checks locally with Node 20+, Go, `psql`, and
+`redis-cli` available:
 
-1. **Logos running** at `http://localhost:3449` (all services — backend, frontend, exporter).
-2. **Test account** with email `benchmark@logos.test`, password `benchmark123!` (or override via env vars).
-3. **Java 17+** and **Clojure CLI** for the generator.
-4. **Node 20+** for the Playwright script.
-
----
-
-### Quick start
-
-```bash
-# 1. Generate the benchmark file (one-time, ~30 s)
-cd test/benchmarks
-clojure -M:gen-benchmark
-# → writes fixtures/large-canvas.logos
-
-# 2. Install Playwright browsers
-npm install
-npx playwright install chromium
-
-# 3. Run the benchmark (requires running Logos)
-node memory_profile.js
-
-# 4. Inspect results
-ls snapshots/
-#  baseline.heapsnapshot  final.heapsnapshot  report-<timestamp>.json
+```sh
+cd backend-go
+go test ./cmd/gen-benchmark ./internal/binfile
+cd ../test/benchmarks
+node --test readiness_preflight.test.js
+DATABASE_URL='postgres://…@127.0.0.1:5432/logos' \
+REDIS_URL='redis://127.0.0.1:6379/0' \
+BACKEND_DEPENDENCIES_READY=true \
+LOGOS_URL='http://127.0.0.1:6060' \
+node readiness_preflight.js
 ```
 
----
+The preflight prints one `READY` or `BLOCKED` result per capability and names
+the missing evidence. It never treats HTTP 200 alone as readiness. For auth and
+import verification, provide a provisioned disposable `LOGOS_EMAIL`,
+`LOGOS_PASSWORD`, and editable `BENCHMARK_PROJECT_ID`; credentials are not
+printed. Browser verification also requires `BENCHMARK_WORKSPACE_URL` with a
+`{fileId}` path placeholder and `BENCHMARK_EXPECTED_PAGES`; the workspace must
+expose `meta[name="logos-build-id"]`, `data-testid="workspace-canvas"` with a
+matching `data-file-id`, `data-testid="page-item"` controls, and visible
+`data-testid="rendered-shape"` elements. The import check writes into the
+destination project, so use only a disposable benchmark environment. Do not
+set a credential in hosted CI until the schema, account lifecycle, and project
+isolation are approved.
 
-### Thresholds
+## Browser measurement handoff
 
-| Metric | Limit | Rationale |
-|--------|-------|-----------|
-| Heap size after scenario | ≤ 300 MB | external design tool ≈ 350–500 MB on comparable files; we target better. |
-| Retained size growth (final − baseline) | ≤ 50 MB | Undo/redo and page nav should not leak retained memory. |
-| Detached DOM nodes | ≤ 100 | Indicates component teardown failures. |
-| ArrayBuffer count growth | ≤ 10 | Indicates buffer leaks in serialisation or WASM transfers. |
+An approved runtime integration must provide all of the following before a
+memory performance gate can run:
 
-Override via environment variables (e.g. `LOGOS_HEAP_LIMIT_MB=400`).
+1. The real editor URL and build identifier.
+2. A supported test-account preparation/authentication flow and isolated
+   editable destination project.
+3. A successful authenticated fixture import and selected project/file.
+4. A workspace verification showing the fixture's visible shapes and expected
+   page controls; change-row counts are not rendering evidence.
+5. A deterministic warm-up and interaction sequence with explicit failure and
+   timeout handling.
+6. Baseline and post-operation heap snapshots, retained heap growth, detached
+   DOM-node counts, ArrayBuffer growth, and browser/OS/build/fixture metadata.
+7. Retained snapshot and JSON report artifacts. Missing reports, empty
+   directories, or skipped work must be `BLOCKED`, never `PASSED`.
 
----
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOGOS_URL` | `http://localhost:3449` | Base URL of the running Logos instance |
-| `LOGOS_EMAIL` | `benchmark@logos.test` | Auth user email |
-| `LOGOS_PASSWORD` | `benchmark123!` | Auth user password |
-| `BENCHMARK_FILE` | `fixtures/large-canvas.logos` | Path to the .logos benchmark file |
-
----
-
-### Interpreting results
-
-The JSON report in `snapshots/report-<timestamp>.json` is machine-readable and
-can be ingested by Grafana or OpenTelemetry (Phase 3). Watch for gradual creep:
-a heap that grows from 250 MB → 290 MB over 30 commits is a warning sign even
-before the 300 MB hard limit is reached.
-
-Load the `.heapsnapshot` files in **Chrome DevTools → Memory → Load profile**
-for interactive flamegraph inspection.
-
----
-
-### References
-
-- Brendan Gregg — *Systems Performance*, USE method applied to JavaScript heap.
-- *Game Programming Patterns*, ch. 6 — time budget and measurement patterns.
-- Chrome DevTools Protocol — `HeapProfiler.takeHeapSnapshot` specification.
+Keep JavaScript heap, WASM memory, GPU allocations, and backend RSS as separate
+metrics. A JavaScript heap snapshot does not measure total browser memory.
+Previously documented numeric limits are historical expectations, not a
+current baseline or performance claim. The browser runtime, UI selectors,
+fixture import path, warm-up, and actual measurement remain a separate approved
+runtime integration change; this work does not select or implement an editor
+runtime.
