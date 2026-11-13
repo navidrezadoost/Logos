@@ -1,0 +1,12 @@
+{
+  "name": "logos-design-token-contract-tests",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Proposed v0.1 design-token contract conformance checks",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1"
+  }
+}
