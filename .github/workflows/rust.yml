@@ -18,6 +18,7 @@ on:
       - "logos-app/test-harness/**"
       - "logos-app/vite.renderer-smoke.config.ts"
       - "test/fixtures/p0-document-compat/**"
+      - "docs/r1/P0.4-REACT-RUNTIME-VERTICAL-SLICE.md"
       - ".github/workflows/rust.yml"
 
 env:
