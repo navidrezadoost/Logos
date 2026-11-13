@@ -35,6 +35,26 @@ jobs:
           go-version-file: backend-go/go.mod
           cache-dependency-path: backend-go/go.sum
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: test/benchmarks/package-lock.json
+
+      - name: Install benchmark preflight runtime
+        working-directory: test/benchmarks
+        run: npm ci
+
+      - name: Install Chromium when available
+        working-directory: test/benchmarks
+        continue-on-error: true
+        run: npx playwright install chromium
+
+      - name: Test deterministic readiness reporting
+        working-directory: test/benchmarks
+        run: node --test readiness_preflight.test.js
+
       # Compose interpolates the required MCP token even when only database
       # services are selected. Supply a disposable per-invocation value in the
       # process environment only: never emit it, write it to GITHUB_ENV/output,
@@ -124,6 +144,7 @@ jobs:
           echo "$!" > "$RUNNER_TEMP/logos-backend.pid"
 
       - name: Verify backend and dependency readiness
+        id: backend-check
         run: |
           for _ in {1..60}; do
             if curl --fail --silent "$LOGOS_URL/api/_health" >/dev/null && \
@@ -132,6 +153,7 @@ jobs:
                 "$RUNNER_TEMP/logos-backend.log"; then
               echo "Go backend health is ready; PostgreSQL and Redis"
               echo "connections succeeded."
+              echo "dependencies_ready=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             pid="$(cat "$RUNNER_TEMP/logos-backend.pid")"
@@ -183,44 +205,37 @@ jobs:
           )
           PY
 
-      # This backend serves JSON APIs only. The browser scenario expects an app
-      # at / with login/dashboard/import/workspace UI, so record the blocker and
-      # do not install/run Playwright or emit memory metrics until that runtime
-      # path is implemented and verified end-to-end.
-      - name: Check benchmark browser target
-        id: browser-target
-        run: |
-          status="$(curl --silent --output "$RUNNER_TEMP/backend-root.html" \
-            --write-out '%{http_code}' "$LOGOS_URL/")"
-          echo "Go backend GET / returned HTTP $status."
-          echo "measurement_ready=false" >> "$GITHUB_OUTPUT"
-          if [ "$status" = "404" ]; then
-            message="Go API has no browser app at /; runtime UI checks and \
-          heap measurement are blocked. See test/benchmarks/CI-RECOVERY.md."
-          else
-            message="A non-404 root is not proof of runtime compatibility; \
-          login/import/workspace checks remain required. \
-          See test/benchmarks/CI-RECOVERY.md."
-          fi
-          echo "::notice title=Memory measurement not run::$message"
-
-      - name: Run memory profiling benchmark
-        if: steps.browser-target.outputs.measurement_ready == 'true'
+      # Evaluate all capabilities independently. BLOCKED is a valid outcome
+      # for this infrastructure job and never counts as a memory measurement.
+      - name: Run benchmark readiness preflight
+        id: readiness
         working-directory: test/benchmarks
-        run: node memory_profile.js
         env:
+          DATABASE_URL: postgres://logos:logos@127.0.0.1:5432/logos
+          REDIS_URL: redis://127.0.0.1:6379/0
+          BACKEND_DEPENDENCIES_READY: ${{ steps.backend-check.outputs.dependencies_ready }}
           LOGOS_URL: ${{ env.LOGOS_URL }}
-          BENCHMARK_FILE: fixtures/large-canvas.logos
+          BENCHMARK_FILE: ${{ github.workspace }}/test/benchmarks/fixtures/large-canvas.logos
+          BENCHMARK_EXPECTED_PAGES: "5"
+          READINESS_PREFLIGHT_REPORT: ${{ runner.temp }}/benchmark-readiness.json
+        run: |
+          node readiness_preflight.js | tee "$RUNNER_TEMP/benchmark-readiness.stdout"
+          cat "$RUNNER_TEMP/benchmark-readiness.stdout" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=Memory measurement not run::This workflow records readiness only; a separate approved performance gate is required."
+          if [ "$(node -e 'const r=require(process.argv[1]); console.log(r.status)' \
+            "$RUNNER_TEMP/benchmark-readiness.json")" != "READY" ]; then
+            echo "::notice title=Readiness blockers::One or more explicit benchmark prerequisites are BLOCKED. See test/benchmarks/CI-RECOVERY.md."
+          fi
 
-      - name: Upload heap snapshots and report
+      - name: Upload readiness evidence (no heap measurement)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: memory-benchmark-infrastructure-${{ github.run_number }}
+          name: memory-benchmark-readiness-${{ github.run_number }}
           path: |
-            test/benchmarks/snapshots/
+            ${{ runner.temp }}/benchmark-readiness.json
             ${{ runner.temp }}/logos-backend.log
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 30
 
       - name: Tear down CI database services
