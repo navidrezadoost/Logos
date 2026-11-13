@@ -118,6 +118,26 @@ Local follow-up checks passed: the Node fixture suite (8 tests), TypeScript proj
 
 These recommendations identify decision owners and evidence; they do not authorize implementation or establish a second graph model.
 
+## A7 renderer compatibility UX and validation boundary
+
+### Typed renderer status
+
+`logos-app/src/render-wasm/renderer-status.ts` defines the editor-facing `RendererStatus` union: `READY`, `RENDERING`, `UNSUPPORTED_SHAPE`, `RENDER_FAILED`, and `RECOVERING`. Unsupported-shape failures retain `shapeId`, `shapeType`, backend (`canvas2d` or `wasm`), and stable diagnostic code `LOGOS_RENDER_UNSUPPORTED_SHAPE`. Other renderer exceptions map to `LOGOS_RENDER_FAILED`; raw exception messages/stack traces are not included in the UI status.
+
+The frame disposition distinguishes `none`, `previous`, and `unverified`. Typed unsupported errors are raised during adapter preflight and leave the target unchanged; when dimensions/backend match the last successful frame, the editor identifies that frame as previous. Generic errors may happen after writes, so any retained output is labelled unverified rather than claimed to be an intact prior frame.
+
+### Compatibility presentation and recovery
+
+`Canvas` contains the diagnostic overlay within the canvas region so its scrim blocks interaction with stale pixels but does not cover neighboring Layers, Inspector, or document-navigation UI. It names the unsupported type, shape ID, backend, and diagnostic code; explains that renderer failure does not delete document data; and labels previous/unverified canvas output as not current. Unsupported content offers **Select in Layers**; a generic renderer failure offers an explicit user-triggered retry, never an automatic retry loop. The persistent inline alert is not a toast and remains a single notice across repeated failed render attempts. A successful compatible render returns status to `READY` and removes the notice automatically. No alternative renderer is invoked on unsupported content because capability for that content has not been proven.
+
+### Nested-shape limitation (explicit)
+
+This change validates only the shapes supplied to the adapters. `Canvas` obtains that array from `useCurrentPageShapes()`, which currently selects `Page.rootShapeIds`; `syncScene2D` likewise preflights only its `shapes` argument. The production path does **not** project or recursively validate nested descendants here. An unsupported child beneath a supported root can therefore bypass this diagnostic boundary, and nested visual parity is not established. This task does not add recursive scene projection, a production hierarchy bridge, or canonical graph ownership.
+
+### Browser evidence
+
+`logos-app/test-harness/a7-renderer-compatibility-smoke.html` mounts the real Canvas component in Chromium with the normal WASM loader directed to a deliberately absent artifact, exercising the actual Canvas 2D fallback. The browser proof checks a supported pixel, an accessible unsupported-shape diagnostic, shape ID/type/backend/code, dimmed previous pixels, unchanged document state after failure, editor controls outside the Canvas overlay, context restoration, non-duplicating repeated failures, and automatic recovery after a compatible shape update. It is separate from browser-persistence evidence and makes no persistence claim.
+
 ## Decision gates
 
 Before production integration, architecture review must approve: the synthetic nil-root contract; source-versus-renderer order and stacking; behavior/capability of vector-network, component, and instance across both renderers; subtree delete/undo semantics; and cache invalidation ownership. No runtime, route, schema, canonical document owner, or migration contract is selected here.
