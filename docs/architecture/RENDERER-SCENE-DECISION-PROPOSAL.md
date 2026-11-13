@@ -101,6 +101,12 @@ The current Rust ABI writes directly into the live singleton pool; it has no sta
 
 Required tests are old/new-parent reparenting, nested deletion, moved geometry crossing tile boundaries, adjacent unaffected cached tiles, invalid references with no live mutation, injected failures at each upload stage, recovery from the last committed snapshot, and repeated identical sync. These tests must use full framebuffer comparisons and confirm that the correct old pixels clear while unrelated tiles remain byte-identical.
 
+## A6.2 implementation and validation record
+
+The current follow-up adds Canvas 2D preflight before `clearRect`, an explicit ellipse path, a typed unsupported-shape error, and `try/finally` restoration of the caller's transformed Canvas context. Context-recorder tests cover eight unsupported known/future types, no clear/draw calls on rejection, and explicit ellipse/vector-network paths. This is not a browser pixel/e2e test of the actual Canvas component or an in-product compatibility banner.
+
+Local follow-up checks passed: the Node fixture suite (7 tests), TypeScript `tsc --noEmit`, isolated Vite adapter bundle, full Vite app bundle, `cargo fmt`, and `git diff --check`. Hosted checks passed on PR81's previous head `2ccbf118` (Rust workspace and React); the A6.2 update requires fresh checks on its new head before PR81 is review-ready.
+
 ## Architecture decision alternatives (proposed)
 
 | Decision | Alternatives and compatibility/risk | Required evidence | Recommendation for review (not approval) |
