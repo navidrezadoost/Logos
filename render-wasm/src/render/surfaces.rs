@@ -597,3 +597,162 @@ impl TileTextureCache {
         }
     }
 }
+
+#[cfg(test)]
+mod tile_compositing_tests {
+    use super::*;
+
+    const TARGET_WIDTH: i32 = 128;
+    const TARGET_HEIGHT: i32 = 64;
+    const TILE_SIZE: i32 = 64;
+
+    fn raster_surface(width: i32, height: i32) -> skia::Surface {
+        skia::surfaces::raster_n32_premul((width, height)).expect("create raster test surface")
+    }
+
+    fn initialized_surfaces(
+        target: skia::Surface,
+        current: skia::Surface,
+        tiles: TileTextureCache,
+    ) -> Surfaces {
+        Surfaces {
+            target,
+            filter: raster_surface(1, 1),
+            cache: raster_surface(TARGET_WIDTH, TARGET_HEIGHT),
+            current,
+            shape_fills: raster_surface(1, 1),
+            shape_strokes: raster_surface(1, 1),
+            drop_shadows: raster_surface(1, 1),
+            inner_shadows: raster_surface(1, 1),
+            text_drop_shadows: raster_surface(1, 1),
+            ui: raster_surface(1, 1),
+            debug: raster_surface(1, 1),
+            tiles,
+            sampling_options: skia::SamplingOptions::default(),
+            margins: skia::ISize::new(0, 0),
+            dirty_surfaces: 0,
+        }
+    }
+
+    fn seed_target(surface: &mut skia::Surface) {
+        surface.canvas().clear(skia::Color::TRANSPARENT);
+        let mut old_paint = Paint::default();
+        old_paint.set_color(skia::Color::from_argb(255, 51, 102, 153));
+        surface
+            .canvas()
+            .draw_rect(skia::Rect::from_xywh(10.0, 10.0, 40.0, 40.0), &old_paint);
+
+        let mut adjacent_paint = Paint::default();
+        adjacent_paint.set_color(skia::Color::from_argb(255, 210, 90, 40));
+        surface.canvas().draw_rect(
+            skia::Rect::from_xywh(70.0, 10.0, 40.0, 40.0),
+            &adjacent_paint,
+        );
+    }
+
+    fn partially_transparent_tile() -> skia::Surface {
+        let mut current = raster_surface(TILE_SIZE, TILE_SIZE);
+        current.canvas().clear(skia::Color::TRANSPARENT);
+        let mut fill = Paint::default();
+        fill.set_color(skia::Color::from_argb(128, 51, 102, 153));
+        current
+            .canvas()
+            .draw_rect(skia::Rect::from_xywh(20.0, 20.0, 30.0, 20.0), &fill);
+        current
+    }
+
+    fn adjacent_tile() -> skia::Surface {
+        let mut adjacent = raster_surface(TILE_SIZE, TILE_SIZE);
+        adjacent.canvas().clear(skia::Color::TRANSPARENT);
+        let mut marker = Paint::default();
+        marker.set_color(skia::Color::from_argb(255, 210, 90, 40));
+        adjacent
+            .canvas()
+            .draw_rect(skia::Rect::from_xywh(6.0, 10.0, 40.0, 40.0), &marker);
+        adjacent
+    }
+
+    fn read_rgba(surface: &mut skia::Surface) -> Vec<u8> {
+        let info = skia::ImageInfo::new(
+            (TARGET_WIDTH, TARGET_HEIGHT),
+            skia::ColorType::RGBA8888,
+            skia::AlphaType::Unpremul,
+            None,
+        );
+        let row_bytes = TARGET_WIDTH as usize * 4;
+        let mut pixels = vec![0; row_bytes * TARGET_HEIGHT as usize];
+        assert!(surface.read_pixels(&info, &mut pixels, row_bytes, (0, 0)));
+        pixels
+    }
+
+    fn pixel(pixels: &[u8], x: usize, y: usize) -> [u8; 4] {
+        let offset = (y * TARGET_WIDTH as usize + x) * 4;
+        pixels[offset..offset + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn cached_and_direct_tiles_replace_stale_pixels_and_match() {
+        let tile_rect = skia::Rect::from_xywh(0.0, 0.0, TILE_SIZE as f32, TILE_SIZE as f32);
+        let adjacent_rect =
+            skia::Rect::from_xywh(TILE_SIZE as f32, 0.0, TILE_SIZE as f32, TILE_SIZE as f32);
+        let current = partially_transparent_tile();
+        let mut current_for_snapshot = current.clone();
+        let image = current_for_snapshot.image_snapshot();
+        let mut adjacent_for_snapshot = adjacent_tile();
+        let adjacent_image = adjacent_for_snapshot.image_snapshot();
+
+        let mut cached_target = raster_surface(TARGET_WIDTH, TARGET_HEIGHT);
+        seed_target(&mut cached_target);
+        let seeded_pixels = read_rgba(&mut cached_target);
+        assert_eq!(pixel(&seeded_pixels, 12, 30), [51, 102, 153, 255]);
+        assert_eq!(pixel(&seeded_pixels, 80, 30), [210, 90, 40, 255]);
+        let mut cached_tiles = TileTextureCache::new();
+        cached_tiles.grid.insert(tiles::Tile(0, 0), image);
+        cached_tiles.grid.insert(tiles::Tile(1, 0), adjacent_image);
+        let mut cached = initialized_surfaces(
+            cached_target,
+            raster_surface(TILE_SIZE, TILE_SIZE),
+            cached_tiles,
+        );
+        cached.draw_cached_tile_surface(tiles::Tile(1, 0), adjacent_rect, skia::Color::TRANSPARENT);
+        cached.draw_cached_tile_surface(tiles::Tile(0, 0), tile_rect, skia::Color::TRANSPARENT);
+        assert!(
+            cached.tiles.has(tiles::Tile(1, 0)),
+            "adjacent cached tile was invalidated"
+        );
+
+        let mut direct_target = raster_surface(TARGET_WIDTH, TARGET_HEIGHT);
+        seed_target(&mut direct_target);
+        let mut direct = initialized_surfaces(direct_target, current, TileTextureCache::new());
+        direct.draw_current_tile_direct(&tile_rect, skia::Color::TRANSPARENT);
+
+        let cached_pixels = read_rgba(&mut cached.target);
+        let direct_pixels = read_rgba(&mut direct.target);
+        assert_eq!(
+            cached_pixels, direct_pixels,
+            "cached and direct tile pixels differ"
+        );
+        assert_eq!(
+            pixel(&cached_pixels, 12, 30),
+            [0, 0, 0, 0],
+            "old opaque edge remains"
+        );
+        let partial = pixel(&cached_pixels, 30, 30);
+        assert!(
+            [51_i16, 102, 153]
+                .iter()
+                .zip(partial[..3].iter())
+                .all(|(want, got)| (*want - i16::from(*got)).abs() <= 1),
+            "partial-alpha fill RGB changed: {partial:?}"
+        );
+        assert_eq!(
+            partial[3], 128,
+            "partial-alpha fill alpha changed: {partial:?}"
+        );
+        assert_eq!(
+            pixel(&cached_pixels, 80, 30),
+            [210, 90, 40, 255],
+            "adjacent tile was modified"
+        );
+    }
+}
