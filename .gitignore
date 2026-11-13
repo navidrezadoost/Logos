@@ -2,6 +2,7 @@ target/
 **/.DS_Store
 node_modules/
 **/node_modules/
+logos-app/.renderer-scene-smoke/
 logos-wasm/dist/
 .cpcache/
 **/.cpcache/

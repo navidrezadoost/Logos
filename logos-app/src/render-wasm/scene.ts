@@ -46,6 +46,25 @@ const SHAPE_TYPE_MAP: Record<string, number> = {
   "svg-raw": 7,
 };
 
+export class UnsupportedRendererShapeError extends Error {
+  readonly shapeId: string;
+  readonly discriminator: string;
+
+  constructor(shapeId: string, discriminator: string) {
+    super(`Cannot upload shape ${shapeId}: unsupported renderer discriminator "${discriminator}"`);
+    this.name = "UnsupportedRendererShapeError";
+    this.shapeId = shapeId;
+    this.discriminator = discriminator;
+  }
+}
+
+function rustShapeDiscriminator(shape: Shape): number {
+  if (!Object.prototype.hasOwnProperty.call(SHAPE_TYPE_MAP, shape.type)) {
+    throw new UnsupportedRendererShapeError(shape.id, String(shape.type));
+  }
+  return SHAPE_TYPE_MAP[shape.type];
+}
+
 const FLAG_HIDDEN     = 0x02;
 const BLEND_NORMAL    = 0x00;
 const CONSTRAINT_NONE = 0xFF;
@@ -66,16 +85,23 @@ export function syncScene(
   width: number,
   height: number
 ): void {
+  // Validate the whole upload before changing viewbox or pool state. In
+  // particular, never silently reinterpret unsupported content as a rectangle.
+  const uploadPlan = shapes.map((shape) => ({
+    shape,
+    rustType: rustShapeDiscriminator(shape),
+  }));
+
   // 1. Resize the WASM viewbox to match the canvas
   mod._resize_viewbox(width, height);
 
   // 2. Allocate pool — total shape count (including nested children)
-  const totalShapes = shapes.reduce((n, s) => n + 1 + s.children.length, 0);
+  const totalShapes = uploadPlan.reduce((n, { shape }) => n + 1 + shape.children.length, 0);
   mod._init_shapes_pool(Math.max(totalShapes, 1));
 
   // 3. Upload every shape via the batched set_shape_base_props ABI
-  for (const shape of shapes) {
-    uploadShapeBatched(mod, shape);
+  for (const { shape, rustType } of uploadPlan) {
+    uploadShapeBatched(mod, shape, rustType);
   }
 
   // 4. Render
@@ -105,7 +131,7 @@ export function syncScene(
  *   [72..88)  selrect      4×f32 LE (x1,y1,x2,y2)
  *   [88..104) corners      4×f32 LE (r1,r2,r3,r4)
  */
-function uploadShapeBatched(mod: RenderWasmModule, shape: Shape): void {
+function uploadShapeBatched(mod: RenderWasmModule, shape: Shape, rustType: number): void {
   const ptr = mod._alloc_bytes(BASE_PROPS_SIZE);
   const heap = mod.HEAPU8;
   const view = new DataView(heap.buffer, ptr, BASE_PROPS_SIZE);
@@ -117,7 +143,7 @@ function uploadShapeBatched(mod: RenderWasmModule, shape: Shape): void {
   writeUUID(view, 16, shape.parentId);
 
   // shape_type [32]
-  view.setUint8(32, SHAPE_TYPE_MAP[shape.type] ?? 3 /* rect */);
+  view.setUint8(32, rustType);
 
   // flags [33]  bit1 = hidden
   view.setUint8(33, shape.hidden ? FLAG_HIDDEN : 0);

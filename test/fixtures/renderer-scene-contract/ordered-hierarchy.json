@@ -1,0 +1,73 @@
+{
+  "fixtureVersion": "renderer-scene-contract/v1",
+  "documentId": "00000000-0000-4000-8000-000000000001",
+  "page": {
+    "id": "00000000-0000-4000-8000-000000000010",
+    "name": "Scene contract fixture",
+    "rootShapeIds": [
+      "00000000-0000-4000-8000-000000000020",
+      "00000000-0000-4000-8000-000000000030"
+    ]
+  },
+  "shapes": {
+    "00000000-0000-4000-8000-000000000020": {
+      "id": "00000000-0000-4000-8000-000000000020",
+      "type": "frame",
+      "name": "Ordered frame",
+      "parentId": null,
+      "children": [
+        "00000000-0000-4000-8000-000000000022",
+        "00000000-0000-4000-8000-000000000021"
+      ],
+      "bounds": { "x": 10, "y": 20, "w": 120, "h": 80 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000021": {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "type": "rect",
+      "name": "Stored child slot one",
+      "parentId": "00000000-0000-4000-8000-000000000020",
+      "children": [],
+      "bounds": { "x": 40, "y": 40, "w": 20, "h": 20 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [{ "type": "solid", "color": "#336699", "opacity": 1 }],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000022": {
+      "id": "00000000-0000-4000-8000-000000000022",
+      "type": "rect",
+      "name": "Stored child slot two",
+      "parentId": "00000000-0000-4000-8000-000000000020",
+      "children": [],
+      "bounds": { "x": 20, "y": 30, "w": 20, "h": 20 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [{ "type": "solid", "color": "#cc6633", "opacity": 1 }],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    },
+    "00000000-0000-4000-8000-000000000030": {
+      "id": "00000000-0000-4000-8000-000000000030",
+      "type": "rect",
+      "name": "Second page root",
+      "parentId": null,
+      "children": [],
+      "bounds": { "x": 180, "y": 30, "w": 30, "h": 30 },
+      "transform": [1, 0, 0, 1, 0, 0],
+      "rotation": 0,
+      "fills": [{ "type": "solid", "color": "#55aa77", "opacity": 1 }],
+      "opacity": 1,
+      "hidden": false,
+      "locked": false
+    }
+  }
+}
