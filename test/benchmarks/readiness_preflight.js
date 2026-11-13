@@ -8,12 +8,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 const net = require("node:net");
 const tls = require("node:tls");
+const { isDisposableImportAllowed, validateLoginResponse, validateImportResponse, validateRendererEvidence, makeReport, writeReport } = require("./readiness_contract");
 
 const base = (process.env.LOGOS_URL || "http://127.0.0.1:6060").replace(/\/$/, "");
 const fixture = path.resolve(process.env.BENCHMARK_FILE || path.join(__dirname, "fixtures/large-canvas.logos"));
 const report = {};
 let importedFileId = null;
-const capabilities = ["postgresql", "redis", "backend", "authentication", "project_import", "browser_workspace", "measurement"];
+const capabilities = ["postgresql", "redis", "backend", "authentication", "project_import", "browser_workspace"];
 
 function set(name, state, evidence) { report[name] = { state, evidence }; }
 function allReady(results) { return capabilities.every((name) => results[name]?.state === "READY"); }
@@ -133,17 +134,18 @@ async function login() {
       body: JSON.stringify({ email, password }), signal: AbortSignal.timeout(8000),
     });
     const cookie = response.headers.get("set-cookie");
-    if (!response.ok || !cookie) return { ok: false, reason: `Supported login-with-password contract failed with HTTP ${response.status}` };
+    const body = await response.json().catch(() => null);
+    if (!validateLoginResponse({ status: response.status, setCookie: cookie, body })) return { ok: false, reason: "Supported login-with-password response was unsuccessful or malformed" };
     return { ok: true, cookie: cookie.split(";")[0] };
   } catch { return { ok: false, reason: "Supported login endpoint could not be reached" }; }
 }
 
-async function checkBrowserAndMeasurement(auth) {
+async function checkBrowserAndHeapCapture(auth) {
   let chromium;
   try { ({ chromium } = require("playwright")); }
   catch {
     set("browser_workspace", "BLOCKED", "Playwright Chromium is unavailable");
-    set("measurement", "BLOCKED", "A supported Chromium runtime is required for CDP heap collection");
+    report.heap_capture_capability = { state: "BLOCKED", evidence: "Playwright Chromium is unavailable" };
     return;
   }
   let browser;
@@ -159,36 +161,34 @@ async function checkBrowserAndMeasurement(auth) {
     const expectedPages = Number(process.env.BENCHMARK_EXPECTED_PAGES || "0");
     if (!workspaceTemplate || !workspaceTemplate.includes("{fileId}") || !importedFileId || !expectedPages) {
       set("browser_workspace", "BLOCKED", "Requires BENCHMARK_WORKSPACE_URL containing {fileId}, a verified imported file, and BENCHMARK_EXPECTED_PAGES");
-      set("measurement", "BLOCKED", "Workspace fixture is not addressable and verified");
+      report.heap_capture_capability = { state: "BLOCKED", evidence: "Workspace fixture is not addressable and verified" };
       return;
     }
     const page = await context.newPage();
     const workspaceUrl = workspaceTemplate.replace("{fileId}", encodeURIComponent(importedFileId));
     stage = "workspace navigation and verification";
     await page.goto(workspaceUrl, { waitUntil: "domcontentloaded", timeout: 10000 });
-    const pageControls = await page.locator('[data-testid="page-item"]').count();
-    const renderedShapes = await page.locator('[data-testid="rendered-shape"]').count();
-    const build = await page.locator('meta[name="logos-build-id"]').getAttribute("content").catch(() => null);
-    const canvas = page.locator('[data-testid="workspace-canvas"]');
-    const workspaceFileId = await canvas.getAttribute("data-file-id").catch(() => null);
-    const ready = Boolean(build) && workspaceFileId === importedFileId && pageControls === expectedPages && renderedShapes > 0;
-    set("browser_workspace", ready ? "READY" : "BLOCKED", ready
-      ? `Editor build ${build}; imported fixture identity, ${pageControls} page controls, and ${renderedShapes} rendered fixture shapes verified`
-      : "Requires matching imported file ID, editor build ID, expected page-control count, and visible fixture shapes via supported data-testid markers");
-    if (!ready) return set("measurement", "BLOCKED", "Workspace fixture verification failed; heap collection must not be interpreted as a benchmark");
+    const evidence = await page.evaluate(async () => {
+      const adapter = globalThis.logosBenchmarkEvidence;
+      return typeof adapter?.collect === "function" ? await adapter.collect() : null;
+    });
+    const validation = validateRendererEvidence(evidence, { fileId: importedFileId, pageCount: expectedPages });
+    const ready = validation.ok;
+    set("browser_workspace", ready ? "READY" : "BLOCKED", validation.reason);
+    if (!ready) return report.heap_capture_capability = { state: "BLOCKED", evidence: "Workspace fixture verification failed" };
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("HeapProfiler.enable");
     await cdp.send("HeapProfiler.collectGarbage");
     await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
-    set("measurement", "READY", "Chromium CDP HeapProfiler snapshot succeeded after workspace verification");
+    report.heap_capture_capability = { state: "READY", evidence: "Chromium CDP HeapProfiler snapshot capability succeeded; no benchmark was run" };
     await cdp.detach();
   } catch {
     if (!report.browser_workspace) set("browser_workspace", "BLOCKED", stage === "launch"
       ? "Chromium could not launch; browser application availability cannot be verified"
       : "Editor URL did not load a verified workspace fixture");
-    set("measurement", "BLOCKED", stage === "launch"
+    report.heap_capture_capability = { state: "BLOCKED", evidence: stage === "launch"
       ? "Supported Chromium runtime is unavailable for CDP heap collection"
-      : "Chromium/CDP heap collection could not be verified");
+      : "Chromium/CDP heap collection could not be verified" };
   } finally { if (browser) await browser.close(); }
 }
 
@@ -197,7 +197,7 @@ async function main() {
   const auth = await login();
   set("authentication", auth.ok ? "READY" : "BLOCKED", auth.ok ? "Provisioned test account authenticated through login-with-password" : auth.reason);
   const projectId = process.env.BENCHMARK_PROJECT_ID;
-  if (auth.ok && projectId && fs.existsSync(fixture)) {
+  if (auth.ok && isDisposableImportAllowed(process.env) && fs.existsSync(fixture)) {
     try {
       const form = new FormData();
       form.set("project-id", projectId);
@@ -206,7 +206,7 @@ async function main() {
         method: "POST", headers: { cookie: auth.cookie }, body: form, signal: AbortSignal.timeout(30000),
       });
       const data = await response.json().catch(() => null);
-      const imported = response.ok && Array.isArray(data?.files) && data.files.length > 0 && typeof data.files[0].newId === "string" && data.files[0].newId.length > 0;
+      const imported = validateImportResponse({ ok: response.ok, status: response.status, body: data });
       if (imported) importedFileId = data.files[0].newId;
       set("project_import", imported ? "READY" : "BLOCKED", imported
         ? "Authenticated import-binfile accepted fixture into the configured destination project"
@@ -215,20 +215,22 @@ async function main() {
   } else {
     set("project_import", "BLOCKED", !auth.ok
       ? "Authentication prerequisite unavailable; import-binfile requires an authenticated session"
-      : !projectId ? "BENCHMARK_PROJECT_ID for an editable destination project is not configured" : "Generated .logos fixture is missing");
+      : !isDisposableImportAllowed(process.env) ? "Import blocked; requires an explicitly approved disposable benchmark environment, valid project ID, and matching confirmation"
+        : "Generated .logos fixture is missing");
   }
-  await checkBrowserAndMeasurement(auth);
-  const ready = allReady(report);
-  const output = { contract: "logos-memory-benchmark-readiness/v1", status: ready ? "READY" : "BLOCKED", capabilities: report };
-  console.log(JSON.stringify(output, null, 2));
-  if (!ready) console.log("Memory measurement not run");
-  if (process.env.READINESS_PREFLIGHT_REPORT) fs.writeFileSync(process.env.READINESS_PREFLIGHT_REPORT, `${JSON.stringify(output, null, 2)}\n`);
+  await checkBrowserAndHeapCapture(auth);
+  const capabilityStates = Object.fromEntries(capabilities.map((name) => [name, report[name]]));
+  const output = makeReport(capabilities, capabilityStates, report.heap_capture_capability);
+  const safeOutput = writeReport((file, value) => fs.writeFileSync(file, value), output, process.env.READINESS_PREFLIGHT_REPORT || null,
+    [process.env.LOGOS_PASSWORD, process.env.DATABASE_URL, process.env.TEST_DATABASE_URL, process.env.REDIS_URL, process.env.TEST_REDIS_URL, process.env.BENCHMARK_DISPOSABLE_CONFIRMATION].filter(Boolean));
+  console.log(JSON.stringify(safeOutput, null, 2));
+  console.log("Memory benchmark NOT MEASURED");
   process.exitCode = 0; // Blocked is an explicit valid infrastructure outcome.
-  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `measurement_ready=${ready}\n`);
+  if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `infrastructure_ready=${safeOutput.infrastructure.state === "READY"}\n`);
 }
 
 if (require.main === module) main().catch((error) => {
-  console.error(`Readiness preflight failed unexpectedly: ${error.message}`);
+  console.error("Readiness preflight failed; details suppressed to prevent secret disclosure");
   process.exitCode = 1;
 });
 

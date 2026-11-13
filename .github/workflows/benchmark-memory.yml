@@ -158,13 +158,12 @@ jobs:
             fi
             pid="$(cat "$RUNNER_TEMP/logos-backend.pid")"
             if ! kill -0 "$pid" 2>/dev/null; then
-              cat "$RUNNER_TEMP/logos-backend.log"
+              echo "Go backend exited before health and dependency checks completed. Details remain in the runner-local log and are not published."
               exit 1
             fi
             sleep 2
           done
-          cat "$RUNNER_TEMP/logos-backend.log"
-          echo "Go backend/dependency readiness timed out."
+          echo "Go backend/dependency readiness timed out. Details remain in the runner-local log and are not published."
           exit 1
 
       - name: Generate and inspect benchmark fixture
@@ -222,7 +221,7 @@ jobs:
           node readiness_preflight.js | tee "$RUNNER_TEMP/benchmark-readiness.stdout"
           cat "$RUNNER_TEMP/benchmark-readiness.stdout" >> "$GITHUB_STEP_SUMMARY"
           echo "::notice title=Memory measurement not run::This workflow records readiness only; a separate approved performance gate is required."
-          if [ "$(node -e 'const r=require(process.argv[1]); console.log(r.status)' \
+          if [ "$(node -e 'const r=require(process.argv[1]); console.log(r.infrastructure.state)' \
             "$RUNNER_TEMP/benchmark-readiness.json")" != "READY" ]; then
             echo "::notice title=Readiness blockers::One or more explicit benchmark prerequisites are BLOCKED. See test/benchmarks/CI-RECOVERY.md."
           fi
@@ -234,7 +233,6 @@ jobs:
           name: memory-benchmark-readiness-${{ github.run_number }}
           path: |
             ${{ runner.temp }}/benchmark-readiness.json
-            ${{ runner.temp }}/logos-backend.log
           if-no-files-found: error
           retention-days: 30
 

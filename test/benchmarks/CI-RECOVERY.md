@@ -78,22 +78,23 @@ the benchmark:
   rows, but this does not prove that the workspace consumes those rows.
 
 The initial HTTP/browser compatibility check is therefore the first stop. The
-deterministic `readiness_preflight.js` reports PostgreSQL schema, Redis,
-backend dependency evidence, authentication, authorized project import,
-browser workspace rendering, and Chromium heap collection as separate
-capabilities. It requires more than an HTTP 200: PostgreSQL must contain the
-required auth/import tables and columns, backend dependency connections must
-be independently established, auth must return a session through
-`login-with-password`, import must succeed through the authenticated
-`import-binfile` route with an editable `project-id`, and the editor must expose
-a build ID, workspace canvas, page controls, and visible fixture shapes.
+deterministic `readiness_preflight.js` reports infrastructure readiness,
+`heap_capture_capability`, and `benchmark_execution` as distinct states. The
+machine-readable contract is v2; benchmark execution remains `NOT_MEASURED`
+regardless of whether a Chromium snapshot capability succeeds. It requires
+more than HTTP 200: PostgreSQL must contain required auth/import schema,
+backend dependency connections must be established independently, auth must
+return a valid session cookie, and import must pass the disposable-project
+guard before calling the authenticated `import-binfile` route. Renderer proof
+must come from a renderer-owned canvas/pixel evidence adapter; DOM shape counts
+are not used as production requirements.
 
 The actual CI database currently lacks the application schema, `LOGOS_SECRET_KEY`
 and a prepared test account are not configured, there is no authorized project
 ID, and the Go backend does not serve the editor UI. Those capabilities report
 specific blockers. When Chromium installation is available, it navigates to
-the configured workspace URL and tests CDP heap collection only after fixture
-verification; unavailable Chromium is reported as a blocker. The infra workflow
+the configured workspace URL and tests CDP heap collection only after renderer
+adapter fixture verification; unavailable Chromium is reported as a blocker. The infra workflow
 keeps succeeding when these capabilities are blocked, uploads readiness JSON,
 and prints **Memory measurement not run**. No heap snapshot/report is emitted
 or treated as a performance pass. A future measurement job must separately
@@ -114,10 +115,11 @@ implementing an editor runtime is a separate approved change.
 - Local source inspection: Go server has no `/` UI route; registration/import
   contracts and fixture naming/page-count assumptions differ as above.
 - CI round-trip test: generated Go payload is readable by the Go v3 parser.
-- Current preflight contract: `readiness_preflight.js` independently records
-  the seven capability states and writes a machine-readable readiness report.
-  Its tests reject invalid/missing database URLs without printing credentials.
-  Infrastructure success and measurement status remain separate.
+- Current follow-up preflight contract: v2 records infrastructure readiness,
+  heap-capture capability, and benchmark execution independently. It requires
+  an exact disposable-project confirmation before any fixture import; tests
+  cover malformed auth/import, renderer evidence mismatch, missing Chromium,
+  secret redaction, and report generation errors.
 - Hosted run [#43405395359](https://github.com/navidrezadoost/Logos/actions/runs/43405395359)
   at `f85ced619adc00801a5bf4aff3190cd49d21b3aa` passed in 44 seconds: PostgreSQL
   and Redis readiness, Go backend health/connections, and the generated fixture
