@@ -4,6 +4,13 @@ name: Memory Benchmark Infrastructure Gate
 # deliberately does not claim memory measurements: the existing Playwright
 # scenario targets a browser application that this workflow does not start.
 on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/benchmark-memory.yml"
+      - "docker/devenv/docker-compose.yaml"
+      - "backend-go/**"
+      - "test/benchmarks/**"
   schedule:
     - cron: "0 2 * * *"
   workflow_dispatch:

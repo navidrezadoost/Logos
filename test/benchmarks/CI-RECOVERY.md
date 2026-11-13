@@ -17,6 +17,11 @@ command. It is not printed, written to a GitHub output/environment file, passed
 to a started service, or stored as a repository/workflow secret. Production
 Compose auth is unchanged.
 
+The infrastructure gate runs on scheduled/manual invocations and on relevant
+pull-request changes to its workflow, Compose inputs, generator/parser, or
+benchmark fixtures/docs. Its Compose override is under `test/benchmarks/`, not
+`.github/workflows/`, so GitHub does not discover it as a workflow definition.
+
 The PostgreSQL init script creates the `logos_test` and `logos_telemetry`
 databases, not the application tables in `logos`; the Go backend health handler
 only answers HTTP and startup pings PostgreSQL/Redis. The workflow checks and
