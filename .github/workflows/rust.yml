@@ -11,6 +11,14 @@ on:
       - "rust/**"
       - "render-wasm/**"
       - "docs/r1/P0.4-CI-RUNNER-APT-DNS-FIX.md"
+      - "logos-app/src/components/canvas/**"
+      - "logos-app/src/render-wasm/**"
+      - "logos-app/src/stores/**"
+      - "logos-app/src/test-support/**"
+      - "logos-app/test-harness/**"
+      - "logos-app/vite.renderer-smoke.config.ts"
+      - "test/fixtures/p0-document-compat/**"
+      - "docs/r1/P0.4-REACT-RUNTIME-VERTICAL-SLICE.md"
       - ".github/workflows/rust.yml"
 
 env:
@@ -507,7 +515,9 @@ jobs:
           HTML
 
           npm ci
+          node --experimental-strip-types --test ../test/p0.4/react-runtime/fixture-adapter.test.mjs
           npm run build
+          ./node_modules/.bin/vite build --config vite.renderer-smoke.config.ts
 
           for asset in render-wasm.js render-wasm.wasm worker/render.js shared.js; do
             test -s "build/js/$asset"
@@ -537,6 +547,7 @@ jobs:
             --no-sandbox \
             --disable-dev-shm-usage \
             --enable-webgl \
+            --disable-features=WebGPU \
             --ignore-gpu-blocklist \
             --use-gl=angle \
             --use-angle=swiftshader \
@@ -550,3 +561,51 @@ jobs:
             cat "$RUNNER_TEMP/renderer-smoke-chrome.log"
             exit 1
           fi
+
+          ./node_modules/.bin/vite preview --config vite.renderer-smoke.config.ts \
+            --host 127.0.0.1 --port 4174 \
+            >"$RUNNER_TEMP/logos-react-renderer-preview.log" 2>&1 &
+          react_server_pid=$!
+          trap 'kill "$server_pid" "$react_server_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4174/test-harness/p04-react-renderer-smoke.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4174/test-harness/p04-react-renderer-smoke.html >/dev/null
+
+          "$chrome_bin" \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --enable-webgl \
+            --disable-features=WebGPU \
+            --ignore-gpu-blocklist \
+            --use-gl=angle \
+            --use-angle=swiftshader \
+            --enable-unsafe-swiftshader \
+            --virtual-time-budget=30000 \
+            --dump-dom http://127.0.0.1:4174/test-harness/p04-react-renderer-smoke.html \
+            >"$RUNNER_TEMP/p04-react-renderer-smoke-dom.html" \
+            2>"$RUNNER_TEMP/p04-react-renderer-smoke-chrome.log"
+          if ! grep -q 'data-status="passed"' "$RUNNER_TEMP/p04-react-renderer-smoke-dom.html"; then
+            cat "$RUNNER_TEMP/p04-react-renderer-smoke-dom.html"
+            cat "$RUNNER_TEMP/p04-react-renderer-smoke-chrome.log"
+            cat "$RUNNER_TEMP/logos-react-renderer-preview.log"
+            exit 1
+          fi
+
+      - name: Preserve P0.4 browser renderer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p04-react-renderer-browser-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/p04-react-renderer-smoke-dom.html
+            ${{ runner.temp }}/p04-react-renderer-smoke-chrome.log
+            ${{ runner.temp }}/logos-react-renderer-preview.log
+            ${{ runner.temp }}/renderer-smoke-dom.html
+            ${{ runner.temp }}/renderer-smoke-chrome.log
