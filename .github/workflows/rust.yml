@@ -52,7 +52,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          apt_sources="$RUNNER_TEMP/logos-p04-ubuntu.sources"
+          apt_tmp="$(mktemp -d /tmp/logos-p04-apt.XXXXXX)"
+          trap 'sudo rm -rf "$apt_tmp"' EXIT
+          chmod 0755 "$apt_tmp"
+          apt_sources="$apt_tmp/ubuntu.sources"
           cat >"$apt_sources" <<'APT'
           Types: deb
           URIs: https://archive.ubuntu.com/ubuntu
@@ -67,8 +70,11 @@ jobs:
           Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
           APT
 
-          apt_lists="$RUNNER_TEMP/logos-p04-apt-lists"
+          apt_lists="$apt_tmp/lists"
           mkdir -p "$apt_lists/partial"
+          chmod 0755 "$apt_lists"
+          sudo chown _apt:root "$apt_lists/partial"
+          sudo chmod 0700 "$apt_lists/partial"
           apt_options=(
             -o "Dir::Etc::sourcelist=$apt_sources"
             -o 'Dir::Etc::sourceparts=-'

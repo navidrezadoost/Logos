@@ -45,7 +45,10 @@ jobs:
             "https://security.ubuntu.com/ubuntu/dists/$codename-security/InRelease"; do
             curl --fail --silent --show-error --location --max-time 30 "$url" -o /dev/null
           done
-          sources="$RUNNER_TEMP/p04-official-ubuntu.sources"
+          apt_tmp="$(mktemp -d /tmp/p04-official-apt.XXXXXX)"
+          trap 'sudo rm -rf "$apt_tmp"' EXIT
+          chmod 0755 "$apt_tmp"
+          sources="$apt_tmp/official-ubuntu.sources"
           cat > "$sources" <<APT
           Types: deb
           URIs: https://archive.ubuntu.com/ubuntu
@@ -59,9 +62,12 @@ jobs:
           Components: main restricted universe multiverse
           Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
           APT
-          lists="$RUNNER_TEMP/p04-official-apt-lists"
+          lists="$apt_tmp/lists"
           mkdir -p "$lists/partial"
+          chmod 0755 "$lists"
+          sudo chown _apt:root "$lists/partial"
+          sudo chmod 0700 "$lists/partial"
           args=(-o "Dir::Etc::sourcelist=$sources" -o "Dir::Etc::sourceparts=-" -o "Dir::State::lists=$lists")
           sudo apt-get "${args[@]}" update
-          sudo apt-get "${args[@]}" install --yes libclang-dev libfontconfig1-dev
+          sudo apt-get "${args[@]}" install --yes --reinstall libclang-dev libfontconfig1-dev
           dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Status}\n' libclang-dev libfontconfig1-dev
