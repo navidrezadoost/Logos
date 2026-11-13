@@ -2,7 +2,8 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseDbUrl, allReady, capabilities } = require("./readiness_preflight");
+const net = require("node:net");
+const { parseDbUrl, allReady, capabilities, redisPing } = require("./readiness_preflight");
 
 test("accepts PostgreSQL URLs without exposing credentials", () => {
   const url = parseDbUrl("postgres://bench:secret@127.0.0.1:5432/logos");
@@ -26,4 +27,15 @@ test("readiness requires independent evidence for all seven capabilities", () =>
   assert.equal(allReady(report), true);
   report.browser_workspace.state = "BLOCKED";
   assert.equal(allReady(report), false);
+});
+
+test("Redis capability uses a direct PING and verifies PONG", async () => {
+  const server = net.createServer((socket) => socket.on("data", () => socket.write("+PONG\r\n")));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { port } = server.address();
+    assert.equal(await redisPing(`redis://127.0.0.1:${port}/0`), true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

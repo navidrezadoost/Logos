@@ -6,6 +6,8 @@
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const net = require("node:net");
+const tls = require("node:tls");
 
 const base = (process.env.LOGOS_URL || "http://127.0.0.1:6060").replace(/\/$/, "");
 const fixture = path.resolve(process.env.BENCHMARK_FILE || path.join(__dirname, "fixtures/large-canvas.logos"));
@@ -56,9 +58,54 @@ async function checkPostgres() {
 async function checkRedis() {
   const url = process.env.REDIS_URL || process.env.TEST_REDIS_URL;
   if (!url) return set("redis", "BLOCKED", "REDIS_URL/TEST_REDIS_URL is not configured");
-  const r = command("redis-cli", ["-u", url, "PING"]);
-  set("redis", r.ok && r.stdout === "PONG" ? "READY" : "BLOCKED",
-    r.ok && r.stdout === "PONG" ? "Redis PING returned PONG" : "Redis connection/PING failed or redis-cli unavailable");
+  try {
+    if (await redisPing(url)) return set("redis", "READY", "Direct Redis protocol PING returned PONG");
+  } catch {}
+  set("redis", "BLOCKED", "Redis connection/PING failed");
+}
+
+function redisCommand(parts) {
+  return `*${parts.length}\r\n${parts.map((part) => `$${Buffer.byteLength(part)}\r\n${part}\r\n`).join("")}`;
+}
+
+function redisPing(value) {
+  let url;
+  try { url = new URL(value); } catch { return Promise.reject(new Error("invalid redis URL")); }
+  if (!["redis:", "rediss:"].includes(url.protocol) || !url.hostname) return Promise.reject(new Error("unsupported redis URL"));
+  const commands = [];
+  if (url.password) {
+    const password = decodeURIComponent(url.password);
+    commands.push(url.username ? ["AUTH", decodeURIComponent(url.username), password] : ["AUTH", password]);
+  }
+  const database = url.pathname.replace(/^\//, "");
+  if (database && database !== "0") commands.push(["SELECT", database]);
+  commands.push(["PING"]);
+  return new Promise((resolve, reject) => {
+    const secure = url.protocol === "rediss:";
+    const socket = secure
+      ? tls.connect({ host: url.hostname, port: Number(url.port || 6379), servername: url.hostname })
+      : net.createConnection({ host: url.hostname, port: Number(url.port || 6379) });
+    let response = "";
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      if (error) reject(error);
+      else resolve(result);
+    };
+    socket.setTimeout(5000, () => finish(new Error("redis timeout")));
+    socket.once(secure ? "secureConnect" : "connect", () => socket.write(commands.map(redisCommand).join("")));
+    socket.on("data", (chunk) => {
+      response += chunk.toString("utf8");
+      const replies = response.split("\r\n");
+      if (replies.length <= commands.length) return;
+      const values = replies.slice(0, commands.length);
+      if (values.some((reply) => !reply.startsWith("+"))) return finish(new Error("redis command failed"));
+      finish(null, values.at(-1) === "+PONG");
+    });
+    socket.once("error", () => finish(new Error("redis connection failed")));
+  });
 }
 
 async function checkBackend() {
@@ -185,4 +232,4 @@ if (require.main === module) main().catch((error) => {
   process.exitCode = 1;
 });
 
-module.exports = { parseDbUrl, allReady, capabilities };
+module.exports = { parseDbUrl, allReady, capabilities, redisPing };
