@@ -22,7 +22,7 @@ if not database.startswith("logos_p04"):
 if not parsed.username or not parsed.password or not parsed.port:
     raise SystemExit("ERROR: TEST_DATABASE_URL must include user, password, port, and database")
 
-env = dict(os.environ, PGPASSWORD=unquote(parsed.password))
+env = dict(os.environ, PGPASSWORD=unquote(parsed.password), PGOPTIONS="-c search_path=public")
 psql = [
     "psql", "-X", "-v", "ON_ERROR_STOP=1", "-q", "-h", parsed.hostname,
     "-p", str(parsed.port), "-U", unquote(parsed.username), "-d", database,
@@ -36,6 +36,8 @@ if scalar("SELECT to_regclass('public.profile') IS NULL") != "t":
     raise SystemExit("ERROR: target database is not fresh (profile table already exists)")
 if scalar("SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'") != "0":
     raise SystemExit("ERROR: target database is not fresh (public schema already contains tables)")
+if scalar("SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname !~ '^pg_' AND nspname NOT IN ('public', 'information_schema')") != "0":
+    raise SystemExit("ERROR: target database contains a non-system, non-public schema")
 
 registry = subprocess.run(
     ["git", "show", f"{legacy_commit}:backend/src/app/migrations.clj"],

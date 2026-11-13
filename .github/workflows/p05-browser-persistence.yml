@@ -4,14 +4,7 @@ on:
   pull_request:
     branches: ["main"]
     paths:
-      - "backend-go/internal/handler/files_p04_persistence_integration_test.go"
-      - "backend-go/internal/handler/files_p05_browser_persistence_integration_test.go"
-      - "backend-go/internal/handler/files.go"
-      - "backend-go/internal/handler/files_create.go"
-      - "backend-go/internal/handler/files_update.go"
-      - "backend-go/internal/server/**"
-      - "backend-go/internal/auth/**"
-      - "backend-go/internal/perms/**"
+      - "backend-go/internal/**"
       - "backend-go/migrations/**"
       - "backend-go/go.mod"
       - "backend-go/go.sum"
