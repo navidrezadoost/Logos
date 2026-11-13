@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Renderer compatibility UX smoke</title>
+    <style>
+      html, body, #app { width: 800px; height: 500px; margin: 0; overflow: hidden; }
+      body { background: #1e232d; color: #e8eaee; font: 12px system-ui, sans-serif; }
+      #a7-status { position: fixed; right: 0; bottom: 0; max-width: 320px; max-height: 140px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <pre id="a7-status" data-status="pending">pending</pre>
+    <script type="module" src="/src/test-support/a7-renderer-compatibility-smoke.tsx"></script>
+  </body>
+</html>

@@ -516,6 +516,7 @@ jobs:
 
           npm ci
           node --experimental-strip-types --test ../test/p0.4/react-runtime/fixture-adapter.test.mjs
+          node --experimental-strip-types --test ../test/p0.5/renderer-scene-contract/scene-boundary.test.mjs
           npm run build
           ./node_modules/.bin/vite build --config vite.renderer-smoke.config.ts
 
@@ -609,3 +610,61 @@ jobs:
             ${{ runner.temp }}/logos-react-renderer-preview.log
             ${{ runner.temp }}/renderer-smoke-dom.html
             ${{ runner.temp }}/renderer-smoke-chrome.log
+
+      - name: Build renderer compatibility UX browser smoke
+        working-directory: logos-app
+        run: ./node_modules/.bin/vite build --config vite.renderer-compatibility-smoke.config.ts
+
+      - name: Verify renderer compatibility UX in headless Chromium
+        working-directory: logos-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+
+          ./node_modules/.bin/vite preview \
+            --config vite.renderer-compatibility-smoke.config.ts \
+            --host 127.0.0.1 --port 4175 \
+            >"$RUNNER_TEMP/renderer-compatibility-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4175/test-harness/a7-renderer-compatibility-smoke.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4175/test-harness/a7-renderer-compatibility-smoke.html >/dev/null
+
+          "$chrome_bin" \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --disable-features=WebGPU \
+            --virtual-time-budget=45000 \
+            --dump-dom http://127.0.0.1:4175/test-harness/a7-renderer-compatibility-smoke.html \
+            >"$RUNNER_TEMP/renderer-compatibility-smoke-dom.html" \
+            2>"$RUNNER_TEMP/renderer-compatibility-smoke-chrome.log"
+
+          if ! grep -q 'data-status="passed"' "$RUNNER_TEMP/renderer-compatibility-smoke-dom.html"; then
+            cat "$RUNNER_TEMP/renderer-compatibility-smoke-dom.html"
+            cat "$RUNNER_TEMP/renderer-compatibility-smoke-chrome.log"
+            cat "$RUNNER_TEMP/renderer-compatibility-preview.log"
+            exit 1
+          fi
+
+      - name: Preserve renderer compatibility UX browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renderer-compatibility-ux-browser-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/renderer-compatibility-smoke-dom.html
+            ${{ runner.temp }}/renderer-compatibility-smoke-chrome.log
+            ${{ runner.temp }}/renderer-compatibility-preview.log
