@@ -3,47 +3,79 @@ set -Eeuo pipefail
 set +x
 
 ROOT="$(git rev-parse --show-toplevel)"
-: "${TEST_DATABASE_URL:?provide a fresh loopback PostgreSQL test database}"
-: "${TEST_REDIS_URL:?provide a disposable loopback Redis service}"
-: "${TEST_REDIS_DISPOSABLE:?set TEST_REDIS_DISPOSABLE=true only for a disposable Redis instance}"
-: "${DEPLOYMENT_ENVIRONMENT:?confirm the test environment classification}"
-: "${DEPLOYMENT_OWNER_AUTHORIZED:?confirm deployment-owner authorization}"
+blocked() {
+  printf 'BLOCKED: %s\n' "$1" >&2
+  exit 2
+}
+
+[[ -n "${TEST_DATABASE_URL:-}" ]] || blocked "TEST_DATABASE_URL is required"
+[[ -n "${TEST_REDIS_URL:-}" ]] || blocked "TEST_REDIS_URL is required"
+[[ -n "${TEST_REDIS_DISPOSABLE:-}" ]] || blocked "TEST_REDIS_DISPOSABLE confirmation is required"
+[[ -n "${DEPLOYMENT_ENVIRONMENT:-}" ]] || blocked "DEPLOYMENT_ENVIRONMENT confirmation is required"
+[[ -n "${DEPLOYMENT_OWNER_AUTHORIZED:-}" ]] || blocked "DEPLOYMENT_OWNER_AUTHORIZED confirmation is required"
 if [[ "$TEST_REDIS_DISPOSABLE" != "true" ]]; then
-  echo "BLOCKED: disposable Redis confirmation is required." >&2
-  exit 2
+  blocked "TEST_REDIS_DISPOSABLE must be true"
 fi
-if [[ "$DEPLOYMENT_ENVIRONMENT" != "nonproduction" || "$DEPLOYMENT_OWNER_AUTHORIZED" != "true" ]]; then
-  echo "BLOCKED: owner-authorized non-production execution is required." >&2
-  exit 2
-fi
+[[ "$DEPLOYMENT_ENVIRONMENT" == "nonproduction" ]] || blocked "DEPLOYMENT_ENVIRONMENT must be nonproduction"
+[[ "$DEPLOYMENT_OWNER_AUTHORIZED" == "true" ]] || blocked "DEPLOYMENT_OWNER_AUTHORIZED must be true"
 
 python3 <<'PY'
-from urllib.parse import urlsplit
 import ipaddress
 import os
+import sys
+from urllib.parse import urlsplit
 
-for label, value in (("PostgreSQL", os.environ["TEST_DATABASE_URL"]), ("Redis", os.environ["TEST_REDIS_URL"])):
-    parsed = urlsplit(value)
+def blocked(message):
+    print(f"BLOCKED: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+def parse_url(label, value):
     try:
-        loopback = parsed.hostname in {"localhost"} or ipaddress.ip_address(parsed.hostname or "").is_loopback
+        return urlsplit(value)
+    except ValueError:
+        blocked(f"{label} URL is malformed")
+
+def loopback_host(label, host):
+    try:
+        loopback = host == "localhost" or ipaddress.ip_address(host or "").is_loopback
     except ValueError:
         loopback = False
     if not loopback:
-        print(f"BLOCKED: {label} test endpoint must be loopback-only.", file=sys.stderr)
-        raise SystemExit(2)
+        blocked(f"{label} test endpoint host must be loopback-only")
 
-database = urlsplit(os.environ["TEST_DATABASE_URL"]).path.lstrip("/")
-if not database.startswith("logos_p04"):
-    print("BLOCKED: PostgreSQL database name must begin with logos_p04.", file=sys.stderr)
-    raise SystemExit(2)
-if urlsplit(os.environ["TEST_REDIS_URL"]).scheme not in {"redis", "rediss"}:
-    print("BLOCKED: Redis URL scheme is invalid.", file=sys.stderr)
-    raise SystemExit(2)
+database_url = os.environ["TEST_DATABASE_URL"]
+redis_url = os.environ["TEST_REDIS_URL"]
+database = parse_url("PostgreSQL", database_url)
+redis = parse_url("Redis", redis_url)
+
+if database.scheme not in {"postgres", "postgresql"}:
+    blocked("TEST_DATABASE_URL scheme must be postgres or postgresql")
+loopback_host("PostgreSQL", database.hostname)
+try:
+    database_port = database.port
+except ValueError:
+    blocked("TEST_DATABASE_URL port is malformed")
+if not database.username or not database.password or database_port is None:
+    blocked("TEST_DATABASE_URL must include username, password, and port")
+database_name = database.path.lstrip("/")
+if not database_name.startswith("logos_p04") or "/" in database_name or not database_name:
+    blocked("PostgreSQL database name must begin with logos_p04")
+
+if redis.scheme not in {"redis", "rediss"}:
+    blocked("TEST_REDIS_URL scheme must be redis or rediss")
+loopback_host("Redis", redis.hostname)
+try:
+    redis.port
+except ValueError:
+    blocked("TEST_REDIS_URL port is malformed")
+if redis.fragment:
+    blocked("TEST_REDIS_URL fragment is not allowed")
+
 print("Disposable test endpoint guards passed; no endpoint values recorded.")
 PY
 
-# The initializer independently verifies a fresh public schema before applying
-# migrations; it refuses non-loopback hosts and non-logos_p04 database names.
+# The initializer rechecks URL shape and public-schema emptiness before applying
+# migrations. These mechanical checks cannot attest that a service is isolated.
 bash "$ROOT/test/p0.5/browser-persistence/initialize-disposable-db-schema.sh"
 
 cd "$ROOT/backend-go"
