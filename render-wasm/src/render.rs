@@ -2109,6 +2109,8 @@ impl RenderState {
                         self.surfaces.apply_mut(SurfaceId::Target as u32, |s| {
                             let mut paint = skia::Paint::default();
                             paint.set_color(self.background_color);
+                            // Replace stale target pixels when the background is transparent.
+                            paint.set_blend_mode(skia::BlendMode::Src);
                             s.canvas().draw_rect(tile_rect, &paint);
                         });
                     }
