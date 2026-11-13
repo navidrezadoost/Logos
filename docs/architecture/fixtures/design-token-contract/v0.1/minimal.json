@@ -1,0 +1,54 @@
+{
+  "contract": "logos.design-token-document",
+  "version": "0.1.0",
+  "tokens": [
+    {
+      "id": "4a56ed5f-70b5-4e6e-973c-1b6425afd501",
+      "name": "coral",
+      "type": "color",
+      "value": {
+        "kind": "literal",
+        "color": {
+          "space": "srgb",
+          "hex": "#FF8577",
+          "alpha": 1.0
+        }
+      }
+    }
+  ],
+  "document": {
+    "shapes": [
+      {
+        "id": "07c43a47-e8db-4c37-a1fa-0d63d2e406b2",
+        "properties": {
+          "fill": {
+            "kind": "literal",
+            "type": "color",
+            "value": {
+              "space": "srgb",
+              "hex": "#FF8577",
+              "alpha": 1.0
+            }
+          }
+        }
+      },
+      {
+        "id": "5d29c7a4-e3a7-4ca9-b5c7-af230fd6d453",
+        "properties": {
+          "fill": {
+            "kind": "binding",
+            "tokenId": "4a56ed5f-70b5-4e6e-973c-1b6425afd501",
+            "fallback": {
+              "type": "color",
+              "value": {
+                "space": "srgb",
+                "hex": "#FF8577",
+                "alpha": 1.0
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

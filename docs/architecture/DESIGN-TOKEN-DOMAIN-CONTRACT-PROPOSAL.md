@@ -4,6 +4,10 @@
 storage format selected. This document inventories repository evidence and
 defines a contract to evaluate. It authorizes no token-engine implementation.
 
+Ownership options and a versioned illustrative fixture are evaluated separately
+in the [DT-ADR-01 decision record](DESIGN-TOKEN-OWNERSHIP-ADR.md); its
+recommendation is pending Chief Architect decision.
+
 ## 1. Repository inventory (DT-B1)
 
 ### Existing representations
@@ -13,7 +17,7 @@ defines a contract to evaluate. It authorizes no token-engine implementation.
 | React import tokens | `LogosToken` has ID, name, a small type union, string value and description. `LogosTokenSet` groups tokens; `LogosTokenTheme` has a group and string overrides. | `logos-app/src/migration/tokens/token-types.ts`; Sketch/XD converters produce these import types. |
 | React token state | Zustand `tokenStore` holds sets, themes and active theme IDs in browser local storage. It resolves `{name}` aliases by name, set order and active theme override; missing/circular aliases return `undefined`. | `logos-app/src/stores/tokenStore.ts`; the import dialog loads converted data. Search finds no document/render integration beyond import UI and the store. |
 | Rust legacy tokens | `TokensLib` maps set names and token paths to raw strings, with active sets. The lookup returns a stored string; it does not follow aliases. | `rust/logos-types/src/token.rs` (`TokensLib`). |
-| Rust typed candidate | `TokenRegistry` schema v1 includes primitive tokens, semantic tokens, collections, modes, per-mode values, sources, and `VariableBinding`. `TokenValueKind` has Color, Number, String, Boolean and Alias(UUID); `TokenType` covers additional design values. | `rust/logos-types/src/token.rs`; generated TypeScript is in `logos-app/src/types/rust-generated/token.ts`. These types are not presently wired into React state, renderer, or Go persistence. |
+| Rust typed candidate | `TokenRegistry` schema v1 includes primitive tokens, semantic tokens, collections, modes, per-mode values, sources, and `VariableBinding`. `TokenValueKind` has Color, Number, String, Boolean and Alias(UUID); `TokenType` covers additional design values. | `rust/logos-types/src/token.rs`. These candidate types are not presently wired into React state, renderer, Go persistence, or the checked-in generated TypeScript token file; that file currently exports the legacy `Token`, `TokenGroup`, and `TokensLib` shape only. |
 | Rust resolver candidate | Resolves semantic aliases, collection mode inheritance/defaults, scope and binding fallback; detects cycles and caps alias depth at 32. | `rust/logos-tokens/src/variable_resolver.rs`. Standalone crate with its own tests; repository search finds no app, render-WASM, or Go consumer. It does not resolve primitive-token aliases or validate final value type against the target property's type. |
 | Shape appearance | Rust `Shape` stores direct fills, strokes, shadows, blur, opacity and radii. Solid fill stores color string and opacity. React `Shape` is a separate projection; render-WASM serializes style values for rendering. | `rust/logos-types/src/shape.rs`, `fill.rs`, `stroke.rs`, `logos-app/src/types/shapes.ts`, `logos-app/src/render-wasm/scene.ts`. No token binding is present on the current shape style model. |
 | Typography | Rust `Typography` is a reusable style record with font and spacing fields and an optional library path. | `rust/logos-types/src/typography.rs`. This does not establish an integrated token reference on text properties. |
