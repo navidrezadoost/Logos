@@ -2,6 +2,13 @@
 
 Logos documentation website.
 
+## Product direction
+
+- [Logos product vision](product/LOGOS-PRODUCT-VISION.md)
+- [Architecture principles](architecture/LOGOS-ARCHITECTURE-PRINCIPLES.md)
+- [Unified platform roadmap](roadmap/LOGOS-UNIFIED-PLATFORM-ROADMAP.md)
+- [UX acceptance criteria](acceptance/UX-ACCEPTANCE-CRITERIA.md)
+
 ## Usage
 
 To view this site locally, first set up the environment:
