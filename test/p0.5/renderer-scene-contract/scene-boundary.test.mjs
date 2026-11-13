@@ -11,7 +11,9 @@ const { createServer } = await import(require.resolve("vite"));
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
 let viteServer;
 let syncScene;
+let syncScene2D;
 let UnsupportedRendererShapeError;
+let UnsupportedCanvas2DShapeError;
 let selectCurrentPageShapes;
 let useDocumentStore;
 
@@ -24,7 +26,8 @@ before(async () => {
     root: appRoot,
     server: { middlewareMode: true },
   });
-  ({ syncScene, UnsupportedRendererShapeError } = await viteServer.ssrLoadModule("/src/render-wasm/scene.ts"));
+  ({ syncScene, syncScene2D, UnsupportedRendererShapeError, UnsupportedCanvas2DShapeError } =
+    await viteServer.ssrLoadModule("/src/render-wasm/scene.ts"));
   ({ selectCurrentPageShapes, useDocumentStore } = await viteServer.ssrLoadModule("/src/stores/documentStore.ts"));
 });
 
@@ -110,6 +113,23 @@ function uuidWords(record) {
 
 function readFloat(record, offset) {
   return new DataView(record.buffer, record.byteOffset, record.byteLength).getFloat32(offset, true);
+}
+
+function makeCanvas2DRecorder() {
+  const calls = [];
+  const record = (name) => (...args) => calls.push([name, ...args]);
+  return {
+    calls,
+    clearRect: record("clearRect"),
+    fillRect: record("fillRect"),
+    beginPath: record("beginPath"),
+    ellipse: record("ellipse"),
+    fill: record("fill"),
+    stroke: record("stroke"),
+    moveTo: record("moveTo"),
+    lineTo: record("lineTo"),
+    bezierCurveTo: record("bezierCurveTo"),
+  };
 }
 
 test("fixture makes root and child ordering and references explicit", () => {
@@ -211,4 +231,85 @@ test("unsupported frontend discriminators fail before any live WASM mutation", (
     assert.equal(module.calls.fills, 0);
     assert.equal(module.calls.render, 0);
   }
+});
+
+test("Canvas 2D rejects unsupported shapes before clearing or drawing", () => {
+  const known = fixture.shapes[fixture.page.rootShapeIds[1]];
+  const unsupportedTypes = ["component", "instance", "path", "text", "group", "bool", "svg-raw", "future-shape"];
+  for (const [index, discriminator] of unsupportedTypes.entries()) {
+    const ctx = makeCanvas2DRecorder();
+    const shape = {
+      ...known,
+      id: `00000000-0000-4000-8000-00000000005${index}`,
+      type: discriminator,
+    };
+    assert.throws(
+      () => syncScene2D(ctx, [shape], 320, 240),
+      (error) => error instanceof UnsupportedCanvas2DShapeError
+        && error.shapeId === shape.id
+        && error.discriminator === discriminator,
+    );
+    assert.deepEqual(ctx.calls, [], `${discriminator} mutated the canvas before rejection`);
+  }
+});
+
+test("Canvas 2D and Rust fail closed for component, instance, and future types in mixed scenes", () => {
+  const known = structuredClone(fixture.shapes[fixture.page.rootShapeIds[1]]);
+  for (const [index, discriminator] of ["component", "instance", "future-shape"].entries()) {
+    const unsupported = {
+      ...known,
+      id: `00000000-0000-4000-8000-00000000006${index}`,
+      type: discriminator,
+    };
+
+    const context = makeCanvas2DRecorder();
+    assert.throws(
+      () => syncScene2D(context, [known, unsupported], 320, 240),
+      (error) => error instanceof UnsupportedCanvas2DShapeError
+        && error.shapeId === unsupported.id
+        && error.discriminator === discriminator,
+    );
+    assert.deepEqual(context.calls, [], `${discriminator} partially mutated Canvas 2D`);
+
+    const module = makeFakeModule();
+    assert.throws(
+      () => syncScene(module, [known, unsupported], 320, 240),
+      (error) => error instanceof UnsupportedRendererShapeError
+        && error.shapeId === unsupported.id
+        && error.discriminator === discriminator,
+    );
+    assert.equal(module.calls.resize, 0);
+    assert.deepEqual(module.calls.pool, []);
+    assert.deepEqual(module.calls.baseRecords, []);
+    assert.equal(module.calls.fills, 0);
+    assert.equal(module.calls.render, 0);
+  }
+});
+
+test("Canvas 2D keeps explicit ellipse and vector-network drawing paths", () => {
+  const ellipseContext = makeCanvas2DRecorder();
+  const ellipse = {
+    ...fixture.shapes[fixture.page.rootShapeIds[1]],
+    type: "ellipse",
+  };
+  syncScene2D(ellipseContext, [ellipse], 320, 240);
+  assert.equal(ellipseContext.calls.filter(([name]) => name === "ellipse").length, 1);
+  assert.deepEqual(ellipseContext.calls.filter(([name]) => name === "fillRect"), [
+    ["fillRect", 0, 0, 320, 240],
+  ], "ellipse was approximated with a shape-sized rectangle");
+
+  const vectorContext = makeCanvas2DRecorder();
+  const vector = {
+    ...fixture.shapes[fixture.page.rootShapeIds[1]],
+    type: "vector-network",
+    vnAnchors: [{ x: 10, y: 10 }, { x: 25, y: 25 }],
+    vnSegments: [{ s: 0, e: 1 }],
+  };
+  syncScene2D(vectorContext, [vector], 320, 240);
+  assert.ok(vectorContext.calls.some(([name]) => name === "moveTo"));
+  assert.ok(vectorContext.calls.some(([name]) => name === "lineTo"));
+  assert.ok(vectorContext.calls.some(([name]) => name === "stroke"));
+  assert.deepEqual(vectorContext.calls.filter(([name]) => name === "fillRect"), [
+    ["fillRect", 0, 0, 320, 240],
+  ], "vector-network was approximated with a shape-sized rectangle");
 });

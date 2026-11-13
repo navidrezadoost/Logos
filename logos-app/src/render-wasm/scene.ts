@@ -225,12 +225,40 @@ function writeUUID(view: DataView, offset: number, uuid: string | null): void {
 // Canvas 2D fallback renderer  (active when Skia not available)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const CANVAS_2D_SHAPE_TYPES = new Set<string>([
+  "rect",
+  "frame",
+  "circle",
+  "ellipse",
+  "vector-network",
+]);
+
+export class UnsupportedCanvas2DShapeError extends Error {
+  readonly shapeId: string;
+  readonly discriminator: string;
+
+  constructor(shapeId: string, discriminator: string) {
+    super(`Canvas 2D cannot render shape ${shapeId} with discriminator "${discriminator}"`);
+    this.name = "UnsupportedCanvas2DShapeError";
+    this.shapeId = shapeId;
+    this.discriminator = discriminator;
+  }
+}
+
 export function syncScene2D(
   ctx: CanvasRenderingContext2D,
   shapes: Shape[],
   width: number,
   height: number
 ): void {
+  // Validate the entire frame before clearRect/fillRect or any shape draw. A
+  // rejected fallback must not leave a misleading partial rectangle frame.
+  for (const shape of shapes) {
+    if (!CANVAS_2D_SHAPE_TYPES.has(shape.type)) {
+      throw new UnsupportedCanvas2DShapeError(shape.id, String(shape.type));
+    }
+  }
+
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = "#1e1e2e";
   ctx.fillRect(0, 0, width, height);
@@ -258,6 +286,7 @@ function draw2DShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
       ctx.fillRect(x, y, w, h);
       break;
     case "circle":
+    case "ellipse":
       ctx.beginPath();
       ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
       ctx.fill();
@@ -287,7 +316,7 @@ function draw2DShape(ctx: CanvasRenderingContext2D, shape: Shape): void {
       break;
     }
     default:
-      ctx.fillRect(x, y, w, h);
+      throw new UnsupportedCanvas2DShapeError(shape.id, String(shape.type));
   }
 
   ctx.globalAlpha = 1;
