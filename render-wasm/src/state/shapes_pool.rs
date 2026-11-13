@@ -414,4 +414,28 @@ mod tests {
             "inactive slot is exposed after empty sync"
         );
     }
+
+    #[test]
+    fn modifier_structure_and_scale_state_can_be_set_in_a_fresh_generation() {
+        let mut pool = ShapesPoolImpl::new();
+        let id = test_id(10);
+        pool.initialize(1);
+        pool.add_shape(id);
+
+        pool.set_modifiers(std::collections::HashMap::from([(
+            id,
+            crate::skia::Matrix::new_identity(),
+        )]));
+        pool.set_structure(std::collections::HashMap::from([(id, Vec::new())]));
+        pool.set_scale_content(std::collections::HashMap::from([(id, 0.75)]));
+
+        assert!(pool.modifiers.contains_key(&0));
+        assert!(pool.structure.contains_key(&0));
+        assert_eq!(pool.scale_content.get(&0), Some(&0.75));
+        assert!(pool.modified_shape_cache.contains_key(&0));
+        assert_eq!(
+            pool.get(&id).expect("derived shape remains available").id,
+            id
+        );
+    }
 }
