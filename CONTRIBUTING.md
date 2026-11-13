@@ -277,8 +277,10 @@ test(handler): add integration tests for file export
 
 **For bug fixes** — open a PR directly; file an issue too so we can track it.
 
-**For new features** — open a Discussion or Feature Request issue first.
-No feature PR will be accepted without prior design discussion.
+**For new features** — define the task and acceptance criteria before implementation.
+For architecture changes, document unresolved ownership and compatibility
+decisions; a discussion can help, but it is not a separate reviewer-approval
+gate.
 
 **For documentation** — PRs welcome without an issue.
 
@@ -292,11 +294,18 @@ No feature PR will be accepted without prior design discussion.
 - [ ] `CHANGELOG.md` updated if the change is user-visible
 - [ ] PR description explains *why* the change is needed, not just what it does
 
-### Review process
+### Engineering acceptance and merge
 
-1. At least one maintainer approval required
-2. CI must be green (build + test + lint)
-3. Squash-merge into `main`
+1. Implement the defined task and execute relevant automated tests.
+2. Run required CI workflows and verify the implementation against its
+   acceptance criteria.
+3. Document known limitations and unresolved failures.
+4. Submit a PR with an accurate summary and test evidence. No independent
+   engineer approval is required for engineering acceptance.
+5. Security-critical changes must include appropriate automated security
+   testing. Missing evidence or failed checks cannot be reported as passing.
+6. Merge only with explicit Chief Architect authorization, after the applicable
+   automated checks pass and the acceptance evidence is complete.
 
 ---
 
@@ -321,7 +330,8 @@ For security vulnerabilities see [SECURITY.md](./SECURITY.md) — report private
    - `rust/Cargo.toml` workspace version
    - `logos-app/package.json`
 4. Update `CHANGELOG.md` with the new version section
-5. Open PR to `main`, merge after review
+5. Open a PR to `main`; merge only with explicit Chief Architect authorization
+   after required checks pass and release evidence is complete
 6. Tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
 7. Push: `git push origin main --tags`
 8. GitHub Actions creates the release artifacts
