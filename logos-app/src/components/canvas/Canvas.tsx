@@ -146,10 +146,13 @@ export function Canvas(): React.ReactElement {
       const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.save();
-        ctx.translate(panX, panY);
-        ctx.scale(zoom, zoom);
-        syncScene2D(ctx, shapes, size.w / zoom, size.h / zoom);
-        ctx.restore();
+        try {
+          ctx.translate(panX, panY);
+          ctx.scale(zoom, zoom);
+          syncScene2D(ctx, shapes, size.w / zoom, size.h / zoom);
+        } finally {
+          ctx.restore();
+        }
       }
     }
   }, [shapes, size, zoom, panX, panY, mode]);
