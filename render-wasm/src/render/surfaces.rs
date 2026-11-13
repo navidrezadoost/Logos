@@ -14,6 +14,15 @@ const TEXTURES_BATCH_DELETE: usize = 256;
 // If it's too big it could affect performance.
 const TILE_SIZE_MULTIPLIER: i32 = 2;
 
+fn tile_background_paint(color: skia::Color) -> Paint {
+    let mut paint = Paint::default();
+    paint.set_color(color);
+    // Transparent SrcOver is a no-op and leaves pixels from the previous frame.
+    // Replace the target region so transparent workspace backgrounds clear it.
+    paint.set_blend_mode(skia::BlendMode::Src);
+    paint
+}
+
 #[repr(u32)]
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum SurfaceId {
@@ -450,10 +459,9 @@ impl Surfaces {
 
     pub fn draw_cached_tile_surface(&mut self, tile: Tile, rect: skia::Rect, color: skia::Color) {
         if let Some(image) = self.tiles.get(tile) {
-            let mut paint = skia::Paint::default();
-            paint.set_color(color);
-
-            self.target.canvas().draw_rect(rect, &paint);
+            self.target
+                .canvas()
+                .draw_rect(rect, &tile_background_paint(color));
 
             self.target
                 .canvas()
@@ -474,10 +482,10 @@ impl Surfaces {
         );
         let src_rect_f = skia::Rect::from(src_rect);
 
-        // Draw background
-        let mut paint = skia::Paint::default();
-        paint.set_color(color);
-        self.target.canvas().draw_rect(tile_rect, &paint);
+        // Replace previous target pixels, including for transparent backgrounds.
+        self.target
+            .canvas()
+            .draw_rect(tile_rect, &tile_background_paint(color));
 
         // Draw current surface directly to target (no snapshot)
         self.current.clone().draw(
