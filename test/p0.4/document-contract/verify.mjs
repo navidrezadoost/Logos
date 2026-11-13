@@ -11,7 +11,7 @@ const reloadedDetail = JSON.parse(readFileSync(`${dir}/reload.json`, "utf8"));
 assert.equal(beforeDetail.id, expected.fileId);
 assert.equal(beforeDetail.revn, 0);
 assert.equal(reloadedDetail.id, expected.fileId);
-assert.equal(reloadedDetail.revn, 1, "authoritative Go API must return incremented revision");
+assert.equal(reloadedDetail.revn, 2, "authoritative Go API must return the revision after the stale-base save");
 
 const before = projectLegacyFileData(beforeDetail.data);
 const after = projectLegacyFileData(reloadedDetail.data);
@@ -20,7 +20,7 @@ assert.deepEqual(after.pageOrder, before.pageOrder);
 assert.deepEqual(after.pages[expected.pageId].rootShapeIds, expected.expectedRootOrder);
 assert.equal(after.shapes[expected.shapeId].id, expected.shapeId);
 assert.equal(after.shapes[expected.shapeId].parentId, null);
-assert.deepEqual(after.shapes[expected.shapeId].bounds, expected.updatedBounds);
+assert.deepEqual(after.shapes[expected.shapeId].bounds, expected.finalBounds);
 assert.deepEqual(after.shapes[expected.shapeId].fills[0], expected.expectedFill);
 assert.deepEqual(after.unknownFieldsById[expected.shapeId]["extension-p0"], expected.expectedExtension);
 

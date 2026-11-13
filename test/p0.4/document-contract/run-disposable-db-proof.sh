@@ -18,7 +18,11 @@ if not database.startswith("logos_p04"):
     raise SystemExit("ERROR: P0.4 persistence proof requires a database name beginning with logos_p04")
 PY
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp/opencode}/logos-p04-document-proof.XXXXXX")"
+TMP_ROOT="${TMPDIR:-/tmp/opencode}"
+if [[ ! -d "$TMP_ROOT" ]]; then
+    TMP_ROOT="${RUNNER_TEMP:-/tmp}"
+fi
+TMP="$(mktemp -d "$TMP_ROOT/logos-p04-document-proof.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 node --experimental-strip-types --test "$ROOT/test/p0.4/document-contract/adapter.test.mjs"
@@ -34,3 +38,19 @@ node --experimental-strip-types "$ROOT/test/p0.4/document-contract/prepare.mjs" 
 )
 
 node --experimental-strip-types "$ROOT/test/p0.4/document-contract/verify.mjs" "$TMP"
+
+if [[ -n "${P05_BROWSER_ASSETS:-}" ]]; then
+    if [[ -z "${P05_BROWSER_BIN:-}" ]]; then
+        echo "ERROR: set P05_BROWSER_BIN to a headless Chrome/Chromium binary for the browser proof" >&2
+        exit 2
+    fi
+    (
+        cd "$ROOT/backend-go"
+        TEST_DATABASE_URL="$TEST_DATABASE_URL" \
+        P04_UPDATE_FILE="$TMP/request.json" \
+        P05_BROWSER_ASSETS="$P05_BROWSER_ASSETS" \
+        P05_BROWSER_BIN="$P05_BROWSER_BIN" \
+        P05_BROWSER_EVIDENCE_OUT="${P05_BROWSER_EVIDENCE_OUT:-}" \
+        go test ./internal/handler -run '^TestP05BrowserToAPIPersistence$' -count=1 -timeout=90s -v
+    )
+fi
