@@ -59,10 +59,8 @@ jobs:
         working-directory: backend-go
         run: go mod download
 
-      - name: Verify PostgreSQL and Redis clients
-        run: |
-          psql --version
-          redis-cli --version
+      - name: Verify PostgreSQL client
+        run: psql --version
 
       - name: Initialize fresh disposable historical test schema
         env:
