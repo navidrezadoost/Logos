@@ -15,6 +15,7 @@ func TestWSCheckOrigin(t *testing.T) {
 		host           string
 		tls            bool
 		forwardedProto string
+		allowedOrigins []string
 		want           bool
 	}{
 		{name: "legacy client without origin", host: "app.example", want: true},
@@ -22,7 +23,8 @@ func TestWSCheckOrigin(t *testing.T) {
 		{name: "same host with default port", origins: []string{"https://app.example:443"}, host: "app.example", tls: true, want: true},
 		{name: "scheme mismatch on plain HTTP", origins: []string{"https://app.example"}, host: "app.example", want: false},
 		{name: "scheme mismatch on TLS", origins: []string{"http://app.example"}, host: "app.example", tls: true, want: false},
-		{name: "trusted proxy HTTPS", origins: []string{"https://app.example"}, host: "app.example", forwardedProto: "https", want: true},
+		{name: "proxy HTTPS rejected without explicit allowlist", origins: []string{"https://app.example"}, host: "backend.internal", forwardedProto: "https", want: false},
+		{name: "proxy HTTPS accepted by exact allowlist", origins: []string{"https://app.example"}, host: "backend.internal", allowedOrigins: []string{"https://app.example"}, want: true},
 		{name: "different host", origins: []string{"https://attacker.example"}, host: "app.example", want: false},
 		{name: "different port", origins: []string{"https://app.example:444"}, host: "app.example", tls: true, want: false},
 		{name: "opaque origin", origins: []string{"null"}, host: "app.example", want: false},
@@ -44,7 +46,7 @@ func TestWSCheckOrigin(t *testing.T) {
 			for _, origin := range tt.origins {
 				req.Header.Add("Origin", origin)
 			}
-			if got := wsCheckOrigin(req); got != tt.want {
+			if got := wsCheckOrigin(req, tt.allowedOrigins); got != tt.want {
 				t.Fatalf("wsCheckOrigin() = %v, want %v", got, tt.want)
 			}
 		})

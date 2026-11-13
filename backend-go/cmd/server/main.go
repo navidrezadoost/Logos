@@ -84,12 +84,13 @@ func main() {
 
 	// ── HTTP server ─────────────────────────────────────────────────────────
 	h := server.New(server.Deps{
-		Pool:       pool,
-		Redis:      rdb,
-		Storage:    sto,
-		AuthMW:     authMW,
-		TokensKey:  tokensKey,
-		CookieName: cfg.CookieName,
+		Pool:                    pool,
+		Redis:                   rdb,
+		Storage:                 sto,
+		AuthMW:                  authMW,
+		TokensKey:               tokensKey,
+		CookieName:              cfg.CookieName,
+		WebSocketAllowedOrigins: cfg.WebSocketAllowedOrigins,
 	})
 	srv := &http.Server{
 		Addr:         cfg.Addr,

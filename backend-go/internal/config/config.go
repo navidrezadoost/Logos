@@ -5,6 +5,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all service configuration.
@@ -21,8 +22,9 @@ type Config struct {
 	// Auth
 	// SecretKey must match LOGOS_SECRET_KEY used by the Clojure backend.
 	// The Go service derives the same tokens-key from it (HKDF-Blake2b-512).
-	SecretKey       string
-	CookieName      string // default "auth-token"
+	SecretKey               string
+	CookieName              string   // default "auth-token"
+	WebSocketAllowedOrigins []string // exact browser origins for TLS-terminating proxy deployments
 
 	// Feature flags
 	CacheEnabled bool // read-through Redis cache for profile
@@ -39,19 +41,34 @@ type Config struct {
 // Load reads configuration from environment variables, applying defaults.
 func Load() Config {
 	return Config{
-		Addr:            envOr("BACKEND_GO_ADDR", ":8080"),
-		DatabaseURL:     envOr("DATABASE_URL", "postgres://logos:logos@localhost:5432/logos"),
-		RedisURL:        envOr("REDIS_URL", ""),
-		SecretKey:       envOr("LOGOS_SECRET_KEY", ""),
-		CookieName:      envOr("AUTH_TOKEN_COOKIE_NAME", "auth-token"),
-		CacheEnabled:    envBool("CACHE_ENABLED", false),
-		CacheTTL:        envInt("CACHE_TTL_SECONDS", 300),
-		StorageBackend:  envOr("STORAGE_BACKEND", "local"),
-		StorageLocalDir: envOr("STORAGE_LOCAL_DIR", "/tmp/logos-storage"),
-		S3Bucket:        envOr("STORAGE_S3_BUCKET", ""),
-		S3Region:        envOr("STORAGE_S3_REGION", "us-east-1"),
-		S3Endpoint:      envOr("STORAGE_S3_ENDPOINT", ""),
+		Addr:                    envOr("BACKEND_GO_ADDR", ":8080"),
+		DatabaseURL:             envOr("DATABASE_URL", "postgres://logos:logos@localhost:5432/logos"),
+		RedisURL:                envOr("REDIS_URL", ""),
+		SecretKey:               envOr("LOGOS_SECRET_KEY", ""),
+		CookieName:              envOr("AUTH_TOKEN_COOKIE_NAME", "auth-token"),
+		WebSocketAllowedOrigins: envList("BACKEND_GO_WEBSOCKET_ALLOWED_ORIGINS"),
+		CacheEnabled:            envBool("CACHE_ENABLED", false),
+		CacheTTL:                envInt("CACHE_TTL_SECONDS", 300),
+		StorageBackend:          envOr("STORAGE_BACKEND", "local"),
+		StorageLocalDir:         envOr("STORAGE_LOCAL_DIR", "/tmp/logos-storage"),
+		S3Bucket:                envOr("STORAGE_S3_BUCKET", ""),
+		S3Region:                envOr("STORAGE_S3_REGION", "us-east-1"),
+		S3Endpoint:              envOr("STORAGE_S3_ENDPOINT", ""),
 	}
+}
+
+func envList(key string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		return nil
+	}
+	var result []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func envOr(key, fallback string) string {

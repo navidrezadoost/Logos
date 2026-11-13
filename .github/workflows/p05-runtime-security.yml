@@ -1,0 +1,80 @@
+name: P0.5 runtime security contracts
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "backend-go/internal/**"
+      - "backend-go/cmd/server/**"
+      - "backend-go/go.mod"
+      - "backend-go/go.sum"
+      - "test/p0.5/browser-persistence/initialize-disposable-db-schema.sh"
+      - "test/fixtures/p0-document-compat/**"
+      - "docs/r1/P0.5-RUNTIME-SECURITY-CONTRACTS.md"
+      - "docs/r1/P0.5-RUNTIME-STRATEGY-DECISION-PACKAGE.md"
+      - ".github/workflows/p05-runtime-security.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+        env:
+          POSTGRES_DB: logos_p04_security
+          POSTGRES_USER: logos
+          POSTGRES_PASSWORD: p05-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logos -d logos_p04_security"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis@sha256:bb142a9c18ac18a16713c1491d779697b4e107c22a97266616099d288237ef47
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend-go/go.mod
+          cache-dependency-path: backend-go/go.sum
+
+      - name: Download Go modules
+        working-directory: backend-go
+        run: go mod download
+
+      - name: Verify PostgreSQL and Redis clients
+        run: |
+          psql --version
+          redis-cli --version
+
+      - name: Initialize fresh disposable historical test schema
+        env:
+          TEST_DATABASE_URL: postgres://logos:p05-only@127.0.0.1:5432/logos_p04_security?sslmode=disable
+        run: bash test/p0.5/browser-persistence/initialize-disposable-db-schema.sh
+
+      - name: Run PostgreSQL/Redis authorization, revocation, reconnect, and history tests
+        working-directory: backend-go
+        env:
+          TEST_DATABASE_URL: postgres://logos:p05-only@127.0.0.1:5432/logos_p04_security?sslmode=disable
+          TEST_REDIS_URL: redis://127.0.0.1:6379/0
+        run: >-
+          go test -race ./internal/handler
+          -run 'Test(NotificationsWebSocket.*Integration|UpdateFileHandler.*Integration)$'
+          -count=1 -timeout=180s -v

@@ -40,11 +40,10 @@ var wsUUIDRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin:     wsCheckOrigin,
 }
 
 // NotificationsHandler upgrades to WebSocket and relays Redis pub/sub messages.
-func NotificationsHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
+func NotificationsHandler(pool *db.Pool, rdb *redis.Client, allowedOrigins []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
@@ -61,7 +60,11 @@ func NotificationsHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		upgrader := wsUpgrader
+		upgrader.CheckOrigin = func(req *http.Request) bool {
+			return wsCheckOrigin(req, allowedOrigins)
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("[ws] upgrade failed: %v", err)
 			return
@@ -84,10 +87,11 @@ func NotificationsHandler(pool *db.Pool, rdb *redis.Client) http.HandlerFunc {
 	}
 }
 
-// wsCheckOrigin permits legacy non-browser clients that omit Origin, but
-// rejects malformed, opaque, and cross-host browser origins. Cross-origin
-// deployments must proxy the websocket through the frontend host.
-func wsCheckOrigin(r *http.Request) bool {
+// wsCheckOrigin permits legacy non-browser clients that omit Origin, rejects
+// malformed/opaque origins, and allows only same-origin requests or an exact
+// deployment-configured origin. It never trusts a client-supplied forwarded
+// protocol header.
+func wsCheckOrigin(r *http.Request, allowedOrigins []string) bool {
 	origins := r.Header.Values("Origin")
 	if len(origins) == 0 {
 		return true
@@ -102,6 +106,9 @@ func wsCheckOrigin(r *http.Request) bool {
 		(origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
 		return false
 	}
+	if originMatchesAllowlist(origin, allowedOrigins) {
+		return true
+	}
 	requestHost, err := url.Parse("//" + r.Host)
 	if err != nil || requestHost.Host == "" || requestHost.User != nil || requestHost.Path != "" {
 		return false
@@ -115,20 +122,37 @@ func wsCheckOrigin(r *http.Request) bool {
 	return originName != "" && originName == requestName && originPort == requestPort
 }
 
-// requestScheme uses direct TLS state when available. For TLS-terminating
-// reverse proxies, X-Forwarded-Proto must be overwritten by the trusted proxy
-// and stripped from untrusted client requests.
+// requestScheme uses transport state rather than forwarded headers. TLS-
+// terminating proxies must configure their exact browser origin in the
+// backend's allowlist.
 func requestScheme(r *http.Request) string {
 	if r.TLS != nil {
 		return "https"
-	}
-	if forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); forwarded == "http" || forwarded == "https" {
-		return forwarded
 	}
 	if r.URL != nil && (r.URL.Scheme == "http" || r.URL.Scheme == "https") {
 		return r.URL.Scheme
 	}
 	return "http"
+}
+
+func originMatchesAllowlist(origin *url.URL, allowedOrigins []string) bool {
+	for _, raw := range allowedOrigins {
+		allowed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || (allowed.Scheme != "http" && allowed.Scheme != "https") ||
+			allowed.Host == "" || allowed.User != nil || allowed.Opaque != "" ||
+			(allowed.Path != "" && allowed.Path != "/") || allowed.RawQuery != "" || allowed.Fragment != "" {
+			continue
+		}
+		if origin.Scheme != allowed.Scheme {
+			continue
+		}
+		originName, originPort := normalizedAuthority(origin, origin.Scheme)
+		allowedName, allowedPort := normalizedAuthority(allowed, allowed.Scheme)
+		if originName != "" && originName == allowedName && originPort == allowedPort {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizedAuthority(u *url.URL, scheme string) (string, string) {

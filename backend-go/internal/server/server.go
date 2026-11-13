@@ -23,6 +23,10 @@ type Deps struct {
 	AuthMW     *auth.Middleware
 	TokensKey  []byte // derived from LOGOS_SECRET_KEY; nil disables auth-write endpoints
 	CookieName string // auth cookie name, e.g. "auth-token"
+	// WebSocketAllowedOrigins is an exact-origin allowlist for deployments
+	// terminating TLS before the Go service. Direct same-origin requests are
+	// checked from the request TLS state and Host.
+	WebSocketAllowedOrigins []string
 }
 
 // New returns an http.Handler with all routes registered.
@@ -58,7 +62,7 @@ func New(deps Deps) http.Handler {
 		registerRPC(r, deps)
 	})
 
-	r.Get("/ws/notifications", handler.NotificationsHandler(deps.Pool, deps.Redis))
+	r.Get("/ws/notifications", handler.NotificationsHandler(deps.Pool, deps.Redis, deps.WebSocketAllowedOrigins))
 
 	// ── Assets (storage object serving) ─────────────────────────────────────
 	r.Get("/assets/by-id/{id}", handler.AssetByIDHandler(deps.Pool, deps.Storage))

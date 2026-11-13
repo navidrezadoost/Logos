@@ -25,7 +25,7 @@ import (
 func TestNotificationsWebSocketAuthenticatedUpgradeAndOriginIntegration(t *testing.T) {
 	pool := openTestDB(t)
 	profileID := createTestProfile(t, pool)
-	server, token := newAuthenticatedNotificationsServer(t, pool, profileID, nil)
+	server, token := newAuthenticatedNotificationsServer(t, pool, profileID, nil, "https://editor.example")
 
 	noCookieConn, noCookieResponse, err := dialNotifications(server.URL, "", integrationUUID(t), server.URL)
 	if noCookieConn != nil {
@@ -48,6 +48,19 @@ func TestNotificationsWebSocketAuthenticatedUpgradeAndOriginIntegration(t *testi
 		t.Fatalf("authenticated upgrade response = %v, want HTTP 101", response)
 	}
 	conn.Close()
+
+	proxyOriginConn, proxyOriginResponse, err := dialNotifications(server.URL, token, integrationUUID(t), "https://editor.example")
+	if err != nil {
+		if proxyOriginResponse != nil {
+			proxyOriginResponse.Body.Close()
+		}
+		t.Fatalf("TLS-terminating proxy origin from explicit allowlist: %v", err)
+	}
+	if proxyOriginResponse == nil || proxyOriginResponse.StatusCode != http.StatusSwitchingProtocols {
+		proxyOriginConn.Close()
+		t.Fatalf("allowlisted proxy-origin response = %v, want HTTP 101", proxyOriginResponse)
+	}
+	proxyOriginConn.Close()
 
 	badOriginConn, badOriginResponse, err := dialNotifications(server.URL, token, integrationUUID(t), "http://attacker.example")
 	if badOriginConn != nil {
@@ -189,7 +202,7 @@ func openTestRedis(t *testing.T) *goredis.Client {
 	return rdb
 }
 
-func newAuthenticatedNotificationsServer(t *testing.T, pool *db.Pool, profileID string, rdb *goredis.Client) (*httptest.Server, string) {
+func newAuthenticatedNotificationsServer(t *testing.T, pool *db.Pool, profileID string, rdb *goredis.Client, allowedOrigins ...string) (*httptest.Server, string) {
 	t.Helper()
 	tokensKey, err := auth.DeriveTokensKey("track-e-runtime-security-contracts-integration")
 	if err != nil {
@@ -205,11 +218,12 @@ func newAuthenticatedNotificationsServer(t *testing.T, pool *db.Pool, profileID 
 		}
 	})
 	server := httptest.NewServer(logosserver.New(logosserver.Deps{
-		Pool:       pool,
-		Redis:      rdb,
-		AuthMW:     auth.NewMiddleware(pool, tokensKey, "auth-token"),
-		TokensKey:  tokensKey,
-		CookieName: "auth-token",
+		Pool:                    pool,
+		Redis:                   rdb,
+		AuthMW:                  auth.NewMiddleware(pool, tokensKey, "auth-token"),
+		TokensKey:               tokensKey,
+		CookieName:              "auth-token",
+		WebSocketAllowedOrigins: allowedOrigins,
 	}))
 	t.Cleanup(server.Close)
 	return server, token
