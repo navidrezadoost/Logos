@@ -1,0 +1,9 @@
+# CI-only host ports for the Go backend, which runs on the GitHub runner rather
+# than inside the Compose network. Do not move these into dev/prod Compose.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
