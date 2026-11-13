@@ -5,7 +5,7 @@ import { Canvas } from "../components/canvas/Canvas";
 import { useDocumentStore } from "../stores/documentStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useUiStore } from "../stores/uiStore";
-import { loadRenderWasm, type RenderWasmModule } from "../render-wasm/module";
+import { loadRenderWasm, SHAPE_TYPE, type RenderWasmModule } from "../render-wasm/module";
 import { uuidToU32x4 } from "../types/shapes";
 import { projectP04RendererFixture } from "./p04-renderer-fixture";
 
@@ -91,13 +91,15 @@ async function run(): Promise<void> {
   diagnostics.wasmLoaded = true;
 
   const renderer = loaded as RenderWasmModule & {
-    _render_sync_shape: (a: number, b: number, c: number, d: number) => void;
+    _set_children_1: (a: number, b: number, c: number, d: number) => void;
+    _get_selection_rect?: () => number;
   };
-  if (typeof renderer._render_sync_shape !== "function") {
-    throw new Error("Rust renderer does not export _render_sync_shape for the test-only root adapter");
+  if (typeof renderer._set_children_1 !== "function") {
+    throw new Error("Rust renderer does not export _set_children_1 for the test-only root adapter");
   }
   let lastBasePropsPointer: number | null = null;
   const uploadedSelrects: number[][] = [];
+  const rendererBoundsHistory: Array<Record<string, number>> = [];
   const allocBytes = renderer._alloc_bytes.bind(renderer);
   renderer._alloc_bytes = (size) => {
     const pointer = allocBytes(size);
@@ -120,10 +122,11 @@ async function run(): Promise<void> {
   };
   let renderCount = 0;
 
-  // Test-only entrypoint adapter. Rust's existing render_sync_shape API creates
-  // the nil root when absent and renders the serialized React shape. Production
-  // scene.ts currently calls full-scene _render_sync without building that root
-  // child list; this smoke does not silently promote the adapter into product code.
+  // Test-only hierarchy adapter. Production scene.ts currently uploads the page
+  // shapes but does not create the nil root/ordered children list needed by
+  // full-scene _render_sync. Build that minimal one-child hierarchy here, then
+  // call the real full-scene renderer entrypoint; this is not product code.
+  const renderSync = renderer._render_sync.bind(renderer);
   renderer._render_sync = () => {
     renderCount++;
     diagnostics.renderCount = renderCount;
@@ -132,8 +135,29 @@ async function run(): Promise<void> {
     if (!currentPage || currentPage.rootShapeIds.length !== 1) {
       throw new Error("P04 slice requires exactly one nil-root child");
     }
-    const [a, b, c, d] = uuidToU32x4(currentPage.rootShapeIds[0]);
-    renderer._render_sync_shape(a, b, c, d);
+    const [rootA, rootB, rootC, rootD] = uuidToU32x4("00000000-0000-0000-0000-000000000000");
+    renderer._use_shape(rootA, rootB, rootC, rootD);
+    renderer._set_shape_type(SHAPE_TYPE.frame);
+    const [childA, childB, childC, childD] = uuidToU32x4(currentPage.rootShapeIds[0]);
+    renderer._set_children_1(childA, childB, childC, childD);
+    renderSync();
+    if (typeof renderer._get_selection_rect === "function") {
+      const inputPointer = renderer._alloc_bytes(16);
+      const input = new DataView(renderer.HEAPU8.buffer, inputPointer, 16);
+      [childA, childB, childC, childD].forEach((word, index) => input.setUint32(index * 4, word, true));
+      const outputPointer = renderer._get_selection_rect();
+      const output = new DataView(renderer.HEAPU8.buffer, outputPointer, 40);
+      const width = output.getFloat32(0, true);
+      const height = output.getFloat32(4, true);
+      const centerX = output.getFloat32(8, true);
+      const centerY = output.getFloat32(12, true);
+      renderer._free_bytes();
+      const rustBounds = { x: centerX - width / 2, y: centerY - height / 2, w: width, h: height };
+      rendererBoundsHistory.push(rustBounds);
+      diagnostics.rendererBoundsHistory = [...rendererBoundsHistory];
+    } else {
+      diagnostics.rendererBoundsProbe = "get_selection_rect export unavailable";
+    }
   };
 
   let targetFramebuffer: WebGLFramebuffer | null = null;
