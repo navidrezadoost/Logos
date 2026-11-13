@@ -1,0 +1,73 @@
+name: P0.4 official Ubuntu runner connectivity qualification
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/p04-runner-qualification.yml"
+      - ".github/workflows/rust.yml"
+      - "docs/r1/P0.4-CI-RUNNER-APT-DNS-FIX.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-ubuntu-qualification:
+    name: Official Ubuntu qualification
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-22.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    steps:
+      - name: Verify official DNS, HTTPS, signed APT and required libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/os-release
+          echo "Runner: $RUNNER_NAME"
+          echo "Resolver configuration:"
+          cat /etc/resolv.conf
+          echo "APT source configuration:"
+          grep -hE '^(URIs|Suites|Components|Signed-By):' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then cat /etc/apt/apt-mirrors.txt; fi
+          codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+          case "$codename" in noble|jammy) ;; *) echo "Unsupported codename $codename" >&2; exit 1 ;; esac
+          for host in archive.ubuntu.com security.ubuntu.com; do
+            echo "DNS: $host"
+            getent ahostsv4 "$host"
+          done
+          for url in \
+            "https://archive.ubuntu.com/ubuntu/dists/$codename/InRelease" \
+            "https://archive.ubuntu.com/ubuntu/dists/$codename-updates/InRelease" \
+            "https://security.ubuntu.com/ubuntu/dists/$codename-security/InRelease"; do
+            curl --fail --silent --show-error --location --max-time 30 "$url" -o /dev/null
+          done
+          apt_tmp="$(mktemp -d /tmp/p04-official-apt.XXXXXX)"
+          trap 'sudo rm -rf "$apt_tmp"' EXIT
+          chmod 0755 "$apt_tmp"
+          sources="$apt_tmp/official-ubuntu.sources"
+          cat > "$sources" <<APT
+          Types: deb
+          URIs: https://archive.ubuntu.com/ubuntu
+          Suites: $codename $codename-updates
+          Components: main restricted universe multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://security.ubuntu.com/ubuntu
+          Suites: $codename-security
+          Components: main restricted universe multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          APT
+          lists="$apt_tmp/lists"
+          mkdir -p "$lists/partial"
+          chmod 0755 "$lists"
+          sudo chown _apt:root "$lists/partial"
+          sudo chmod 0700 "$lists/partial"
+          args=(-o "Dir::Etc::sourcelist=$sources" -o "Dir::Etc::sourceparts=-" -o "Dir::State::lists=$lists")
+          sudo apt-get "${args[@]}" update
+          sudo apt-get "${args[@]}" install --yes --reinstall libclang-dev libfontconfig1-dev
+          dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Status}\n' libclang-dev libfontconfig1-dev

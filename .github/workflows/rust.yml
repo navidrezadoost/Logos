@@ -10,6 +10,7 @@ on:
       - "Cargo.lock"
       - "rust/**"
       - "render-wasm/**"
+      - "docs/r1/P0.4-CI-RUNNER-APT-DNS-FIX.md"
       - ".github/workflows/rust.yml"
 
 env:
@@ -22,8 +23,67 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install renderer system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev libfontconfig1-dev
+      - name: Diagnose runner and verify official Ubuntu repository access
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/os-release
+          echo 'APT source URI/suite configuration:'
+          grep -hE '^(URIs|Suites|Components|Signed-By):' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            echo 'Runner apt mirror list:'
+            cat /etc/apt/apt-mirrors.txt
+          fi
+
+          for host in archive.ubuntu.com security.ubuntu.com; do
+            echo "DNS records for $host:"
+            getent ahostsv4 "$host"
+          done
+
+          for url in \
+            https://archive.ubuntu.com/ubuntu/dists/noble/InRelease \
+            https://archive.ubuntu.com/ubuntu/dists/noble-updates/InRelease \
+            https://security.ubuntu.com/ubuntu/dists/noble-security/InRelease; do
+            echo "Probing official repository metadata: $url"
+            curl --fail --silent --show-error --location --max-time 30 "$url" -o /dev/null
+          done
+
+      - name: Install renderer system dependencies from official Ubuntu repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt_tmp="$(mktemp -d /tmp/logos-p04-apt.XXXXXX)"
+          trap 'sudo rm -rf "$apt_tmp"' EXIT
+          chmod 0755 "$apt_tmp"
+          apt_sources="$apt_tmp/ubuntu.sources"
+          cat >"$apt_sources" <<'APT'
+          Types: deb
+          URIs: https://archive.ubuntu.com/ubuntu
+          Suites: noble noble-updates noble-backports
+          Components: main restricted universe multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://security.ubuntu.com/ubuntu
+          Suites: noble-security
+          Components: main restricted universe multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          APT
+
+          apt_lists="$apt_tmp/lists"
+          mkdir -p "$apt_lists/partial"
+          chmod 0755 "$apt_lists"
+          sudo chown _apt:root "$apt_lists/partial"
+          sudo chmod 0700 "$apt_lists/partial"
+          apt_options=(
+            -o "Dir::Etc::sourcelist=$apt_sources"
+            -o 'Dir::Etc::sourceparts=-'
+            -o "Dir::State::lists=$apt_lists"
+            -o 'APT::Get::List-Cleanup=1'
+          )
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y libclang-dev libfontconfig1-dev
+          dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Status}\n' libclang-dev libfontconfig1-dev
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
