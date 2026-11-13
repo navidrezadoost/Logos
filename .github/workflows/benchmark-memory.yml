@@ -1,167 +1,232 @@
-name: Memory Regression Benchmark
+name: Memory Benchmark Infrastructure Gate
 
-# P1.7 — CI safety net against heap regressions.
-#
-# Scheduled nightly and on manual dispatch. Not triggered on every push to
-# avoid the cost of starting the full Logos stack on each commit — the
-# benchmark runs after nightly integration tests confirm the build is healthy.
-#
-# On failure: the job exits non-zero; GitHub will mark the run as failed and
-# send a notification. Heap snapshots are uploaded as artifacts and can be
-# loaded in Chrome DevTools for inspection.
-#
-# Reference: *Systems Performance* (Brendan Gregg) — "Measure first; optimise
-# second. Without metrics you are flying blind."
-
+# This job verifies the benchmark's current infrastructure prerequisites. It
+# deliberately does not claim memory measurements: the existing Playwright
+# scenario targets a browser application that this workflow does not start.
 on:
   schedule:
-    # Run at 02:00 UTC nightly (off-peak; long-running benchmark is acceptable)
     - cron: "0 2 * * *"
-
-  # Allow manual trigger with optional file regeneration
   workflow_dispatch:
-    inputs:
-      regenerate_file:
-        description: "Regenerate the benchmark .logos file before testing"
-        required: false
-        default: "false"
-        type: boolean
 
 env:
-  LOGOS_URL:      "http://localhost:6060"
-  LOGOS_EMAIL:    "benchmark@logos.test"
-  LOGOS_PASSWORD: "benchmark123!"
+  LOGOS_URL: "http://127.0.0.1:6060"
   BENCHMARK_FILE: "test/benchmarks/fixtures/large-canvas.logos"
 
 jobs:
-  memory-benchmark:
-    name: Memory Profiling Regression
+  memory-benchmark-infrastructure:
+    name: Memory benchmark infrastructure (measurement blocked)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      # ── Checkout ──────────────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Go toolchain (for backend binary + fixture generator) ─────────────
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: backend-go/go.mod
           cache-dependency-path: backend-go/go.sum
 
-      # ── Cache Docker layers ────────────────────────────────────────────────
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.docker-cache
-          key: ${{ runner.os }}-docker-${{ hashFiles('docker/**', 'logos-app/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-docker-
-
-      # ── Start Logos services via Docker Compose ───────────────────────────
-      - name: Start Logos services
+      # Compose interpolates the required MCP token even when only database
+      # services are selected. Supply a disposable per-invocation value in the
+      # process environment only: never emit it, write it to GITHUB_ENV/output,
+      # or pass it to a started service. The privileged main dev container and
+      # unrelated MinIO/mail/LDAP services are intentionally not started.
+      - name: Start PostgreSQL and Redis only
         run: |
-          docker compose -f docker/devenv/docker-compose.yaml up -d \
-            postgres redis minio
-        timeout-minutes: 10
+          LOGOS_MCP_LOCAL_TOKEN="$(
+            python3 -c 'import secrets; print(secrets.token_hex(32))'
+          )" \
+          CURRENT_USER_ID="$(id -u)" \
+          docker compose \
+            -f docker/devenv/docker-compose.yaml \
+            -f .github/workflows/benchmark-memory-compose.yaml \
+            up -d postgres redis
+        timeout-minutes: 5
 
-      # ── Build and start the Go backend ────────────────────────────────────
+      - name: Wait for PostgreSQL and Redis
+        run: |
+          compose() {
+            LOGOS_MCP_LOCAL_TOKEN="$(
+              python3 -c 'import secrets; print(secrets.token_hex(32))'
+            )" \
+            CURRENT_USER_ID="$(id -u)" \
+            docker compose \
+              -f docker/devenv/docker-compose.yaml \
+              -f .github/workflows/benchmark-memory-compose.yaml \
+              "$@"
+          }
+          for _ in {1..60}; do
+            if compose exec -T postgres pg_isready -U logos -d logos \
+              >/dev/null 2>&1 && \
+              [ "$(compose exec -T redis redis-cli ping 2>/dev/null \
+                | tr -d '\r')" = "PONG" ]; then
+              echo "PostgreSQL and Redis containers are ready."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL or Redis did not become ready."
+          exit 1
+
+      - name: Check application schema bootstrap state
+        run: |
+          profile_table="$(
+            LOGOS_MCP_LOCAL_TOKEN="$(
+              python3 -c 'import secrets; print(secrets.token_hex(32))'
+            )" \
+            CURRENT_USER_ID="$(id -u)" \
+            docker compose \
+              -f docker/devenv/docker-compose.yaml \
+              -f .github/workflows/benchmark-memory-compose.yaml \
+              exec -T postgres psql -U logos -d logos -Atqc \
+              "SELECT to_regclass('public.profile') IS NOT NULL"
+          )"
+          if [ "$profile_table" = "t" ]; then
+            echo "The profile table exists;"
+            echo "full schema readiness is not verified."
+          elif [ "$profile_table" = "f" ]; then
+            message="CI database has no public.profile table; \
+          dev init creates databases only."
+            echo "::notice title=Application login unavailable::$message"
+          else
+            echo "Could not determine whether the application schema"
+            echo "is initialized."
+            exit 1
+          fi
+
+      - name: Test Go .logos generator/parser compatibility
+        working-directory: backend-go
+        run: go test ./cmd/gen-benchmark ./internal/binfile
+
       - name: Build Go backend
         working-directory: backend-go
         run: go build -o ../bin/logos-backend ./cmd/server
 
-      - name: Start Go backend
+      # The host-published loopback ports in the CI-only Compose overlay match
+      # these URLs. Successful backend startup also proves its own PostgreSQL
+      # and Redis connection checks passed from the runner process.
+      - name: Start Go backend against CI database services
         run: |
-          DATABASE_URL="postgres://logos:logos@localhost:5432/logos" \
-          REDIS_URL="redis://localhost:6379/0" \
+          mkdir -p "$RUNNER_TEMP"
+          DATABASE_URL="postgres://logos:logos@127.0.0.1:5432/logos" \
+          REDIS_URL="redis://127.0.0.1:6379/0" \
           BACKEND_GO_ADDR=":6060" \
-          ./bin/logos-backend &
+          ./bin/logos-backend > "$RUNNER_TEMP/logos-backend.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/logos-backend.pid"
 
-      # ── Wait for health ────────────────────────────────────────────────────
-      - name: Wait for backend health
+      - name: Verify backend and dependency readiness
         run: |
-          echo "Waiting for Logos backend to become healthy …"
-          for i in $(seq 1 60); do
-            if curl -sf "$LOGOS_URL/api/_health" > /dev/null 2>&1; then
-              echo "Backend ready after ${i}s"
-              break
+          for _ in {1..60}; do
+            if curl --fail --silent "$LOGOS_URL/api/_health" >/dev/null && \
+              grep -Fq "[db] connected" "$RUNNER_TEMP/logos-backend.log" && \
+              grep -Fq "[redis] connected" \
+                "$RUNNER_TEMP/logos-backend.log"; then
+              echo "Go backend health is ready; PostgreSQL and Redis"
+              echo "connections succeeded."
+              exit 0
             fi
-            if [ "$i" -eq 60 ]; then
-              echo "ERROR: Backend did not become healthy within 60s"
+            pid="$(cat "$RUNNER_TEMP/logos-backend.pid")"
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/logos-backend.log"
               exit 1
             fi
             sleep 2
           done
+          cat "$RUNNER_TEMP/logos-backend.log"
+          echo "Go backend/dependency readiness timed out."
+          exit 1
 
-      # ── Create benchmark user (idempotent) ────────────────────────────────
-      - name: Create benchmark test user
-        run: |
-          curl -sf -X POST "$LOGOS_URL/api/rpc/command/register-profile" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"'"$LOGOS_EMAIL"'","password":"'"$LOGOS_PASSWORD"'","fullName":"Benchmark User"}' \
-            || true
-
-      # ── Cache generated benchmark fixture ────────────────────────────────
-      - name: Cache benchmark fixture
-        id: cache-fixture
-        uses: actions/cache@v4
-        with:
-          path: test/benchmarks/fixtures
-          key: benchmark-fixture-go-${{ hashFiles('backend-go/cmd/gen-benchmark/**', 'backend-go/internal/binfile/**') }}
-
-      - name: Generate benchmark file
-        if: steps.cache-fixture.outputs.cache-hit != 'true' || inputs.regenerate_file == 'true'
+      - name: Generate and inspect benchmark fixture
         working-directory: backend-go
         run: |
-          mkdir -p ../test/benchmarks/fixtures
+          mkdir -p "$(dirname "$GITHUB_WORKSPACE/$BENCHMARK_FILE")"
           go run ./cmd/gen-benchmark \
-            --output ../test/benchmarks/fixtures/large-canvas.logos \
-            --pages 10 \
-            --objects 500
-          echo "Generated fixture:"
-          ls -lh ../test/benchmarks/fixtures/large-canvas.logos
+            --output "$GITHUB_WORKSPACE/$BENCHMARK_FILE" \
+            --pages 5 \
+            --objects 2000
+          python3 - "$GITHUB_WORKSPACE/$BENCHMARK_FILE" <<'PY'
+          import json
+          import sys
+          import zipfile
 
-      # ── Set up Node + Playwright ───────────────────────────────────────────
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: test/benchmarks/package.json
+          fixture = sys.argv[1]
+          with zipfile.ZipFile(fixture) as archive:
+              assert archive.testzip() is None, "corrupt ZIP member"
+              manifest = json.loads(archive.read("manifest.json"))
+              assert manifest["version"] == 1
+              assert manifest.get("go-extension") is True
+              assert len(manifest["files"]) == 1
+              file_id = manifest["files"][0]["id"]
+              prefix = f"files/{file_id}/"
+              pages = json.loads(archive.read(prefix + "pages.json"))
+              changes = json.loads(archive.read(prefix + "changes.json"))
+              assert len(pages) == 5, len(pages)
+              assert len(changes) == 10_000, len(changes)
+              assert all(
+                  json.loads(row["changes"])
+                  if isinstance(row["changes"], str)
+                  else row["changes"]
+                  for row in changes
+              )
+          print(
+              "Generated Go v3 .logos ZIP is readable: "
+              "5 pages, 10,000 Go change rows."
+          )
+          PY
 
-      - name: Install Node dependencies
-        working-directory: test/benchmarks
-        run: npm ci
+      # This backend serves JSON APIs only. The browser scenario expects an app
+      # at / with login/dashboard/import/workspace UI, so record the blocker and
+      # do not install/run Playwright or emit memory metrics until that runtime
+      # path is implemented and verified end-to-end.
+      - name: Check benchmark browser target
+        id: browser-target
+        run: |
+          status="$(curl --silent --output "$RUNNER_TEMP/backend-root.html" \
+            --write-out '%{http_code}' "$LOGOS_URL/")"
+          echo "Go backend GET / returned HTTP $status."
+          echo "measurement_ready=false" >> "$GITHUB_OUTPUT"
+          if [ "$status" = "404" ]; then
+            message="Go API has no browser app at /; runtime UI checks and \
+          heap measurement are blocked. See test/benchmarks/CI-RECOVERY.md."
+          else
+            message="A non-404 root is not proof of runtime compatibility; \
+          login/import/workspace checks remain required. \
+          See test/benchmarks/CI-RECOVERY.md."
+          fi
+          echo "::notice title=Memory measurement not run::$message"
 
-      - name: Install Playwright Chromium
-        working-directory: test/benchmarks
-        run: npx playwright install chromium --with-deps
-
-      # ── Run the memory benchmark ───────────────────────────────────────────
       - name: Run memory profiling benchmark
+        if: steps.browser-target.outputs.measurement_ready == 'true'
         working-directory: test/benchmarks
         run: node memory_profile.js
         env:
-          LOGOS_URL:      ${{ env.LOGOS_URL }}
-          LOGOS_EMAIL:    ${{ env.LOGOS_EMAIL }}
-          LOGOS_PASSWORD: ${{ env.LOGOS_PASSWORD }}
-          BENCHMARK_FILE: ${{ github.workspace }}/test/benchmarks/fixtures/large-canvas.logos
+          LOGOS_URL: ${{ env.LOGOS_URL }}
+          BENCHMARK_FILE: fixtures/large-canvas.logos
 
-      # ── Upload artifacts ───────────────────────────────────────────────────
       - name: Upload heap snapshots and report
+        if: always()
         uses: actions/upload-artifact@v4
-        if: always()   # upload even on failure for post-mortem inspection
         with:
-          name: heap-snapshots-${{ github.run_number }}
+          name: memory-benchmark-infrastructure-${{ github.run_number }}
           path: |
             test/benchmarks/snapshots/
+            ${{ runner.temp }}/logos-backend.log
+          if-no-files-found: ignore
           retention-days: 30
 
-      # ── Tear down services ─────────────────────────────────────────────────
-      - name: Tear down services
+      - name: Tear down CI database services
         if: always()
         run: |
-          pkill logos-backend || true
-          docker compose -f docker/devenv/docker-compose.yaml down -v
+          if [ -f "$RUNNER_TEMP/logos-backend.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/logos-backend.pid")" 2>/dev/null || true
+          fi
+          LOGOS_MCP_LOCAL_TOKEN="$(
+            python3 -c 'import secrets; print(secrets.token_hex(32))'
+          )" \
+          CURRENT_USER_ID="$(id -u)" \
+          docker compose \
+            -f docker/devenv/docker-compose.yaml \
+            -f .github/workflows/benchmark-memory-compose.yaml \
+            down --volumes --remove-orphans

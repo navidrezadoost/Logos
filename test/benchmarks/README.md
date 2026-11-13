@@ -4,6 +4,11 @@ This directory contains the **P1.7 memory-profiling regression suite** for the
 Logos performance initiative. It ensures that Phase 1 rendering improvements
 (P1.1–P1.6) do not regress as the codebase evolves.
 
+> **CI status:** the hosted workflow currently validates infrastructure only;
+> it does not produce memory measurements because its Go API target does not
+> serve the login/dashboard/workspace UI expected by this legacy Playwright
+> scenario. See [CI recovery and blocker details](CI-RECOVERY.md).
+
 ---
 
 ### Files
