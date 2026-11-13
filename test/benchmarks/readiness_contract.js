@@ -17,19 +17,6 @@ function validateLoginResponse({ status, setCookie, body }) {
     pair.slice(equals + 1).length > 0 && !/[\r\n]/.test(pair);
 }
 
-function validateRendererEvidence(evidence, expected) {
-  if (!evidence || typeof evidence !== "object") return { ok: false, reason: "Renderer evidence adapter is unavailable" };
-  const pageCount = Number(evidence.pageCount);
-  const pixelDelta = Number(evidence.pixelDelta);
-  const canvas = evidence.canvas;
-  const ok = evidence.fileId === expected.fileId &&
-    Number.isInteger(expected.pageCount) && pageCount === expected.pageCount &&
-    canvas?.visible === true && Number(canvas.width) > 0 && Number(canvas.height) > 0 &&
-    typeof evidence.baselineSha256 === "string" && /^[a-f0-9]{64}$/i.test(evidence.baselineSha256) &&
-    Number.isFinite(pixelDelta) && pixelDelta > 0;
-  return { ok, reason: ok ? "Renderer canvas dimensions, fixture identity, page count, and baseline pixel evidence verified" : "Renderer canvas, fixture identity, page count, or baseline pixel evidence did not match" };
-}
-
 function validateImportResponse({ ok, status, body }) {
   const id = body?.files?.[0]?.newId;
   return Boolean(ok && status >= 200 && status < 300 && Array.isArray(body?.files) && UUID.test(id || ""));
@@ -65,4 +52,4 @@ function writeReport(writeFile, report, filePath, secrets = []) {
   return safe;
 }
 
-module.exports = { isDisposableImportAllowed, validateLoginResponse, validateImportResponse, validateRendererEvidence, chromiumCapability, makeReport, sanitizeText, writeReport };
+module.exports = { isDisposableImportAllowed, validateLoginResponse, validateImportResponse, chromiumCapability, makeReport, sanitizeText, writeReport };

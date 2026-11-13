@@ -85,16 +85,20 @@ regardless of whether a Chromium snapshot capability succeeds. It requires
 more than HTTP 200: PostgreSQL must contain required auth/import schema,
 backend dependency connections must be established independently, auth must
 return a valid session cookie, and import must pass the disposable-project
-guard before calling the authenticated `import-binfile` route. Renderer proof
-must come from a renderer-owned canvas/pixel evidence adapter; DOM shape counts
-are not used as production requirements.
+guard before calling the authenticated `import-binfile` route. The editor
+runtime currently does not prove that the same imported file is loaded in its
+document store and visibly rendered. Preflight therefore rejects the former
+page-global metadata-only evidence and keeps browser and heap capture blocked
+until the actual `get-file` response, active document identity, and observed
+canvas pixels are independently tied together. DOM shape counts are not used.
 
 The actual CI database currently lacks the application schema, `LOGOS_SECRET_KEY`
 and a prepared test account are not configured, there is no authorized project
 ID, and the Go backend does not serve the editor UI. Those capabilities report
 specific blockers. When Chromium installation is available, it navigates to
-the configured workspace URL and tests CDP heap collection only after renderer
-adapter fixture verification; unavailable Chromium is reported as a blocker. The infra workflow
+the configured workspace URL but does not run CDP heap collection without
+independently observed loaded-file and canvas evidence; unavailable Chromium is
+reported as a blocker. The infra workflow
 keeps succeeding when these capabilities are blocked, uploads readiness JSON,
 and prints **Memory measurement not run**. No heap snapshot/report is emitted
 or treated as a performance pass. A future measurement job must separately

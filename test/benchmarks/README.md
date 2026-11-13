@@ -59,15 +59,15 @@ explicit guard, not proof that a project is disposable; only use an environment
 whose owner has approved its isolation. Hosted infrastructure CI supplies none
 of these values and performs no import.
 
-The Logos editor is owned by the Rust/canvas renderer. The future browser
-adapter contract is `globalThis.logosBenchmarkEvidence.collect()`, returning
-the imported `fileId`, exact `pageCount`, visible canvas dimensions, a SHA-256
-baseline image identifier, and a non-zero pixel difference against the
-fixture-derived image expectation. The page count comes from the actual
-workspace controls through that renderer-owned adapter. This preflight does
-not assume DOM shape elements or impose selectors on the editor. Until the
-actual renderer provides and validates this evidence adapter, browser
-workspace and heap-capture capability remain `BLOCKED`.
+The current editor route does not independently prove that the backend-imported
+file reached its active document store or rendered canvas pixels. A prior
+page-global metadata object was insufficient: it could report matching IDs,
+counts, and dimensions without showing file load or visible content. The
+preflight now fails closed after navigation and does not accept that metadata
+or run heap capture. Browser workspace and heap-capture capability remain
+`BLOCKED` until an approved integration observes the exact `get-file` response,
+confirms the same file/page is active in the editor, and captures actual
+canvas pixels from the Rust renderer. DOM shape counts are not used.
 
 The machine-readable report, stdout, and GitHub step summary pass through
 secret redaction; unexpected exception details are suppressed. Report-write

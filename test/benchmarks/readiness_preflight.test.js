@@ -4,7 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const net = require("node:net");
 const { parseDbUrl, allReady, capabilities, redisPing } = require("./readiness_preflight");
-const { isDisposableImportAllowed, validateLoginResponse, validateImportResponse, validateRendererEvidence, chromiumCapability, makeReport, sanitizeText, writeReport } = require("./readiness_contract");
+const { isDisposableImportAllowed, validateLoginResponse, validateImportResponse, chromiumCapability, makeReport, sanitizeText, writeReport } = require("./readiness_contract");
 
 test("accepts PostgreSQL URLs without exposing credentials", () => {
   const url = parseDbUrl("postgres://bench:secret@127.0.0.1:5432/logos");
@@ -66,15 +66,12 @@ test("imports require an explicitly confirmed disposable project", () => {
   assert.equal(isDisposableImportAllowed({ BENCHMARK_PROJECT_ID: "bad", BENCHMARK_DISPOSABLE_ENVIRONMENT: "true", BENCHMARK_DISPOSABLE_CONFIRMATION: "bad" }), false);
 });
 
-test("renderer evidence requires matching fixture, page controls, canvas pixels, and baseline", () => {
-  const fileId = "00000000-0000-4000-8000-000000000001";
-  const expected = { fileId, pageCount: 5 };
-  const evidence = { fileId, pageCount: 5, canvas: { visible: true, width: 1280, height: 720 }, baselineSha256: "a".repeat(64), pixelDelta: 10 };
-  assert.equal(validateRendererEvidence(null, expected).ok, false);
-  assert.equal(validateRendererEvidence({ ...evidence, pageCount: undefined }, expected).ok, false); // missing page controls
-  assert.equal(validateRendererEvidence({ ...evidence, pageCount: 4 }, expected).ok, false); // incorrect fixture count
-  assert.equal(validateRendererEvidence({ ...evidence, fileId: "bad" }, expected).ok, false); // invalid workspace ID
-  assert.equal(validateRendererEvidence(evidence, expected).ok, true);
+test("metadata-only renderer evidence cannot mark the workspace ready", () => {
+  const states = Object.fromEntries(capabilities.map((name) => [name, { state: "READY" }]));
+  states.browser_workspace = { state: "BLOCKED", evidence: "loaded-file response and observed canvas pixels are not independently verified" };
+  const gated = makeReport(capabilities, states);
+  assert.equal(gated.infrastructure.state, "BLOCKED");
+  assert.equal(gated.heap_capture_capability.state, "BLOCKED");
 });
 
 test("unavailable Chromium is an explicit blocked capability", () => {
