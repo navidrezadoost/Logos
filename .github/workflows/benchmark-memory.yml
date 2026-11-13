@@ -41,7 +41,7 @@ jobs:
           CURRENT_USER_ID="$(id -u)" \
           docker compose \
             -f docker/devenv/docker-compose.yaml \
-            -f .github/workflows/benchmark-memory-compose.yaml \
+            -f test/benchmarks/benchmark-memory-compose.yaml \
             up -d postgres redis
         timeout-minutes: 5
 
@@ -54,7 +54,7 @@ jobs:
             CURRENT_USER_ID="$(id -u)" \
             docker compose \
               -f docker/devenv/docker-compose.yaml \
-              -f .github/workflows/benchmark-memory-compose.yaml \
+              -f test/benchmarks/benchmark-memory-compose.yaml \
               "$@"
           }
           for _ in {1..60}; do
@@ -79,7 +79,7 @@ jobs:
             CURRENT_USER_ID="$(id -u)" \
             docker compose \
               -f docker/devenv/docker-compose.yaml \
-              -f .github/workflows/benchmark-memory-compose.yaml \
+              -f test/benchmarks/benchmark-memory-compose.yaml \
               exec -T postgres psql -U logos -d logos -Atqc \
               "SELECT to_regclass('public.profile') IS NOT NULL"
           )"
@@ -228,5 +228,5 @@ jobs:
           CURRENT_USER_ID="$(id -u)" \
           docker compose \
             -f docker/devenv/docker-compose.yaml \
-            -f .github/workflows/benchmark-memory-compose.yaml \
+            -f test/benchmarks/benchmark-memory-compose.yaml \
             down --volumes --remove-orphans

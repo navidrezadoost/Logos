@@ -4,7 +4,7 @@
 
 Scheduled/manual workflow runs now start **only PostgreSQL and Redis**. The
 privileged `main` development container, MinIO, mailer, and LDAP are not started.
-`.github/workflows/benchmark-memory-compose.yaml` publishes PostgreSQL and Redis
+`test/benchmarks/benchmark-memory-compose.yaml` publishes PostgreSQL and Redis
 on runner loopback so the host-run Go backend can use its configured
 `127.0.0.1:5432` and `127.0.0.1:6379` addresses. The workflow waits for both
 services, then requires the backend health endpoint and its successful database
