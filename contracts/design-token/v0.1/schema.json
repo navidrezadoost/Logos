@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:logos:design-token-contract:0.1.0",
+  "title": "Logos proposed design-token and agent-plan contract v0.1",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "namespace": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "contextMap": {
+      "type": "object",
+      "maxProperties": 8,
+      "propertyNames": { "minLength": 1, "maxLength": 128 },
+      "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 256 }
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Opaque extension values are preserved by readers that do not understand them.",
+      "additionalProperties": true
+    },
+    "colorValue": {
+      "type": "object",
+      "required": ["space", "hex", "alpha"],
+      "properties": {
+        "space": { "const": "srgb" },
+        "hex": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "alpha": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "typedValue": {
+      "oneOf": [
+        { "type": "object", "required": ["type", "value"], "properties": { "type": { "const": "color" }, "value": { "$ref": "#/$defs/colorValue" } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "value"], "properties": { "type": { "const": "number" }, "value": { "type": "number" } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "value", "unit"], "properties": { "type": { "const": "dimension" }, "value": { "type": "number" }, "unit": { "enum": ["px", "ms", "s"] } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "value"], "properties": { "type": { "const": "string" }, "value": { "type": "string" } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "value"], "properties": { "type": { "const": "boolean" }, "value": { "type": "boolean" } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "value"], "properties": { "type": { "const": "opacity" }, "value": { "type": "number", "minimum": 0, "maximum": 1 } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "value"], "properties": { "type": { "const": "fontFamily" }, "value": { "type": "string", "minLength": 1 } }, "additionalProperties": false },
+        { "type": "object", "required": ["type", "value"], "properties": { "type": { "const": "fontWeight" }, "value": { "type": "number", "minimum": 1, "maximum": 1000 } }, "additionalProperties": false }
+      ]
+    },
+    "tokenReference": {
+      "type": "object",
+      "required": ["namespace", "tokenId"],
+      "properties": { "namespace": { "$ref": "#/$defs/namespace" }, "tokenId": { "$ref": "#/$defs/uuid" } },
+      "additionalProperties": false
+    },
+    "expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "value"],
+          "properties": { "kind": { "const": "literal" }, "value": { "$ref": "#/$defs/typedValue" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "target"],
+          "properties": { "kind": { "const": "reference" }, "target": { "$ref": "#/$defs/tokenReference" } },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "operator", "arguments"],
+          "properties": {
+            "kind": { "const": "operation" },
+            "operator": { "enum": ["add", "subtract", "multiply", "divide", "min", "max", "clamp"] },
+            "arguments": { "type": "array", "minItems": 2, "maxItems": 256, "items": { "$ref": "#/$defs/expression" } }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "tokenValue": {
+      "type": "object",
+      "required": ["when", "expression"],
+      "properties": { "when": { "$ref": "#/$defs/contextMap" }, "expression": { "$ref": "#/$defs/expression" } },
+      "additionalProperties": false
+    },
+    "tokenDefinition": {
+      "type": "object",
+      "required": ["id", "namespace", "name", "type", "values"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "namespace": { "$ref": "#/$defs/namespace" },
+        "name": { "$ref": "#/$defs/name" },
+        "type": { "enum": ["color", "number", "dimension", "string", "boolean", "opacity", "fontFamily", "fontWeight"] },
+        "groupPath": { "type": "array", "items": { "$ref": "#/$defs/name" } },
+        "collectionId": { "$ref": "#/$defs/uuid" },
+        "setId": { "$ref": "#/$defs/uuid" },
+        "values": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/tokenValue" } },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      },
+      "additionalProperties": false
+    },
+    "mode": {
+      "type": "object",
+      "required": ["id", "option"],
+      "properties": { "id": { "$ref": "#/$defs/uuid" }, "option": { "$ref": "#/$defs/name" } },
+      "additionalProperties": false
+    },
+    "collection": {
+      "type": "object",
+      "required": ["id", "name", "modeDimension", "defaultModeId", "modes"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/name" },
+        "modeDimension": { "$ref": "#/$defs/name" },
+        "defaultModeId": { "$ref": "#/$defs/uuid" },
+        "modes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/mode" } },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      },
+      "additionalProperties": false
+    },
+    "tokenSet": {
+      "type": "object",
+      "required": ["id", "name", "when"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/name" },
+        "when": { "$ref": "#/$defs/contextMap" },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      },
+      "additionalProperties": false
+    },
+    "contextDimension": {
+      "type": "object",
+      "required": ["id", "name", "options"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/name" },
+        "options": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/name" } },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      },
+      "additionalProperties": false
+    },
+    "tokenSnapshot": {
+      "type": "object",
+      "required": ["contractVersion", "status", "revision", "documentNamespace", "tokens", "collections", "sets", "contextDimensions", "activeSetIds"],
+      "properties": {
+        "contractVersion": { "const": "0.1.0" },
+        "status": { "const": "PROPOSED" },
+        "revision": { "type": "string", "minLength": 1 },
+        "documentNamespace": { "$ref": "#/$defs/namespace" },
+        "tokens": { "type": "array", "items": { "$ref": "#/$defs/tokenDefinition" } },
+        "collections": { "type": "array", "items": { "$ref": "#/$defs/collection" } },
+        "sets": { "type": "array", "items": { "$ref": "#/$defs/tokenSet" } },
+        "contextDimensions": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/contextDimension" } },
+        "activeSetIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      },
+      "additionalProperties": false
+    },
+    "propertyBinding": {
+      "type": "object",
+      "required": ["kind", "target", "modeStrategy"],
+      "properties": {
+        "kind": { "const": "binding" },
+        "target": { "$ref": "#/$defs/tokenReference" },
+        "modeStrategy": {
+          "oneOf": [
+            { "type": "object", "required": ["kind"], "properties": { "kind": { "const": "inherit" } }, "additionalProperties": false },
+            { "type": "object", "required": ["kind", "modeId"], "properties": { "kind": { "const": "explicit" }, "modeId": { "$ref": "#/$defs/uuid" } }, "additionalProperties": false }
+          ]
+        },
+        "fallback": { "anyOf": [{ "$ref": "#/$defs/typedValue" }, { "type": "null" }] },
+        "localOverride": { "$ref": "#/$defs/typedValue" },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      },
+      "additionalProperties": false
+    },
+    "propertyValue": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "value"], "properties": { "kind": { "const": "literal" }, "value": { "$ref": "#/$defs/typedValue" }, "extensions": { "$ref": "#/$defs/extensions" } }, "additionalProperties": false },
+        { "$ref": "#/$defs/propertyBinding" }
+      ]
+    },
+    "resolutionContext": {
+      "type": "object",
+      "required": ["explicit", "ancestorsNearestFirst", "page", "document"],
+      "properties": {
+        "explicit": { "$ref": "#/$defs/contextMap" },
+        "ancestorsNearestFirst": { "type": "array", "items": { "$ref": "#/$defs/contextMap" }, "maxItems": 32 },
+        "page": { "$ref": "#/$defs/contextMap" },
+        "document": { "$ref": "#/$defs/contextMap" }
+      },
+      "additionalProperties": false
+    },
+    "resolveRequest": {
+      "type": "object",
+      "required": ["contractVersion", "snapshotRevision", "propertyType", "property", "context"],
+      "properties": {
+        "contractVersion": { "const": "0.1.0" },
+        "snapshotRevision": { "type": "string", "minLength": 1 },
+        "propertyType": { "enum": ["color", "number", "dimension", "string", "boolean", "opacity", "fontFamily", "fontWeight"] },
+        "property": { "$ref": "#/$defs/propertyValue" },
+        "context": { "$ref": "#/$defs/resolutionContext" }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "severity", "message"],
+      "properties": {
+      "code": { "enum": ["MISSING_TOKEN", "MISSING_MODE", "ALIAS_CYCLE", "ALIAS_BUDGET", "TYPE_MISMATCH", "SCOPE_DENIED", "EXPRESSION_INVALID", "EXPRESSION_BUDGET", "CONTEXT_BUDGET", "DIVISION_BY_ZERO", "CONTEXT_CONFLICT", "STALE_REVISION", "UNKNOWN_EXTENSION", "UNSUPPORTED_FEATURE"] },
+        "severity": { "enum": ["error", "warning"] },
+        "message": { "type": "string", "minLength": 1 },
+        "tokenChain": { "type": "array", "items": { "$ref": "#/$defs/tokenReference" } },
+        "propertyPath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "resolveResult": {
+      "type": "object",
+      "required": ["contractVersion", "snapshotRevision", "status", "diagnostics", "dependencyTrace", "effectiveContext"],
+      "properties": {
+        "contractVersion": { "const": "0.1.0" },
+        "snapshotRevision": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["RESOLVED", "ERROR"] },
+        "value": { "$ref": "#/$defs/typedValue" },
+        "source": { "enum": ["DIRECT", "TOKEN", "LOCAL_OVERRIDE", "FALLBACK"] },
+        "dependencyTrace": { "type": "array", "items": { "$ref": "#/$defs/tokenReference" } },
+        "effectiveContext": { "$ref": "#/$defs/contextMap" },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "RESOLVED" } } }, "then": { "required": ["value", "source"] } },
+        { "if": { "properties": { "status": { "const": "ERROR" } } }, "then": { "not": { "required": ["value"] } } }
+      ],
+      "additionalProperties": false
+    },
+    "operation": {
+      "oneOf": [
+        { "type": "object", "required": ["kind", "definition"], "properties": { "kind": { "const": "createToken" }, "definition": { "$ref": "#/$defs/tokenDefinition" } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "target", "context", "expectedValue", "nextValue"], "properties": { "kind": { "const": "setTokenValue" }, "target": { "$ref": "#/$defs/tokenReference" }, "context": { "$ref": "#/$defs/contextMap" }, "expectedValue": { "anyOf": [{ "$ref": "#/$defs/expression" }, { "type": "null" }] }, "nextValue": { "$ref": "#/$defs/expression" } }, "additionalProperties": false },
+        { "type": "object", "required": ["kind", "shapeId", "propertyPath", "expectedProperty", "nextProperty"], "properties": { "kind": { "const": "setProperty" }, "shapeId": { "$ref": "#/$defs/uuid" }, "propertyPath": { "type": "string", "minLength": 1 }, "expectedProperty": { "anyOf": [{ "$ref": "#/$defs/propertyValue" }, { "type": "null" }] }, "nextProperty": { "$ref": "#/$defs/propertyValue" } }, "additionalProperties": false }
+      ]
+    },
+    "userIntent": {
+      "type": "object",
+      "required": ["protocolVersion", "intentId", "text", "requestedCapabilities"],
+      "properties": {
+        "protocolVersion": { "const": "0.1.0" },
+        "intentId": { "$ref": "#/$defs/uuid" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "requestedCapabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["createToken", "bindProperty", "createTheme", "explain", "import"] } },
+        "constraints": { "type": "array", "items": { "type": "string", "maxLength": 1000 } }
+      },
+      "additionalProperties": false
+    },
+    "documentContext": {
+      "type": "object",
+      "required": ["protocolVersion", "documentId", "revision", "selectedShapeIds", "propertyValues", "allowedNamespaces", "permissions"],
+      "properties": {
+        "protocolVersion": { "const": "0.1.0" },
+        "documentId": { "$ref": "#/$defs/uuid" },
+        "revision": { "type": "string", "minLength": 1 },
+        "pageId": { "$ref": "#/$defs/uuid" },
+        "selectedShapeIds": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" }, "maxItems": 1000 },
+        "propertyValues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["shapeId", "propertyPath", "value"],
+            "properties": { "shapeId": { "$ref": "#/$defs/uuid" }, "propertyPath": { "type": "string", "minLength": 1 }, "value": { "$ref": "#/$defs/propertyValue" } },
+            "additionalProperties": false
+          }
+        },
+        "context": { "$ref": "#/$defs/resolutionContext" },
+        "allowedNamespaces": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/namespace" } },
+        "permissions": { "type": "array", "uniqueItems": true, "items": { "enum": ["readDocument", "readTokens", "proposeChanges", "commitChanges", "readLibrary"] } }
+      },
+      "additionalProperties": false
+    },
+    "proposedPlan": {
+      "type": "object",
+      "required": ["protocolVersion", "planId", "baseRevision", "intentId", "summary", "operations", "assumptions", "requiresUserApproval"],
+      "properties": {
+        "protocolVersion": { "const": "0.1.0" },
+        "planId": { "$ref": "#/$defs/uuid" },
+        "baseRevision": { "type": "string", "minLength": 1 },
+        "intentId": { "$ref": "#/$defs/uuid" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "operations": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/operation" } },
+        "assumptions": { "type": "array", "items": { "type": "string", "maxLength": 1000 } },
+        "previewContexts": { "type": "array", "items": { "$ref": "#/$defs/contextMap" }, "maxItems": 128 },
+        "requiresUserApproval": { "const": true },
+        "extensions": { "$ref": "#/$defs/extensions" }
+      },
+      "additionalProperties": false
+    },
+    "impactSummary": {
+      "type": "object",
+      "required": ["createdTokens", "updatedTokens", "boundProperties", "affectedPropertyPaths", "contextsEvaluated"],
+      "properties": {
+        "createdTokens": { "type": "integer", "minimum": 0 },
+        "updatedTokens": { "type": "integer", "minimum": 0 },
+        "boundProperties": { "type": "integer", "minimum": 0 },
+        "affectedPropertyPaths": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "maxItems": 10000 },
+        "contextsEvaluated": { "type": "array", "items": { "$ref": "#/$defs/contextMap" }, "maxItems": 128 },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      },
+      "additionalProperties": false
+    },
+    "validationResult": {
+      "type": "object",
+      "required": ["protocolVersion", "planId", "baseRevision", "status", "planDigest", "impact", "diagnostics"],
+      "properties": {
+        "protocolVersion": { "const": "0.1.0" },
+        "planId": { "$ref": "#/$defs/uuid" },
+        "baseRevision": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["READY", "REJECTED", "NEEDS_CONFIRMATION"] },
+        "planDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "impact": { "$ref": "#/$defs/impactSummary" },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      },
+      "additionalProperties": false
+    },
+    "commitRequest": {
+      "type": "object",
+      "required": ["protocolVersion", "planId", "expectedRevision", "validationDigest", "explicitUserApproval", "idempotencyKey"],
+      "properties": {
+        "protocolVersion": { "const": "0.1.0" },
+        "planId": { "$ref": "#/$defs/uuid" },
+        "expectedRevision": { "type": "string", "minLength": 1 },
+        "validationDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "explicitUserApproval": { "const": true },
+        "idempotencyKey": { "type": "string", "minLength": 16, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "transactionReceipt": {
+      "type": "object",
+      "required": ["protocolVersion", "transactionId", "status", "baseRevision", "resultingRevision", "operationIds", "actorId", "approvedByUser", "undoReference", "replayReference"],
+      "properties": {
+        "protocolVersion": { "const": "0.1.0" },
+        "transactionId": { "$ref": "#/$defs/uuid" },
+        "status": { "const": "APPLIED" },
+        "baseRevision": { "type": "string", "minLength": 1 },
+        "resultingRevision": { "type": "string", "minLength": 1 },
+        "operationIds": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        "actorId": { "type": "string", "minLength": 1 },
+        "approvedByUser": { "const": true },
+        "undoReference": { "type": "string", "minLength": 1 },
+        "replayReference": { "type": "string", "minLength": 1 },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}
