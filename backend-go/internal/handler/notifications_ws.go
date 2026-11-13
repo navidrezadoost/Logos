@@ -12,23 +12,27 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/logos-design/logos/backend-go/internal/auth"
+	"github.com/logos-design/logos/backend-go/internal/db"
+	"github.com/logos-design/logos/backend-go/internal/perms"
 	"github.com/logos-design/logos/backend-go/internal/transit"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	msgbusTenant       = "default"
-	uuidZero           = "00000000-0000-0000-0000-000000000000"
-	wsPingInterval     = 5 * time.Second
-	wsMaxMissedPings   = 3
-	wsWriteWait        = 10 * time.Second
-	wsPongWait         = 20 * time.Second
+	msgbusTenant     = "default"
+	uuidZero         = "00000000-0000-0000-0000-000000000000"
+	wsPingInterval   = 5 * time.Second
+	wsMaxMissedPings = 3
+	wsWriteWait      = 10 * time.Second
+	wsPongWait       = 20 * time.Second
 )
 
 var wsUUIDRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -36,11 +40,10 @@ var wsUUIDRE = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	CheckOrigin:     func(_ *http.Request) bool { return true },
 }
 
 // NotificationsHandler upgrades to WebSocket and relays Redis pub/sub messages.
-func NotificationsHandler(rdb *redis.Client) http.HandlerFunc {
+func NotificationsHandler(pool *db.Pool, rdb *redis.Client, allowedOrigins []string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		profileID := auth.ProfileID(r.Context())
 		if profileID == "" {
@@ -57,42 +60,162 @@ func NotificationsHandler(rdb *redis.Client) http.HandlerFunc {
 			return
 		}
 
-		conn, err := wsUpgrader.Upgrade(w, r, nil)
+		upgrader := wsUpgrader
+		upgrader.CheckOrigin = func(req *http.Request) bool {
+			return wsCheckOrigin(req, allowedOrigins)
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Printf("[ws] upgrade failed: %v", err)
 			return
 		}
 
 		s := &wsSession{
-			conn:       conn,
-			profileID:  profileID,
-			sessionID:  sessionID,
-			rdb:        rdb,
-			send:       make(chan []byte, 64),
-			done:       make(chan struct{}),
-			subscribed: make(map[string]struct{}),
+			conn:              conn,
+			pool:              pool,
+			profileID:         profileID,
+			sessionID:         sessionID,
+			rdb:               rdb,
+			send:              make(chan wsOutboundMessage, 64),
+			done:              make(chan struct{}),
+			subscribed:        make(map[string]struct{}),
+			resources:         make(map[string]wsResource),
+			channelGeneration: make(map[string]uint64),
 		}
-		go s.run(r.Context())
+		// The request context is canceled when this handler returns, which is
+		// immediately after the upgrade. The websocket owns its own lifetime.
+		go s.run(context.Background())
 	}
 }
 
+// wsCheckOrigin rejects requests without Origin, malformed/opaque origins,
+// and cross-origin requests unless the exact origin is deployment-allowlisted.
+// It never trusts a client-supplied forwarded protocol header.
+func wsCheckOrigin(r *http.Request, allowedOrigins []string) bool {
+	origins := r.Header.Values("Origin")
+	if len(origins) == 0 {
+		return false
+	}
+	if len(origins) != 1 || origins[0] == "" {
+		return false
+	}
+
+	origin, err := url.Parse(origins[0])
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") ||
+		origin.Host == "" || origin.User != nil || origin.Opaque != "" ||
+		(origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
+		return false
+	}
+	if originMatchesAllowlist(origin, allowedOrigins) {
+		return true
+	}
+	requestHost, err := url.Parse("//" + r.Host)
+	if err != nil || requestHost.Host == "" || requestHost.User != nil || requestHost.Path != "" {
+		return false
+	}
+	if origin.Scheme != requestScheme(r) {
+		return false
+	}
+
+	originName, originPort := normalizedAuthority(origin, origin.Scheme)
+	requestName, requestPort := normalizedAuthority(requestHost, origin.Scheme)
+	return originName != "" && originName == requestName && originPort == requestPort
+}
+
+// requestScheme uses transport state rather than forwarded headers. TLS-
+// terminating proxies must configure their exact browser origin in the
+// backend's allowlist.
+func requestScheme(r *http.Request) string {
+	if r.TLS != nil {
+		return "https"
+	}
+	if r.URL != nil && (r.URL.Scheme == "http" || r.URL.Scheme == "https") {
+		return r.URL.Scheme
+	}
+	return "http"
+}
+
+func originMatchesAllowlist(origin *url.URL, allowedOrigins []string) bool {
+	for _, raw := range allowedOrigins {
+		allowed, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || (allowed.Scheme != "http" && allowed.Scheme != "https") ||
+			allowed.Host == "" || allowed.User != nil || allowed.Opaque != "" ||
+			(allowed.Path != "" && allowed.Path != "/") || allowed.RawQuery != "" || allowed.Fragment != "" {
+			continue
+		}
+		if origin.Scheme != allowed.Scheme {
+			continue
+		}
+		originName, originPort := normalizedAuthority(origin, origin.Scheme)
+		allowedName, allowedPort := normalizedAuthority(allowed, allowed.Scheme)
+		if originName != "" && originName == allowedName && originPort == allowedPort {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedAuthority(u *url.URL, scheme string) (string, string) {
+	name := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	port := u.Port()
+	if port == "" {
+		if scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	return name, port
+}
+
+type wsResourceKind uint8
+
+const (
+	wsFileResource wsResourceKind = iota + 1
+	wsTeamResource
+)
+
+type wsResource struct {
+	kind wsResourceKind
+	id   string
+}
+
+type wsOutboundMessage struct {
+	channel         string
+	resource        wsResource
+	resourceChannel bool
+	generation      uint64
+	payload         []byte
+}
+
 type wsSession struct {
-	conn       *websocket.Conn
-	profileID  string
-	sessionID  string
-	rdb        *redis.Client
-	send       chan []byte
-	done       chan struct{}
-	subMu      sync.Mutex
-	subscribed map[string]struct{}
-	pubsub     *redis.PubSub
-	missedPing int
-	pingMu     sync.Mutex
+	conn              *websocket.Conn
+	pool              *db.Pool
+	profileID         string
+	sessionID         string
+	rdb               *redis.Client
+	send              chan wsOutboundMessage
+	done              chan struct{}
+	subMu             sync.Mutex
+	subscribed        map[string]struct{}
+	resources         map[string]wsResource // Redis channel -> authorized file/team
+	channelGeneration map[string]uint64
+	pubsub            *redis.PubSub
+	missedPing        int
+	pingMu            sync.Mutex
+	closeOnce         sync.Once
+	pingEvery         time.Duration // zero selects the production interval; overridden by deterministic lifecycle tests
+	missedLimit       int           // zero selects the production threshold; overridden by deterministic lifecycle tests
 }
 
 func (s *wsSession) run(ctx context.Context) {
-	defer close(s.done)
-	defer s.conn.Close()
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		cancel()
+		s.closePubSub()
+		s.terminate()
+		close(s.done)
+	}()
 
 	// Initial subscriptions: profile channel + system (uuid zero).
 	s.subscribeTopics(s.profileID, uuidZero)
@@ -118,21 +241,53 @@ func (s *wsSession) run(ctx context.Context) {
 			return
 		}
 		s.conn.SetReadDeadline(time.Now().Add(wsPongWait))
-		s.handleMessage(data)
+		s.handleMessage(ctx, data)
 	}
 }
 
 func (s *wsSession) writeLoop() {
-	for msg := range s.send {
-		s.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
-		if err := s.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+	for {
+		select {
+		case <-s.done:
 			return
+		case msg := <-s.send:
+			if !s.writeOutboundMessage(msg) {
+				return
+			}
 		}
 	}
 }
 
+// writeOutboundMessage rechecks subscription and permission state at the last
+// point before delivery. Holding subMu through the write gives unsubscribe a
+// clear ordering point: a frame is either written before unsubscribe takes
+// effect, or it is dropped.
+func (s *wsSession) writeOutboundMessage(msg wsOutboundMessage) bool {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !s.outboundAllowedLocked(ctx, msg) {
+		return true
+	}
+	s.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+	if err := s.conn.WriteMessage(websocket.TextMessage, msg.payload); err != nil {
+		s.terminate()
+		return false
+	}
+	return true
+}
+
 func (s *wsSession) pingLoop() {
-	ticker := time.NewTicker(wsPingInterval)
+	interval := s.pingEvery
+	if interval <= 0 {
+		interval = wsPingInterval
+	}
+	missedLimit := s.missedLimit
+	if missedLimit <= 0 {
+		missedLimit = wsMaxMissedPings
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	missed := 0
@@ -147,7 +302,8 @@ func (s *wsSession) pingLoop() {
 			s.missedPing++
 			s.pingMu.Unlock()
 
-			if missed >= wsMaxMissedPings {
+			if missed >= missedLimit {
+				s.terminate()
 				return
 			}
 
@@ -155,15 +311,23 @@ func (s *wsSession) pingLoop() {
 			payload := make([]byte, 8)
 			binary.BigEndian.PutUint64(payload, uint64(beat))
 
-			s.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
-			if err := s.conn.WriteMessage(websocket.PingMessage, payload); err != nil {
+			if err := s.conn.WriteControl(websocket.PingMessage, payload, time.Now().Add(wsWriteWait)); err != nil {
+				s.terminate()
 				return
 			}
 		}
 	}
 }
 
-func (s *wsSession) handleMessage(data []byte) {
+func (s *wsSession) terminate() {
+	s.closeOnce.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
+}
+
+func (s *wsSession) handleMessage(ctx context.Context, data []byte) {
 	msg, err := decodeWSMessage(data)
 	if err != nil {
 		return
@@ -179,7 +343,18 @@ func (s *wsSession) handleMessage(data []byte) {
 			teamID, _ = msg["teamId"].(string)
 		}
 		if teamID != "" {
-			s.subscribeTopics(teamID)
+			resource := wsResource{kind: wsTeamResource, id: teamID}
+			if s.authorized(ctx, resource) {
+				s.subscribeResource(resource, teamID)
+			}
+		}
+	case "unsubscribe-team":
+		teamID, _ := msg["team-id"].(string)
+		if teamID == "" {
+			teamID, _ = msg["teamId"].(string)
+		}
+		if teamID != "" {
+			s.unsubscribeResource(wsResource{kind: wsTeamResource, id: teamID})
 		}
 	case "subscribe-file":
 		fileID, _ := msg["file-id"].(string)
@@ -193,10 +368,14 @@ func (s *wsSession) handleMessage(data []byte) {
 		if fileID == "" {
 			return
 		}
+		resource := wsResource{kind: wsFileResource, id: fileID}
+		if !s.authorized(ctx, resource) {
+			return
+		}
 		if pageID != "" {
-			s.subscribeTopics(fileID+":page:"+pageID, fileID+":meta")
+			s.subscribeResource(resource, fileID+":page:"+pageID, fileID+":meta")
 		} else {
-			s.subscribeTopics(fileID)
+			s.subscribeResource(resource, fileID)
 		}
 	case "unsubscribe-file":
 		fileID, _ := msg["file-id"].(string)
@@ -204,7 +383,7 @@ func (s *wsSession) handleMessage(data []byte) {
 			fileID, _ = msg["fileId"].(string)
 		}
 		if fileID != "" {
-			s.unsubscribeTopics(fileID, fileID+":meta")
+			s.unsubscribeResource(wsResource{kind: wsFileResource, id: fileID})
 		}
 	case "broadcast":
 		s.publish(msg)
@@ -214,9 +393,28 @@ func (s *wsSession) handleMessage(data []byte) {
 			fileID, _ = msg["fileId"].(string)
 		}
 		if fileID != "" {
+			if !s.authorized(ctx, wsResource{kind: wsFileResource, id: fileID}) {
+				return
+			}
 			s.publishToTopic(fileID, msg)
 			s.publishToTopic(fileID+":meta", msg)
 		}
+	}
+}
+
+func (s *wsSession) authorized(ctx context.Context, resource wsResource) bool {
+	if s.pool == nil || resource.id == "" {
+		return false
+	}
+	switch resource.kind {
+	case wsFileResource:
+		p, err := perms.GetFilePermissions(ctx, s.pool, s.profileID, resource.id)
+		return err == nil && p != nil && p.CanRead
+	case wsTeamResource:
+		p, err := perms.GetTeamPermissions(ctx, s.pool, s.profileID, resource.id)
+		return err == nil && p != nil && p.CanRead
+	default:
+		return false
 	}
 }
 
@@ -227,45 +425,86 @@ func (s *wsSession) subscribeTopics(topics ...string) {
 
 	channels := make([]string, 0, len(topics))
 	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	s.ensurePubSubLocked()
 	for _, topic := range topics {
 		ch := msgbusTopic(topic)
 		if _, ok := s.subscribed[ch]; ok {
 			continue
 		}
-		s.subscribed[ch] = struct{}{}
 		channels = append(channels, ch)
 	}
-	s.subMu.Unlock()
 
 	if len(channels) == 0 {
 		return
 	}
 
-	if s.pubsub == nil {
-		s.pubsub = s.rdb.Subscribe(context.Background())
-	}
-	_ = s.pubsub.Subscribe(context.Background(), channels...)
-}
-
-func (s *wsSession) unsubscribeTopics(topics ...string) {
-	if s.rdb == nil || s.pubsub == nil {
+	if err := s.pubsub.Subscribe(context.Background(), channels...); err != nil {
 		return
 	}
+	for _, ch := range channels {
+		s.channelGeneration[ch]++
+		s.subscribed[ch] = struct{}{}
+	}
+}
 
+func (s *wsSession) subscribeResource(resource wsResource, topics ...string) {
+	if s.rdb == nil {
+		return
+	}
 	channels := make([]string, 0, len(topics))
 	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	s.ensurePubSubLocked()
 	for _, topic := range topics {
 		ch := msgbusTopic(topic)
-		if _, ok := s.subscribed[ch]; !ok {
+		if old, ok := s.resources[ch]; !ok || old != resource {
+			s.channelGeneration[ch]++
+		}
+		s.resources[ch] = resource
+		if _, ok := s.subscribed[ch]; ok {
 			continue
 		}
-		delete(s.subscribed, ch)
 		channels = append(channels, ch)
 	}
-	s.subMu.Unlock()
-
 	if len(channels) > 0 {
-		_ = s.pubsub.Unsubscribe(context.Background(), channels...)
+		if err := s.pubsub.Subscribe(context.Background(), channels...); err != nil {
+			return
+		}
+		for _, ch := range channels {
+			s.channelGeneration[ch]++
+			s.subscribed[ch] = struct{}{}
+		}
+	}
+}
+
+func (s *wsSession) ensurePubSubLocked() {
+	if s.pubsub == nil && s.rdb != nil {
+		s.pubsub = s.rdb.Subscribe(context.Background())
+	}
+}
+
+func (s *wsSession) unsubscribeResource(resource wsResource) {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	s.unsubscribeResourceLocked(resource)
+}
+
+func (s *wsSession) unsubscribeResourceLocked(resource wsResource) {
+	var channels []string
+	for ch, subscribedResource := range s.resources {
+		if subscribedResource != resource {
+			continue
+		}
+		if _, ok := s.subscribed[ch]; ok {
+			delete(s.subscribed, ch)
+			s.channelGeneration[ch]++
+			channels = append(channels, ch)
+		}
+	}
+	pubsub := s.pubsub
+	if pubsub != nil && len(channels) > 0 {
+		_ = pubsub.Unsubscribe(context.Background(), channels...)
 	}
 }
 
@@ -274,24 +513,28 @@ func (s *wsSession) startRedisLoop(ctx context.Context) {
 		for {
 			select {
 			case <-s.done:
-				if s.pubsub != nil {
-					_ = s.pubsub.Close()
-				}
+				return
+			case <-ctx.Done():
 				return
 			default:
 			}
 
-			if s.pubsub == nil {
-				time.Sleep(100 * time.Millisecond)
+			pubsub := s.currentPubSub()
+			if pubsub == nil {
+				if !waitContext(ctx, 100*time.Millisecond) {
+					return
+				}
 				continue
 			}
 
-			msg, err := s.pubsub.ReceiveMessage(ctx)
+			msg, err := pubsub.ReceiveMessage(ctx)
 			if err != nil {
 				if ctx.Err() != nil {
 					return
 				}
-				time.Sleep(200 * time.Millisecond)
+				if !waitContext(ctx, 200*time.Millisecond) {
+					return
+				}
 				continue
 			}
 
@@ -303,6 +546,22 @@ func (s *wsSession) startRedisLoop(ctx context.Context) {
 					continue
 				}
 				payload = plain
+			}
+
+			resource, resourceChannel, active, generation := s.channelStatus(msg.Channel)
+			if !active {
+				continue
+			}
+			if !resourceChannel && !s.isSystemChannel(msg.Channel) {
+				continue
+			}
+			var eventResource wsResource
+			if resourceChannel {
+				var ok bool
+				eventResource, ok = notificationResource(resource, payload)
+				if !ok {
+					continue
+				}
 			}
 
 			sid, _ := payload["session-id"].(string)
@@ -318,12 +577,126 @@ func (s *wsSession) startRedisLoop(ctx context.Context) {
 				continue
 			}
 
-			select {
-			case s.send <- out:
-			default:
-			}
+			s.enqueueOutbound(ctx, wsOutboundMessage{
+				channel:         msg.Channel,
+				resource:        eventResource,
+				resourceChannel: resourceChannel,
+				generation:      generation,
+				payload:         out,
+			})
 		}
 	}()
+}
+
+func waitContext(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func (s *wsSession) currentPubSub() *redis.PubSub {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	return s.pubsub
+}
+
+func (s *wsSession) channelStatus(channel string) (wsResource, bool, bool, uint64) {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	resource, ok := s.resources[channel]
+	_, active := s.subscribed[channel]
+	return resource, ok, active, s.channelGeneration[channel]
+}
+
+func (s *wsSession) isSystemChannel(channel string) bool {
+	return channel == msgbusTopic(s.profileID) || channel == msgbusTopic(uuidZero)
+}
+
+func (s *wsSession) enqueueOutbound(ctx context.Context, msg wsOutboundMessage) bool {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	if !s.outboundAllowedLocked(ctx, msg) {
+		return false
+	}
+	select {
+	case s.send <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *wsSession) outboundAllowedLocked(ctx context.Context, msg wsOutboundMessage) bool {
+	if _, active := s.subscribed[msg.channel]; !active || s.channelGeneration[msg.channel] != msg.generation {
+		return false
+	}
+	if !msg.resourceChannel {
+		return s.isSystemChannel(msg.channel)
+	}
+	resource, classified := s.resources[msg.channel]
+	if !classified {
+		return false
+	}
+	if s.authorized(ctx, msg.resource) {
+		return true
+	}
+	if msg.resource == resource {
+		s.unsubscribeResourceLocked(resource)
+	}
+	return false
+}
+
+// notificationResource classifies the resource that produced a Redis message,
+// rather than trusting only the resource most recently associated with a
+// channel. Legacy file and team topics share the same raw UUID namespace, so a
+// file UUID colliding with a team UUID must still be authorized as the event's
+// actual resource.
+func notificationResource(subscription wsResource, message map[string]any) (wsResource, bool) {
+	typ, _ := message["type"].(string)
+	typ = strings.TrimPrefix(typ, "~:")
+	if typ == "library-change" {
+		if subscription.id == "" {
+			return wsResource{}, false
+		}
+		return wsResource{kind: wsTeamResource, id: subscription.id}, true
+	}
+
+	fileID := messageString(message, "file-id", "fileId")
+	if fileID != "" {
+		return wsResource{kind: wsFileResource, id: fileID}, true
+	}
+	teamID := messageString(message, "team-id", "teamId")
+	if teamID != "" {
+		return wsResource{kind: wsTeamResource, id: teamID}, true
+	}
+	return wsResource{}, false
+}
+
+func messageString(message map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := message[key].(string); ok && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (s *wsSession) closePubSub() {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	for channel := range s.subscribed {
+		delete(s.subscribed, channel)
+		s.channelGeneration[channel]++
+	}
+	if s.pubsub != nil {
+		_ = s.pubsub.Close()
+		s.pubsub = nil
+	}
 }
 
 func (s *wsSession) publish(msg map[string]any) {

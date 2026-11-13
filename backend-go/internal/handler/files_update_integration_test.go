@@ -94,6 +94,16 @@ func TestUpdateFileHandlerRevisionPersistenceIntegration(t *testing.T) {
 	if first.Code != http.StatusOK {
 		t.Fatalf("first update: status=%d body=%s", first.Code, first.Body.String())
 	}
+	// A labeled snapshot is metadata for the existing revision, not a second
+	// operation in the change history. It shares revn 1 with the real update and
+	// must not make a complete-history stale rebase appear to have a duplicate.
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO file_change
+			(id, file_id, profile_id, created_at, updated_at, revn, label, created_by)
+		VALUES ($1, $2, $3, now(), now(), 1, 'review snapshot', 'user')`,
+		integrationUUID(t), created.ID, profileID); err != nil {
+		t.Fatalf("insert labeled snapshot at revision 1: %v", err)
+	}
 	second := update(0, makeAdd(shapeB, "Stale-base rectangle"))
 	if second.Code != http.StatusOK {
 		t.Fatalf("stale-base update: status=%d body=%s", second.Code, second.Body.String())
@@ -134,16 +144,75 @@ func TestUpdateFileHandlerRevisionPersistenceIntegration(t *testing.T) {
 		}
 	}
 
-	var changeCount int
+	var changeCount, snapshotCount int
 	var rebased bool
 	if err := pool.QueryRow(context.Background(), `
-		SELECT COUNT(*), bool_or(rebased)
+		SELECT COUNT(*) FILTER (WHERE label IS NULL),
+		       COUNT(*) FILTER (WHERE label IS NOT NULL),
+		       bool_or(rebased) FILTER (WHERE label IS NULL)
 		  FROM file_change
-		 WHERE file_id = $1`, created.ID).Scan(&changeCount, &rebased); err != nil {
+		 WHERE file_id = $1`, created.ID).Scan(&changeCount, &snapshotCount, &rebased); err != nil {
 		t.Fatalf("read revision history: %v", err)
 	}
-	if changeCount != 2 || !rebased {
-		t.Fatalf("revision rows=%d rebased=%v, want 2 rows and a stale-base rebase", changeCount, rebased)
+	if changeCount != 2 || snapshotCount != 1 || !rebased {
+		t.Fatalf("revision rows=%d snapshots=%d rebased=%v, want 2 operation rows, 1 labeled snapshot, and a stale-base rebase", changeCount, snapshotCount, rebased)
+	}
+}
+
+func TestUpdateFileHandlerRejectsMalformedLegacyCompetingHistoryIntegration(t *testing.T) {
+	pool := openTestDB(t)
+	profileID := createTestProfile(t, pool)
+	_, projectID := createTestTeamAndProject(t, pool, profileID)
+	fileID := createIntegrationFile(t, pool, profileID, projectID)
+
+	// Historical Clojure file_change rows store Transit+zstd bytes. This zstd
+	// frame marker represents a legacy row that the current JSON rebase path
+	// cannot safely decode.
+	legacyChanges := []byte{0x28, 0xb5, 0x2f, 0xfd}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO file_change
+			(id, session_id, profile_id, created_at, updated_at, deleted_at,
+			 file_id, revn, version, base_revn, rebased, changes)
+		VALUES ($1, $2, $3, now(), now(), now() + interval '1 hour',
+			$4, 1, 0, 0, false, $5)`,
+		integrationUUID(t), integrationUUID(t), profileID, fileID, legacyChanges); err != nil {
+		t.Fatalf("insert malformed legacy competing change row: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `UPDATE file SET revn = 1 WHERE id = $1`, fileID); err != nil {
+		t.Fatalf("set authoritative file revision: %v", err)
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"id":         fileID,
+		"session-id": integrationUUID(t),
+		"revn":       0,
+		"vern":       0,
+		"changes": []map[string]any{{
+			"type": "del-obj",
+			"id":   integrationUUID(t),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("encode stale update request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/rpc/command/update-file", bytes.NewReader(body))
+	req = req.WithContext(auth.WithProfileID(req.Context(), profileID))
+	rec := httptest.NewRecorder()
+	handler.UpdateFileHandler(pool, nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("stale update with malformed competing history: status=%d body=%s, want 409", rec.Code, rec.Body.String())
+	}
+
+	var revision int64
+	var changeCount int
+	if err := pool.QueryRow(context.Background(), `SELECT revn FROM file WHERE id = $1`, fileID).Scan(&revision); err != nil {
+		t.Fatalf("read file revision after rejected update: %v", err)
+	}
+	if err := pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM file_change WHERE file_id = $1`, fileID).Scan(&changeCount); err != nil {
+		t.Fatalf("read change history after rejected update: %v", err)
+	}
+	if revision != 1 || changeCount != 1 {
+		t.Fatalf("rejected update left revision=%d change rows=%d; want revision 1 and original row only", revision, changeCount)
 	}
 }
 
