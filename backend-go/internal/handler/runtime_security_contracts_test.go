@@ -18,7 +18,7 @@ func TestWSCheckOrigin(t *testing.T) {
 		allowedOrigins []string
 		want           bool
 	}{
-		{name: "legacy client without origin", host: "app.example", want: true},
+		{name: "missing origin rejected by default", host: "app.example", want: false},
 		{name: "same host", origins: []string{"https://app.example"}, host: "app.example", tls: true, want: true},
 		{name: "same host with default port", origins: []string{"https://app.example:443"}, host: "app.example", tls: true, want: true},
 		{name: "scheme mismatch on plain HTTP", origins: []string{"https://app.example"}, host: "app.example", want: false},
@@ -50,6 +50,72 @@ func TestWSCheckOrigin(t *testing.T) {
 				t.Fatalf("wsCheckOrigin() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWSOutboundDeliveryFailsClosedAfterUnsubscribe(t *testing.T) {
+	resource := wsResource{kind: wsFileResource, id: "file-id"}
+	channel := msgbusTopic(resource.id)
+	s := &wsSession{
+		profileID:         "profile-id",
+		send:              make(chan wsOutboundMessage, 1),
+		subscribed:        map[string]struct{}{channel: {}},
+		resources:         map[string]wsResource{channel: resource},
+		channelGeneration: map[string]uint64{channel: 4},
+	}
+	queued := wsOutboundMessage{
+		channel:         channel,
+		resource:        resource,
+		resourceChannel: true,
+		generation:      4,
+		payload:         []byte("queued before unsubscribe"),
+	}
+
+	// No permission backend means the pre-enqueue authorization fails closed,
+	// and revokes the channel while retaining its classification for in-flight
+	// messages that were already received from Redis.
+	if s.enqueueOutbound(context.Background(), queued) {
+		t.Fatal("queued a resource notification without a permission backend")
+	}
+	if len(s.subscribed) != 0 {
+		t.Fatalf("subscription remained active after failed authorization: %v", s.subscribed)
+	}
+	if got, ok := s.resources[channel]; !ok || got != resource {
+		t.Fatalf("resource classification = %#v, %v; want retained %#v", got, ok, resource)
+	}
+
+	// Simulate a message that was already queued before unsubscribe, then a fast
+	// resubscribe to the same channel. The old generation must remain invalid;
+	// the writer cannot trust that the raw channel is active again.
+	s.subscribed[channel] = struct{}{}
+	s.channelGeneration[channel]++
+	s.send <- queued
+	if !s.writeOutboundMessage(<-s.send) {
+		t.Fatal("stale-generation queued message should be dropped without a write error")
+	}
+	if len(s.send) != 0 {
+		t.Fatal("inactive queued message was re-enqueued")
+	}
+}
+
+func TestWSOutboundDeliveryDropsUnknownNonSystemChannel(t *testing.T) {
+	channel := msgbusTopic("unclassified")
+	s := &wsSession{
+		profileID:         "profile-id",
+		send:              make(chan wsOutboundMessage, 1),
+		subscribed:        map[string]struct{}{channel: {}},
+		resources:         map[string]wsResource{},
+		channelGeneration: map[string]uint64{channel: 1},
+	}
+	if s.enqueueOutbound(context.Background(), wsOutboundMessage{
+		channel:    channel,
+		generation: 1,
+		payload:    []byte("unknown"),
+	}) {
+		t.Fatal("unknown non-profile/system channel was queued")
+	}
+	if len(s.send) != 0 {
+		t.Fatal("unknown channel left a message in the outbound queue")
 	}
 }
 

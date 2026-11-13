@@ -94,6 +94,16 @@ func TestUpdateFileHandlerRevisionPersistenceIntegration(t *testing.T) {
 	if first.Code != http.StatusOK {
 		t.Fatalf("first update: status=%d body=%s", first.Code, first.Body.String())
 	}
+	// A labeled snapshot is metadata for the existing revision, not a second
+	// operation in the change history. It shares revn 1 with the real update and
+	// must not make a complete-history stale rebase appear to have a duplicate.
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO file_change
+			(id, file_id, profile_id, created_at, updated_at, revn, label, created_by)
+		VALUES ($1, $2, $3, now(), now(), 1, 'review snapshot', 'user')`,
+		integrationUUID(t), created.ID, profileID); err != nil {
+		t.Fatalf("insert labeled snapshot at revision 1: %v", err)
+	}
 	second := update(0, makeAdd(shapeB, "Stale-base rectangle"))
 	if second.Code != http.StatusOK {
 		t.Fatalf("stale-base update: status=%d body=%s", second.Code, second.Body.String())
@@ -134,16 +144,18 @@ func TestUpdateFileHandlerRevisionPersistenceIntegration(t *testing.T) {
 		}
 	}
 
-	var changeCount int
+	var changeCount, snapshotCount int
 	var rebased bool
 	if err := pool.QueryRow(context.Background(), `
-		SELECT COUNT(*), bool_or(rebased)
+		SELECT COUNT(*) FILTER (WHERE label IS NULL),
+		       COUNT(*) FILTER (WHERE label IS NOT NULL),
+		       bool_or(rebased) FILTER (WHERE label IS NULL)
 		  FROM file_change
-		 WHERE file_id = $1`, created.ID).Scan(&changeCount, &rebased); err != nil {
+		 WHERE file_id = $1`, created.ID).Scan(&changeCount, &snapshotCount, &rebased); err != nil {
 		t.Fatalf("read revision history: %v", err)
 	}
-	if changeCount != 2 || !rebased {
-		t.Fatalf("revision rows=%d rebased=%v, want 2 rows and a stale-base rebase", changeCount, rebased)
+	if changeCount != 2 || snapshotCount != 1 || !rebased {
+		t.Fatalf("revision rows=%d snapshots=%d rebased=%v, want 2 operation rows, 1 labeled snapshot, and a stale-base rebase", changeCount, snapshotCount, rebased)
 	}
 }
 

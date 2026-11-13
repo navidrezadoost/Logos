@@ -71,15 +71,16 @@ func NotificationsHandler(pool *db.Pool, rdb *redis.Client, allowedOrigins []str
 		}
 
 		s := &wsSession{
-			conn:       conn,
-			pool:       pool,
-			profileID:  profileID,
-			sessionID:  sessionID,
-			rdb:        rdb,
-			send:       make(chan []byte, 64),
-			done:       make(chan struct{}),
-			subscribed: make(map[string]struct{}),
-			resources:  make(map[string]wsResource),
+			conn:              conn,
+			pool:              pool,
+			profileID:         profileID,
+			sessionID:         sessionID,
+			rdb:               rdb,
+			send:              make(chan wsOutboundMessage, 64),
+			done:              make(chan struct{}),
+			subscribed:        make(map[string]struct{}),
+			resources:         make(map[string]wsResource),
+			channelGeneration: make(map[string]uint64),
 		}
 		// The request context is canceled when this handler returns, which is
 		// immediately after the upgrade. The websocket owns its own lifetime.
@@ -87,14 +88,13 @@ func NotificationsHandler(pool *db.Pool, rdb *redis.Client, allowedOrigins []str
 	}
 }
 
-// wsCheckOrigin permits legacy non-browser clients that omit Origin, rejects
-// malformed/opaque origins, and allows only same-origin requests or an exact
-// deployment-configured origin. It never trusts a client-supplied forwarded
-// protocol header.
+// wsCheckOrigin rejects requests without Origin, malformed/opaque origins,
+// and cross-origin requests unless the exact origin is deployment-allowlisted.
+// It never trusts a client-supplied forwarded protocol header.
 func wsCheckOrigin(r *http.Request, allowedOrigins []string) bool {
 	origins := r.Header.Values("Origin")
 	if len(origins) == 0 {
-		return true
+		return false
 	}
 	if len(origins) != 1 || origins[0] == "" {
 		return false
@@ -180,20 +180,32 @@ type wsResource struct {
 	id   string
 }
 
+type wsOutboundMessage struct {
+	channel         string
+	resource        wsResource
+	resourceChannel bool
+	generation      uint64
+	payload         []byte
+}
+
 type wsSession struct {
-	conn       *websocket.Conn
-	pool       *db.Pool
-	profileID  string
-	sessionID  string
-	rdb        *redis.Client
-	send       chan []byte
-	done       chan struct{}
-	subMu      sync.Mutex
-	subscribed map[string]struct{}
-	resources  map[string]wsResource // Redis channel -> authorized file/team
-	pubsub     *redis.PubSub
-	missedPing int
-	pingMu     sync.Mutex
+	conn              *websocket.Conn
+	pool              *db.Pool
+	profileID         string
+	sessionID         string
+	rdb               *redis.Client
+	send              chan wsOutboundMessage
+	done              chan struct{}
+	subMu             sync.Mutex
+	subscribed        map[string]struct{}
+	resources         map[string]wsResource // Redis channel -> authorized file/team
+	channelGeneration map[string]uint64
+	pubsub            *redis.PubSub
+	missedPing        int
+	pingMu            sync.Mutex
+	closeOnce         sync.Once
+	pingEvery         time.Duration // zero selects the production interval; overridden by deterministic lifecycle tests
+	missedLimit       int           // zero selects the production threshold; overridden by deterministic lifecycle tests
 }
 
 func (s *wsSession) run(ctx context.Context) {
@@ -201,7 +213,7 @@ func (s *wsSession) run(ctx context.Context) {
 	defer func() {
 		cancel()
 		s.closePubSub()
-		_ = s.conn.Close()
+		s.terminate()
 		close(s.done)
 	}()
 
@@ -239,16 +251,43 @@ func (s *wsSession) writeLoop() {
 		case <-s.done:
 			return
 		case msg := <-s.send:
-			s.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
-			if err := s.conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			if !s.writeOutboundMessage(msg) {
 				return
 			}
 		}
 	}
 }
 
+// writeOutboundMessage rechecks subscription and permission state at the last
+// point before delivery. Holding subMu through the write gives unsubscribe a
+// clear ordering point: a frame is either written before unsubscribe takes
+// effect, or it is dropped.
+func (s *wsSession) writeOutboundMessage(msg wsOutboundMessage) bool {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if !s.outboundAllowedLocked(ctx, msg) {
+		return true
+	}
+	s.conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+	if err := s.conn.WriteMessage(websocket.TextMessage, msg.payload); err != nil {
+		s.terminate()
+		return false
+	}
+	return true
+}
+
 func (s *wsSession) pingLoop() {
-	ticker := time.NewTicker(wsPingInterval)
+	interval := s.pingEvery
+	if interval <= 0 {
+		interval = wsPingInterval
+	}
+	missedLimit := s.missedLimit
+	if missedLimit <= 0 {
+		missedLimit = wsMaxMissedPings
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	missed := 0
@@ -263,7 +302,8 @@ func (s *wsSession) pingLoop() {
 			s.missedPing++
 			s.pingMu.Unlock()
 
-			if missed >= wsMaxMissedPings {
+			if missed >= missedLimit {
+				s.terminate()
 				return
 			}
 
@@ -272,10 +312,19 @@ func (s *wsSession) pingLoop() {
 			binary.BigEndian.PutUint64(payload, uint64(beat))
 
 			if err := s.conn.WriteControl(websocket.PingMessage, payload, time.Now().Add(wsWriteWait)); err != nil {
+				s.terminate()
 				return
 			}
 		}
 	}
+}
+
+func (s *wsSession) terminate() {
+	s.closeOnce.Do(func() {
+		if s.conn != nil {
+			_ = s.conn.Close()
+		}
+	})
 }
 
 func (s *wsSession) handleMessage(ctx context.Context, data []byte) {
@@ -383,7 +432,6 @@ func (s *wsSession) subscribeTopics(topics ...string) {
 		if _, ok := s.subscribed[ch]; ok {
 			continue
 		}
-		s.subscribed[ch] = struct{}{}
 		channels = append(channels, ch)
 	}
 
@@ -391,7 +439,13 @@ func (s *wsSession) subscribeTopics(topics ...string) {
 		return
 	}
 
-	_ = s.pubsub.Subscribe(context.Background(), channels...)
+	if err := s.pubsub.Subscribe(context.Background(), channels...); err != nil {
+		return
+	}
+	for _, ch := range channels {
+		s.channelGeneration[ch]++
+		s.subscribed[ch] = struct{}{}
+	}
 }
 
 func (s *wsSession) subscribeResource(resource wsResource, topics ...string) {
@@ -404,15 +458,23 @@ func (s *wsSession) subscribeResource(resource wsResource, topics ...string) {
 	s.ensurePubSubLocked()
 	for _, topic := range topics {
 		ch := msgbusTopic(topic)
+		if old, ok := s.resources[ch]; !ok || old != resource {
+			s.channelGeneration[ch]++
+		}
 		s.resources[ch] = resource
 		if _, ok := s.subscribed[ch]; ok {
 			continue
 		}
-		s.subscribed[ch] = struct{}{}
 		channels = append(channels, ch)
 	}
 	if len(channels) > 0 {
-		_ = s.pubsub.Subscribe(context.Background(), channels...)
+		if err := s.pubsub.Subscribe(context.Background(), channels...); err != nil {
+			return
+		}
+		for _, ch := range channels {
+			s.channelGeneration[ch]++
+			s.subscribed[ch] = struct{}{}
+		}
 	}
 }
 
@@ -423,18 +485,20 @@ func (s *wsSession) ensurePubSubLocked() {
 }
 
 func (s *wsSession) unsubscribeResource(resource wsResource) {
-	if s.rdb == nil {
-		return
-	}
-	var channels []string
 	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	s.unsubscribeResourceLocked(resource)
+}
+
+func (s *wsSession) unsubscribeResourceLocked(resource wsResource) {
+	var channels []string
 	for ch, subscribedResource := range s.resources {
 		if subscribedResource != resource {
 			continue
 		}
-		delete(s.resources, ch)
 		if _, ok := s.subscribed[ch]; ok {
 			delete(s.subscribed, ch)
+			s.channelGeneration[ch]++
 			channels = append(channels, ch)
 		}
 	}
@@ -442,7 +506,6 @@ func (s *wsSession) unsubscribeResource(resource wsResource) {
 	if pubsub != nil && len(channels) > 0 {
 		_ = pubsub.Unsubscribe(context.Background(), channels...)
 	}
-	s.subMu.Unlock()
 }
 
 func (s *wsSession) startRedisLoop(ctx context.Context) {
@@ -485,16 +548,18 @@ func (s *wsSession) startRedisLoop(ctx context.Context) {
 				payload = plain
 			}
 
-			resource, resourceChannel := s.resourceForChannel(msg.Channel)
+			resource, resourceChannel, active, generation := s.channelStatus(msg.Channel)
+			if !active {
+				continue
+			}
+			if !resourceChannel && !s.isSystemChannel(msg.Channel) {
+				continue
+			}
+			var eventResource wsResource
 			if resourceChannel {
-				eventResource, ok := notificationResource(resource, payload)
+				var ok bool
+				eventResource, ok = notificationResource(resource, payload)
 				if !ok {
-					continue
-				}
-				if !s.authorized(ctx, eventResource) {
-					if eventResource == resource {
-						s.unsubscribeResource(resource)
-					}
 					continue
 				}
 			}
@@ -512,10 +577,13 @@ func (s *wsSession) startRedisLoop(ctx context.Context) {
 				continue
 			}
 
-			select {
-			case s.send <- out:
-			default:
-			}
+			s.enqueueOutbound(ctx, wsOutboundMessage{
+				channel:         msg.Channel,
+				resource:        eventResource,
+				resourceChannel: resourceChannel,
+				generation:      generation,
+				payload:         out,
+			})
 		}
 	}()
 }
@@ -537,11 +605,50 @@ func (s *wsSession) currentPubSub() *redis.PubSub {
 	return s.pubsub
 }
 
-func (s *wsSession) resourceForChannel(channel string) (wsResource, bool) {
+func (s *wsSession) channelStatus(channel string) (wsResource, bool, bool, uint64) {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	resource, ok := s.resources[channel]
-	return resource, ok
+	_, active := s.subscribed[channel]
+	return resource, ok, active, s.channelGeneration[channel]
+}
+
+func (s *wsSession) isSystemChannel(channel string) bool {
+	return channel == msgbusTopic(s.profileID) || channel == msgbusTopic(uuidZero)
+}
+
+func (s *wsSession) enqueueOutbound(ctx context.Context, msg wsOutboundMessage) bool {
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	if !s.outboundAllowedLocked(ctx, msg) {
+		return false
+	}
+	select {
+	case s.send <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *wsSession) outboundAllowedLocked(ctx context.Context, msg wsOutboundMessage) bool {
+	if _, active := s.subscribed[msg.channel]; !active || s.channelGeneration[msg.channel] != msg.generation {
+		return false
+	}
+	if !msg.resourceChannel {
+		return s.isSystemChannel(msg.channel)
+	}
+	resource, classified := s.resources[msg.channel]
+	if !classified {
+		return false
+	}
+	if s.authorized(ctx, msg.resource) {
+		return true
+	}
+	if msg.resource == resource {
+		s.unsubscribeResourceLocked(resource)
+	}
+	return false
 }
 
 // notificationResource classifies the resource that produced a Redis message,
@@ -582,6 +689,10 @@ func messageString(message map[string]any, keys ...string) string {
 func (s *wsSession) closePubSub() {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
+	for channel := range s.subscribed {
+		delete(s.subscribed, channel)
+		s.channelGeneration[channel]++
+	}
 	if s.pubsub != nil {
 		_ = s.pubsub.Close()
 		s.pubsub = nil

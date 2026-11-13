@@ -36,6 +36,15 @@ func TestNotificationsWebSocketAuthenticatedUpgradeAndOriginIntegration(t *testi
 	}
 	noCookieResponse.Body.Close()
 
+	missingOriginConn, missingOriginResponse, err := dialNotifications(server.URL, token, integrationUUID(t), "")
+	if missingOriginConn != nil {
+		missingOriginConn.Close()
+	}
+	if err == nil || missingOriginResponse == nil || missingOriginResponse.StatusCode != http.StatusForbidden {
+		t.Fatalf("upgrade without Origin: response=%v err=%v, want HTTP 403", missingOriginResponse, err)
+	}
+	missingOriginResponse.Body.Close()
+
 	conn, response, err := dialNotifications(server.URL, token, integrationUUID(t), server.URL)
 	if err != nil {
 		if response != nil {
@@ -126,6 +135,18 @@ func TestNotificationsWebSocketResourceAuthorizationAndRevocationIntegration(t *
 		"type": "file-change", "fileId": fileID, "probe": "allowed-file",
 	})
 	assertNotificationProbe(t, conn, "allowed-file")
+
+	// Unsubscription must invalidate queued/in-flight events and retain enough
+	// classification to reject messages even after the active channel is gone.
+	sendNotification(t, conn, map[string]any{"type": "unsubscribe-team", "team-id": teamID})
+	waitRedisSubscribers(t, rdb, teamID, 0)
+	publishNotification(t, rdb, teamID, map[string]any{
+		"type": "library-change", "teamId": teamID, "probe": "after-unsubscribe",
+	})
+	waitForBroadcastBarrier(t, rdb, conn, subscriberID)
+	assertNoNotification(t, conn)
+	sendNotification(t, conn, map[string]any{"type": "subscribe-team", "team-id": teamID})
+	waitRedisSubscribers(t, rdb, teamID, 1)
 
 	// Remove the only relationship that grants this subscriber access. Both
 	// resources remain subscribed until an event arrives; that event must be

@@ -342,7 +342,7 @@ func loadCompetingChangeSets(ctx context.Context, tx pgx.Tx, fileID string, base
 	rows, err := tx.Query(ctx,
 		`SELECT revn, changes
 		   FROM file_change
-		  WHERE file_id = $1 AND revn > $2 AND revn <= $3
+		  WHERE file_id = $1 AND revn > $2 AND revn <= $3 AND label IS NULL
 		  ORDER BY revn ASC`,
 		fileID, baseRevn, currentRevn,
 	)
