@@ -22,6 +22,8 @@ type GLRenderFrame = {
 };
 let activeGLFrame: GLRenderFrame | null = null;
 const glRenderFrames: GLRenderFrame[] = [];
+const framebufferImageSummaries: Array<Record<string, unknown>> = [];
+let previousFramebufferPixels: { width: number; height: number; pixels: Uint8Array } | null = null;
 const framebufferIds = new WeakMap<WebGLFramebuffer, number>();
 let nextFramebufferId = 1;
 window.addEventListener("error", (event) => browserErrors.push(event.error?.stack ?? event.message));
@@ -92,6 +94,96 @@ function glSnapshot(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement): Reco
     viewport: Array.from(gl.getParameter(gl.VIEWPORT) as Int32Array),
     scissorEnabled: gl.isEnabled(gl.SCISSOR_TEST),
     scissor: Array.from(gl.getParameter(gl.SCISSOR_BOX) as Int32Array),
+  };
+}
+
+function captureTargetPixels(
+  gl: WebGL2RenderingContext,
+  canvas: HTMLCanvasElement,
+  target: WebGLFramebuffer | null,
+): Uint8Array {
+  const previousReadFramebuffer = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+  const previousReadBuffer = gl.getParameter(gl.READ_BUFFER) as number;
+  const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+  gl.finish();
+  try {
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target);
+    gl.readBuffer(target === null ? gl.BACK : gl.COLOR_ATTACHMENT0);
+    gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  } finally {
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, previousReadFramebuffer);
+    gl.readBuffer(previousReadBuffer);
+  }
+  return pixels;
+}
+
+function summarizeFramebuffer(
+  pixels: Uint8Array,
+  width: number,
+  height: number,
+  phase: string,
+): Record<string, unknown> {
+  let nonTransparent = 0;
+  let left = width;
+  let top = height;
+  let right = -1;
+  let bottom = -1;
+  const colorCounts = new Map<string, number>();
+  for (let index = 0; index < pixels.length; index += 4) {
+    const x = (index / 4) % width;
+    const y = Math.floor(index / 4 / width);
+    const r = pixels[index];
+    const g = pixels[index + 1];
+    const b = pixels[index + 2];
+    const a = pixels[index + 3];
+    const color = `${r},${g},${b},${a}`;
+    colorCounts.set(color, (colorCounts.get(color) ?? 0) + 1);
+    if (a !== 0) {
+      nonTransparent++;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  const logicalPixel = (x: number, y: number) => {
+    const offset = ((height - 1 - y) * width + x) * 4;
+    return Array.from(pixels.subarray(offset, offset + 4));
+  };
+  let diff: Record<string, unknown> | null = null;
+  if (previousFramebufferPixels?.width === width && previousFramebufferPixels.height === height) {
+    let changed = 0;
+    let diffLeft = width;
+    let diffTop = height;
+    let diffRight = -1;
+    let diffBottom = -1;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (
+        pixels[i] === previousFramebufferPixels.pixels[i] &&
+        pixels[i + 1] === previousFramebufferPixels.pixels[i + 1] &&
+        pixels[i + 2] === previousFramebufferPixels.pixels[i + 2] &&
+        pixels[i + 3] === previousFramebufferPixels.pixels[i + 3]
+      ) continue;
+      changed++;
+      const x = (i / 4) % width;
+      const y = Math.floor(i / 4 / width);
+      diffLeft = Math.min(diffLeft, x);
+      diffTop = Math.min(diffTop, y);
+      diffRight = Math.max(diffRight, x);
+      diffBottom = Math.max(diffBottom, y);
+    }
+    diff = { changedPixels: changed, bounds: changed ? [diffLeft, diffTop, diffRight, diffBottom] : null };
+  }
+  previousFramebufferPixels = { width, height, pixels: pixels.slice() };
+  return {
+    phase,
+    dimensions: [width, height],
+    nonTransparentPixels: nonTransparent,
+    nonTransparentBounds: right >= left ? [left, top, right, bottom] : null,
+    colorCounts: Object.fromEntries(colorCounts),
+    oldEdge: logicalPixel(15, 40),
+    newInterior: logicalPixel(30, 40),
+    diffFromPreviousRender: diff,
   };
 }
 
@@ -256,6 +348,11 @@ async function run(): Promise<void> {
     if (gl && canvas instanceof HTMLCanvasElement) frame.after = glSnapshot(gl, canvas);
     glRenderFrames.push(frame);
     diagnostics.glRenderFrames = glRenderFrames;
+    if (gl && canvas instanceof HTMLCanvasElement && targetFramebuffer !== undefined) {
+      const pixels = captureTargetPixels(gl, canvas, targetFramebuffer);
+      framebufferImageSummaries.push(summarizeFramebuffer(pixels, canvas.width, canvas.height, frame.phase));
+      diagnostics.framebufferImageSummaries = framebufferImageSummaries;
+    }
     if (typeof renderer._get_selection_rect === "function") {
       const inputPointer = renderer._alloc_bytes(16);
       const input = new DataView(renderer.HEAPU8.buffer, inputPointer, 16);
