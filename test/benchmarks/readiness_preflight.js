@@ -8,7 +8,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const net = require("node:net");
 const tls = require("node:tls");
-const { isDisposableImportAllowed, validateLoginResponse, validateImportResponse, validateRendererEvidence, makeReport, writeReport } = require("./readiness_contract");
+const { isDisposableImportAllowed, validateLoginResponse, validateImportResponse, makeReport, writeReport } = require("./readiness_contract");
 
 const base = (process.env.LOGOS_URL || "http://127.0.0.1:6060").replace(/\/$/, "");
 const fixture = path.resolve(process.env.BENCHMARK_FILE || path.join(__dirname, "fixtures/large-canvas.logos"));
@@ -168,20 +168,12 @@ async function checkBrowserAndHeapCapture(auth) {
     const workspaceUrl = workspaceTemplate.replace("{fileId}", encodeURIComponent(importedFileId));
     stage = "workspace navigation and verification";
     await page.goto(workspaceUrl, { waitUntil: "domcontentloaded", timeout: 10000 });
-    const evidence = await page.evaluate(async () => {
-      const adapter = globalThis.logosBenchmarkEvidence;
-      return typeof adapter?.collect === "function" ? await adapter.collect() : null;
-    });
-    const validation = validateRendererEvidence(evidence, { fileId: importedFileId, pageCount: expectedPages });
-    const ready = validation.ok;
-    set("browser_workspace", ready ? "READY" : "BLOCKED", validation.reason);
-    if (!ready) return report.heap_capture_capability = { state: "BLOCKED", evidence: "Workspace fixture verification failed" };
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("HeapProfiler.enable");
-    await cdp.send("HeapProfiler.collectGarbage");
-    await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
-    report.heap_capture_capability = { state: "READY", evidence: "Chromium CDP HeapProfiler snapshot capability succeeded; no benchmark was run" };
-    await cdp.detach();
+    // The current editor does not expose an architecture-bound signal proving
+    // that this backend file was loaded into its document store and rendered
+    // to observed canvas pixels. A page global returning metadata is not proof.
+    set("browser_workspace", "BLOCKED", "No verified runtime evidence links the imported file response to the loaded editor document and observed canvas pixels");
+    report.heap_capture_capability = { state: "BLOCKED", evidence: "Heap capture is gated until loaded-file identity and observed canvas output are independently verified" };
+    return;
   } catch {
     if (!report.browser_workspace) set("browser_workspace", "BLOCKED", stage === "launch"
       ? "Chromium could not launch; browser application availability cannot be verified"
