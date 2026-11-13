@@ -544,6 +544,11 @@ pub unsafe extern "C" fn logos_calc_grid_layout(ptr: *const u8, len: u32) -> u32
 mod tests {
     use super::*;
 
+    // The native ABI tests share OUTPUT_BUF. Serialize each complete ABI
+    // request/read/free sequence so Rust's parallel test runner cannot make
+    // one test observe another test's output.
+    static ABI_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     fn flex_round_trip(json: &str) -> FlexOutput {
         let input: FlexInput = serde_json::from_str(json).expect("parse");
         run_flex_layout(input)
@@ -730,6 +735,7 @@ mod tests {
 
     #[test]
     fn abi_flex_round_trip() {
+        let _guard = ABI_TEST_LOCK.lock().unwrap();
         let input = r#"{"container_width":400,"container_height":200,"children":[{"id":42,"width":100.0,"height":80.0}]}"#;
         let bytes = input.as_bytes();
 
@@ -756,6 +762,7 @@ mod tests {
 
     #[test]
     fn abi_grid_round_trip() {
+        let _guard = ABI_TEST_LOCK.lock().unwrap();
         let input = r#"{"container_width":600,"container_height":400,"columns":[{"type":"fixed","value":200},{"type":"fixed","value":300}],"rows":[{"type":"fixed","value":100}],"children":[{"id":1},{"id":2}]}"#;
         let bytes = input.as_bytes();
 
@@ -774,6 +781,7 @@ mod tests {
 
     #[test]
     fn abi_bad_json_returns_zero() {
+        let _guard = ABI_TEST_LOCK.lock().unwrap();
         let bad = b"not valid json";
         let output_len = unsafe {
             let ptr = logos_alloc(bad.len() as u32);
