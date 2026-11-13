@@ -17,6 +17,7 @@ Logos should feel deliberate and responsive in everyday work, support collaborat
 - **Universal migration as a fidelity goal.** Penpot, Figma, Adobe XD, Sketch, SVG, and other sources are potential migration inputs. Support depends on real export/API access, format and version coverage, legal rights, and representative fixtures. A supported path must report what was preserved, approximated, or omitted. “Universal” is a direction, not a 100% migration guarantee.
 - **AI-native and human-led.** Agents can inspect and propose semantic edits, but changes must be permission-scoped, reviewable, and reversible. AI does not bypass the document contract, validation, or user authorization.
 - **One product across platforms.** Share domain behavior and document semantics across supported platforms. Platform-specific presentation may differ when accessibility, input devices, or operating-system conventions require it; semantic parity and supported capability differences must be explicit.
+- **Privacy-first by design.** Make collection, storage, sharing, retention, and AI processing of design data visible and permission-scoped. Minimize data exposure, preserve private asset/document boundaries, and require an explicit product policy and user/team authorization before external model processing. This is a product requirement, not a claim about current deployments or implementation.
 
 ## Who Logos serves
 
@@ -36,6 +37,7 @@ Logos should feel deliberate and responsive in everyday work, support collaborat
 4. **Safe intelligence:** agent operations are understandable before application, constrained by permissions and validation, and undoable after application.
 5. **Scale and reach:** large documents and supported platforms remain usable under published, reproducible performance and compatibility criteria.
 6. **Sustainable extension:** versioned APIs, plugins, and automation extend Logos without bypassing isolation, security, or document invariants.
+7. **Respect for data ownership:** users and teams can understand and control which people, agents, plugins, and external services can access their work; retention and deletion behavior are explicit and testable.
 
 ## Current evidence and intended future state
 
@@ -56,6 +58,7 @@ The active P0.5 stabilization gates are not product achievements: **#64** remain
 - No claim of 100% competitor migration, certified source API/data access, universal compatibility, or achieved Figma parity without scoped evidence.
 - No new canonical schema, renderer/runtime, editor route, or platform host is selected by this vision. Preserve existing architecture/ADR decisions until a reviewed, evidence-based decision changes them.
 - No agent or plugin may silently apply unbounded changes or bypass user permissions, validation, review, and recovery.
+- Private document or asset content is not sent to an external model or used for model training unless a reviewed policy and explicit user/team authorization permit that specific processing.
 - Performance thresholds in the UX criteria are proposed targets until a reproducible baseline is collected and reviewed.
 
 ## Related direction
