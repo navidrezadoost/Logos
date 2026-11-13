@@ -1,6 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { Canvas } from "../components/canvas/Canvas";
+import { Inspector } from "../components/inspector/Inspector";
+import { LayersPanel } from "../components/layers/LayersPanel";
 import { useDocumentStore } from "../stores/documentStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useUiStore } from "../stores/uiStore";
@@ -73,6 +75,23 @@ function assertContextRestored(canvas: HTMLCanvasElement): void {
   );
 }
 
+function CompatibilitySmokeWorkspace({ onNavigate }: { onNavigate: () => void }): React.ReactElement {
+  const layersPanelOpen = useUiStore((state) => state.layersPanelOpen);
+  return (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: `56px ${layersPanelOpen ? "220px " : ""}minmax(0, 1fr) 220px`,
+      width: 800,
+      height: 500,
+    }}>
+      <nav data-testid="test-page-navigation"><button onClick={onNavigate}>Pages</button></nav>
+      {layersPanelOpen && <div data-testid="test-layers-panel"><LayersPanel /></div>}
+      <main style={{ display: "flex", minWidth: 0, height: 500 }}><Canvas /></main>
+      <aside data-testid="test-inspector" style={{ height: 500 }}><Inspector /></aside>
+    </div>
+  );
+}
+
 async function run(): Promise<void> {
   const { setZoom, setPan } = useUiStore.getState();
   useUiStore.setState({ zoom: 1, panX: 0, panY: 0, layersPanelOpen: false });
@@ -82,13 +101,8 @@ async function run(): Promise<void> {
   );
 
   let navigationClicks = 0;
-  let inspectorClicks = 0;
   createRoot(document.getElementById("app")!).render(
-    <div style={{ display: "grid", gridTemplateColumns: "110px minmax(0, 1fr) 180px", width: 800, height: 500 }}>
-      <nav data-testid="test-page-navigation"><button onClick={() => navigationClicks++}>Pages</button></nav>
-      <main style={{ display: "flex", minWidth: 0, height: 500 }}><Canvas /></main>
-      <aside data-testid="test-inspector"><button onClick={() => inspectorClicks++}>Inspector</button></aside>
-    </div>,
+    <CompatibilitySmokeWorkspace onNavigate={() => navigationClicks++} />,
   );
 
   setStage("supported-scene-renders");
@@ -142,19 +156,28 @@ async function run(): Promise<void> {
   const alertNode = overlay.querySelector<HTMLElement>("[role='alert']");
   assert(alertNode, "compatibility message is not an accessible alert");
   assert(document.querySelectorAll("[data-testid='renderer-compatibility-overlay']").length === 1, "duplicate notices were created");
-  document.querySelector<HTMLButtonElement>("[data-testid='test-page-navigation'] button")!.click();
-  document.querySelector<HTMLButtonElement>("[data-testid='test-inspector'] button")!.click();
-  assert(navigationClicks === 1 && inspectorClicks === 1, "canvas notice blocked surrounding editor controls");
-  overlay.querySelector<HTMLButtonElement>("button")!.click();
-  assert(useSelectionStore.getState().selectedIds.includes(unsupportedId), "recovery action did not select the incompatible shape");
-  assert(useUiStore.getState().layersPanelOpen, "recovery action did not open Layers");
-
   setStage("repeated-failure-does-not-loop-notices");
   setPan(9, 6);
   await nextPaint();
   assert(document.querySelectorAll("[data-testid='renderer-compatibility-overlay']").length === 1, "repeated failure duplicated the compatibility notice");
   assert(documentSnapshot() === unchangedDocument, "repeated failed render mutated document state");
   assertPixelsEqual(priorPixels, captureCanvas(canvas), "repeated fail-closed render");
+
+  setStage("single-persistent-diagnostic-and-editor-access");
+  document.querySelector<HTMLButtonElement>("[data-testid='test-page-navigation'] button")!.click();
+  assert(navigationClicks === 1, "canvas notice blocked document navigation");
+  document.querySelector<HTMLButtonElement>("[data-testid='renderer-compatibility-overlay'] button")!.click();
+  assert(useSelectionStore.getState().selectedIds.includes(unsupportedId), "recovery action did not select the incompatible shape");
+  assert(useUiStore.getState().layersPanelOpen, "recovery action did not open Layers");
+  await nextPaint();
+  const reflowedOverlay = document.querySelector<HTMLElement>("[data-testid='renderer-compatibility-overlay']");
+  assert(reflowedOverlay?.dataset.frameDisposition === "none", "resized canvas was incorrectly labelled as showing the previous frame");
+  assert(reflowedOverlay.innerText.includes("No current frame is available"), "cleared pixels were not identified to the user");
+  assert(document.querySelector("[data-testid='test-layers-panel']")?.textContent?.includes("Legacy component"), "Layers did not reveal the selected shape");
+  const inspector = document.querySelector<HTMLElement>("[data-testid='test-inspector']");
+  assert(inspector, "Inspector panel is unavailable");
+  assert(inspector.textContent?.includes("Legacy component"), "Inspector did not update for the selected shape");
+  assert(inspector.querySelector("input"), "Inspector controls are unavailable during the diagnostic");
 
   setStage("compatible-update-recovers");
   useDocumentStore.getState().updateShape(unsupportedId, { type: "rect" });

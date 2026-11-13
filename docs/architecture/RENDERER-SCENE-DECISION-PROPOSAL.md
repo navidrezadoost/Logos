@@ -136,7 +136,7 @@ This change validates only the shapes supplied to the adapters. `Canvas` obtains
 
 ### Browser evidence
 
-`logos-app/test-harness/a7-renderer-compatibility-smoke.html` mounts the real Canvas component in Chromium with the normal WASM loader directed to a deliberately absent artifact, exercising the actual Canvas 2D fallback. The browser proof checks a supported pixel, an accessible unsupported-shape diagnostic, shape ID/type/backend/code, dimmed previous pixels, unchanged document state after failure, editor controls outside the Canvas overlay, context restoration, non-duplicating repeated failures, and automatic recovery after a compatible shape update. It is separate from browser-persistence evidence and makes no persistence claim.
+`logos-app/test-harness/a7-renderer-compatibility-smoke.html` mounts the real Canvas component in Chromium with the normal WASM loader directed to a deliberately absent artifact, exercising the actual Canvas 2D fallback. The browser proof checks a supported pixel, an accessible unsupported-shape diagnostic, shape ID/type/backend/code, dimmed previous pixels, unchanged document state after failure, the real LayersPanel and Inspector alongside document navigation outside the Canvas overlay, context restoration, non-duplicating repeated failures, and automatic recovery after a compatible shape update. It also confirms a Canvas resize no longer labels a cleared backing store as a visible previous frame. It is separate from browser-persistence evidence and makes no persistence claim.
 
 ## Decision gates
 
