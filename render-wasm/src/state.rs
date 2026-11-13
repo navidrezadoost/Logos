@@ -133,6 +133,12 @@ impl State {
         self.shapes.initialize(capacity);
     }
 
+    pub fn begin_scene_upload(&mut self, capacity: usize) {
+        self.render_state.reset_for_scene_upload();
+        self.current_id = None;
+        self.shapes.initialize(capacity);
+    }
+
     pub fn use_shape(&mut self, id: Uuid) {
         if !self.shapes.has(&id) {
             self.shapes.add_shape(id);

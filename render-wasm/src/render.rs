@@ -532,6 +532,31 @@ impl RenderState {
         self.surfaces.reset(self.background_color);
     }
 
+    /// Start a full scene upload with no derived state from the previous pool
+    /// generation. The caller must submit and render a complete scene before
+    /// presenting this target as current.
+    pub fn reset_for_scene_upload(&mut self) {
+        self.cancel_animation_frame();
+        self.render_request_id = None;
+        self.render_in_progress = false;
+        self.pending_nodes.clear();
+        self.pending_tiles.list.clear();
+        self.current_tile = None;
+        self.render_area = Rect::new_empty();
+        self.tiles.invalidate();
+        self.touched_ids.clear();
+        self.nested_fills.clear();
+        self.nested_blurs.clear();
+        self.nested_shadows.clear();
+        self.focus_mode.clear();
+        self.reset_canvas();
+        self.surfaces.remove_cached_tiles(self.background_color);
+        self.surfaces
+            .canvas(SurfaceId::Target)
+            .clear(self.background_color)
+            .reset_matrix();
+    }
+
     #[allow(dead_code)]
     pub fn get_canvas_at(&mut self, surface_id: SurfaceId) -> &skia::Canvas {
         self.surfaces.canvas(surface_id)

@@ -339,6 +339,14 @@ pub extern "C" fn init_shapes_pool(capacity: usize) {
     });
 }
 
+/// Reset the live scene/cache generation before a complete projection upload.
+#[no_mangle]
+pub extern "C" fn begin_scene_upload(capacity: usize) {
+    with_state_mut!(state, {
+        state.begin_scene_upload(capacity);
+    });
+}
+
 #[no_mangle]
 pub extern "C" fn use_shape(a: u32, b: u32, c: u32, d: u32) {
     with_state_mut!(state, {
