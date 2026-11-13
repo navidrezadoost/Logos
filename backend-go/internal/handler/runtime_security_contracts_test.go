@@ -25,6 +25,8 @@ func TestWSCheckOrigin(t *testing.T) {
 		{name: "scheme mismatch on TLS", origins: []string{"http://app.example"}, host: "app.example", tls: true, want: false},
 		{name: "proxy HTTPS rejected without explicit allowlist", origins: []string{"https://app.example"}, host: "backend.internal", forwardedProto: "https", want: false},
 		{name: "proxy HTTPS accepted by exact allowlist", origins: []string{"https://app.example"}, host: "backend.internal", allowedOrigins: []string{"https://app.example"}, want: true},
+		{name: "proxy HTTPS rejects malformed allowlist entry", origins: []string{"https://app.example"}, host: "backend.internal", allowedOrigins: []string{"https://app.example/path"}, want: false},
+		{name: "proxy HTTPS skips malformed entries but accepts exact valid entry", origins: []string{"https://app.example"}, host: "backend.internal", allowedOrigins: []string{"not-an-origin", "https://app.example?unexpected=query", "https://app.example"}, want: true},
 		{name: "different host", origins: []string{"https://attacker.example"}, host: "app.example", want: false},
 		{name: "different port", origins: []string{"https://app.example:444"}, host: "app.example", tls: true, want: false},
 		{name: "opaque origin", origins: []string{"null"}, host: "app.example", want: false},
