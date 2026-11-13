@@ -97,3 +97,11 @@ generated fixture in the same runtime.
   check passed. It observed no `public.profile` table and HTTP 404 at `/`; the
   memory step was skipped. No heap snapshots or memory measurements were
   produced.
+- The Compose overlay was moved from `.github/workflows/` to
+  `test/benchmarks/benchmark-memory-compose.yaml` because GitHub discovered the
+  former `.yaml` path as a workflow definition and reported that generated
+  workflow check as failed. The infrastructure workflow now has a
+  pull-request trigger for relevant inputs. Hosted [run #43411514803](https://github.com/navidrezadoost/Logos/actions/runs/43411514803)
+  on head `aae9e0fa` was triggered by PR #73 and passed the infrastructure gate;
+  it explicitly reported “Memory measurement not run” because `GET /` returned
+  404. This is infrastructure execution evidence only, not a performance result.
