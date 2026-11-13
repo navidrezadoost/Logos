@@ -680,10 +680,12 @@ jobs:
             ${{ runner.temp }}/renderer-compatibility-preview.log
 
       - name: Build DT-C3 token workflow browser smoke
+        if: always()
         working-directory: logos-app
         run: ./node_modules/.bin/vite build --config vite.dt-c3-token-workflow-smoke.config.ts
 
       - name: Verify Rust-backed token workflow in headless Chromium
+        if: always()
         working-directory: logos-app
         shell: bash
         run: |
