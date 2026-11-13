@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/p04-runner-qualification.yml"
       - ".github/workflows/rust.yml"
+      - "docs/r1/P0.4-CI-RUNNER-APT-DNS-FIX.md"
   workflow_dispatch:
 
 permissions:

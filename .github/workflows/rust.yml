@@ -10,6 +10,7 @@ on:
       - "Cargo.lock"
       - "rust/**"
       - "render-wasm/**"
+      - "docs/r1/P0.4-CI-RUNNER-APT-DNS-FIX.md"
       - ".github/workflows/rust.yml"
 
 env:
