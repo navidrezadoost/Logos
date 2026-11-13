@@ -74,18 +74,21 @@ function validatePlan(plan, context, snapshot) {
   if (plan.baseRevision !== context.revision || snapshot.revision !== context.revision) diagnostics.push(diagnostic('STALE_REVISION'));
   if (!context.permissions.includes('proposeChanges')) diagnostics.push(diagnostic('SCOPE_DENIED'));
   const created = new Set(snapshot.tokens.map((token) => `${token.namespace}:${token.id}`));
+  const tokens = structuredClone(snapshot.tokens);
   const properties = new Map(context.propertyValues.map((item) => [`${item.shapeId}:${item.propertyPath}`, item.value]));
   for (const operation of plan.operations) {
     if (operation.kind === 'createToken') {
       const key = `${operation.definition.namespace}:${operation.definition.id}`;
       if (!context.allowedNamespaces.includes(operation.definition.namespace) || created.has(key)) diagnostics.push(diagnostic('SCOPE_DENIED'));
       created.add(key);
+      tokens.push(structuredClone(operation.definition));
     }
     if (operation.kind === 'setProperty') {
       const key = `${operation.shapeId}:${operation.propertyPath}`;
       const current = properties.get(key);
-      if (!context.selectedShapeIds.includes(operation.shapeId) || !context.allowedNamespaces.includes(NS)) diagnostics.push(diagnostic('SCOPE_DENIED'));
-      if (JSON.stringify(current ?? null) !== JSON.stringify(operation.expectedProperty ?? null)) diagnostics.push(diagnostic('STALE_REVISION'));
+      if (!context.selectedShapeIds.includes(operation.shapeId)) diagnostics.push(diagnostic('SCOPE_DENIED'));
+      if (!Object.hasOwn(operation, 'expectedProperty')) diagnostics.push(diagnostic('INVALID_PLAN'));
+      else if (JSON.stringify(current ?? null) !== JSON.stringify(operation.expectedProperty)) diagnostics.push(diagnostic('STALE_REVISION'));
       properties.set(key, operation.nextProperty);
     }
   }
@@ -98,10 +101,37 @@ function validatePlan(plan, context, snapshot) {
       updatedTokens: plan.operations.filter((op) => op.kind === 'setTokenValue').length,
       boundProperties: plan.operations.filter((op) => op.kind === 'setProperty' && op.nextProperty.kind === 'binding').length,
       affectedPropertyPaths: [...new Set(plan.operations.filter((op) => op.kind === 'setProperty').map((op) => op.propertyPath))],
-      contextsEvaluated: [], diagnostics: unique,
+      contextsEvaluated: [], propertyPreviews: [], diagnostics: unique,
     },
     diagnostics: unique,
   };
+  if (!unique.length) {
+    const touched = new Map();
+    for (const operation of plan.operations.filter((op) => op.kind === 'setProperty')) {
+      const key = `${operation.shapeId}:${operation.propertyPath}`;
+      touched.set(key, { operation, value: properties.get(key) });
+    }
+    for (const { operation, value } of touched.values()) {
+      let resolution;
+      if (value.kind === 'literal') {
+        resolution = { contractVersion: '0.1.0', snapshotRevision: snapshot.revision, status: 'RESOLVED', value: value.value, source: 'DIRECT', diagnostics: [], dependencyTrace: [], effectiveContext: {} };
+      } else {
+        const target = value.target;
+        const token = tokens.find((item) => item.id === target.tokenId && item.namespace === target.namespace);
+        const expression = token?.values[0]?.expression;
+        if (expression?.kind === 'literal') {
+          resolution = { contractVersion: '0.1.0', snapshotRevision: snapshot.revision, status: 'RESOLVED', value: expression.value, source: 'TOKEN', diagnostics: [], dependencyTrace: [target], effectiveContext: {} };
+        } else {
+          unique.push(diagnostic('MISSING_TOKEN'));
+          result.status = 'REJECTED';
+          result.diagnostics = unique;
+          result.impact.diagnostics = unique;
+          return result;
+        }
+      }
+      result.impact.propertyPreviews.push({ shapeId: operation.shapeId, propertyPath: operation.propertyPath, context: {}, propertyValue: value, resolution });
+    }
+  }
   assert.equal(validValidation(result), true, JSON.stringify(validValidation.errors));
   return result;
 }
@@ -139,6 +169,9 @@ test('deterministic validation produces a typed impact and supports immutable pr
   assert.deepEqual(first, second);
   assert.equal(first.impact.createdTokens, 1);
   assert.equal(first.impact.boundProperties, 1);
+  assert.equal(first.impact.propertyPreviews.length, 1);
+  assert.equal(first.impact.propertyPreviews[0].resolution.status, 'RESOLVED');
+  assert.deepEqual(first.impact.propertyPreviews[0].resolution.value, direct.value);
   const preview = previewPlan(input.plan, input.documentContext, input.snapshot, first);
   assert.equal(preview.snapshot.tokens.length, 1);
   assert.equal(preview.documentContext.propertyValues[0].value.kind, 'binding');
@@ -165,8 +198,11 @@ test('agent plans cannot carry executable code or disable user approval', () => 
   const input = makeInput();
   const withCode = { ...input.plan, script: 'mutate registry' };
   const withoutApproval = { ...input.plan, requiresUserApproval: false };
+  const missingPropertyPreState = structuredClone(input.plan);
+  missingPropertyPreState.operations[1].expectedProperty = null;
   assert.equal(validPlan(withCode), false);
   assert.equal(validPlan(withoutApproval), false);
+  assert.equal(validPlan(missingPropertyPreState), false);
 });
 
 test('commit gate requires explicit approval, matching revision, and a ready validation digest', () => {
