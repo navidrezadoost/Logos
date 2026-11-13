@@ -86,5 +86,9 @@ generated fixture in the same runtime.
 - Local source inspection: Go server has no `/` UI route; registration/import
   contracts and fixture naming/page-count assumptions differ as above.
 - CI round-trip test: generated Go payload is readable by the Go v3 parser.
-- Hosted infrastructure gate: PostgreSQL/Redis connectivity and backend health
-  are checked; memory measurements remain intentionally skipped.
+- Hosted run [#43405395359](https://github.com/navidrezadoost/Logos/actions/runs/43405395359)
+  at `f85ced619adc00801a5bf4aff3190cd49d21b3aa` passed in 44 seconds: PostgreSQL
+  and Redis readiness, Go backend health/connections, and the generated fixture
+  check passed. It observed no `public.profile` table and HTTP 404 at `/`; the
+  memory step was skipped. No heap snapshots or memory measurements were
+  produced.
