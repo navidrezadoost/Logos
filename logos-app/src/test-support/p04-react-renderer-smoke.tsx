@@ -13,6 +13,17 @@ const status = document.getElementById("p04-status") as HTMLPreElement;
 const browserErrors: string[] = [];
 const diagnostics: Record<string, unknown> = {};
 let stage = "setup";
+type GLRenderFrame = {
+  phase: string;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  counters: Record<string, number>;
+  operations: Array<Record<string, unknown>>;
+};
+let activeGLFrame: GLRenderFrame | null = null;
+const glRenderFrames: GLRenderFrame[] = [];
+const framebufferIds = new WeakMap<WebGLFramebuffer, number>();
+let nextFramebufferId = 1;
 window.addEventListener("error", (event) => browserErrors.push(event.error?.stack ?? event.message));
 window.addEventListener("unhandledrejection", (event) => browserErrors.push(String(event.reason)));
 const originalConsoleError = console.error.bind(console);
@@ -62,6 +73,94 @@ function expectColor(actual: number[], expected: number[], label: string): void 
   if (actual.some((channel, index) => Math.abs(channel - expected[index]) > 2)) {
     throw new Error(`${label}: expected ${expected}, got ${actual}`);
   }
+}
+
+function framebufferName(gl: WebGL2RenderingContext, framebuffer: WebGLFramebuffer | null): string {
+  if (framebuffer === null) return "default";
+  let id = framebufferIds.get(framebuffer);
+  if (id === undefined) {
+    id = nextFramebufferId++;
+    framebufferIds.set(framebuffer, id);
+  }
+  return `fbo-${id}`;
+}
+
+function glSnapshot(gl: WebGL2RenderingContext, canvas: HTMLCanvasElement): Record<string, unknown> {
+  return {
+    canvas: [canvas.width, canvas.height],
+    framebuffer: framebufferName(gl, gl.getParameter(gl.FRAMEBUFFER_BINDING)),
+    viewport: Array.from(gl.getParameter(gl.VIEWPORT) as Int32Array),
+    scissorEnabled: gl.isEnabled(gl.SCISSOR_TEST),
+    scissor: Array.from(gl.getParameter(gl.SCISSOR_BOX) as Int32Array),
+  };
+}
+
+function instrumentGL(gl: WebGL2RenderingContext): void {
+  const methods = gl as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const wrap = (name: string, record: (args: unknown[]) => void) => {
+    const original = methods[name];
+    if (typeof original !== "function") return;
+    methods[name] = (...args: unknown[]) => {
+      if (activeGLFrame) record(args);
+      return Reflect.apply(original, gl, args);
+    };
+  };
+  const count = (name: string) => (args: unknown[]) => {
+    if (!activeGLFrame) return;
+    activeGLFrame.counters[name] = (activeGLFrame.counters[name] ?? 0) + 1;
+    const framebuffer = framebufferName(gl, gl.getParameter(gl.FRAMEBUFFER_BINDING));
+    if (name.startsWith("draw") || name.startsWith("clear")) {
+      const perFramebuffer = `${name}@${framebuffer}`;
+      activeGLFrame.counters[perFramebuffer] = (activeGLFrame.counters[perFramebuffer] ?? 0) + 1;
+    }
+    if (activeGLFrame.operations.length < 64) {
+      activeGLFrame.operations.push({
+        call: name,
+        args: args.map((value) => typeof value === "number" ? value : undefined),
+        framebuffer,
+      });
+    }
+  };
+
+  wrap("bindFramebuffer", (args) => {
+    if (!activeGLFrame) return;
+    activeGLFrame.counters.bindFramebuffer = (activeGLFrame.counters.bindFramebuffer ?? 0) + 1;
+    if (activeGLFrame.operations.length < 64) {
+      activeGLFrame.operations.push({
+        call: "bindFramebuffer",
+        target: args[0],
+        framebuffer: framebufferName(gl, (args[1] as WebGLFramebuffer | null) ?? null),
+      });
+    }
+  });
+  for (const name of ["clear", "clearBufferfi", "clearBufferfv", "clearBufferiv", "drawArrays", "drawElements", "flush", "blitFramebuffer"]) {
+    wrap(name, count(name));
+  }
+  wrap("clearColor", (args) => {
+    if (!activeGLFrame) return;
+    activeGLFrame.counters.clearColor = (activeGLFrame.counters.clearColor ?? 0) + 1;
+    if (activeGLFrame.operations.length < 64) activeGLFrame.operations.push({ call: "clearColor", args });
+  });
+  wrap("viewport", (args) => {
+    if (!activeGLFrame) return;
+    activeGLFrame.counters.viewport = (activeGLFrame.counters.viewport ?? 0) + 1;
+    if (activeGLFrame.operations.length < 64) activeGLFrame.operations.push({ call: "viewport", args });
+  });
+  wrap("scissor", (args) => {
+    if (!activeGLFrame) return;
+    activeGLFrame.counters.scissor = (activeGLFrame.counters.scissor ?? 0) + 1;
+    if (activeGLFrame.operations.length < 64) activeGLFrame.operations.push({ call: "scissor", args });
+  });
+  wrap("enable", (args) => {
+    if (activeGLFrame && args[0] === gl.SCISSOR_TEST) {
+      activeGLFrame.counters.enableScissor = (activeGLFrame.counters.enableScissor ?? 0) + 1;
+    }
+  });
+  wrap("disable", (args) => {
+    if (activeGLFrame && args[0] === gl.SCISSOR_TEST) {
+      activeGLFrame.counters.disableScissor = (activeGLFrame.counters.disableScissor ?? 0) + 1;
+    }
+  });
 }
 
 async function run(): Promise<void> {
@@ -140,7 +239,23 @@ async function run(): Promise<void> {
     renderer._set_shape_type(SHAPE_TYPE.frame);
     const [childA, childB, childC, childD] = uuidToU32x4(currentPage.rootShapeIds[0]);
     renderer._set_children_1(childA, childB, childC, childD);
-    renderSync();
+    const gl = document.querySelector("canvas")?.getContext("webgl2") as WebGL2RenderingContext | null;
+    const canvas = document.querySelector("canvas");
+    const frame: GLRenderFrame = {
+      phase: renderCount === 1 ? "initial" : `render-${renderCount}`,
+      counters: {},
+      operations: [],
+    };
+    if (gl && canvas instanceof HTMLCanvasElement) frame.before = glSnapshot(gl, canvas);
+    activeGLFrame = frame;
+    try {
+      renderSync();
+    } finally {
+      activeGLFrame = null;
+    }
+    if (gl && canvas instanceof HTMLCanvasElement) frame.after = glSnapshot(gl, canvas);
+    glRenderFrames.push(frame);
+    diagnostics.glRenderFrames = glRenderFrames;
     if (typeof renderer._get_selection_rect === "function") {
       const inputPointer = renderer._alloc_bytes(16);
       const input = new DataView(renderer.HEAPU8.buffer, inputPointer, 16);
@@ -168,6 +283,7 @@ async function run(): Promise<void> {
     if (!gl) throw new Error("React canvas did not acquire WebGL2 before Rust init");
     targetFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     diagnostics.canvasSizeAtInit = [width, height];
+    instrumentGL(gl);
     init(width, height);
   };
 
