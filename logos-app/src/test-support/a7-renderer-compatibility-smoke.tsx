@@ -169,9 +169,10 @@ async function run(): Promise<void> {
   document.querySelector<HTMLButtonElement>("[data-testid='renderer-compatibility-overlay'] button")!.click();
   assert(useSelectionStore.getState().selectedIds.includes(unsupportedId), "recovery action did not select the incompatible shape");
   assert(useUiStore.getState().layersPanelOpen, "recovery action did not open Layers");
-  await nextPaint();
-  const reflowedOverlay = document.querySelector<HTMLElement>("[data-testid='renderer-compatibility-overlay']");
-  assert(reflowedOverlay?.dataset.frameDisposition === "none", "resized canvas was incorrectly labelled as showing the previous frame");
+  const reflowedOverlay = await waitFor(() => {
+    const element = document.querySelector<HTMLElement>("[data-testid='renderer-compatibility-overlay']");
+    return element?.dataset.frameDisposition === "none" ? element : null;
+  }, "resized canvas to clear stale-frame status");
   assert(reflowedOverlay.innerText.includes("No current frame is available"), "cleared pixels were not identified to the user");
   assert(document.querySelector("[data-testid='test-layers-panel']")?.textContent?.includes("Legacy component"), "Layers did not reveal the selected shape");
   const inspector = document.querySelector<HTMLElement>("[data-testid='test-inspector']");
