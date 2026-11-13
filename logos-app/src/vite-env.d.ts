@@ -4,6 +4,7 @@
 declare const __RENDER_WASM_JS__: string;
 declare const __RENDER_WASM_WASM__: string;
 declare const __LOGOS_LAYOUT_WASM__: string;
+declare const __LOGOS_TOKENS_WASM__: string;
 
 // WGSL shader imports via Vite's `?raw` suffix.
 declare module "*.wgsl?raw" {

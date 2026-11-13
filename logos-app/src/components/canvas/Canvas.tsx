@@ -11,7 +11,7 @@
  *  - Worker pool initialization on mount
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
 import {
   loadRenderWasm,
   initCanvasContext,
@@ -38,6 +38,7 @@ import { workerPool } from "../../worker";
 import { createRect } from "../../types/shapes";
 import { theme } from "../../theme/colors";
 import { RendererStatusOverlay } from "./RendererStatusOverlay";
+import { useTokenWorkflowPreviewStore } from "../../stores/tokenWorkflowPreviewStore";
 
 const WASM_JS_URL: string =
   typeof __RENDER_WASM_JS__ !== "undefined" ? __RENDER_WASM_JS__ : "/js/render-wasm.js";
@@ -88,6 +89,18 @@ export function Canvas(): React.ReactElement {
   const scaleDragRef = useRef<ScaleDrag | null>(null);
 
   const shapes = useCurrentPageShapes();
+  const tokenPreviewColors = useTokenWorkflowPreviewStore((state) => state.colors);
+  const renderedShapes = useMemo(() => shapes.map((shape) => {
+    const preview = tokenPreviewColors[shape.id];
+    if (!preview) return shape;
+    return {
+      ...shape,
+      fills: shape.fills.map((fill, index) => {
+        if (index !== preview.fillIndex || fill.type !== "solid") return fill;
+        return { ...fill, color: preview.color };
+      }),
+    };
+  }), [shapes, tokenPreviewColors]);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const { select, selectRange } = useSelectionStore();
   const {
@@ -103,7 +116,7 @@ export function Canvas(): React.ReactElement {
   // ── WebGPU tile renderer (Phase 5, feature-gated) ─────────────────────────
   // canvasRef is the same <canvas> element Skia renders to.
   // When WebGPU is unavailable this returns null and has zero overhead.
-  const gpuRenderer = useWebGPURenderer(canvasRef, shapes, zoom, panX, panY);
+  const gpuRenderer = useWebGPURenderer(canvasRef, renderedShapes, zoom, panX, panY);
 
   // ── Resize observer ────────────────────────────────────────────────────────
   useLayoutEffect(() => {
@@ -173,7 +186,7 @@ export function Canvas(): React.ReactElement {
       if (backend === "wasm") {
         const mod = moduleRef.current;
         if (!mod) throw new Error("renderer module unavailable");
-        syncScene(mod, shapes, size.w, size.h);
+        syncScene(mod, renderedShapes, size.w, size.h);
       } else {
         const ctx = canvas.getContext("2d");
         if (!ctx) throw new Error("Canvas 2D context unavailable");
@@ -181,7 +194,7 @@ export function Canvas(): React.ReactElement {
         try {
           ctx.translate(panX, panY);
           ctx.scale(zoom, zoom);
-          syncScene2D(ctx, shapes, size.w / zoom, size.h / zoom);
+          syncScene2D(ctx, renderedShapes, size.w / zoom, size.h / zoom);
         } finally {
           ctx.restore();
         }
@@ -199,7 +212,7 @@ export function Canvas(): React.ReactElement {
       );
       publishRendererStatus(rendererFailureStatus(error, backend, previousFrameVisible));
     }
-  }, [shapes, size, zoom, panX, panY, mode, renderRetry, publishRendererStatus]);
+  }, [renderedShapes, size, zoom, panX, panY, mode, renderRetry, publishRendererStatus]);
 
   // ── Mouse handlers for draw tools ─────────────────────────────────────────
 

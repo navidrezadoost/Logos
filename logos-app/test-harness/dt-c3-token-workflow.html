@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DT-C3 Rust token workflow smoke</title>
+    <style>
+      html, body, #app { width: 800px; height: 500px; margin: 0; overflow: hidden; }
+      body { background: #1e1e2e; color: #cdd6f4; font: 12px system-ui, sans-serif; }
+      #dt-c3-status { position: fixed; left: 4px; bottom: 4px; z-index: 999; max-width: 380px; max-height: 150px; overflow: auto; background: #11111bcc; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <pre id="dt-c3-status" data-status="pending">pending</pre>
+    <script type="module" src="/src/test-support/dt-c3-token-workflow-smoke.tsx"></script>
+  </body>
+</html>

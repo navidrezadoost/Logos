@@ -12,11 +12,18 @@ on:
       - "render-wasm/**"
       - "docs/r1/P0.4-CI-RUNNER-APT-DNS-FIX.md"
       - "logos-app/src/components/canvas/**"
+      - "logos-app/src/components/inspector/Inspector.tsx"
+      - "logos-app/src/components/inspector/TokenWorkflowControl.tsx"
       - "logos-app/src/render-wasm/**"
       - "logos-app/src/stores/**"
+      - "logos-app/src/tokens/**"
       - "logos-app/src/test-support/**"
       - "logos-app/test-harness/**"
+      - "logos-app/vite.config.ts"
+      - "logos-app/vite.dt-c3-token-workflow-smoke.config.ts"
       - "logos-app/vite.renderer-smoke.config.ts"
+      - "scripts/build-logos-tokens-wasm.sh"
+      - "docs/architecture/DT-C3-RUST-TOKEN-WORKFLOW.md"
       - "test/fixtures/p0-document-compat/**"
       - "docs/r1/P0.4-REACT-RUNTIME-VERTICAL-SLICE.md"
       - ".github/workflows/rust.yml"
@@ -97,7 +104,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.0
-          targets: wasm32-unknown-emscripten
+          targets: wasm32-unknown-emscripten, wasm32-unknown-unknown
           components: rustfmt
 
       - name: Cache Cargo artifacts
@@ -106,6 +113,9 @@ jobs:
           workspaces: |
             . -> target
             rust -> rust/target
+
+      - name: Build Rust token engine WASM bridge
+        run: ./scripts/build-logos-tokens-wasm.sh
 
       - name: Capture HarfBuzz and Skia link diagnostics
         shell: bash
@@ -668,3 +678,63 @@ jobs:
             ${{ runner.temp }}/renderer-compatibility-smoke-dom.html
             ${{ runner.temp }}/renderer-compatibility-smoke-chrome.log
             ${{ runner.temp }}/renderer-compatibility-preview.log
+
+      - name: Build DT-C3 token workflow browser smoke
+        working-directory: logos-app
+        run: ./node_modules/.bin/vite build --config vite.dt-c3-token-workflow-smoke.config.ts
+
+      - name: Verify Rust-backed token workflow in headless Chromium
+        working-directory: logos-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+
+          test -s build-dt-c3-token-workflow-smoke/js/logos_tokens_wasm.wasm
+          ./node_modules/.bin/vite preview \
+            --config vite.dt-c3-token-workflow-smoke.config.ts \
+            --host 127.0.0.1 --port 4176 \
+            >"$RUNNER_TEMP/dt-c3-token-workflow-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4176/test-harness/dt-c3-token-workflow.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4176/js/logos_tokens_wasm.wasm >/dev/null
+
+          "$chrome_bin" \
+            --headless=new \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --disable-features=WebGPU \
+            --window-size=800,500 \
+            --virtual-time-budget=45000 \
+            --dump-dom http://127.0.0.1:4176/test-harness/dt-c3-token-workflow.html \
+            >"$RUNNER_TEMP/dt-c3-token-workflow-dom.html" \
+            2>"$RUNNER_TEMP/dt-c3-token-workflow-chrome.log"
+
+          if ! grep -q 'data-status="passed"' "$RUNNER_TEMP/dt-c3-token-workflow-dom.html"; then
+            cat "$RUNNER_TEMP/dt-c3-token-workflow-dom.html"
+            cat "$RUNNER_TEMP/dt-c3-token-workflow-chrome.log"
+            cat "$RUNNER_TEMP/dt-c3-token-workflow-preview.log"
+            exit 1
+          fi
+
+      - name: Preserve DT-C3 token workflow browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dt-c3-token-workflow-browser-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/dt-c3-token-workflow-dom.html
+            ${{ runner.temp }}/dt-c3-token-workflow-chrome.log
+            ${{ runner.temp }}/dt-c3-token-workflow-preview.log

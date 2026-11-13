@@ -10,6 +10,8 @@ import { useSelectionStore } from "../../stores/selectionStore";
 import { useComponentStore } from "../../stores/componentStore";
 import type { FontVariationAxis, Shape, SolidFill } from "../../types/shapes";
 import { theme } from "../../theme/colors";
+import { TokenWorkflowControl } from "./TokenWorkflowControl";
+import { useTokenWorkflowPreviewStore } from "../../stores/tokenWorkflowPreviewStore";
 
 // ---------------------------------------------------------------------------
 // Well-known variable font axes (fvar table metadata when font introspection
@@ -65,6 +67,8 @@ export function Inspector(): React.ReactElement {
 
   const shape = selected[0];
   const solidFill = shape.fills.find((f): f is SolidFill => f.type === "solid");
+  const solidFillIndex = shape.fills.findIndex((f) => f.type === "solid");
+  const clearTokenPreview = useTokenWorkflowPreviewStore((state) => state.clearColor);
 
   // Variable font axes — only shown for text shapes
   const isText = shape.type === "text";
@@ -86,6 +90,7 @@ export function Inspector(): React.ReactElement {
   }
 
   function patchFillColor(color: string) {
+    clearTokenPreview(shape.id);
     updateShape(shape.id, {
       fills: shape.fills.map((f) =>
         f.type === "solid" ? { ...f, color } : f
@@ -185,6 +190,7 @@ export function Inspector(): React.ReactElement {
               onChange={(v) => patchOpacity(v / 100)}
             />
           </Row>
+          {solidFillIndex === 0 && <TokenWorkflowControl shapeId={shape.id} fillHex={solidFill.color} fillIndex={solidFillIndex} />}
         </Section>
       )}
 
