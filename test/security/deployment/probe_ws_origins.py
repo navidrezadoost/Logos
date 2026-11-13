@@ -20,10 +20,16 @@ from pathlib import Path
 
 
 def origin_parts(value):
+    if not value or value != value.strip() or any(ord(char) <= 0x20 or ord(char) == 0x7f for char in value):
+        raise ValueError("invalid authorized origin")
     parsed = urllib.parse.urlsplit(value)
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username or
             parsed.password or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
         raise ValueError("invalid authorized origin")
+    try:
+        parsed.port
+    except ValueError as error:
+        raise ValueError("invalid authorized origin") from error
     return parsed
 
 
@@ -97,6 +103,11 @@ def perform_upgrade(ws, cookie, origin_header):
                 if separator:
                     headers[name.decode("ascii", "ignore").strip().lower()] = value.decode("ascii", "ignore").strip()
                 line = header_line
+
+    return validate_upgrade_response(status_line, headers, key)
+
+
+def validate_upgrade_response(status_line, headers, key):
     match = re.match(rb"HTTP/1\.[01] ([0-9]{3})(?:\s|\r|\n)", status_line)
     status = int(match.group(1)) if match else None
     expected_accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()).decode("ascii")
@@ -115,14 +126,13 @@ def cases_for(origin):
     if other_port == 443:
         other_port = 444
     wrong_port_authority = f"{hostname}:{other_port}"
-    wrong_scheme_authority = authority
     return [
         ("authorized_origin", f"{scheme}://{authority}", 101),
         ("missing_origin", None, 403),
         ("malformed_origin", "not-an-origin", 403),
         ("opaque_origin", "null", 403),
         ("unauthorized_origin", f"{scheme}://origin-probe-denied.invalid", 403),
-        ("scheme_mismatch", f"{'http' if scheme == 'https' else 'https'}://{wrong_scheme_authority}", 403),
+        ("scheme_mismatch", f"{'http' if scheme == 'https' else 'https'}://{authority}", 403),
         ("port_mismatch", f"{scheme}://{wrong_port_authority}", 403),
     ]
 

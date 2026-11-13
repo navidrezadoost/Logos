@@ -9,6 +9,8 @@ on:
       - "backend-go/go.mod"
       - "backend-go/go.sum"
       - "test/p0.5/browser-persistence/initialize-disposable-db-schema.sh"
+      - "test/security/deployment/**"
+      - "docs/r1/P0.5-OPERATIONAL-SECURITY-AND-BENCHMARK-HANDOFF.md"
       - "test/fixtures/p0-document-compat/**"
       - "docs/r1/P0.5-RUNTIME-SECURITY-CONTRACTS.md"
       - "docs/r1/P0.5-RUNTIME-STRATEGY-DECISION-PACKAGE.md"
@@ -19,6 +21,20 @@ permissions:
   contents: read
 
 jobs:
+  operational-script-safety:
+    name: Operational security script safety (offline)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run offline operational-script safety tests
+        run: python3 -m unittest discover -s test/security/deployment -p 'test_*.py' -v
+
   security-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
