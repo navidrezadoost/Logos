@@ -15,7 +15,8 @@ heap result exists, and the performance gate remains **NOT MEASURED**. See
 | Authentication | Supported Go flow is `prepare-register-profile` followed by `register-profile`; login uses `login-with-password` | Blocked: no prepared test account or signing key in current workflow |
 | Project/import | Authenticated multipart `import-binfile` requires an editable destination `project-id` and `.logos` file | Blocked: no authorized test account/project in current workflow |
 | Browser workspace | Must identify the actual editor build, load the imported fixture, and verify visible shapes and page controls | Blocked: Go API exposes no editor UI |
-| Measurement | Requires a verified workspace and a Chromium/CDP heap snapshot runtime | Not reached |
+| Heap-capture capability | Requires renderer evidence and Chromium/CDP snapshot support | Blocked until the real editor adapter is available |
+| Benchmark execution | Requires a separate measurement runner, metrics, and retained result | **NOT MEASURED** |
 
 The fixture generator creates 10,000 change-history rows. That count does not
 mean the browser rendered 10,000 shapes.
@@ -45,18 +46,32 @@ LOGOS_URL='http://127.0.0.1:6060' \
 node readiness_preflight.js
 ```
 
-The preflight prints one `READY` or `BLOCKED` result per capability and names
-the missing evidence. It never treats HTTP 200 alone as readiness. For auth and
-import verification, provide a provisioned disposable `LOGOS_EMAIL`,
-`LOGOS_PASSWORD`, and editable `BENCHMARK_PROJECT_ID`; credentials are not
-printed. Browser verification also requires `BENCHMARK_WORKSPACE_URL` with a
-`{fileId}` path placeholder and `BENCHMARK_EXPECTED_PAGES`; the workspace must
-expose `meta[name="logos-build-id"]`, `data-testid="workspace-canvas"` with a
-matching `data-file-id`, `data-testid="page-item"` controls, and visible
-`data-testid="rendered-shape"` elements. The import check writes into the
-destination project, so use only a disposable benchmark environment. Do not
-set a credential in hosted CI until the schema, account lifecycle, and project
-isolation are approved.
+The v2 report has three independent states: `infrastructure` (`READY` or
+`BLOCKED`), `heap_capture_capability` (`READY` or `BLOCKED`), and
+`benchmark_execution` (`NOT_MEASURED`). A successful CDP snapshot capability is
+never a memory benchmark result. The workflow currently does not execute a
+benchmark or fabricate performance metrics.
+
+Import is disabled unless `BENCHMARK_DISPOSABLE_ENVIRONMENT=true`,
+`BENCHMARK_PROJECT_ID` is a valid UUID, and
+`BENCHMARK_DISPOSABLE_CONFIRMATION` exactly repeats that project ID. This is an
+explicit guard, not proof that a project is disposable; only use an environment
+whose owner has approved its isolation. Hosted infrastructure CI supplies none
+of these values and performs no import.
+
+The Logos editor is owned by the Rust/canvas renderer. The future browser
+adapter contract is `globalThis.logosBenchmarkEvidence.collect()`, returning
+the imported `fileId`, exact `pageCount`, visible canvas dimensions, a SHA-256
+baseline image identifier, and a non-zero pixel difference against the
+fixture-derived image expectation. The page count comes from the actual
+workspace controls through that renderer-owned adapter. This preflight does
+not assume DOM shape elements or impose selectors on the editor. Until the
+actual renderer provides and validates this evidence adapter, browser
+workspace and heap-capture capability remain `BLOCKED`.
+
+The machine-readable report, stdout, and GitHub step summary pass through
+secret redaction; unexpected exception details are suppressed. Report-write
+failure is an explicit job failure with a generic message.
 
 ## Browser measurement handoff
 
@@ -79,7 +94,7 @@ memory performance gate can run:
 Keep JavaScript heap, WASM memory, GPU allocations, and backend RSS as separate
 metrics. A JavaScript heap snapshot does not measure total browser memory.
 Previously documented numeric limits are historical expectations, not a
-current baseline or performance claim. The browser runtime, UI selectors,
-fixture import path, warm-up, and actual measurement remain a separate approved
+current baseline or performance claim. The browser runtime, renderer evidence
+adapter, fixture import path, warm-up, and actual measurement remain a separate approved
 runtime integration change; this work does not select or implement an editor
 runtime.
