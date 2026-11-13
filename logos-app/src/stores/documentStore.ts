@@ -335,12 +335,16 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
  * different value.  Without this, React 18's useSyncExternalStore fires the
  * "getSnapshot should be cached" warning and causes an infinite update loop.
  */
+export function selectCurrentPageShapes(state: {
+  pages: Record<string, Page>;
+  currentPageId: string;
+  shapes: Record<string, Shape>;
+}): Shape[] {
+  const page = state.pages[state.currentPageId];
+  if (!page) return [];
+  return page.rootShapeIds.flatMap((id) => (state.shapes[id] ? [state.shapes[id]] : []));
+}
+
 export function useCurrentPageShapes(): Shape[] {
-  return useDocumentStore(
-    useShallow((s) => {
-      const page = s.pages[s.currentPageId];
-      if (!page) return [];
-      return page.rootShapeIds.flatMap((id) => (s.shapes[id] ? [s.shapes[id]] : []));
-    })
-  );
+  return useDocumentStore(useShallow(selectCurrentPageShapes));
 }

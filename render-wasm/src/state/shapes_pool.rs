@@ -78,6 +78,9 @@ impl ShapesPoolImpl {
         performance::begin_measure!("shapes_pool_initialize");
         self.counter = 0;
         self.uuid_to_idx = HashMap::with_capacity(capacity);
+        // A new pool generation is a full scene upload. Index-keyed derived
+        // state must not be carried into slots that will be reused below.
+        self.clean_all();
 
         let additional = capacity as i32 - self.shapes.len() as i32;
         if additional <= 0 {
@@ -116,7 +119,10 @@ impl ShapesPoolImpl {
 
         let idx = self.counter;
         let new_shape = &mut self.shapes[idx];
-        new_shape.id = id;
+        // Reusing storage is safe only if the new logical shape starts from
+        // the same defaults as a freshly allocated slot. Base-props and fill
+        // uploads are intentionally partial and may omit optional properties.
+        *new_shape = Shape::new(id);
 
         // Simply store the UUID -> index mapping. No unsafe lifetime tricks needed!
         self.uuid_to_idx.insert(id, idx);
@@ -198,13 +204,15 @@ impl ShapesPoolImpl {
     }
 
     #[allow(dead_code)]
-    pub fn iter(&self) -> std::slice::Iter<'_, Shape> {
-        self.shapes.iter()
+    /// Iterates only the active generation, not retained capacity slots.
+    pub fn iter(&self) -> impl Iterator<Item = &Shape> {
+        self.shapes.iter().take(self.counter)
     }
 
     #[allow(dead_code)]
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Shape> {
-        self.shapes.iter_mut()
+    /// Mutably iterates only the active generation, not retained capacity slots.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Shape> {
+        self.shapes.iter_mut().take(self.counter)
     }
 
     fn clean_shape_cache(&mut self) {
@@ -336,5 +344,74 @@ impl ShapesPoolImpl {
                 .unwrap_or(default);
             !math::is_close_matrix(parent_modifier, child_modifier)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shapes::{Fill, SolidColor, Type};
+
+    fn test_id(value: u64) -> Uuid {
+        Uuid::from_u64_pair(0, value)
+    }
+
+    #[test]
+    fn new_pool_generation_resets_reused_slot_and_exposes_only_active_shapes() {
+        let mut pool = ShapesPoolImpl::new();
+        let old_id = test_id(1);
+        let new_id = test_id(2);
+
+        pool.initialize(2);
+        let old_child = test_id(3);
+        let old = pool.add_shape(old_id);
+        old.fills
+            .push(Fill::Solid(SolidColor(crate::skia::Color::from_argb(
+                255, 255, 0, 0,
+            ))));
+        old.children.push(old_child);
+        old.hidden = true;
+        old.opacity = 0.25;
+        old.parent_id = Some(test_id(4));
+        old.shape_type = Type::Bool(crate::shapes::Bool::default());
+
+        pool.modifiers.insert(0, crate::skia::Matrix::default());
+        pool.structure.insert(0, Vec::new());
+        pool.scale_content.insert(0, 0.25);
+        pool.modified_shape_cache.insert(0, OnceCell::new());
+
+        // This models the second _init_shapes_pool + upload generation, where
+        // the new shape intentionally omits fill and child records.
+        pool.initialize(1);
+        pool.add_shape(new_id);
+
+        let new = pool.get(&new_id).expect("new generation shape is indexed");
+        assert!(
+            pool.get(&old_id).is_none(),
+            "deleted generation ID remains indexed"
+        );
+        assert!(new.fills.is_empty(), "old fill leaked into reused slot");
+        assert!(
+            new.children.is_empty(),
+            "old children leaked into reused slot"
+        );
+        assert_eq!(new.parent_id, None, "old parent leaked into reused slot");
+        assert!(!new.hidden, "old hidden flag leaked into reused slot");
+        assert_eq!(new.opacity, 1.0, "old opacity leaked into reused slot");
+        assert!(matches!(&new.shape_type, Type::Rect(_)));
+        assert_eq!(
+            pool.iter().map(|shape| shape.id).collect::<Vec<_>>(),
+            vec![new_id]
+        );
+        assert!(pool.modifiers.is_empty());
+        assert!(pool.structure.is_empty());
+        assert!(pool.scale_content.is_empty());
+        assert!(pool.modified_shape_cache.is_empty());
+
+        pool.initialize(1);
+        assert!(
+            pool.iter().next().is_none(),
+            "inactive slot is exposed after empty sync"
+        );
     }
 }
