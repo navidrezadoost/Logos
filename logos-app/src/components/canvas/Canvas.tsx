@@ -62,6 +62,7 @@ export function Canvas(): React.ReactElement {
 
   const [mode, setMode] = useState<RenderMode>("loading");
   const [size, setSize] = useState({ w: 800, h: 600 });
+  const sizeRef = useRef(size);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [rendererStatus, setRendererStatus] = useState<RendererStatus | null>(null);
   const rendererStatusRef = useRef<RendererStatus | null>(null);
@@ -124,7 +125,19 @@ export function Canvas(): React.ReactElement {
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
-      setSize({ w: Math.floor(width), h: Math.floor(height) });
+      const nextSize = { w: Math.floor(width), h: Math.floor(height) };
+      const previousSize = sizeRef.current;
+      if (nextSize.w === previousSize.w && nextSize.h === previousSize.h) return;
+
+      // Changing the canvas backing dimensions clears its pixels. Clear the
+      // stale-frame claim before React applies the new width/height attributes.
+      sizeRef.current = nextSize;
+      lastSuccessfulFrameRef.current = null;
+      const status = rendererStatusRef.current;
+      if (status && "frameDisposition" in status && status.frameDisposition !== "none") {
+        publishRendererStatus({ ...status, frameDisposition: "none" });
+      }
+      setSize(nextSize);
     });
     ro.observe(el);
     return () => ro.disconnect();

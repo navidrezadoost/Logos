@@ -43,6 +43,8 @@ export interface RenderWasmModule {
   _set_view(zoom: number, x: number, y: number): void;
   // Shapes pool
   _init_shapes_pool(total: number): void;
+  /** Clear scene-derived cache/index state, then initialize a full-upload generation. */
+  _begin_scene_upload(total: number): void;
 
   /**
    * Batched shape base-props — reads 104 bytes from the WASM heap
@@ -79,6 +81,10 @@ export interface RenderWasmModule {
   _set_shape_hidden(hidden: boolean): void;
   _set_shape_corners(r1: number, r2: number, r3: number, r4: number): void;
   _set_parent(a: number, b: number, c: number, d: number): void;
+  /** Replace the active shape's children from the allocated UUID buffer. */
+  _set_children(): void;
+  /** Replace the active shape's children with an empty vector. */
+  _set_children_0(): void;
   /** Write fill data from the current alloc buffer into the active shape. */
   _set_shape_fills(): void;
   // Render
@@ -312,27 +318,30 @@ export function applySolidFill(mod: RenderWasmModule, color: number): void {
   const totalBytes = HEADER_SIZE + NUM_FILLS * RAW_FILL_DATA_SIZE;
 
   const ptr = mod._alloc_bytes(totalBytes);
-  const heap = mod.HEAPU8;
-  heap.fill(0, ptr, ptr + totalBytes);
+  try {
+    const heap = mod.HEAPU8;
+    heap.fill(0, ptr, ptr + totalBytes);
 
-  // Header
-  heap[ptr + 0] = NUM_FILLS; // num_fills
-  heap[ptr + 1] = 0;
-  heap[ptr + 2] = 0;
-  heap[ptr + 3] = 0;
+    // Header
+    heap[ptr + 0] = NUM_FILLS; // num_fills
+    heap[ptr + 1] = 0;
+    heap[ptr + 2] = 0;
+    heap[ptr + 3] = 0;
 
-  // Fill 0 — Solid (discriminant = 0x00)
-  heap[ptr + 4] = FILL_TYPE.solid; // discriminant
-  heap[ptr + 5] = 0;               // padding
-  heap[ptr + 6] = 0;               // padding
-  heap[ptr + 7] = 0;               // padding
+    // Fill 0 — Solid (discriminant = 0x00)
+    heap[ptr + 4] = FILL_TYPE.solid; // discriminant
+    heap[ptr + 5] = 0;               // padding
+    heap[ptr + 6] = 0;               // padding
+    heap[ptr + 7] = 0;               // padding
 
-  // Color as u32 little-endian (ARGB)
-  const colorView = new DataView(heap.buffer, ptr + 8, 4);
-  colorView.setUint32(0, color, true /* LE */);
+    // Color as u32 little-endian (ARGB)
+    const colorView = new DataView(heap.buffer, ptr + 8, 4);
+    colorView.setUint32(0, color, true /* LE */);
 
-  mod._set_shape_fills();
-  mod._free_bytes();
+    mod._set_shape_fills();
+  } finally {
+    mod._free_bytes();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
