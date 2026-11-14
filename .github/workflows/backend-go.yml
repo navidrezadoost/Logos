@@ -35,3 +35,46 @@ jobs:
       - name: Vet backend packages
         run: go vet ./...
         working-directory: backend-go
+
+  snapshot-integrity-integration:
+    name: Snapshot integrity PostgreSQL integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres@sha256:16bc17c64a573ef34162af9298258d1aec548232985b33ed7b1eac33ba35c229
+        env:
+          POSTGRES_DB: logos_p04_snapshot
+          POSTGRES_USER: logos
+          POSTGRES_PASSWORD: snapshot-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logos -d logos_p04_snapshot"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend-go/go.mod
+          cache-dependency-path: backend-go/go.sum
+
+      - name: Download Go modules
+        run: go mod download
+        working-directory: backend-go
+
+      - name: Initialize fresh disposable PostgreSQL schema
+        env:
+          TEST_DATABASE_URL: postgres://logos:snapshot-only@127.0.0.1:5432/logos_p04_snapshot?sslmode=disable
+        run: bash test/p0.5/browser-persistence/initialize-disposable-db-schema.sh
+
+      - name: Run snapshot creation and restore integration suite
+        env:
+          TEST_DATABASE_URL: postgres://logos:snapshot-only@127.0.0.1:5432/logos_p04_snapshot?sslmode=disable
+        run: go test -race ./internal/handler -run 'Test(CreateSnapshot|Restore|HistoricalComplete)' -count=1 -timeout=180s -v
+        working-directory: backend-go
