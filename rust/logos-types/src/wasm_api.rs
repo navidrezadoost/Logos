@@ -26,8 +26,10 @@ mod tests {
     use wasm_bindgen_test::wasm_bindgen_test;
 
     use super::validate_document_json;
-    use crate::document_geometry::{local_to_world, object_to_new_parent, point_to_world};
-    use logos_layout::{Matrix, Point};
+    use crate::document_geometry::{
+        local_to_world, object_to_new_parent, point_to_local, point_to_world, rect_to_space,
+    };
+    use logos_layout::{Matrix, Point, Rect};
 
     const VALID: &str =
         include_str!("../../../logos-app/src/document-core/fixtures/rust-candidate-v1.json");
@@ -127,6 +129,111 @@ mod tests {
                     values[5].as_f64().unwrap(),
                 );
                 assert!(result.close_to(&expected, tolerance), "{name}: reparent");
+            }
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn browser_executes_g1_b5_transform_corners_bounds_and_reparent_vectors() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/g1-b5-transform-golden-v1.json"
+        ))
+        .unwrap();
+        let tolerance = fixture["tolerance"].as_f64().unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 12);
+
+        let matrix = |value: &serde_json::Value| {
+            let values = value.as_array().unwrap();
+            Matrix::new(
+                values[0].as_f64().unwrap(),
+                values[1].as_f64().unwrap(),
+                values[2].as_f64().unwrap(),
+                values[3].as_f64().unwrap(),
+                values[4].as_f64().unwrap(),
+                values[5].as_f64().unwrap(),
+            )
+        };
+        let point = |value: &serde_json::Value| {
+            Point::new(value[0].as_f64().unwrap(), value[1].as_f64().unwrap())
+        };
+
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let world = matrix(&case["worldMatrix"]);
+            let inverse = matrix(&case["inverseMatrix"]);
+            assert!(
+                (world * inverse).close_to(&Matrix::identity(), tolerance),
+                "{name}: inverse"
+            );
+            for (local, expected) in case["localCorners"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(case["worldCorners"].as_array().unwrap())
+            {
+                let mapped = point_to_world(point(local), world).unwrap();
+                let expected = point(expected);
+                assert!((mapped.x - expected.x).abs() <= tolerance, "{name}: x");
+                assert!((mapped.y - expected.y).abs() <= tolerance, "{name}: y");
+                let round_trip = point_to_local(expected, world).unwrap();
+                let local = point(local);
+                assert!(
+                    (round_trip.x - local.x).abs() <= tolerance,
+                    "{name}: inverse x"
+                );
+                assert!(
+                    (round_trip.y - local.y).abs() <= tolerance,
+                    "{name}: inverse y"
+                );
+            }
+
+            let bounds = &case["localBounds"];
+            let actual = rect_to_space(
+                Rect::new(
+                    bounds[0].as_f64().unwrap(),
+                    bounds[1].as_f64().unwrap(),
+                    bounds[2].as_f64().unwrap(),
+                    bounds[3].as_f64().unwrap(),
+                ),
+                world,
+            )
+            .unwrap();
+            for (actual, index) in [
+                (actual.x, 0),
+                (actual.y, 1),
+                (actual.width, 2),
+                (actual.height, 3),
+            ] {
+                assert!(
+                    (actual - case["expectedBoundingBox"][index].as_f64().unwrap()).abs()
+                        <= tolerance,
+                    "{name}: bounds"
+                );
+            }
+
+            if case.get("oldParentWorld").is_some() {
+                let converted = object_to_new_parent(
+                    matrix(&case["oldParentWorld"]) * matrix(&case["objectToOldParent"]),
+                    matrix(&case["newParentWorld"]),
+                )
+                .unwrap();
+                assert!(
+                    converted.close_to(&matrix(&case["expectedNewLocal"]), tolerance),
+                    "{name}: reparent"
+                );
+            }
+            if let Some(chain) = case.get("matrixChain") {
+                let chain = chain
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(matrix)
+                    .collect::<Vec<_>>();
+                assert!(
+                    local_to_world(&chain).unwrap().close_to(&world, tolerance),
+                    "{name}: root-to-leaf composition"
+                );
             }
         }
     }

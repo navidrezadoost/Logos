@@ -1,5 +1,5 @@
 import { loadRenderWasm, initCanvasContext, type RenderWasmModule } from "../render-wasm/module";
-import { projectAndSyncScene } from "../render-wasm/scene";
+import { projectAndSyncScene, syncScene2D } from "../render-wasm/scene";
 import { buildSceneProjection, NIL_RENDERER_ROOT_ID } from "../render-wasm/scene-projection";
 import type { Shape } from "../types/shapes";
 import nestedFixture from "../../../test/fixtures/renderer-scene-projection/nested-overlap.json";
@@ -56,6 +56,7 @@ function pixelAt(pixels: Uint8Array, width: number, height: number, x: number, y
 }
 
 const expectedObserved: Array<{ label: string; expected: number[]; observed: number[] }> = [];
+const canvas2dObserved: Array<{ label: string; observed: number[] }> = [];
 
 function expectPixel(
   pixels: Uint8Array,
@@ -274,12 +275,38 @@ async function run(): Promise<void> {
   if (!repeated.ok) throw new Error(`repeated scene sync failed: ${repeated.diagnostic.code}`);
   assertFramesEqual(afterReparent, captureFrame(gl, targetFramebuffer, canvas.width, canvas.height), "identical repeated sync");
 
+  setStage("observe current Canvas2D transform boundary in Chromium");
+  const fallbackCanvas = document.createElement("canvas");
+  fallbackCanvas.width = 120;
+  fallbackCanvas.height = 100;
+  const fallbackContext = fallbackCanvas.getContext("2d");
+  assert(fallbackContext, "Canvas2D context unavailable");
+  const transformedRect: Shape = {
+    ...firstScene.shapes[blueId],
+    bounds: { x: 50, y: 50, w: 40, h: 20 },
+    rotation: 45,
+    transform: [2, 0, 0, 1, 0, 0],
+    fills: [{ type: "solid", color: "#ff0000", opacity: 1 }],
+  };
+  syncScene2D(fallbackContext, [transformedRect], fallbackCanvas.width, fallbackCanvas.height);
+  const fallbackInside = Array.from(fallbackContext.getImageData(55, 55, 1, 1).data);
+  const fallbackOutside = Array.from(fallbackContext.getImageData(95, 55, 1, 1).data);
+  canvas2dObserved.push(
+    { label: "untransformed bounds interior remains red despite rotation and scale properties", observed: fallbackInside },
+    { label: "scale-and-rotation destination remains background in Canvas2D fallback", observed: fallbackOutside },
+  );
+  assert(fallbackInside[0] === 255 && fallbackInside[1] === 0 && fallbackInside[2] === 0,
+    "Canvas2D negative-control interior did not match its axis-aligned fill");
+  assert(fallbackOutside[0] === 30 && fallbackOutside[1] === 30 && fallbackOutside[2] === 46,
+    "Canvas2D negative-control exterior changed from the workspace background");
+
   setStage("complete");
   report.dataset.status = "passed";
   report.textContent = JSON.stringify({
     status: "passed",
     actualRenderer: "render-wasm/Skia in headless Chromium",
     expectedObserved,
+    canvas2dObserved,
     checks: [
       "synthetic nil-root and deterministic painter-order serialization",
       "overlapping roots and nested-frame descendants render at expected pixels",
@@ -288,6 +315,7 @@ async function run(): Promise<void> {
       "subtree deletion clears removed pixels",
       "reparenting updates uploaded parent ID, old pixels, and new pixels",
       "repeated identical synchronization has byte-identical framebuffer output",
+      "actual Canvas2D fallback negative control confirms it ignores shape rotation and affine scale",
     ],
   }, null, 2);
 }
