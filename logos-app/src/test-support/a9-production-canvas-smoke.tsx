@@ -66,8 +66,17 @@ async function waitFor(predicate: () => boolean, label: string, timeoutMs = 1200
 }
 
 async function waitReady(label: string): Promise<void> {
-  await waitFor(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY", `${label} READY`);
-  await waitFor(() => Boolean(document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-metrics")), `${label} metrics`);
+  await waitFor(() => {
+    const root = document.querySelector("[data-renderer-status]");
+    const canvas = document.querySelector<HTMLCanvasElement>("canvas");
+    if (root?.getAttribute("data-renderer-status") !== "READY" || !canvas) return false;
+    const raw = root.getAttribute("data-renderer-metrics");
+    if (!raw) return false;
+    const metrics = JSON.parse(raw) as { rendererWidth?: number; rendererHeight?: number };
+    return metrics.rendererWidth === canvas.width && metrics.rendererHeight === canvas.height &&
+      canvas.width === Math.floor(canvas.getBoundingClientRect().width) &&
+      canvas.height === Math.floor(canvas.getBoundingClientRect().height);
+  }, `${label} resized READY frame and metrics`);
   const raw = document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-metrics");
   if (raw) performanceRuns.push(JSON.parse(raw) as Record<string, number>);
 }

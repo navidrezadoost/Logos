@@ -49,6 +49,7 @@ The Canvas2D fallback remains a flat compatibility path. It accepts only flat, u
 The timing fields are:
 
 - `projectionValidationMs`: A8 graph projection plus A9 capability validation.
+- `rendererWidth` / `rendererHeight`: backing dimensions used by that successful upload.
 - `wasmUploadMs`: synchronous view setup, shape-property upload, and child-list upload.
 - `nativeRendererMs`: wall time inside `_render_sync()` (the renderer entry is synchronous).
 - `synchronousMainThreadMs`: the full projection/validation/upload/render call duration.

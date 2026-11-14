@@ -145,6 +145,8 @@ export interface ProjectedSceneView {
 }
 
 export interface ProjectedSceneMetrics {
+  readonly rendererWidth: number;
+  readonly rendererHeight: number;
   readonly projectionValidationMs: number;
   readonly wasmUploadMs: number;
   readonly nativeRendererMs: number;
@@ -235,6 +237,8 @@ export function projectAndSyncScene(
       ok: true,
       plan: projection.plan,
       metrics: {
+        rendererWidth: width,
+        rendererHeight: height,
         projectionValidationMs,
         wasmUploadMs: uploadMetrics.uploadMs,
         nativeRendererMs: uploadMetrics.nativeMs,
