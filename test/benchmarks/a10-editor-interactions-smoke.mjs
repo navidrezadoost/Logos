@@ -44,6 +44,13 @@ try {
   const openLayerMenu = async (id) => {
     const row = page.locator(`[data-layer-id="${id}"]`);
     await row.scrollIntoViewIfNeeded();
+    // Native <details> menus remain open independently. Close another row's
+    // menu through its visible summary before opening this one so overlays
+    // cannot intercept subsequent real pointer interactions.
+    for (const menu of await page.locator('[data-layer-id] details[open]').all()) {
+      const menuRowId = await menu.evaluate((details) => details.closest("[data-layer-id]")?.getAttribute("data-layer-id"));
+      if (menuRowId !== id) await menu.locator("summary").click();
+    }
     if (!(await row.locator("details").evaluate((details) => details.open))) await row.locator("summary").click();
     return row;
   };
