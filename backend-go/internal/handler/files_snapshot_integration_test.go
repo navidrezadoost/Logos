@@ -624,6 +624,8 @@ func TestExpiredPreRestorePurgeScopeCharacterizationIntegration(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM file_data WHERE file_id=$1 AND id=$2`, fileID, targetID).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
+	// This proves row-level removal after commit; it does not measure PostgreSQL
+	// table/TOAST disk reclamation or secure erasure.
 	if remaining != 0 {
 		t.Fatalf("committed target payload rows=%d; want physical row removal", remaining)
 	}
