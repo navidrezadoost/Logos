@@ -28,7 +28,26 @@ export type RendererStatus =
       backend: RendererBackend;
       code: typeof RENDERER_DIAGNOSTIC_CODES.renderFailed;
       frameDisposition: RendererFrameDisposition;
+    }
+  | {
+      state: "SCENE_REJECTED";
+      backend: RendererBackend;
+      code: string;
+      shapeId?: string;
+      shapeType?: string;
+      frameDisposition: RendererFrameDisposition;
     };
+
+export class SceneRejectedRenderError extends Error {
+  constructor(
+    readonly code: string,
+    readonly shapeId?: string,
+    readonly shapeType?: string,
+  ) {
+    super(code);
+    this.name = "SceneRejectedRenderError";
+  }
+}
 
 /** Shared adapter error; raw engine exceptions stay out of the editor status. */
 export class UnsupportedShapeRenderError extends Error {
@@ -48,7 +67,7 @@ export function rendererFailureStatus(
   error: unknown,
   backend: RendererBackend,
   hasPreviousFrame: boolean,
-): Extract<RendererStatus, { state: "UNSUPPORTED_SHAPE" | "RENDER_FAILED" }> {
+): Extract<RendererStatus, { state: "UNSUPPORTED_SHAPE" | "RENDER_FAILED" | "SCENE_REJECTED" }> {
   if (error instanceof UnsupportedShapeRenderError) {
     return {
       state: "UNSUPPORTED_SHAPE",
@@ -57,6 +76,20 @@ export function rendererFailureStatus(
       shapeId: error.shapeId,
       shapeType: error.shapeType,
       frameDisposition: hasPreviousFrame ? "previous" : "none",
+    };
+  }
+
+  if (error instanceof SceneRejectedRenderError) {
+    const frameDisposition = error.code === "LOGOS_SCENE_RECOVERY_FAILED" || error.code === "LOGOS_SCENE_MODULE_POISONED"
+      ? (hasPreviousFrame ? "unverified" : "none")
+      : (hasPreviousFrame ? "previous" : "none");
+    return {
+      state: "SCENE_REJECTED",
+      backend,
+      code: error.code,
+      shapeId: error.shapeId,
+      shapeType: error.shapeType,
+      frameDisposition,
     };
   }
 
