@@ -151,9 +151,11 @@ try {
   evidence.checks.push("Poisoned WASM module rejected further uploads and recreated with fresh module/context");
 
   await page.evaluate(() => window.__a10.stage("Pen-created Vector Network compatibility diagnostics"));
-  await page.keyboard.press("p");
-  const penStart = await canvasPoint(500, 320);
-  const penEnd = await canvasPoint(540, 350);
+  await page.locator('[title="Pen (P)"]').click();
+  const penBounds = await page.locator("canvas").boundingBox();
+  assert(penBounds && penBounds.width > 80 && penBounds.height > 80, "Canvas is too small for the Pen interaction");
+  const penStart = await canvasPoint(penBounds.width * 0.7, penBounds.height * 0.7);
+  const penEnd = await canvasPoint(penBounds.width * 0.7 + 30, penBounds.height * 0.7 + 30);
   await page.mouse.click(penStart.x, penStart.y);
   await page.mouse.click(penEnd.x, penEnd.y);
   await page.keyboard.press("Enter");
