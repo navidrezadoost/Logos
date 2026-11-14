@@ -47,6 +47,15 @@ pub enum ShapeType {
     Component,
 }
 
+impl ShapeType {
+    /// Shared domain rule for whether a shape can own ordered child shapes.
+    /// Component definitions are structural containers, as are frames,
+    /// groups, and boolean-result groups.
+    pub const fn is_container(self) -> bool {
+        matches!(self, ShapeType::Frame | ShapeType::Group | ShapeType::Bool | ShapeType::Component)
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Constraints
 // ─────────────────────────────────────────────────────────────────
@@ -151,13 +160,14 @@ pub struct Shape {
     pub points: Option<[logos_layout::Point; 4]>,
 
     // ── Hierarchy ───────────────────────────────────────────────
-    /// UUID of the parent frame / group.  `None` for the root frame.
+    /// Immediate structural parent. `None` for a page root.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub parent_id: Option<Uuid>,
-    /// Frame this shape belongs to (may equal `parent_id`).
+    /// Nearest enclosing Frame ancestor; a Frame's own membership is its outer
+    /// Frame ancestor, not itself. `None` outside a Frame.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub frame_id: Option<Uuid>,
-    /// Ordered children IDs (only meaningful for Frame/Group/Bool).
+    /// Ordered children IDs (meaningful for Frame/Group/Bool/Component).
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Vec::is_empty"))]
     pub shapes: Vec<Uuid>,
 
@@ -310,9 +320,9 @@ impl Shape {
     /// Returns `true` if this shape has any visible strokes.
     pub fn has_strokes(&self) -> bool { !self.strokes.is_empty() }
 
-    /// Returns `true` if this shape can have children (Frame/Group/Bool).
+    /// Returns `true` if this shape can have children under the shared domain rule.
     pub fn is_container(&self) -> bool {
-        matches!(self.shape_type, ShapeType::Frame | ShapeType::Group | ShapeType::Bool)
+        self.shape_type.is_container()
     }
 
     /// Returns `true` if this is a component instance (linked copy).
@@ -348,6 +358,13 @@ mod tests {
         let id = Uuid::new_v4();
         let s = Shape::frame(id, "Page", 0.0, 0.0, 1920.0, 1080.0);
         assert!(s.is_container());
+    }
+
+    #[test]
+    fn component_is_a_container_under_the_shared_domain_rule() {
+        let shape = Shape::new(Uuid::new_v4(), ShapeType::Component, "Component");
+        assert!(shape.is_container());
+        assert_eq!(shape.is_container(), shape.shape_type.is_container());
     }
 
     #[test]

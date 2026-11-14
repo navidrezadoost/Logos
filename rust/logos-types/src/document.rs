@@ -14,6 +14,9 @@ use crate::{Shape, ShapeType};
 
 pub const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 const NIL_RENDERER_ROOT_ID: Uuid = Uuid::nil();
+/// Candidate coordinate/transform magnitude bound in document units.
+const MAX_ABS_GEOMETRY: f64 = 1_000_000_000_000.0;
+const MATRIX_INVERSE_TOLERANCE: f64 = 1.0e-8;
 
 /// Candidate document envelope. `pages` order is document page order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,9 +87,13 @@ pub enum ValidationDiagnosticCode {
     Cycle,
     OrphanShape,
     InvalidGeometry,
+    GeometryOutOfRange,
     NonFiniteTransform,
+    SingularTransform,
+    TransformInverseMismatch,
     InvalidOpacity,
     InvalidFrameReference,
+    FrameMembershipMismatch,
     InvalidComponentReference,
     ExtensionKeyCollision,
     OperationPreconditionFailed,
@@ -247,6 +254,7 @@ pub fn validate_document(document: &Document) -> Vec<ValidationDiagnostic> {
         );
         validate_numbers(record, &path, &mut diagnostics);
     }
+    let expected_frames = expected_frame_memberships(&shapes_by_id);
 
     // Validate every page/root relation and retain the declared sibling order.
     let mut root_owner = HashMap::<Uuid, Uuid>::new();
@@ -312,7 +320,7 @@ pub fn validate_document(document: &Document) -> Vec<ValidationDiagnostic> {
                 );
                 continue;
             }
-            if !is_container_type(shape.shape_type) {
+            if !shape.shape_type.is_container() {
                 diagnostics.push(
                     ValidationDiagnostic::new(
                         ValidationDiagnosticCode::NonContainerParent,
@@ -391,7 +399,7 @@ pub fn validate_document(document: &Document) -> Vec<ValidationDiagnostic> {
                             .ids(shape.id, Some(parent_id)),
                         );
                     }
-                    if !is_container_type(parent.shape.shape_type) {
+                    if !parent.shape.shape_type.is_container() {
                         diagnostics.push(
                             ValidationDiagnostic::new(
                                 ValidationDiagnosticCode::NonContainerParent,
@@ -421,26 +429,24 @@ pub fn validate_document(document: &Document) -> Vec<ValidationDiagnostic> {
             None => {}
         }
 
-        if let Some(frame_id) = shape.frame_id {
-            match shapes_by_id.get(&frame_id).copied() {
-                Some((_, frame))
-                    if frame.page_id == record.page_id
-                        && frame.shape.shape_type == ShapeType::Frame => {}
-                Some(_) => diagnostics.push(
-                    ValidationDiagnostic::new(
-                        ValidationDiagnosticCode::InvalidFrameReference,
-                        format!("{path}/frame-id"),
-                    )
-                    .ids(shape.id, Some(frame_id)),
-                ),
-                None => diagnostics.push(
-                    ValidationDiagnostic::new(
-                        ValidationDiagnosticCode::InvalidFrameReference,
-                        format!("{path}/frame-id"),
-                    )
-                    .ids(shape.id, Some(frame_id)),
-                ),
-            }
+        let expected_frame_id = expected_frames.get(&shape.id).copied().flatten();
+        if shape.frame_id != expected_frame_id {
+            let code = if shape.frame_id.is_some_and(|frame_id| {
+                !matches!(
+                    shapes_by_id.get(&frame_id),
+                    Some((_, frame))
+                        if frame.page_id == record.page_id
+                            && frame.shape.shape_type == ShapeType::Frame
+                )
+            }) {
+                ValidationDiagnosticCode::InvalidFrameReference
+            } else {
+                ValidationDiagnosticCode::FrameMembershipMismatch
+            };
+            diagnostics.push(
+                ValidationDiagnostic::new(code, format!("{path}/frame-id"))
+                    .ids(shape.id, shape.frame_id.or(expected_frame_id)),
+            );
         }
         if let Some(component_id) = shape.component_id {
             if shape.component_file.is_none()
@@ -467,11 +473,69 @@ pub fn validate_document(document: &Document) -> Vec<ValidationDiagnostic> {
     diagnostics
 }
 
-fn is_container_type(shape_type: ShapeType) -> bool {
-    matches!(
-        shape_type,
-        ShapeType::Frame | ShapeType::Group | ShapeType::Bool | ShapeType::Component
-    )
+fn expected_frame_memberships(
+    shapes: &HashMap<Uuid, (usize, &ShapeRecord)>,
+) -> HashMap<Uuid, Option<Uuid>> {
+    let mut ids: Vec<_> = shapes.keys().copied().collect();
+    ids.sort();
+    let mut expected = HashMap::with_capacity(ids.len());
+
+    for start in ids {
+        if expected.contains_key(&start) {
+            continue;
+        }
+        let mut path = Vec::new();
+        let mut visiting = HashSet::new();
+        let mut cursor = Some(start);
+        let mut parent = None;
+        let mut inherited_frame = None;
+        let mut resolvable = true;
+
+        while let Some(id) = cursor {
+            if expected.contains_key(&id) {
+                parent = Some(id);
+                inherited_frame = expected[&id];
+                break;
+            }
+            if !visiting.insert(id) {
+                resolvable = false;
+                break;
+            }
+            let Some((_, record)) = shapes.get(&id).copied() else {
+                resolvable = false;
+                break;
+            };
+            path.push(id);
+            cursor = record.shape.parent_id;
+            if cursor.is_none() {
+                break;
+            }
+        }
+
+        if !resolvable {
+            for id in path {
+                expected.insert(id, None);
+            }
+            continue;
+        }
+
+        for id in path.into_iter().rev() {
+            let enclosing = match parent {
+                Some(parent_id)
+                    if shapes
+                        .get(&parent_id)
+                        .is_some_and(|(_, record)| record.shape.shape_type == ShapeType::Frame) =>
+                {
+                    Some(parent_id)
+                }
+                _ => inherited_frame,
+            };
+            expected.insert(id, enclosing);
+            inherited_frame = enclosing;
+            parent = Some(id);
+        }
+    }
+    expected
 }
 
 fn check_id(
@@ -525,6 +589,17 @@ fn validate_numbers(record: &ShapeRecord, path: &str, diagnostics: &mut Vec<Vali
             )
             .ids(shape.id, None),
         );
+    } else if geometry.iter().any(|value| value.abs() > MAX_ABS_GEOMETRY)
+        || (rect.x + rect.width).abs() > MAX_ABS_GEOMETRY
+        || (rect.y + rect.height).abs() > MAX_ABS_GEOMETRY
+    {
+        diagnostics.push(
+            ValidationDiagnostic::new(
+                ValidationDiagnosticCode::GeometryOutOfRange,
+                format!("{path}/selrect"),
+            )
+            .ids(shape.id, None),
+        );
     }
     let transform = shape.transform;
     let inverse = shape.transform_inverse;
@@ -550,6 +625,38 @@ fn validate_numbers(record: &ShapeRecord, path: &str, diagnostics: &mut Vec<Vali
             )
             .ids(shape.id, None),
         );
+    } else if matrix_values
+        .iter()
+        .any(|value| value.abs() > MAX_ABS_GEOMETRY)
+    {
+        diagnostics.push(
+            ValidationDiagnostic::new(
+                ValidationDiagnosticCode::GeometryOutOfRange,
+                format!("{path}/transform"),
+            )
+            .ids(shape.id, None),
+        );
+    } else if transform.inverse().is_none() {
+        diagnostics.push(
+            ValidationDiagnostic::new(
+                ValidationDiagnosticCode::SingularTransform,
+                format!("{path}/transform"),
+            )
+            .ids(shape.id, None),
+        );
+    } else {
+        let identity = Matrix::identity();
+        if !(transform * inverse).close_to(&identity, MATRIX_INVERSE_TOLERANCE)
+            || !(inverse * transform).close_to(&identity, MATRIX_INVERSE_TOLERANCE)
+        {
+            diagnostics.push(
+                ValidationDiagnostic::new(
+                    ValidationDiagnosticCode::TransformInverseMismatch,
+                    format!("{path}/transform-inverse"),
+                )
+                .ids(shape.id, None),
+            );
+        }
     }
     if !shape.opacity.is_finite() || !(0.0..=1.0).contains(&shape.opacity) {
         diagnostics.push(
@@ -681,27 +788,44 @@ fn sort_diagnostics(diagnostics: &mut Vec<ValidationDiagnostic>) {
     diagnostics.dedup();
 }
 
-/// Deterministic import identity from a caller-owned stable namespace and
-/// source identity. This non-cryptographic 128-bit derivation is only an ID
-/// suggestion: importers must still run duplicate-ID validation before use.
+/// Deterministic UUIDv5 import identity from a caller-owned stable namespace
+/// and source identity. This is only an ID suggestion: importers must still
+/// run duplicate-ID validation before use.
 pub fn stable_import_id(namespace: Uuid, source_format: &str, source_id: &str) -> Uuid {
-    fn fnv64(bytes: &[u8], seed: u64) -> u64 {
-        bytes.iter().fold(seed, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
-        })
+    let mut name = b"logos-import-v1\0".to_vec();
+    name.extend_from_slice(&(source_format.len() as u64).to_be_bytes());
+    name.extend_from_slice(source_format.as_bytes());
+    name.extend_from_slice(&(source_id.len() as u64).to_be_bytes());
+    name.extend_from_slice(source_id.as_bytes());
+    Uuid::new_v5(&namespace, &name)
+}
+
+/// Derive importer IDs and fail if any two source identities map to the same
+/// UUID. Callers must apply this check before adding imported records to a
+/// candidate document; they must never silently suffix or reassign collisions.
+pub fn stable_import_ids<I, S>(
+    namespace: Uuid,
+    source_format: &str,
+    source_ids: I,
+) -> Result<Vec<Uuid>, ValidationDiagnostic>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    for (index, source_id) in source_ids.into_iter().enumerate() {
+        let derived = stable_import_id(namespace, source_format, source_id.as_ref());
+        if !seen.insert(derived) {
+            return Err(ValidationDiagnostic::new(
+                ValidationDiagnosticCode::DuplicateId,
+                format!("/import/source-identities/{index}"),
+            )
+            .ids(derived, None));
+        }
+        result.push(derived);
     }
-    let name = format!("logos-import:{source_format}:{source_id}");
-    let mut material = namespace.as_bytes().to_vec();
-    material.extend_from_slice(name.as_bytes());
-    let a = fnv64(&material, 0xcbf29ce484222325).to_be_bytes();
-    let b = fnv64(&material, 0x84222325cbf29ce4).to_be_bytes();
-    let mut bytes = [0; 16];
-    bytes[..8].copy_from_slice(&a);
-    bytes[8..].copy_from_slice(&b);
-    // Mark as a deterministic name-derived UUID with RFC variant bits.
-    bytes[6] = (bytes[6] & 0x0f) | 0x50;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    Uuid::from_bytes(bytes)
+    Ok(result)
 }
 
 /// Candidate immutable operations. These are not connected to production
@@ -781,36 +905,51 @@ fn apply_to_candidate(
             {
                 return Err(op_error(record.shape.id, None));
             }
-            let page = document
-                .pages
-                .iter_mut()
-                .find(|page| page.id == record.page_id)
-                .ok_or_else(|| missing_page(record.shape.id, record.page_id))?;
+            if !document.pages.iter().any(|page| page.id == record.page_id) {
+                return Err(missing_page(record.shape.id, record.page_id));
+            }
+            let mut new_record = record.clone();
             if let Some(parent_id) = parent_id {
                 let parent = document
                     .shapes
-                    .iter_mut()
+                    .iter()
                     .find(|item| item.shape.id == *parent_id)
                     .ok_or_else(|| missing_shape(record.shape.id, *parent_id))?;
-                if parent.page_id != record.page_id || !is_container_type(parent.shape.shape_type) {
+                if parent.page_id != record.page_id || !parent.shape.shape_type.is_container() {
                     return Err(op_error(record.shape.id, Some(*parent_id)));
+                }
+                if record.shape.parent_id.is_some_and(|id| id != *parent_id) {
+                    return Err(op_error(record.shape.id, record.shape.parent_id));
                 }
                 if *index > parent.shape.shapes.len() {
                     return Err(op_error(record.shape.id, Some(*parent_id)));
                 }
-                let mut new_record = record.clone();
                 new_record.shape.parent_id = Some(*parent_id);
+                new_record.shape.frame_id = nearest_frame_for_parent(document, Some(*parent_id));
+                let parent = document
+                    .shapes
+                    .iter_mut()
+                    .find(|item| item.shape.id == *parent_id)
+                    .expect("checked above");
                 parent.shape.shapes.insert(*index, new_record.shape.id);
                 document.shapes.push(new_record);
             } else {
-                if *index > page.root_shape_ids.len() {
+                let page_index = document
+                    .pages
+                    .iter()
+                    .position(|page| page.id == record.page_id)
+                    .unwrap();
+                if *index > document.pages[page_index].root_shape_ids.len() {
                     return Err(op_error(record.shape.id, None));
                 }
                 if record.shape.parent_id.is_some() {
                     return Err(op_error(record.shape.id, record.shape.parent_id));
                 }
-                page.root_shape_ids.insert(*index, record.shape.id);
-                document.shapes.push(record.clone());
+                new_record.shape.frame_id = None;
+                document.pages[page_index]
+                    .root_shape_ids
+                    .insert(*index, record.shape.id);
+                document.shapes.push(new_record);
             }
         }
         DocumentOperation::UpdateShape {
@@ -854,25 +993,19 @@ fn apply_to_candidate(
             shape_id,
             expected_parent_id,
         } => {
-            let target = document
+            let target_index = document
                 .shapes
                 .iter()
-                .find(|item| item.shape.id == *shape_id)
+                .position(|item| item.shape.id == *shape_id)
                 .ok_or_else(|| missing_shape(*shape_id, *shape_id))?;
-            if target.shape.parent_id != *expected_parent_id {
-                return Err(op_error(*shape_id, target.shape.parent_id));
+            if document.shapes[target_index].shape.parent_id != *expected_parent_id {
+                return Err(op_error(
+                    *shape_id,
+                    document.shapes[target_index].shape.parent_id,
+                ));
             }
-            let page_id = target.page_id;
-            let mut subtree = HashSet::new();
-            let mut stack = vec![*shape_id];
-            while let Some(id) = stack.pop() {
-                if !subtree.insert(id) {
-                    continue;
-                }
-                if let Some(record) = document.shapes.iter().find(|item| item.shape.id == id) {
-                    stack.extend(record.shape.shapes.iter().copied());
-                }
-            }
+            let page_id = document.shapes[target_index].page_id;
+            let subtree = subtree_ids(document, *shape_id);
             if let Some(parent_id) = expected_parent_id {
                 if let Some(parent) = document
                     .shapes
@@ -915,7 +1048,7 @@ fn apply_to_candidate(
                     .iter()
                     .find(|record| record.shape.id == *parent_id)
                     .ok_or_else(|| missing_shape(*shape_id, *parent_id))?;
-                if parent.page_id != *new_page_id || !is_container_type(parent.shape.shape_type) {
+                if parent.page_id != *new_page_id || !parent.shape.shape_type.is_container() {
                     return Err(op_error(*shape_id, Some(*parent_id)));
                 }
                 if *parent_id == *shape_id || is_descendant(document, *parent_id, *shape_id) {
@@ -926,6 +1059,27 @@ fn apply_to_candidate(
                     .ids(*shape_id, Some(*parent_id)));
                 }
             }
+            let old_page_id = document.shapes[source_index].page_id;
+            let destination_len = if let Some(parent_id) = new_parent_id {
+                let parent = document
+                    .shapes
+                    .iter()
+                    .find(|record| record.shape.id == *parent_id)
+                    .unwrap();
+                parent.shape.shapes.len() - usize::from(*expected_parent_id == Some(*parent_id))
+            } else {
+                let page = document
+                    .pages
+                    .iter()
+                    .find(|page| page.id == *new_page_id)
+                    .unwrap();
+                page.root_shape_ids.len()
+                    - usize::from(expected_parent_id.is_none() && old_page_id == *new_page_id)
+            };
+            if *index > destination_len {
+                return Err(op_error(*shape_id, *new_parent_id));
+            }
+            let moved_ids = subtree_ids(document, *shape_id);
             detach_from_current_parent(document, source_index);
             let mut record = document.shapes.remove(source_index);
             record.page_id = *new_page_id;
@@ -936,9 +1090,6 @@ fn apply_to_candidate(
                     .iter_mut()
                     .find(|item| item.shape.id == *parent_id)
                     .expect("checked above");
-                if *index > parent.shape.shapes.len() {
-                    return Err(op_error(*shape_id, Some(*parent_id)));
-                }
                 parent.shape.shapes.insert(*index, *shape_id);
             } else {
                 let page = document
@@ -946,29 +1097,10 @@ fn apply_to_candidate(
                     .iter_mut()
                     .find(|page| page.id == *new_page_id)
                     .expect("checked above");
-                if *index > page.root_shape_ids.len() {
-                    return Err(op_error(*shape_id, None));
-                }
                 page.root_shape_ids.insert(*index, *shape_id);
             }
             document.shapes.push(record);
-            // Descendants move with their subtree and retain local coordinates.
-            let mut stack = document
-                .shapes
-                .iter()
-                .find(|item| item.shape.id == *shape_id)
-                .map(|item| item.shape.shapes.clone())
-                .unwrap_or_default();
-            while let Some(child_id) = stack.pop() {
-                if let Some(child) = document
-                    .shapes
-                    .iter_mut()
-                    .find(|item| item.shape.id == child_id)
-                {
-                    child.page_id = *new_page_id;
-                    stack.extend(child.shape.shapes.iter().copied());
-                }
-            }
+            update_subtree_page_and_frames(document, *shape_id, *new_page_id, &moved_ids);
         }
         DocumentOperation::ReorderChildren {
             page_id,
@@ -1033,19 +1165,111 @@ fn detach_from_current_parent(document: &mut Document, record_index: usize) {
     }
 }
 
-fn is_descendant(document: &Document, possible_descendant: Uuid, ancestor: Uuid) -> bool {
-    let mut stack = vec![ancestor];
-    let mut visited = HashSet::new();
+fn subtree_ids(document: &Document, root_id: Uuid) -> HashSet<Uuid> {
+    let index_by_id: HashMap<_, _> = document
+        .shapes
+        .iter()
+        .enumerate()
+        .map(|(index, record)| (record.shape.id, index))
+        .collect();
+    let mut subtree = HashSet::new();
+    let mut stack = vec![root_id];
     while let Some(id) = stack.pop() {
-        if !visited.insert(id) {
+        if !subtree.insert(id) {
             continue;
         }
-        if let Some(record) = document.shapes.iter().find(|record| record.shape.id == id) {
-            if record.shape.shapes.contains(&possible_descendant) {
-                return true;
-            }
-            stack.extend(record.shape.shapes.iter().copied());
+        if let Some(index) = index_by_id.get(&id) {
+            stack.extend(document.shapes[*index].shape.shapes.iter().copied());
         }
+    }
+    subtree
+}
+
+fn nearest_frame_for_parent(document: &Document, mut parent_id: Option<Uuid>) -> Option<Uuid> {
+    let index_by_id: HashMap<_, _> = document
+        .shapes
+        .iter()
+        .enumerate()
+        .map(|(index, record)| (record.shape.id, index))
+        .collect();
+    let mut visited = HashSet::new();
+    while let Some(id) = parent_id {
+        if !visited.insert(id) {
+            return None;
+        }
+        let parent = &document.shapes[*index_by_id.get(&id)?];
+        if parent.shape.shape_type == ShapeType::Frame {
+            return Some(id);
+        }
+        parent_id = parent.shape.parent_id;
+    }
+    None
+}
+
+fn update_subtree_page_and_frames(
+    document: &mut Document,
+    root_id: Uuid,
+    page_id: Uuid,
+    subtree: &HashSet<Uuid>,
+) {
+    let index_by_id: HashMap<_, _> = document
+        .shapes
+        .iter()
+        .enumerate()
+        .map(|(index, record)| (record.shape.id, index))
+        .collect();
+    let root_index = index_by_id[&root_id];
+    let root_frame =
+        nearest_frame_for_parent(document, document.shapes[root_index].shape.parent_id);
+    let mut stack = vec![(root_id, root_frame)];
+    while let Some((id, frame)) = stack.pop() {
+        if !subtree.contains(&id) {
+            continue;
+        }
+        let Some(index) = index_by_id.get(&id).copied() else {
+            continue;
+        };
+        let record = &mut document.shapes[index];
+        record.page_id = page_id;
+        record.shape.frame_id = frame;
+        let child_frame = if record.shape.shape_type == ShapeType::Frame {
+            Some(id)
+        } else {
+            frame
+        };
+        stack.extend(
+            record
+                .shape
+                .shapes
+                .iter()
+                .rev()
+                .copied()
+                .map(|child_id| (child_id, child_frame)),
+        );
+    }
+}
+
+fn is_descendant(document: &Document, possible_descendant: Uuid, ancestor: Uuid) -> bool {
+    let index_by_id: HashMap<_, _> = document
+        .shapes
+        .iter()
+        .enumerate()
+        .map(|(index, record)| (record.shape.id, index))
+        .collect();
+    let mut visited = HashSet::new();
+    let mut current = Some(possible_descendant);
+    while let Some(id) = current {
+        if !visited.insert(id) {
+            return true;
+        }
+        let Some(index) = index_by_id.get(&id).copied() else {
+            return false;
+        };
+        let parent_id = document.shapes[index].shape.parent_id;
+        if parent_id == Some(ancestor) {
+            return true;
+        }
+        current = parent_id;
     }
     false
 }
@@ -1164,6 +1388,207 @@ mod tests {
             stable_import_id(namespace, "xd", "artboard-1"),
             stable_import_id(id(45), "xd", "artboard-1")
         );
+        assert_ne!(
+            stable_import_id(namespace, "xd:a", "b"),
+            stable_import_id(namespace, "xd", "a:b")
+        );
+        assert_eq!(
+            Uuid::new_v5(&Uuid::NAMESPACE_DNS, b"www.widgets.com").to_string(),
+            "21f7f8de-8051-5b89-8680-0195ef798b6a"
+        );
+        let duplicate =
+            stable_import_ids(namespace, "xd", ["artboard-1", "artboard-1"]).unwrap_err();
+        assert_eq!(duplicate.code, ValidationDiagnosticCode::DuplicateId);
+    }
+
+    #[test]
+    fn shared_frame_ancestry_requires_nearest_frame_even_through_groups() {
+        let mut document = valid_document();
+        let group_id = id(4);
+        let mut group = Shape::new(group_id, ShapeType::Group, "Group");
+        group.parent_id = Some(id(2));
+        group.frame_id = Some(id(2));
+        group.shapes.push(id(3));
+        document.shapes[0].shape.shapes = vec![group_id];
+        document.shapes[1].shape.parent_id = Some(group_id);
+        document.shapes.push(record(group, id(1)));
+        // Put group before its descendant in storage to demonstrate order is
+        // expressed by graph links rather than vector order.
+        document.shapes.swap(1, 2);
+        assert!(validate_document(&document).is_empty());
+
+        let leaf_index = document
+            .shapes
+            .iter()
+            .position(|r| r.shape.id == id(3))
+            .unwrap();
+        document.shapes[leaf_index].shape.frame_id = None;
+        assert!(validate_document(&document)
+            .iter()
+            .any(|d| d.code == ValidationDiagnosticCode::FrameMembershipMismatch));
+    }
+
+    #[test]
+    fn cross_page_reparent_updates_page_and_nearest_frame_closure() {
+        let mut document = valid_document();
+        let second_page = id(11);
+        let second_frame = id(12);
+        let frame = Shape::frame(second_frame, "Second frame", 0.0, 0.0, 100.0, 100.0);
+        document.pages.push(Page {
+            id: second_page,
+            name: "Page 2".into(),
+            root_shape_ids: vec![second_frame],
+            extensions: BTreeMap::new(),
+        });
+        document.shapes.push(record(frame, second_page));
+        let moved = apply_operation(
+            &document,
+            &DocumentOperation::ReparentShape {
+                shape_id: id(2),
+                expected_parent_id: None,
+                new_parent_id: None,
+                new_page_id: second_page,
+                index: 1,
+            },
+        )
+        .unwrap();
+        assert!(moved.pages[0].root_shape_ids.is_empty());
+        assert_eq!(moved.pages[1].root_shape_ids, vec![second_frame, id(2)]);
+        let frame_index = moved
+            .shapes
+            .iter()
+            .position(|r| r.shape.id == id(2))
+            .unwrap();
+        let child_index = moved
+            .shapes
+            .iter()
+            .position(|r| r.shape.id == id(3))
+            .unwrap();
+        assert_eq!(moved.shapes[frame_index].page_id, second_page);
+        assert_eq!(moved.shapes[frame_index].shape.frame_id, None);
+        assert_eq!(moved.shapes[child_index].page_id, second_page);
+        assert_eq!(moved.shapes[child_index].shape.frame_id, Some(id(2)));
+        assert!(validate_document(&moved).is_empty());
+    }
+
+    #[test]
+    fn same_parent_reparent_index_is_measured_after_detach() {
+        let mut document = valid_document();
+        let extra_id = id(4);
+        document.shapes[0].shape.shapes.push(extra_id);
+        let mut extra = Shape::rect(extra_id, 2.0, 3.0, 4.0, 5.0);
+        extra.parent_id = Some(id(2));
+        extra.frame_id = Some(id(2));
+        document.shapes.push(record(extra, id(1)));
+        assert!(validate_document(&document).is_empty());
+
+        let moved = apply_operation(
+            &document,
+            &DocumentOperation::ReparentShape {
+                shape_id: id(3),
+                expected_parent_id: Some(id(2)),
+                new_parent_id: Some(id(2)),
+                new_page_id: id(1),
+                index: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(moved.shapes[0].shape.shapes, vec![id(4), id(3)]);
+        assert!(validate_document(&moved).is_empty());
+    }
+
+    #[test]
+    fn rejected_same_parent_reparent_index_does_not_mutate_input() {
+        let document = valid_document();
+        let before = serde_json::to_value(&document).unwrap();
+        let result = apply_operation(
+            &document,
+            &DocumentOperation::ReparentShape {
+                shape_id: id(3),
+                expected_parent_id: Some(id(2)),
+                new_parent_id: Some(id(2)),
+                new_page_id: id(1),
+                index: 2,
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(serde_json::to_value(&document).unwrap(), before);
+    }
+
+    #[test]
+    fn delete_rejects_removing_a_still_referenced_component() {
+        let page_id = id(1);
+        let component_id = id(2);
+        let instance_id = id(3);
+        let mut component = Shape::new(component_id, ShapeType::Component, "Master");
+        component.main_instance = false;
+        let mut instance = Shape::rect(instance_id, 0.0, 0.0, 10.0, 10.0);
+        instance.component_id = Some(component_id);
+        let document = Document {
+            id: id(10),
+            schema_version: DOCUMENT_SCHEMA_VERSION,
+            pages: vec![Page {
+                id: page_id,
+                name: "Components".into(),
+                root_shape_ids: vec![component_id, instance_id],
+                extensions: BTreeMap::new(),
+            }],
+            shapes: vec![record(component, page_id), record(instance, page_id)],
+            extensions: BTreeMap::new(),
+        };
+        assert!(validate_document(&document).is_empty());
+        let before = serde_json::to_value(&document).unwrap();
+        let result = apply_operation(
+            &document,
+            &DocumentOperation::DeleteSubtree {
+                shape_id: component_id,
+                expected_parent_id: None,
+            },
+        );
+        assert!(result
+            .unwrap_err()
+            .iter()
+            .any(|d| d.code == ValidationDiagnosticCode::InvalidComponentReference));
+        assert_eq!(serde_json::to_value(&document).unwrap(), before);
+    }
+
+    #[test]
+    fn transform_inverse_numeric_and_geometry_boundary_policy_is_explicit() {
+        let mut document = valid_document();
+        let child_index = document
+            .shapes
+            .iter()
+            .position(|r| r.shape.id == id(3))
+            .unwrap();
+        document.shapes[child_index].shape.transform = Matrix::translate_dist(12.0, -8.0);
+        document.shapes[child_index].shape.transform_inverse = Matrix::translate_dist(-12.0, 8.0);
+        document.shapes[child_index].shape.selrect = Rect::new(-MAX_ABS_GEOMETRY, 0.0, 0.0, 0.0);
+        assert!(validate_document(&document).is_empty());
+
+        document.shapes[child_index].shape.transform_inverse = Matrix::identity();
+        assert!(validate_document(&document)
+            .iter()
+            .any(|d| d.code == ValidationDiagnosticCode::TransformInverseMismatch));
+
+        document.shapes[child_index].shape.transform = Matrix::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        document.shapes[child_index].shape.transform_inverse =
+            Matrix::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        assert!(validate_document(&document)
+            .iter()
+            .any(|d| d.code == ValidationDiagnosticCode::SingularTransform));
+
+        document.shapes[child_index].shape.transform = Matrix::identity();
+        document.shapes[child_index].shape.transform_inverse = Matrix::identity();
+        document.shapes[child_index].shape.selrect.x = MAX_ABS_GEOMETRY + 1.0;
+        assert!(validate_document(&document)
+            .iter()
+            .any(|d| d.code == ValidationDiagnosticCode::GeometryOutOfRange));
+
+        document.shapes[child_index].shape.selrect.x = 0.0;
+        document.shapes[child_index].shape.selrect.width = -0.01;
+        assert!(validate_document(&document)
+            .iter()
+            .any(|d| d.code == ValidationDiagnosticCode::InvalidGeometry));
     }
 
     #[test]
@@ -1479,6 +1904,30 @@ mod tests {
             encoded["shapes"][0]["future-shape-extension"],
             fixture["shapes"][0]["future-shape-extension"]
         );
+    }
+
+    #[test]
+    fn candidate_decode_normalize_encode_matches_golden_output_and_identity() {
+        let source = include_str!("../tests/fixtures/g1-b1/rust-contract-candidate.json");
+        let expected =
+            include_str!("../tests/fixtures/g1-b1/rust-contract-candidate-normalized.json");
+        let decoded = decode_and_validate_json(source).unwrap();
+        assert_eq!(
+            decoded.id,
+            Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()
+        );
+        assert_eq!(
+            decoded.pages[0].id,
+            Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap()
+        );
+        assert_eq!(
+            decoded.shapes[0].shape.id,
+            Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap()
+        );
+        assert_eq!(decoded.shapes[0].shape.selrect.width, 30.0);
+        let encoded = serde_json::to_value(decoded).unwrap();
+        let expected: Value = serde_json::from_str(expected).unwrap();
+        assert_eq!(encoded, expected);
     }
 
     #[test]

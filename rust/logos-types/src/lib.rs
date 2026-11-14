@@ -48,9 +48,9 @@ pub use blur::Blur;
 pub use color::{Color, Gradient, GradientStop, GradientType};
 #[cfg(feature = "serde")]
 pub use document::{
-    apply_operation, decode_and_validate_json, stable_import_id, validate_document,
-    CompatibilityEnvelope, Document, DocumentOperation, Page, ShapeRecord, ValidationDiagnostic,
-    ValidationDiagnosticCode, DOCUMENT_SCHEMA_VERSION,
+    apply_operation, decode_and_validate_json, stable_import_id, stable_import_ids,
+    validate_document, CompatibilityEnvelope, Document, DocumentOperation, Page, ShapeRecord,
+    ValidationDiagnostic, ValidationDiagnosticCode, DOCUMENT_SCHEMA_VERSION,
 };
 pub use fill::Fill;
 pub use shadow::{Shadow, ShadowStyle};

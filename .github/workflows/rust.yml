@@ -97,7 +97,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.0
-          targets: wasm32-unknown-emscripten
+          targets: wasm32-unknown-emscripten,wasm32-unknown-unknown
           components: rustfmt
 
       - name: Cache Cargo artifacts
@@ -169,10 +169,42 @@ jobs:
       - name: Test Rust domain workspace
         run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
 
-      - name: Install Node.js for renderer packaging
+      - name: Install Node.js for candidate document WASM tests
         uses: actions/setup-node@v4
         with:
           node-version: 22.22.0
+
+      - name: Install wasm-pack for candidate document parity tests
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.13.1
+
+      - name: Run candidate document contract tests under Node WebAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          wasm-pack test --node rust/logos-types --features wasm \
+            2>&1 | tee "${RUNNER_TEMP}/g1-b2-wasm-conformance.log"
+          grep -E 'running [1-9][0-9]* tests?' \
+            "${RUNNER_TEMP}/g1-b2-wasm-conformance.log"
+
+      - name: Check out exact PR head for benchmark provenance
+        run: |
+          head_sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          git fetch --no-tags origin "$head_sha"
+          git checkout --detach "$head_sha"
+
+      - name: Run locked candidate-core benchmark with provenance
+        run: |
+          rust/logos-types/scripts/run_document_core_bench.sh \
+            | tee "${RUNNER_TEMP}/g1-b2-document-core-benchmark.jsonl"
+
+      - name: Upload candidate-core benchmark raw results
+        uses: actions/upload-artifact@v4
+        with:
+          name: g1-b2-document-core-benchmark-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/g1-b2-document-core-benchmark.jsonl
+          if-no-files-found: error
 
       - name: Install Emscripten SDK
         shell: bash
