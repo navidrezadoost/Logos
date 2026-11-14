@@ -155,12 +155,16 @@ try {
   await page.waitForFunction(() => {
     const shapes = Object.values(window.__a10.state().shapes);
     return shapes.some((shape) => shape.type === "vector-network") &&
-      document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY";
+      document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
+      document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_CAPABILITY";
   }, undefined, { timeout: 20000 });
   const vectorState = await getState();
   const vector = vectorState.shapes[vectorId];
   assert(vector?.vnAnchors?.length === 2 && vector.vnSegments?.length === 1, "Vector Network creation did not retain geometry");
-  assert((await page.getByTestId("inspector").textContent()).includes(vector.name), "Inspector did not retain the created Vector Network selection");
+  assert((await page.getByTestId("inspector").textContent()).includes(vector.name), "Inspector did not retain the rejected Vector Network selection");
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), vector.id);
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY", undefined, { timeout: 20000 });
+  assert.equal((await getState()).shapes[vector.id].vnAnchors.length, 2, "renderer recovery discarded Vector Network geometry");
 
   const componentId = await page.evaluate(() => window.__a10.createUnsupportedComponentForCompatibility());
   await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE" &&
