@@ -102,8 +102,11 @@ async function run(): Promise<void> {
   const heapMemory = () => (performance as Performance & { memory?: { usedJSHeapSize: number } })
     .memory?.usedJSHeapSize ?? null;
   const heapBeforeLifecycle = heapMemory();
+  const rejectedValidationMs: number[] = [];
   for (let cycle = 0; cycle < 5; cycle += 1) {
+    const rejectedStart = performance.now();
     const rejected = validateReactSnapshot(invalidParent, { validateDocumentJson: validate_document_json });
+    rejectedValidationMs.push(performance.now() - rejectedStart);
     assert(!rejected.ok && rejected.diagnostics.some((diagnostic) => diagnostic.code === "PARENT_CHILD_MISMATCH"),
       "repeated rejected-document validation changed outcome");
   }
@@ -117,11 +120,29 @@ async function run(): Promise<void> {
     "unsupported text property was silently discarded");
 
   const translatedParent = clone(fixture());
+  const translatedFrame = Object.values(translatedParent.shapes).find((item) => item.type === "frame")!;
   const translatedGroup = Object.values(translatedParent.shapes).find((item) => item.type === "group")!;
-  translatedGroup.bounds.x = 10;
+  const translatedRect = Object.values(translatedParent.shapes).find((item) => item.type === "rect")!;
+  translatedFrame.bounds = { ...translatedFrame.bounds, x: 100, y: 50 };
+  translatedGroup.bounds = { ...translatedGroup.bounds, x: 120, y: 70 };
+  translatedRect.bounds = { ...translatedRect.bounds, x: 125, y: 75 };
+  // Use importer-neutral identity matrices so this fixture tests only the
+  // established page-position to parent-local translation conversion.
+  translatedRect.transform = [1, 0, 0, 1, 0, 0];
   const coordinateResult = validateReactSnapshot(translatedParent, { validateDocumentJson: validate_document_json });
-  assert(!coordinateResult.ok && coordinateResult.issues.some((item) => item.code === "UNVERIFIED_COORDINATE_SPACE"),
-    "canvas-local bounds under a translated parent were reinterpreted as parent-local");
+  assert(coordinateResult.ok, `translated nested document rejected: ${JSON.stringify(coordinateResult)}`);
+  assert(JSON.stringify(canonical(coordinateResult.roundTrip)) === JSON.stringify(canonical(translatedParent)),
+    "translated frame/group/rectangle did not round-trip in page coordinates");
+  const translatedCandidate = coordinateResult.candidate as { shapes: Array<{ id: string; selrect: { x: number; y: number } }> };
+  const localRect = translatedCandidate.shapes.find((item) => item.id === translatedRect.id)?.selrect;
+  assert(localRect?.x === 5 && localRect.y === 5, "React page-space rect did not normalize to immediate-parent local coordinates");
+
+  const rotatedParent = clone(translatedParent);
+  const rotatedFrame = Object.values(rotatedParent.shapes).find((item) => item.type === "frame")!;
+  rotatedFrame.rotation = 15;
+  const rotatedCoordinateResult = validateReactSnapshot(rotatedParent, { validateDocumentJson: validate_document_json });
+  assert(!rotatedCoordinateResult.ok && rotatedCoordinateResult.issues.some((item) => item.code === "UNVERIFIED_COORDINATE_SPACE"),
+    "rotated parent with unresolved React pivot semantics did not fail closed");
 
   const noIdentity = clone(fixture());
   noIdentity.documentId = "caller-must-supply-uuid";
@@ -146,24 +167,36 @@ async function run(): Promise<void> {
     const validator = { validateDocumentJson: validate_document_json };
     const warmup = validateReactSnapshot(large, validator, () => wasmExports.memory.buffer.byteLength);
     assert(warmup.ok, `${count}-object warmup failed validation`);
-    const samples: Array<{ serializeMs: number; rustValidationMs: number; totalMs: number;
+    const samples: Array<{ mappingMs: number; geometryConversionMs: number; serializationMs: number;
+      wasmValidationBoundaryMs: number; rustResponseParseMs: number; resultMaterializationMs: number; totalMs: number;
       wasmLinearMemoryReservedBytes: number | null; jsHeapUsedBytes: number | null }> = [];
     for (let sample = 0; sample < 5; sample += 1) {
       const start = performance.now();
       const measured = validateReactSnapshot(large, validator, () => wasmExports.memory.buffer.byteLength);
       const totalMs = performance.now() - start;
       assert(measured.ok, `${count}-object fixture failed validation`);
-      samples.push({ serializeMs: measured.timingsMs.serialize,
-        rustValidationMs: measured.timingsMs.rustValidation, totalMs,
+      samples.push({ mappingMs: measured.timingsMs.mapping,
+        geometryConversionMs: measured.timingsMs.geometryConversion,
+        serializationMs: measured.timingsMs.serialization,
+        wasmValidationBoundaryMs: measured.timingsMs.wasmValidationBoundary,
+        rustResponseParseMs: measured.timingsMs.rustResponseParse,
+        resultMaterializationMs: measured.timingsMs.resultMaterialization,
+        totalMs,
         wasmLinearMemoryReservedBytes: measured.wasmMemoryBytes, jsHeapUsedBytes: heapMemory() });
       if (measured.wasmMemoryBytes !== null) memory.push(measured.wasmMemoryBytes);
     }
     measurements.push({
       objects: count, warmupRuns: 1, measuredRuns: samples.length,
-      serializeMs: { p50: percentile(samples.map((sample) => sample.serializeMs), 0.5),
-        p95: percentile(samples.map((sample) => sample.serializeMs), 0.95) },
-      rustValidationMs: { p50: percentile(samples.map((sample) => sample.rustValidationMs), 0.5),
-        p95: percentile(samples.map((sample) => sample.rustValidationMs), 0.95) },
+      stagesMs: Object.fromEntries([
+        ["mapping", samples.map((sample) => sample.mappingMs)],
+        ["geometryConversion", samples.map((sample) => sample.geometryConversionMs)],
+        ["serialization", samples.map((sample) => sample.serializationMs)],
+        ["wasmValidationBoundary", samples.map((sample) => sample.wasmValidationBoundaryMs)],
+        ["rustResponseParse", samples.map((sample) => sample.rustResponseParseMs)],
+        ["resultMaterialization", samples.map((sample) => sample.resultMaterializationMs)],
+      ].map(([stage, values]) => [stage, {
+        p50: percentile(values as number[], 0.5), p95: percentile(values as number[], 0.95),
+      }])),
       totalMs: { p50: percentile(samples.map((sample) => sample.totalMs), 0.5),
         p95: percentile(samples.map((sample) => sample.totalMs), 0.95) },
       wasmLinearMemoryReservedBytes: samples[samples.length - 1]?.wasmLinearMemoryReservedBytes ?? null,
@@ -202,8 +235,11 @@ async function run(): Promise<void> {
       issue: liveResult.ok ? null : liveResult.issues[0]?.code },
     supportedFixture: { shapes: Object.keys(snapshot.shapes).length, exactRoundTrip: true },
     invalidParentRustDiagnostic: invalid.diagnostics.map((item) => item.code),
+    rejectedValidationRuns: { count: rejectedValidationMs.length,
+      totalMs: { p50: percentile(rejectedValidationMs, 0.5), p95: percentile(rejectedValidationMs, 0.95) } },
     unsupportedFieldIssue: unsupportedResult.issues.map((item) => item.code),
-    translatedParentCoordinateIssue: coordinateResult.issues.map((item) => item.code),
+    translatedParentCoordinateRoundTrip: coordinateResult.ok,
+    rotatedParentCoordinateIssue: rotatedCoordinateResult.ok ? [] : rotatedCoordinateResult.issues.map((item) => item.code),
     storeUnchanged: true,
     localStorageWrites: storageWrites.length,
     indexedDbOpens: databaseOpens.length,
