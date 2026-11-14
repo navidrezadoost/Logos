@@ -226,9 +226,14 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   addShapes: (shapes) => {
     const state = get();
-    const incomingIds = new Set(shapes.map((shape) => shape?.id?.toLowerCase()));
+    if (!Array.isArray(shapes) || shapes.length === 0) throw new Error("LOGOS_COMPAT_ADD_REQUIRES_SHAPES");
     for (const shape of shapes) {
-      if (!shape || typeof shape.id !== "string") throw new Error("LOGOS_OPERATION_INVALID_SHAPE");
+      if (!shape || typeof shape.id !== "string" || (shape.parentId !== null && typeof shape.parentId !== "string")) {
+        throw new Error("LOGOS_OPERATION_INVALID_SHAPE");
+      }
+    }
+    const incomingIds = new Set(shapes.map((shape) => shape.id.toLowerCase()));
+    for (const shape of shapes) {
       if (shape.parentId !== null && !incomingIds.has(shape.parentId.toLowerCase())) {
         const owners = getShapePageOwners(state, shape.parentId);
         if (owners.length > 1 || (owners.length === 1 && owners[0] !== state.currentPageId)) {
