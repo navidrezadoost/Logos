@@ -38,6 +38,7 @@ export function Inspector(): React.ReactElement {
     setVariantProperty,
     resetInstance,
   } = useComponentStore();
+  const clearTokenPreview = useTokenWorkflowPreviewStore((state) => state.clearColor);
 
   const selected: Shape[] = selectedIds.flatMap((id) =>
     shapes[id] ? [shapes[id]] : []
@@ -68,7 +69,6 @@ export function Inspector(): React.ReactElement {
   const shape = selected[0];
   const solidFill = shape.fills.find((f): f is SolidFill => f.type === "solid");
   const solidFillIndex = shape.fills.findIndex((f) => f.type === "solid");
-  const clearTokenPreview = useTokenWorkflowPreviewStore((state) => state.clearColor);
 
   // Variable font axes — only shown for text shapes
   const isText = shape.type === "text";
