@@ -150,6 +150,39 @@ try {
   assert(recoveredPixel[3] > 0, `recreated renderer did not redraw the retained document: ${recoveredPixel}`);
   evidence.checks.push("Poisoned WASM module rejected further uploads and recreated with fresh module/context");
 
+  await page.evaluate(() => window.__a10.stage("Pen-created Vector Network compatibility diagnostics"));
+  await page.keyboard.press("p");
+  const penStart = await canvasPoint(500, 320);
+  const penEnd = await canvasPoint(540, 350);
+  await page.mouse.click(penStart.x, penStart.y);
+  await page.mouse.click(penEnd.x, penEnd.y);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => {
+    const status = document.querySelector("[data-renderer-status]");
+    const shapes = Object.values(window.__a10.state().shapes);
+    return shapes.some((shape) => shape.type === "vector-network") &&
+      status?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE" &&
+      status.getAttribute("data-renderer-diagnostic") === "LOGOS_RENDER_UNSUPPORTED_SHAPE";
+  }, undefined, { timeout: 20000 });
+  let legacyState = await getState();
+  const penVector = Object.values(legacyState.shapes).find((shape) => shape.type === "vector-network");
+  assert(penVector?.vnAnchors?.length === 2 && penVector.vnSegments?.length === 1, "Pen-created Vector Network geometry was not retained");
+  assert((await page.getByTestId("inspector").textContent()).includes(penVector.name), "Inspector did not retain selection for unsupported vector content");
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), penVector.id);
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY", undefined, { timeout: 20000 });
+  legacyState = await getState();
+  assert.equal(legacyState.shapes[penVector.id].vnAnchors.length, 2, "renderer recovery discarded unsupported geometry data");
+
+  const replacementEvidence = await page.evaluate(() => window.__a10.replaceTwoVectorNetworks());
+  legacyState = await getState();
+  assert.equal(legacyState.shapes[replacementEvidence.firstId], undefined, "multi-shape replacement left its first input behind");
+  assert.equal(legacyState.shapes[replacementEvidence.secondId], undefined, "multi-shape replacement left its second input behind");
+  assert.equal(legacyState.shapes[replacementEvidence.replacementId].type, "vector-network", "replacement was not retained as a Vector Network");
+  assert.deepEqual(replacementEvidence.rootsAfter.filter((id) => id !== replacementEvidence.replacementId), replacementEvidence.rootsBefore, "replacement changed the relative root order of unaffected shapes");
+  assert.deepEqual(replacementEvidence.selection, [replacementEvidence.replacementId], "selection did not reconcile to the replacement shape");
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
+  evidence.checks.push("Pen-created vector geometry retained with an explicit unsupported-renderer diagnostic; multi-vector replacement and selection/root-order reconciliation");
+
   evidence.status = "passed";
   evidence.environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, platform: navigator.platform, logicalProcessors: navigator.hardwareConcurrency, deviceMemoryGiB: navigator.deviceMemory ?? null, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }, wasmReservedBytes: window.__a10.wasmReservedBytes() }));
   evidence.rendererInstances = await page.evaluate(() => window.__a10.rendererInstances());

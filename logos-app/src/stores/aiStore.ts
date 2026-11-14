@@ -191,12 +191,13 @@ function runTemplate(
     const tpl = TEMPLATES.find((t) => t.keywords.some((kw) => lower.includes(kw)));
     if (!tpl) return null;
 
-    const { addShape } = useDocumentStore.getState();
-    const shapeIds: string[] = [];
+    const { addShapes } = useDocumentStore.getState();
+    const generated: Shape[] = [];
     tpl.generate(
-        (s: Shape) => { addShape(s); shapeIds.push(s.id); },
+        (s: Shape) => { generated.push(s); },
         x, y, width
     );
+    const shapeIds = addShapes(generated);
     return { label: tpl.label, shapeIds };
 }
 
@@ -439,7 +440,7 @@ export const useAiStore = create<AiState>((set) => ({
 
         setTimeout(() => {
             try {
-                const { shapes, addShape } = useDocumentStore.getState();
+                const { shapes, addShapes } = useDocumentStore.getState();
                 const allShapes = Object.values(shapes);
                 const source = shapes[frameId] ?? allShapes.find((s) => s.name === frameId);
 
@@ -454,7 +455,7 @@ export const useAiStore = create<AiState>((set) => ({
                 const gap = 80;
                 const rowY = sy + sh + gap;
                 let cursorX = sx;
-                const created: string[] = [];
+                const generated: Shape[] = [];
 
                 for (const targetW of widths) {
                     const scale = targetW / sw;
@@ -465,10 +466,12 @@ export const useAiStore = create<AiState>((set) => ({
                         bounds: { x: cursorX, y: rowY, w: targetW, h: Math.round(sh * scale) },
                         children: [],
                     };
-                    addShape(dup);
-                    created.push(dup.name);
+                    generated.push(dup);
                     cursorX += targetW + gap;
                 }
+
+                addShapes(generated);
+                const created = generated.map((shape) => shape.name);
 
                 pushMsg(set, "assistant",
                     `Created ${created.length} breakpoint frame(s): ${created.join(", ")}.`);

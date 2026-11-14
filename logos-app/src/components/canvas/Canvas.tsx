@@ -108,7 +108,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
     layersPanelOpen, toggleLayersPanel,
   } = useUiStore();
   const { addShape, addVectorNetwork, addInstanceShape, updateShape } = useDocumentStore();
-  const { createInstance, components } = useComponentStore();
+  const { createInstance, removeInstance, components } = useComponentStore();
 
   // Pen tool state
   const pen = usePenStore();
@@ -607,7 +607,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
         );
         // Rename to Line/Arrow N
         const created = useDocumentStore.getState().shapes[id];
-        if (created) addShape({ ...created, name: `${label} ${count}` });
+        if (created) updateShape(id, { name: `${label} ${count}` });
         select(id);
 
       } else if (activeTool === "polygon") {
@@ -725,7 +725,12 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
         const w = masterShape?.bounds.w ?? 200;
         const h = masterShape?.bounds.h ?? 100;
 
-        addInstanceShape(instanceId, comp.name, { x: canvasX, y: canvasY, w, h }, meta);
+        try {
+          addInstanceShape(instanceId, comp.name, { x: canvasX, y: canvasY, w, h }, meta);
+        } catch (error) {
+          removeInstance(instanceId);
+          console.error("[Canvas] Instance document insertion was rejected", error);
+        }
       }}
     >
       {hierarchyNotice && <div role="status" aria-live="polite" data-testid="hierarchy-operation-diagnostic" style={{ position: "absolute", zIndex: 2, left: 8, top: 8, padding: "4px 8px", borderRadius: 4, background: theme.error, color: theme.text }}>{hierarchyNotice}</div>}

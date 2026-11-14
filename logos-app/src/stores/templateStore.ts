@@ -116,10 +116,8 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         if (!tpl) return;
 
         const cloned = cloneShapes(tpl.shapes, offsetX, offsetY);
-        const { addShape } = useDocumentStore.getState();
-        for (const shape of cloned) {
-            addShape(shape);
-        }
+        const { addShapes } = useDocumentStore.getState();
+        addShapes(cloned);
 
         set({ lastInserted: tpl.name, galleryOpen: false });
 

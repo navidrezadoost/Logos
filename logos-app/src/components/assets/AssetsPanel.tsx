@@ -60,7 +60,7 @@ function ComponentRow({
   componentId: string;
   name: string;
 }): React.ReactElement {
-  const { createInstance } = useComponentStore();
+  const { createInstance, removeInstance } = useComponentStore();
   const { shapes, addInstanceShape } = useDocumentStore();
 
   // Compute a suitable default bounds for a new instance: same size as the
@@ -76,7 +76,12 @@ function ComponentRow({
     const bounds = buildDefaultBounds();
     const instanceId = crypto.randomUUID();
     const meta = createInstance(instanceId, componentId);
-    addInstanceShape(instanceId, name, bounds, meta);
+    try {
+      addInstanceShape(instanceId, name, bounds, meta);
+    } catch (error) {
+      removeInstance(instanceId);
+      console.error("[AssetsPanel] Instance document insertion was rejected", error);
+    }
   }
 
   function onDragStart(e: React.DragEvent<HTMLDivElement>) {

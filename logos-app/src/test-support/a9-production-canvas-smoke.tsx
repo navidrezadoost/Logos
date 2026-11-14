@@ -112,11 +112,13 @@ base.shapes[redId].parentId = groupId;
 base.shapes[groupId] = group;
 
 function installScene(page: Page, shapes: Record<string, Shape>): void {
-  useDocumentStore.setState((state) => ({
+  const result = useDocumentStore.getState().hydrateDocument({
     currentPageId: page.id,
-    pages: { ...state.pages, [page.id]: page },
+    pages: { [page.id]: page },
+    pageOrder: [page.id],
     shapes,
-  }));
+  });
+  assert(result.ok, `test fixture failed hydration: ${result.ok ? "" : result.diagnostic.code}`);
 }
 
 async function instrumentedLoader(jsUrl: string, wasmUrl: string): Promise<RenderWasmModule | null> {
