@@ -15,7 +15,21 @@ export interface RustTokenEngine {
   validatePlan(snapshot: TokenSnapshot, intent: UserIntent, context: DocumentContext, plan: ProposedPlan): ValidationResult;
 }
 
-export async function loadRustTokenEngine(wasmUrl: string): Promise<RustTokenEngine> {
+const enginesByUrl = new Map<string, Promise<RustTokenEngine>>();
+
+export function loadRustTokenEngine(wasmUrl: string): Promise<RustTokenEngine> {
+  const cached = enginesByUrl.get(wasmUrl);
+  if (cached) return cached;
+
+  const pending = initializeRustTokenEngine(wasmUrl).catch((error: unknown) => {
+    if (enginesByUrl.get(wasmUrl) === pending) enginesByUrl.delete(wasmUrl);
+    throw error;
+  });
+  enginesByUrl.set(wasmUrl, pending);
+  return pending;
+}
+
+async function initializeRustTokenEngine(wasmUrl: string): Promise<RustTokenEngine> {
   const response = await fetch(wasmUrl);
   if (!response.ok) throw new Error(`Rust token engine unavailable (${response.status})`);
   const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {});

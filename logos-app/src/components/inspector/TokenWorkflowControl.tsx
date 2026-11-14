@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTokenWorkflowPreviewStore } from "../../stores/tokenWorkflowPreviewStore";
 import type { ResolveRequest, TokenDiagnostic, ValidationResult } from "../../tokens/contract";
-import { loadRustTokenEngine, type RustTokenEngine } from "../../tokens/rustTokenEngine";
+import { loadRustTokenEngine } from "../../tokens/rustTokenEngine";
 import {
   createTokenValuePreview,
   createTokenWorkflowProposal,
@@ -11,12 +11,6 @@ import {
 
 declare const __LOGOS_TOKENS_WASM__: string | undefined;
 const TOKEN_WASM_URL = typeof __LOGOS_TOKENS_WASM__ !== "undefined" ? __LOGOS_TOKENS_WASM__ : "/js/logos_tokens_wasm.wasm";
-let enginePromise: Promise<RustTokenEngine> | undefined;
-
-function loadEngine(): Promise<RustTokenEngine> {
-  enginePromise ??= loadRustTokenEngine(TOKEN_WASM_URL);
-  return enginePromise;
-}
 
 function statusDiagnostics(result: ValidationResult): TokenDiagnostic[] {
   return result.diagnostics.length ? result.diagnostics : result.impact.diagnostics;
@@ -61,7 +55,7 @@ export function TokenWorkflowControl({ shapeId, fillHex, fillIndex }: { shapeId:
     setStatus("Loading Rust token engine…");
     try {
       const proposal = createTokenWorkflowProposal(shapeId, fillHex, name, fillIndex);
-      const engine = await loadEngine();
+      const engine = await loadRustTokenEngine(TOKEN_WASM_URL);
       setStatus("Resolving selected fill in Rust…");
       const directRequest: ResolveRequest = {
         contractVersion: "0.1.0", snapshotRevision: proposal.snapshot.revision, propertyType: "color",
@@ -93,7 +87,7 @@ export function TokenWorkflowControl({ shapeId, fillHex, fillIndex }: { shapeId:
     setDiagnostics([]);
     setStatus("Loading Rust token engine…");
     try {
-      const engine = await loadEngine();
+      const engine = await loadRustTokenEngine(TOKEN_WASM_URL);
       setStatus("Validating token value preview in Rust…");
       const currentExpression = session.definition.values[0].expression;
       const snapshot = snapshotWithDefinition(session, currentExpression);
