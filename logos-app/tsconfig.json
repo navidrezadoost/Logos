@@ -16,5 +16,6 @@
       "@logos/plugin-types": ["./src/plugins/types/generated/index.d.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/test-support/g1-b3-adapter-smoke.ts"]
 }

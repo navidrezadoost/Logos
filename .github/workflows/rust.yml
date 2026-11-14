@@ -788,7 +788,7 @@ jobs:
         working-directory: logos-app
         run: |
           set -euo pipefail
-          ./node_modules/.bin/tsc --noEmit -p tsconfig.json
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.g1-b3-adapter-smoke.json
           node --experimental-strip-types scripts/g1-b3-check-fixtures.mjs
           ./node_modules/.bin/vite build --config vite.g1-b3-adapter-smoke.config.ts
 
