@@ -45,6 +45,21 @@ export interface AdapterIssue {
   path: string;
 }
 
+export interface AdapterTimings {
+  mapping: number;
+  geometryConversion: number;
+  serialization: number;
+  wasmValidationBoundary: number;
+  rustResponseParse: number;
+  resultMaterialization: number;
+}
+
+type TimedConversion = { mapping: number; geometryConversion: number };
+
+function conversionTimings(start: number, geometryConversion: number): TimedConversion {
+  return { mapping: Math.max(0, performance.now() - start - geometryConversion), geometryConversion };
+}
+
 export type ReactAdapterResult =
   | {
       ok: true;
@@ -52,7 +67,7 @@ export type ReactAdapterResult =
       candidate: Record<string, unknown>;
       roundTrip: ReactDocumentSnapshot;
       diagnostics: [];
-      timingsMs: { serialize: number; rustValidation: number };
+      timingsMs: AdapterTimings;
       wasmMemoryBytes: number | null;
     }
   | {
@@ -60,7 +75,7 @@ export type ReactAdapterResult =
       adapterVersion: typeof G1_B3_ADAPTER_VERSION;
       issues: AdapterIssue[];
       diagnostics: RustDiagnostic[];
-      timingsMs: { serialize: number; rustValidation: number };
+      timingsMs: AdapterTimings;
       wasmMemoryBytes: number | null;
     };
 
@@ -109,33 +124,78 @@ function isDefaultUnsupported(key: string, value: unknown): boolean {
     key !== "parentId" && key !== "children" && value !== undefined;
 }
 
-function deriveFrameId(shape: Shape, shapes: Record<string, Shape>): string | null {
-  const seen = new Set<string>();
-  let parentId = shape.parentId;
-  while (parentId) {
-    if (seen.has(parentId)) return null; // Rust reports the graph cycle.
-    seen.add(parentId);
-    const parent = shapes[parentId];
-    if (!parent) return null; // Rust reports the missing parent.
-    if (parent.type === "frame") return parent.id;
-    parentId = parent.parentId;
+function deriveFrameIds(shapes: Record<string, Shape>): Map<string, string | null> {
+  const membership = new Map<string, string | null>();
+  for (const startId of Object.keys(shapes)) {
+    if (membership.has(startId)) continue;
+    const path: string[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = startId;
+    while (cursor && !membership.has(cursor) && !seen.has(cursor)) {
+      const current: Shape | undefined = shapes[cursor];
+      if (!current) break; // Rust owns missing-parent diagnostics.
+      seen.add(cursor);
+      path.push(cursor);
+      cursor = current.parentId;
+    }
+    // Resolve nearest enclosing Frame from parent links, caching every visited
+    // node so a deep document is processed once rather than walking all
+    // ancestors independently for each shape.
+    for (const id of path.reverse()) {
+      const current: Shape = shapes[id];
+      const parentId = current.parentId;
+      const parent = parentId ? shapes[parentId] : undefined;
+      membership.set(id, parent?.type === "frame" ? parent.id : parentId ? membership.get(parentId) ?? null : null);
+    }
   }
-  return null;
+  return membership;
 }
 
-function hasEquivalentParentSpace(shape: Shape, shapes: Record<string, Shape>): boolean {
+function hasSupportedParentSpace(
+  shape: Shape,
+  shapes: Record<string, Shape>,
+  cache: Map<string, boolean>,
+): boolean {
+  const path: string[] = [];
   const seen = new Set<string>();
-  let parentId = shape.parentId;
+  let parentId: string | null = shape.id;
+  let supported = true;
   while (parentId) {
-    if (seen.has(parentId)) return true; // Rust owns cycle diagnostics.
+    const known = cache.get(parentId);
+    if (known !== undefined) {
+      supported = known;
+      break;
+    }
+    if (seen.has(parentId)) break; // Rust owns cycle diagnostics.
     seen.add(parentId);
-    const parent = shapes[parentId];
-    if (!parent) return true; // Rust owns missing-parent diagnostics.
-    if (parent.bounds.x !== 0 || parent.bounds.y !== 0 ||
-        parent.transform.some((value, index) => value !== [1, 0, 0, 1, 0, 0][index])) return false;
-    parentId = parent.parentId;
+    const current: Shape | undefined = shapes[parentId];
+    if (!current) break; // Rust owns missing-parent diagnostics.
+    // React currently stores child bounds in page coordinates. Pure parent
+    // translations can be normalized exactly; rotation/scale/skew require
+    // source transform and pivot semantics that remain unverified.
+    const hasUnverifiedTransform = current.rotation !== 0 || current.transform.some((value, index) =>
+      value !== [1, 0, 0, 1, 0, 0][index]);
+    if (current.id !== shape.id && hasUnverifiedTransform) {
+      supported = false;
+      break;
+    }
+    path.push(current.id);
+    parentId = current.parentId;
   }
-  return true;
+  for (const id of path) cache.set(id, supported);
+  cache.set(shape.id, supported);
+  return supported;
+}
+
+function parentLocalBounds(shape: Shape, shapes: Record<string, Shape>): Shape["bounds"] {
+  if (!shape.parentId) return { ...shape.bounds };
+  const parent = shapes[shape.parentId];
+  if (!parent) return { ...shape.bounds }; // Keep missing-parent diagnostics in Rust.
+  return {
+    ...shape.bounds,
+    x: shape.bounds.x - parent.bounds.x,
+    y: shape.bounds.y - parent.bounds.y,
+  };
 }
 
 type FillConversion = { ok: true; value: Record<string, unknown> } | { ok: false; issue: AdapterIssue };
@@ -151,10 +211,12 @@ function fillToRust(fill: unknown, path: string): FillConversion {
 
 /** Convert a one-page Zustand-shaped snapshot to the candidate Rust envelope. */
 export function toRustCandidate(input: unknown):
-  | { ok: true; candidate: Record<string, unknown> }
-  | { ok: false; issues: AdapterIssue[] } {
+  | ({ ok: true; candidate: Record<string, unknown> } & TimedConversion)
+  | ({ ok: false; issues: AdapterIssue[] } & TimedConversion) {
+  const mappingStart = performance.now();
+  let geometryConversion = 0;
   const issues: AdapterIssue[] = [];
-  if (!isRecord(input)) return { ok: false, issues: [issue("INVALID_SNAPSHOT", "/")] };
+  if (!isRecord(input)) return { ok: false, issues: [issue("INVALID_SNAPSHOT", "/")], ...conversionTimings(mappingStart, geometryConversion) };
   for (const key of Object.keys(input)) {
     if (!["documentId", "pages", "pageOrder", "shapes"].includes(key)) {
       issues.push(issue("UNSUPPORTED_PROPERTY", `/${key}`));
@@ -166,7 +228,7 @@ export function toRustCandidate(input: unknown):
   }
   if (!Array.isArray(input.pageOrder) || input.pageOrder.length !== 1 ||
       typeof input.pageOrder[0] !== "string" || !isRecord(input.pages) || !isRecord(input.shapes)) {
-    return { ok: false, issues: [...issues, issue("INVALID_SNAPSHOT", "/pages")] };
+    return { ok: false, issues: [...issues, issue("INVALID_SNAPSHOT", "/pages")], ...conversionTimings(mappingStart, geometryConversion) };
   }
   const pageId = input.pageOrder[0];
   if (Object.keys(input.pages).length !== 1 || Object.keys(input.pages)[0] !== pageId) {
@@ -190,6 +252,8 @@ export function toRustCandidate(input: unknown):
     }
   }
   const shapes = input.shapes as Record<string, Shape>;
+  const parentSpaceCache = new Map<string, boolean>();
+  const frameIdByShape = deriveFrameIds(shapes);
   const shapeRecords: Record<string, unknown>[] = [];
   for (const [key, raw] of Object.entries(shapes)) {
     const path = `/shapes/${key}`;
@@ -225,7 +289,7 @@ export function toRustCandidate(input: unknown):
       issues.push(issue("INVALID_SNAPSHOT", `${path}/children`));
     }
     if (!shape.parentId && shape.parentId !== null) issues.push(issue("INVALID_SNAPSHOT", `${path}/parentId`));
-    if (shape.parentId && !hasEquivalentParentSpace(shape, shapes)) {
+    if (shape.parentId && !hasSupportedParentSpace(shape, shapes, parentSpaceCache)) {
       issues.push(issue("UNVERIFIED_COORDINATE_SPACE", `${path}/bounds`));
     }
     if (typeof shape.name !== "string" || typeof shape.hidden !== "boolean" ||
@@ -238,12 +302,17 @@ export function toRustCandidate(input: unknown):
         id: shape.id,
         type,
         name: shape.name,
-        selrect: { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h },
+        selrect: (() => {
+          const geometryStart = performance.now();
+          const local = parentLocalBounds(shape, shapes);
+          geometryConversion += performance.now() - geometryStart;
+          return { x: local.x, y: local.y, width: local.w, height: local.h };
+        })(),
         transform: matrixObject(transform as Transform),
         "transform-inverse": matrixObject(transformInverse),
         rotation: shape.rotation,
         "parent-id": shape.parentId,
-        "frame-id": deriveFrameId(shape, shapes),
+        "frame-id": frameIdByShape.get(shape.id) ?? null,
         shapes: [...shape.children],
         hidden: shape.hidden,
         opacity: shape.opacity,
@@ -253,9 +322,14 @@ export function toRustCandidate(input: unknown):
       });
     }
   }
-  if (issues.length > 0 || pageRecord === null) return { ok: false, issues: issues.length ? issues : [issue("INVALID_SNAPSHOT", "/pages")] };
+  if (issues.length > 0 || pageRecord === null) return {
+    ok: false,
+    issues: issues.length ? issues : [issue("INVALID_SNAPSHOT", "/pages")],
+    ...conversionTimings(mappingStart, geometryConversion),
+  };
   return {
     ok: true,
+    ...conversionTimings(mappingStart, geometryConversion),
     candidate: {
       id: documentId,
       "schema-version": 1,
@@ -270,6 +344,31 @@ function fromRustDocument(document: Record<string, unknown>): ReactDocumentSnaps
   const records = document.shapes as Array<Record<string, unknown>>;
   const page = pages[0];
   const pageId = page.id as string;
+  const recordsById = new Map(records.map((record) => [record.id as string, record]));
+  const worldOrigins = new Map<string, { x: number; y: number }>();
+  const resolveWorldOrigin = (id: string): { x: number; y: number } => {
+    const cached = worldOrigins.get(id);
+    if (cached) return cached;
+    const path: string[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = id;
+    while (cursor && !worldOrigins.has(cursor)) {
+      if (seen.has(cursor)) throw new Error(`Cycle while projecting validated shape ${cursor}`);
+      seen.add(cursor);
+      const record = recordsById.get(cursor);
+      if (!record) throw new Error(`Missing validated shape ${cursor}`);
+      path.push(cursor);
+      cursor = (record["parent-id"] as string | null | undefined) ?? null;
+    }
+    let origin = cursor ? worldOrigins.get(cursor)! : { x: 0, y: 0 };
+    for (const pathId of path.reverse()) {
+      const record = recordsById.get(pathId)!;
+      const selrect = record.selrect as Record<string, number>;
+      origin = { x: origin.x + selrect.x, y: origin.y + selrect.y };
+      worldOrigins.set(pathId, origin);
+    }
+    return worldOrigins.get(id)!;
+  };
   const shapes: Record<string, Shape> = {};
   for (const record of records) {
     const id = record.id as string;
@@ -278,11 +377,12 @@ function fromRustDocument(document: Record<string, unknown>): ReactDocumentSnaps
     if (typeof locked !== "boolean") throw new Error(`Missing locked extension for ${id}`);
     const matrix = record.transform as Record<string, number>;
     const selrect = record.selrect as Record<string, number>;
+    const origin = resolveWorldOrigin(id);
     shapes[id] = {
       id,
       type: record.type as Shape["type"],
       name: record.name as string,
-      bounds: { x: selrect.x, y: selrect.y, w: selrect.width, h: selrect.height },
+      bounds: { x: origin.x, y: origin.y, w: selrect.width, h: selrect.height },
       transform: [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f],
       rotation: record.rotation as number,
       fills: rustFills.map((fill) => ({
@@ -312,36 +412,63 @@ export function validateReactSnapshot(
   rust: RustDocumentValidator,
   wasmMemoryBytes: () => number | null = () => null,
 ): ReactAdapterResult {
-  const serializationStart = performance.now();
   const converted = toRustCandidate(input);
-  const json = converted.ok ? JSON.stringify(converted.candidate) : null;
-  const serialize = performance.now() - serializationStart;
-  if (!converted.ok || json === null) return {
+  const emptyTimings = (serialization = 0, wasmValidationBoundary = 0,
+    rustResponseParse = 0, resultMaterialization = 0): AdapterTimings => ({
+      mapping: converted.mapping,
+      geometryConversion: converted.geometryConversion,
+      serialization,
+      wasmValidationBoundary,
+      rustResponseParse,
+      resultMaterialization,
+    });
+  if (!converted.ok) return {
     ok: false, adapterVersion: G1_B3_ADAPTER_VERSION, issues: converted.ok ? [issue("INVALID_SNAPSHOT", "/")] : converted.issues,
-    diagnostics: [], timingsMs: { serialize, rustValidation: 0 }, wasmMemoryBytes: wasmMemoryBytes(),
+    diagnostics: [], timingsMs: emptyTimings(), wasmMemoryBytes: wasmMemoryBytes(),
+  };
+  const serializationStart = performance.now();
+  const json = JSON.stringify(converted.candidate);
+  const serialization = performance.now() - serializationStart;
+  if (json === undefined) return {
+    ok: false, adapterVersion: G1_B3_ADAPTER_VERSION, issues: [issue("INVALID_SNAPSHOT", "/")],
+    diagnostics: [], timingsMs: emptyTimings(serialization), wasmMemoryBytes: wasmMemoryBytes(),
   };
   const validationStart = performance.now();
-  let result: RustValidationResult;
+  let response: string;
   try {
-    result = JSON.parse(rust.validateDocumentJson(json)) as RustValidationResult;
+    response = rust.validateDocumentJson(json);
   } catch {
     return { ok: false, adapterVersion: G1_B3_ADAPTER_VERSION,
       issues: [issue("INVALID_RUST_RESPONSE", "/")], diagnostics: [],
-      timingsMs: { serialize, rustValidation: performance.now() - validationStart }, wasmMemoryBytes: wasmMemoryBytes() };
+      timingsMs: emptyTimings(serialization, performance.now() - validationStart), wasmMemoryBytes: wasmMemoryBytes() };
   }
-  const rustValidation = performance.now() - validationStart;
+  const wasmValidationBoundary = performance.now() - validationStart;
+  const parseStart = performance.now();
+  let result: RustValidationResult;
+  try {
+    result = JSON.parse(response) as RustValidationResult;
+  } catch {
+    return { ok: false, adapterVersion: G1_B3_ADAPTER_VERSION,
+      issues: [issue("INVALID_RUST_RESPONSE", "/")], diagnostics: [],
+      timingsMs: emptyTimings(serialization, wasmValidationBoundary, performance.now() - parseStart), wasmMemoryBytes: wasmMemoryBytes() };
+  }
+  const rustResponseParse = performance.now() - parseStart;
   if (!result || typeof result.ok !== "boolean" || !Array.isArray(result.diagnostics)) {
     return { ok: false, adapterVersion: G1_B3_ADAPTER_VERSION,
       issues: [issue("INVALID_RUST_RESPONSE", "/")], diagnostics: [],
-      timingsMs: { serialize, rustValidation }, wasmMemoryBytes: wasmMemoryBytes() };
+      timingsMs: emptyTimings(serialization, wasmValidationBoundary, rustResponseParse), wasmMemoryBytes: wasmMemoryBytes() };
   }
   if (!result.ok || !result.document) return {
     ok: false, adapterVersion: G1_B3_ADAPTER_VERSION, issues: [], diagnostics: result.diagnostics,
-    timingsMs: { serialize, rustValidation }, wasmMemoryBytes: wasmMemoryBytes(),
+    timingsMs: emptyTimings(serialization, wasmValidationBoundary, rustResponseParse), wasmMemoryBytes: wasmMemoryBytes(),
   };
+  const materializationStart = performance.now();
+  const roundTrip = fromRustDocument(result.document);
+  const resultMaterialization = performance.now() - materializationStart;
   return {
     ok: true, adapterVersion: G1_B3_ADAPTER_VERSION, candidate: result.document,
-    roundTrip: fromRustDocument(result.document), diagnostics: [],
-    timingsMs: { serialize, rustValidation }, wasmMemoryBytes: wasmMemoryBytes(),
+    roundTrip, diagnostics: [],
+    timingsMs: emptyTimings(serialization, wasmValidationBoundary, rustResponseParse, resultMaterialization),
+    wasmMemoryBytes: wasmMemoryBytes(),
   };
 }
