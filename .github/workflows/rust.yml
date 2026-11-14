@@ -97,7 +97,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.93.0
-          targets: wasm32-unknown-emscripten
+          targets: wasm32-unknown-emscripten,wasm32-unknown-unknown
           components: rustfmt
 
       - name: Cache Cargo artifacts
@@ -169,10 +169,18 @@ jobs:
       - name: Test Rust domain workspace
         run: cargo test --manifest-path rust/Cargo.toml --workspace --locked
 
-      - name: Install Node.js for renderer packaging
+      - name: Install Node.js for candidate document WASM tests
         uses: actions/setup-node@v4
         with:
           node-version: 22.22.0
+
+      - name: Install wasm-pack for candidate document parity tests
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.13.1
+
+      - name: Run candidate document contract tests under Node WebAssembly
+        run: wasm-pack test --node rust/logos-types --features wasm
 
       - name: Install Emscripten SDK
         shell: bash
