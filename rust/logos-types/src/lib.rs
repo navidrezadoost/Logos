@@ -36,9 +36,9 @@ pub mod color;
 #[cfg(feature = "serde")]
 pub mod document;
 
-/// Narrow browser ABI for read-only validation of candidate documents.
-#[cfg(feature = "wasm")]
-mod wasm_api;
+/// Pure affine coordinate conversions used by the candidate document adapter.
+pub mod document_geometry;
+
 pub mod fill;
 pub mod geometry;
 pub mod shadow;
@@ -46,6 +46,9 @@ pub mod shape;
 pub mod stroke;
 pub mod token;
 pub mod typography;
+/// Narrow browser ABI for read-only validation of candidate documents.
+#[cfg(feature = "wasm")]
+mod wasm_api;
 
 // ── Convenience re-exports ────────────────────────────────────────
 pub use blur::Blur;

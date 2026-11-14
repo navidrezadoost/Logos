@@ -1,0 +1,18 @@
+{
+  "fixtureVersion": "g1-b4-coordinate-golden/v1",
+  "tolerance": 0.000001,
+  "cases": [
+    {"name":"root-rectangle","chain":[],"point":[2,3],"worldPoint":[2,3],"worldMatrix":[1,0,0,1,0,0],"inverse":[1,0,0,1,0,0]},
+    {"name":"translated-frame-rectangle","chain":[[1,0,0,1,100,50]],"point":[2,3],"worldPoint":[102,53],"worldMatrix":[1,0,0,1,100,50],"inverse":[1,0,0,1,-100,-50]},
+    {"name":"nested-frame-in-frame","chain":[[1,0,0,1,100,50],[1,0,0,1,20,10]],"point":[2,3],"worldPoint":[122,63],"worldMatrix":[1,0,0,1,120,60],"inverse":[1,0,0,1,-120,-60]},
+    {"name":"group-in-translated-frame","chain":[[1,0,0,1,30,40],[1,0,0,1,5,6]],"point":[1,2],"worldPoint":[36,48],"worldMatrix":[1,0,0,1,35,46],"inverse":[1,0,0,1,-35,-46]},
+    {"name":"rotated-parent","chain":[[0,1,-1,0,0,0]],"point":[2,3],"worldPoint":[-3,2],"worldMatrix":[0,1,-1,0,0,0],"inverse":[0,-1,1,0,0,0]},
+    {"name":"scaled-parent","chain":[[2,0,0,3,0,0]],"point":[2,3],"worldPoint":[4,9],"worldMatrix":[2,0,0,3,0,0],"inverse":[0.5,0,0,0.3333333333333333,0,0]},
+    {"name":"rotation-and-translation","chain":[[1,0,0,1,10,-4],[0,1,-1,0,0,0]],"point":[2,3],"worldPoint":[7,-2],"worldMatrix":[0,1,-1,0,10,-4],"inverse":[0,-1,1,0,4,10]},
+    {"name":"negative-coordinates","chain":[[1,0,0,1,-20,-30]],"point":[-2,-3],"worldPoint":[-22,-33],"worldMatrix":[1,0,0,1,-20,-30],"inverse":[1,0,0,1,20,30]},
+    {"name":"reparent-preserve-world","chain":[[1,0,0,1,100,20],[1,0,0,1,10,5]],"point":[1,2],"worldPoint":[111,27],"worldMatrix":[1,0,0,1,110,25],"inverse":[1,0,0,1,-110,-25],"newParent":[1,0,0,1,-40,30],"expectedNewLocal":[1,0,0,1,150,-5]},
+    {"name":"singular-parent-rejects-inverse","chain":[[0,0,0,1,0,0]],"point":[1,2],"error":"SingularMatrix"},
+    {"name":"xd-artboard-to-frame","chain":[[1,0,0,1,100,200],[1,0,0,1,20,30]],"point":[0,0],"worldPoint":[120,230],"worldMatrix":[1,0,0,1,120,230],"inverse":[1,0,0,1,-120,-230],"newParent":[1,0,0,1,100,200],"expectedNewLocal":[1,0,0,1,20,30]},
+    {"name":"deep-transform-composition","chain":[[1,0,0,1,1,0],[1,0,0,1,0,2],[2,0,0,2,0,0],[1,0,0,1,3,4]],"point":[1,1],"worldPoint":[9,12],"worldMatrix":[2,0,0,2,7,10],"inverse":[0.5,0,0,0.5,-3.5,-5]}
+  ]
+}
