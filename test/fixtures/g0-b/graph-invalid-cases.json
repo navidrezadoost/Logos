@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "name": "duplicate-id",
+      "pageRoots": ["a"],
+      "nodes": [{"id":"a","parent":null,"children":["b"]},{"id":"b","parent":"a","children":[]},{"id":"b","parent":"a","children":[]}],
+      "expectedInvariant": "IDs are unique within document scope"
+    },
+    {
+      "name": "dangling-child",
+      "pageRoots": ["a"],
+      "nodes": [{"id":"a","parent":null,"children":["missing"]}],
+      "expectedInvariant": "every child reference resolves to one node"
+    },
+    {
+      "name": "parent-cycle",
+      "pageRoots": ["a"],
+      "nodes": [{"id":"a","parent":"b","children":["b"]},{"id":"b","parent":"a","children":["a"]}],
+      "expectedInvariant": "parent relation is acyclic and root reachable"
+    },
+    {
+      "name": "backlink-mismatch",
+      "pageRoots": ["a"],
+      "nodes": [{"id":"a","parent":null,"children":["b"]},{"id":"b","parent":null,"children":[]}],
+      "expectedInvariant": "parent and ordered child relation agree"
+    }
+  ]
+}

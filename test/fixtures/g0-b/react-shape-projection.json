@@ -1,0 +1,14 @@
+{
+  "id": "f0000000-0000-4000-8000-000000000003",
+  "type": "rect",
+  "name": "React rectangle",
+  "bounds": { "x": 10, "y": 20, "w": 80, "h": 40 },
+  "transform": [1, 0, 0, 1, 10, 20],
+  "rotation": 0,
+  "fills": [{ "type": "solid", "color": "#336699", "opacity": 1 }],
+  "opacity": 1,
+  "hidden": false,
+  "locked": false,
+  "parentId": null,
+  "children": []
+}
