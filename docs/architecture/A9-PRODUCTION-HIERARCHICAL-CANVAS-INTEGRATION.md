@@ -44,7 +44,7 @@ The Canvas2D fallback remains a flat compatibility path. It accepts only flat, u
 
 ## Browser and performance evidence
 
-`test-harness/a9-production-canvas-smoke.html` mounts the production `Canvas` and `LayersPanel`, loads the actual Emscripten renderer, and reads the Rust renderer framebuffer. It distinguishes fixture/store-injected mutations from implemented pointer gestures. The report includes the browser user agent, WebGL renderer/vendor, logical CPU count, viewport, device pixel ratio, WASM buffer size, observed Chromium heap when available, and per-render timing samples.
+`test-harness/a9-production-canvas-smoke.html` mounts the production `Canvas` and `LayersPanel`, loads the actual Emscripten renderer, and reads the Rust renderer framebuffer. Playwright drives the runner-installed Chromium on its real-time event loop (without a virtual-time budget), saves the browser DOM report, and fails if the frame clock never advances. It distinguishes fixture/store-injected mutations from implemented pointer gestures. The report includes the browser user agent, WebGL renderer/vendor, logical CPU count, viewport, device pixel ratio, WASM buffer size, observed Chromium heap when available, and per-render timing samples.
 
 The timing fields are:
 
