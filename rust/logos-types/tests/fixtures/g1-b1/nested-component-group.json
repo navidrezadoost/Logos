@@ -1,0 +1,10 @@
+{
+  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "schema-version": 1,
+  "pages": [{ "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "name": "Components", "root-shape-ids": ["cccccccc-cccc-4ccc-8ccc-cccccccccccc"] }],
+  "shapes": [
+    { "page-id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "type": "component", "name": "Button", "selrect": { "x": 0, "y": 0, "width": 20, "height": 20 }, "transform": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 0, "f": 0 }, "transform-inverse": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 0, "f": 0 }, "shapes": ["dddddddd-dddd-4ddd-8ddd-dddddddddddd"] },
+    { "page-id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "type": "group", "name": "Content", "parent-id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc", "selrect": { "x": 0, "y": 0, "width": 20, "height": 20 }, "transform": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 0, "f": 0 }, "transform-inverse": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 0, "f": 0 }, "shapes": ["eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"] },
+    { "page-id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", "type": "rect", "name": "Label background", "parent-id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd", "selrect": { "x": 0, "y": 0, "width": 20, "height": 20 }, "transform": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 0, "f": 0 }, "transform-inverse": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 0, "f": 0 } }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "33333333-3333-4333-8333-333333333333",
+  "type": "rect",
+  "name": "React-only shape",
+  "bounds": { "x": 1, "y": 2, "width": 30, "height": 40 },
+  "transform": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 1, "f": 2 },
+  "rotation": 0,
+  "fills": [],
+  "opacity": 1,
+  "hidden": false,
+  "locked": false,
+  "parentId": null,
+  "children": [],
+  "text": "Not represented in the Rust DTO"
+}

@@ -1,0 +1,7 @@
+{
+  "source": "xd-importer-fixture",
+  "artboards": [
+    { "id": "artboard-1", "name": "Artboard", "children": [{ "id": "shape-1", "type": "rect", "bounds": { "x": 0, "y": 0, "width": 10, "height": 10 } }] }
+  ],
+  "responsiveConstraints": { "shape-1": "source-only" }
+}
