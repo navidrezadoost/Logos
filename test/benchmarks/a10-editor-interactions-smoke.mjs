@@ -108,6 +108,9 @@ try {
   evidence.checks.push("Root reordering and axis-aligned reparent with world-space bounds preserved");
 
   // Select a descendant in Layers, then remove its owning frame through its layer menu.
+  // Close the Rectangle's still-open action menu first so it cannot cover the
+  // child row and intercept a real pointer click.
+  await row.locator("summary").click();
   await page.locator(`[data-layer-id="${child.id}"]`).click();
   row = await openLayerMenu(frame.id);
   await ready("delete subtree through Layers", () => row.getByRole("button", { name: "Delete Renamed Frame" }).click());
