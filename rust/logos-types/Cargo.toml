@@ -23,7 +23,7 @@ crate-type = ["cdylib", "rlib"]
 default = ["serde"]
 # Enable serde serialization (always-on in practice; behind a feature so
 # pure-native benchmarks can opt out without pulling in serde).
-serde   = ["dep:serde", "uuid/serde", "chrono/serde", "logos-layout/serde"]
+serde   = ["dep:serde", "dep:serde_json", "uuid/serde", "chrono/serde", "logos-layout/serde"]
 # wasm-bindgen glue for browser targets.
 wasm    = ["wasm-bindgen"]
 # TypeScript type generation.
@@ -37,7 +37,7 @@ ts      = []
 
 [dependencies]
 # UUID generation + serialization.
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "js"] }
 
 # Timestamp fields for registry entities.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -47,6 +47,7 @@ logos-layout = { path = "../logos-layout" }
 
 # Serialization — gated so wasm builds can drop it if needed.
 serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 
 # WASM glue — only for browser builds.
 wasm-bindgen = { version = "0.2", optional = true }
