@@ -18,7 +18,7 @@ import {
   cleanUp,
   type RenderWasmModule,
 } from "../../render-wasm/module";
-import { projectAndSyncScene, syncScene2D } from "../../render-wasm/scene";
+import { projectAndSyncScene, syncScene2D, UnsupportedCanvas2DShapeError } from "../../render-wasm/scene";
 import {
   rendererFailureStatus,
   SceneRejectedRenderError,
@@ -213,11 +213,10 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
           });
         });
       } else {
+        const unsupportedType = pageScene.shapes.find((shape) => shape.type !== "rect" && shape.type !== "frame");
+        if (unsupportedType) throw new UnsupportedCanvas2DShapeError(unsupportedType.id, String(unsupportedType.type));
         const unsupported = pageScene.shapes.find((shape) =>
           shape.parentId !== null || !Array.isArray(shape.children) || shape.children.length > 0 ||
-          shape.type === "group" || shape.type === "bool" || shape.type === "path" ||
-          shape.type === "text" || shape.type === "svg-raw" || shape.type === "component" ||
-          shape.type === "instance" || shape.type === "vector-network" ||
           shape.rotation !== 0 || !Array.isArray(shape.transform) || shape.transform.length !== 6 ||
           shape.transform.some((value, index) => value !== [1, 0, 0, 1, 0, 0][index]) ||
           !Array.isArray(shape.fills) || shape.fills.length > 1 || shape.fills.some((fill) => fill.type !== "solid")
