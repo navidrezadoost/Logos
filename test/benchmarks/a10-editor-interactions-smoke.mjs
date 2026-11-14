@@ -153,20 +153,26 @@ try {
   await page.evaluate(() => window.__a10.stage("Vector Network compatibility creation diagnostics"));
   const vectorId = await page.evaluate(() => window.__a10.createVectorNetworkForCompatibility());
   await page.waitForFunction(() => {
-    const status = document.querySelector("[data-renderer-status]");
     const shapes = Object.values(window.__a10.state().shapes);
     return shapes.some((shape) => shape.type === "vector-network") &&
-      status?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE" &&
-      status.getAttribute("data-renderer-diagnostic") === "LOGOS_RENDER_UNSUPPORTED_SHAPE";
+      document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY";
   }, undefined, { timeout: 20000 });
-  let legacyState = await getState();
-  const vector = legacyState.shapes[vectorId];
+  const vectorState = await getState();
+  const vector = vectorState.shapes[vectorId];
   assert(vector?.vnAnchors?.length === 2 && vector.vnSegments?.length === 1, "Vector Network creation did not retain geometry");
-  assert((await page.getByTestId("inspector").textContent()).includes(vector.name), "Inspector did not retain selection for unsupported vector content");
-  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), vector.id);
+  assert((await page.getByTestId("inspector").textContent()).includes(vector.name), "Inspector did not retain the created Vector Network selection");
+
+  const componentId = await page.evaluate(() => window.__a10.createUnsupportedComponentForCompatibility());
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE" &&
+    document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_RENDER_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
+  let legacyState = await getState();
+  const component = legacyState.shapes[componentId];
+  assert.deepEqual(component.vendorExtension, { sentinel: "preserved-by-compatibility-operation" }, "compatibility add discarded an unknown visual extension");
+  assert((await page.getByTestId("inspector").textContent()).includes(component.name), "Inspector did not retain selection for unsupported component content");
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), componentId);
   await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY", undefined, { timeout: 20000 });
   legacyState = await getState();
-  assert.equal(legacyState.shapes[vector.id].vnAnchors.length, 2, "renderer recovery discarded unsupported geometry data");
+  assert.deepEqual(legacyState.shapes[componentId].vendorExtension, { sentinel: "preserved-by-compatibility-operation" }, "renderer recovery discarded preserved extension data");
 
   const replacementEvidence = await page.evaluate(() => window.__a10.replaceTwoVectorNetworks());
   legacyState = await getState();
@@ -176,7 +182,7 @@ try {
   assert.deepEqual(replacementEvidence.rootsAfter.filter((id) => id !== replacementEvidence.replacementId), replacementEvidence.rootsBefore, "replacement changed the relative root order of unaffected shapes");
   assert.deepEqual(replacementEvidence.selection, [replacementEvidence.replacementId], "selection did not reconcile to the replacement shape");
   await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
-  evidence.checks.push("Vector Network creation retained geometry with an explicit unsupported-renderer diagnostic; multi-vector replacement and selection/root-order reconciliation");
+  evidence.checks.push("Vector Network creation rendered with retained geometry; unsupported legacy component data persisted across diagnostic and recovery; multi-vector replacement and selection/root-order reconciliation");
 
   evidence.status = "passed";
   evidence.environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, platform: navigator.platform, logicalProcessors: navigator.hardwareConcurrency, deviceMemoryGiB: navigator.deviceMemory ?? null, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }, wasmReservedBytes: window.__a10.wasmReservedBytes() }));

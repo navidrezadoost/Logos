@@ -17,6 +17,7 @@ type WindowHarness = Window & {
     selection: () => string[];
     addPage: () => string;
     createVectorNetworkForCompatibility: () => string;
+    createUnsupportedComponentForCompatibility: () => string;
     setShapeFlags: (id: string, flags: { hidden?: boolean; locked?: boolean }) => void;
     rejectInvalidChild: (parentId: string) => boolean;
     setShapeTypeForCompatibilityRecovery: (id: string) => void;
@@ -106,6 +107,25 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
   addPage: () => useDocumentStore.getState().addPage("A10 second page"),
   createVectorNetworkForCompatibility: () => {
     const id = useDocumentStore.getState().addVectorNetwork([{ x: 90, y: 280 }, { x: 120, y: 310 }], [{ s: 0, e: 1 }]);
+    useSelectionStore.getState().select(id);
+    return id;
+  },
+  createUnsupportedComponentForCompatibility: () => {
+    const store = useDocumentStore.getState();
+    const base = Object.values(store.shapes).find((shape) => shape.type === "rect");
+    if (!base) throw new Error("Create a rectangle before adding the compatibility component fixture");
+    const id = crypto.randomUUID();
+    store.addShape({
+      ...base,
+      id,
+      type: "component",
+      name: "A10 unsupported compatibility component",
+      bounds: { ...base.bounds, x: base.bounds.x + 40 },
+      parentId: null,
+      children: [],
+      componentMeta: { properties: {} },
+      vendorExtension: { sentinel: "preserved-by-compatibility-operation" },
+    } as Shape);
     useSelectionStore.getState().select(id);
     return id;
   },
