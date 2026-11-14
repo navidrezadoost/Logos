@@ -245,6 +245,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "logos-tokens-wasm"
+version = "0.1.0"
+dependencies = [
+ "logos-tokens",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "logos-types"
 version = "0.1.0"
 dependencies = [

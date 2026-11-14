@@ -1,0 +1,15 @@
+[package]
+name = "logos-tokens-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "JSON-in/JSON-out WASM bridge for the Logos design-token contract engine"
+license-file = "../../LICENSE"
+repository = "https://github.com/navidrezadoost/Logos"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+logos-tokens = { path = "../logos-tokens" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

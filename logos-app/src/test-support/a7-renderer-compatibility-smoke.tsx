@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { Canvas } from "../components/canvas/Canvas";
 import { Inspector } from "../components/inspector/Inspector";
 import { LayersPanel } from "../components/layers/LayersPanel";
@@ -166,12 +167,25 @@ async function run(): Promise<void> {
   setStage("single-persistent-diagnostic-and-editor-access");
   document.querySelector<HTMLButtonElement>("[data-testid='test-page-navigation'] button")!.click();
   assert(navigationClicks === 1, "canvas notice blocked document navigation");
-  document.querySelector<HTMLButtonElement>("[data-testid='renderer-compatibility-overlay'] button")!.click();
+  const widthBeforeResize = canvas.width;
+  flushSync(() => document.querySelector<HTMLButtonElement>("[data-testid='renderer-compatibility-overlay'] button")!.click());
   assert(useSelectionStore.getState().selectedIds.includes(unsupportedId), "recovery action did not select the incompatible shape");
   assert(useUiStore.getState().layersPanelOpen, "recovery action did not open Layers");
-  await nextPaint();
-  const reflowedOverlay = document.querySelector<HTMLElement>("[data-testid='renderer-compatibility-overlay']");
-  assert(reflowedOverlay?.dataset.frameDisposition === "none", "resized canvas was incorrectly labelled as showing the previous frame");
+  await waitFor(() => document.querySelector<HTMLElement>("[data-testid='test-layers-panel']"), "Layers panel to commit after recovery action");
+  let reflowedOverlay: HTMLElement;
+  try {
+    reflowedOverlay = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>("[data-testid='renderer-compatibility-overlay']");
+      return canvas.width < widthBeforeResize && element?.dataset.frameDisposition === "none" ? element : null;
+    }, "resized canvas to clear stale-frame status");
+  } catch (error) {
+    const bounds = (element: Element | null) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height, clientWidth: (element as HTMLElement).clientWidth, clientHeight: (element as HTMLElement).clientHeight };
+    };
+    throw new Error(`${String(error)}; canvas=${canvas.width}x${canvas.height}; canvasRect=${JSON.stringify(bounds(canvas))}; rendererContainer=${JSON.stringify(bounds(canvas.parentElement))}; parent=${JSON.stringify(bounds(canvas.parentElement?.parentElement ?? null))}; app=${JSON.stringify(bounds(document.getElementById("app")))}; layers=${JSON.stringify(bounds(document.querySelector("[data-testid='test-layers-panel']")))}`);
+  }
   assert(reflowedOverlay.innerText.includes("No current frame is available"), "cleared pixels were not identified to the user");
   assert(document.querySelector("[data-testid='test-layers-panel']")?.textContent?.includes("Legacy component"), "Layers did not reveal the selected shape");
   const inspector = document.querySelector<HTMLElement>("[data-testid='test-inspector']");
