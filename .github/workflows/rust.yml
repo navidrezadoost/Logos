@@ -180,7 +180,13 @@ jobs:
           version: v0.13.1
 
       - name: Run candidate document contract tests under Node WebAssembly
-        run: wasm-pack test --node rust/logos-types --features wasm
+        shell: bash
+        run: |
+          set -euo pipefail
+          wasm-pack test --node rust/logos-types --features wasm \
+            2>&1 | tee "${RUNNER_TEMP}/g1-b2-wasm-conformance.log"
+          grep -E 'running [1-9][0-9]* tests?' \
+            "${RUNNER_TEMP}/g1-b2-wasm-conformance.log"
 
       - name: Check out exact PR head for benchmark provenance
         run: |
