@@ -148,6 +148,9 @@ function makeProjectedFakeModule() {
       calls.dimensions = [width, height];
       failAfter("resize");
     },
+    _set_view(zoom, panX, panY) {
+      calls.view = [zoom, panX, panY];
+    },
     _begin_scene_upload(capacity) {
       calls.begin++;
       calls.active = { capacity, base: [], children: [] };
