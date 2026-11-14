@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/document-core/react-adapter.ts",
+    "src/test-support/g1-b3-adapter-smoke.ts"
+  ],
+  "exclude": []
+}

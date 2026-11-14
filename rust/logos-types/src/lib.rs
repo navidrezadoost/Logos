@@ -35,6 +35,10 @@ pub mod blur;
 pub mod color;
 #[cfg(feature = "serde")]
 pub mod document;
+
+/// Narrow browser ABI for read-only validation of candidate documents.
+#[cfg(feature = "wasm")]
+mod wasm_api;
 pub mod fill;
 pub mod geometry;
 pub mod shadow;

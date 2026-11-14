@@ -15,6 +15,10 @@ on:
       - "logos-app/src/render-wasm/**"
       - "logos-app/src/stores/**"
       - "logos-app/src/test-support/**"
+      - "logos-app/src/document-core/**"
+      - "logos-app/g1-b3-adapter-smoke.html"
+      - "logos-app/vite.g1-b3-adapter-smoke.config.ts"
+      - "test/benchmarks/g1-b3-adapter-browser.mjs"
       - "logos-app/test-harness/**"
       - "logos-app/vite.renderer-smoke.config.ts"
       - "test/fixtures/p0-document-compat/**"
@@ -763,3 +767,75 @@ jobs:
             ${{ runner.temp }}/hierarchy-renderer-smoke-dom.html
             ${{ runner.temp }}/hierarchy-renderer-smoke-chrome.log
             ${{ runner.temp }}/hierarchy-renderer-preview.log
+
+      - name: Build candidate document validation WASM
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path rust/Cargo.toml -p logos-types \
+            --target wasm32-unknown-unknown --features wasm --release --locked
+
+      - name: Install matching wasm-bindgen CLI
+        run: cargo install --locked --version 0.2.126 wasm-bindgen-cli
+
+      - name: Generate browser bindings for candidate document validation
+        run: |
+          set -euo pipefail
+          wasm-bindgen --target web \
+            --out-dir logos-app/src/document-core/rust-wasm \
+            rust/target/wasm32-unknown-unknown/release/logos_types.wasm
+
+      - name: Build read-only React/Rust adapter browser harness
+        working-directory: logos-app
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.g1-b3-adapter-smoke.json
+          node --experimental-strip-types scripts/g1-b3-check-fixtures.mjs
+          ./node_modules/.bin/vite build --config vite.g1-b3-adapter-smoke.config.ts
+
+      - name: Verify read-only React/Rust adapter in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+
+          npm ci --prefix test/benchmarks --ignore-scripts --no-audit --no-fund
+
+          (
+            cd logos-app
+            ./node_modules/.bin/vite preview \
+              --config vite.g1-b3-adapter-smoke.config.ts \
+              --host 127.0.0.1 --port 4177
+          ) >"$RUNNER_TEMP/g1-b3-adapter-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4177/g1-b3-adapter-smoke.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4177/g1-b3-adapter-smoke.html >/dev/null
+          G1_B3_CHROME="$chrome_bin" \
+          G1_B3_EVIDENCE_PATH="$RUNNER_TEMP/g1-b3-adapter-smoke-dom.html" \
+            node test/benchmarks/g1-b3-adapter-browser.mjs
+
+          if ! grep -q 'data-status="passed"' "$RUNNER_TEMP/g1-b3-adapter-smoke-dom.html"; then
+            cat "$RUNNER_TEMP/g1-b3-adapter-smoke-dom.html"
+            cat "$RUNNER_TEMP/g1-b3-adapter-preview.log"
+            exit 1
+          fi
+
+      - name: Preserve G1-B3 browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g1-b3-react-rust-adapter-browser-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/g1-b3-adapter-smoke-dom.html
+            ${{ runner.temp }}/g1-b3-adapter-preview.log
