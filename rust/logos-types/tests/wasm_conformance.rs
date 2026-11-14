@@ -1,4 +1,4 @@
-#![cfg(all(target_arch = "wasm32", feature = "wasm"))]
+#![cfg(target_arch = "wasm32")]
 
 mod conformance_vectors;
 

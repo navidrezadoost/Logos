@@ -183,7 +183,10 @@ jobs:
         run: wasm-pack test --node rust/logos-types --features wasm
 
       - name: Check out exact PR head for benchmark provenance
-        run: git checkout --detach "${{ github.event.pull_request.head.sha || github.sha }}"
+        run: |
+          head_sha="${{ github.event.pull_request.head.sha || github.sha }}"
+          git fetch --no-tags origin "$head_sha"
+          git checkout --detach "$head_sha"
 
       - name: Run locked candidate-core benchmark with provenance
         run: |
