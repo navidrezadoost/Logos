@@ -3,6 +3,7 @@ target/
 node_modules/
 **/node_modules/
 logos-app/.renderer-scene-smoke/
+logos-app/src/document-core/rust-wasm/
 logos-wasm/dist/
 .cpcache/
 **/.cpcache/

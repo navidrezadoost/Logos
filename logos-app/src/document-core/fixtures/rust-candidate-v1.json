@@ -1,0 +1,186 @@
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "schema-version": 1,
+  "pages": [
+    {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "name": "Supported React fixture",
+      "root-shape-ids": [
+        "33333333-3333-4333-8333-333333333333",
+        "66666666-6666-4666-8666-666666666666"
+      ]
+    }
+  ],
+  "shapes": [
+    {
+      "page-id": "22222222-2222-4222-8222-222222222222",
+      "id": "33333333-3333-4333-8333-333333333333",
+      "type": "frame",
+      "name": "Outer frame",
+      "selrect": {
+        "x": 0,
+        "y": 0,
+        "width": 500,
+        "height": 300
+      },
+      "transform": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": 0,
+        "f": 0
+      },
+      "transform-inverse": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": 0,
+        "f": 0
+      },
+      "rotation": 0,
+      "parent-id": null,
+      "frame-id": null,
+      "shapes": [
+        "44444444-4444-4444-8444-444444444444"
+      ],
+      "hidden": false,
+      "opacity": 1,
+      "masked-group": false,
+      "fills": [
+        {
+          "fill-type": "solid",
+          "fill-color": "#ffffff",
+          "fill-opacity": 1
+        }
+      ],
+      "react-locked": false
+    },
+    {
+      "page-id": "22222222-2222-4222-8222-222222222222",
+      "id": "44444444-4444-4444-8444-444444444444",
+      "type": "group",
+      "name": "Nested group",
+      "selrect": {
+        "x": 0,
+        "y": 0,
+        "width": 220,
+        "height": 140
+      },
+      "transform": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": 0,
+        "f": 0
+      },
+      "transform-inverse": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": 0,
+        "f": 0
+      },
+      "rotation": 0,
+      "parent-id": "33333333-3333-4333-8333-333333333333",
+      "frame-id": "33333333-3333-4333-8333-333333333333",
+      "shapes": [
+        "55555555-5555-4555-8555-555555555555"
+      ],
+      "hidden": false,
+      "opacity": 0.9,
+      "masked-group": false,
+      "fills": [],
+      "react-locked": true
+    },
+    {
+      "page-id": "22222222-2222-4222-8222-222222222222",
+      "id": "55555555-5555-4555-8555-555555555555",
+      "type": "rect",
+      "name": "Coral rectangle",
+      "selrect": {
+        "x": 25,
+        "y": 35,
+        "width": 180,
+        "height": 90
+      },
+      "transform": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": 25,
+        "f": 35
+      },
+      "transform-inverse": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": -25,
+        "f": -35
+      },
+      "rotation": 12,
+      "parent-id": "44444444-4444-4444-8444-444444444444",
+      "frame-id": "33333333-3333-4333-8333-333333333333",
+      "shapes": [],
+      "hidden": false,
+      "opacity": 0.8,
+      "masked-group": false,
+      "fills": [
+        {
+          "fill-type": "solid",
+          "fill-color": "#ff8577",
+          "fill-opacity": 0.75
+        }
+      ],
+      "react-locked": false
+    },
+    {
+      "page-id": "22222222-2222-4222-8222-222222222222",
+      "id": "66666666-6666-4666-8666-666666666666",
+      "type": "rect",
+      "name": "Second ordered root",
+      "selrect": {
+        "x": 600,
+        "y": 40,
+        "width": 80,
+        "height": 50
+      },
+      "transform": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": 600,
+        "f": 40
+      },
+      "transform-inverse": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 1,
+        "e": -600,
+        "f": -40
+      },
+      "rotation": 0,
+      "parent-id": null,
+      "frame-id": null,
+      "shapes": [],
+      "hidden": true,
+      "opacity": 1,
+      "masked-group": false,
+      "fills": [
+        {
+          "fill-type": "solid",
+          "fill-color": "#336699",
+          "fill-opacity": 1
+        }
+      ],
+      "react-locked": false
+    }
+  ]
+}
