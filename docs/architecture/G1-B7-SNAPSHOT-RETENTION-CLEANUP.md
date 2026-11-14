@@ -45,10 +45,12 @@ identified as historical, against source revision
 - **EXPIRED:** the matching system pre-restore `file_change` and snapshot
   `file_data` expiries have passed. The Go list/restore path hides/rejects it;
   current Go code may still retain its bytes.
-- **PURGED:** matching snapshot payload bytes are absent after a committed
-  cleanup operation. Metadata may remain for diagnostics unless a separately
-  authorized policy removes it. A missing payload must report unavailable and
-  must never be restored as empty content.
+- **PURGED:** the matching snapshot payload row is absent after a committed
+  cleanup operation. PostgreSQL may reclaim table/TOAST disk space later
+  through vacuum; row deletion is not secure erasure and does not guarantee an
+  immediate reduction in allocated storage. Metadata may remain for diagnostics
+  unless a separately authorized policy removes it. A missing payload must
+  report unavailable and must never be restored as empty content.
 
 The compatibility window remains 48 hours. This does not set a physical purge
 SLA. The historical daily job, where operated, may run later than the logical
