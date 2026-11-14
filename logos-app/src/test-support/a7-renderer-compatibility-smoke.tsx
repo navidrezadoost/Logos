@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 import { Canvas } from "../components/canvas/Canvas";
 import { Inspector } from "../components/inspector/Inspector";
 import { LayersPanel } from "../components/layers/LayersPanel";
@@ -167,9 +168,10 @@ async function run(): Promise<void> {
   document.querySelector<HTMLButtonElement>("[data-testid='test-page-navigation'] button")!.click();
   assert(navigationClicks === 1, "canvas notice blocked document navigation");
   const widthBeforeResize = canvas.width;
-  document.querySelector<HTMLButtonElement>("[data-testid='renderer-compatibility-overlay'] button")!.click();
+  flushSync(() => document.querySelector<HTMLButtonElement>("[data-testid='renderer-compatibility-overlay'] button")!.click());
   assert(useSelectionStore.getState().selectedIds.includes(unsupportedId), "recovery action did not select the incompatible shape");
   assert(useUiStore.getState().layersPanelOpen, "recovery action did not open Layers");
+  await waitFor(() => document.querySelector<HTMLElement>("[data-testid='test-layers-panel']"), "Layers panel to commit after recovery action");
   let reflowedOverlay: HTMLElement;
   try {
     reflowedOverlay = await waitFor(() => {
