@@ -610,7 +610,7 @@ export function Canvas(): React.ReactElement {
       ref={containerRef}
       data-renderer-status={rendererStatus?.state ?? "IDLE"}
       data-renderer-backend={rendererStatus?.backend ?? mode}
-      style={{ flex: 1, position: "relative", overflow: "hidden", background: theme.canvas, cursor }}
+      style={{ flex: 1, minWidth: 0, position: "relative", overflow: "hidden", background: theme.canvas, cursor }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
