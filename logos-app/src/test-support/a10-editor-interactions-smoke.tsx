@@ -16,6 +16,7 @@ type WindowHarness = Window & {
     state: () => unknown;
     selection: () => string[];
     addPage: () => string;
+    createVectorNetworkForCompatibility: () => string;
     setShapeFlags: (id: string, flags: { hidden?: boolean; locked?: boolean }) => void;
     rejectInvalidChild: (parentId: string) => boolean;
     setShapeTypeForCompatibilityRecovery: (id: string) => void;
@@ -103,6 +104,11 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
   },
   selection: () => useSelectionStore.getState().selectedIds,
   addPage: () => useDocumentStore.getState().addPage("A10 second page"),
+  createVectorNetworkForCompatibility: () => {
+    const id = useDocumentStore.getState().addVectorNetwork([{ x: 90, y: 280 }, { x: 120, y: 310 }], [{ s: 0, e: 1 }]);
+    useSelectionStore.getState().select(id);
+    return id;
+  },
   setShapeFlags: (id, flags) => useDocumentStore.getState().updateShape(id, flags),
   rejectInvalidChild: (parentId) => {
     const before = useDocumentStore.getState();

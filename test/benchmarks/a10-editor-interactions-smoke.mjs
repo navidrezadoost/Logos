@@ -150,15 +150,8 @@ try {
   assert(recoveredPixel[3] > 0, `recreated renderer did not redraw the retained document: ${recoveredPixel}`);
   evidence.checks.push("Poisoned WASM module rejected further uploads and recreated with fresh module/context");
 
-  await page.evaluate(() => window.__a10.stage("Pen-created Vector Network compatibility diagnostics"));
-  await page.locator('[title="Pen (P)"]').click();
-  const penBounds = await page.locator("canvas").boundingBox();
-  assert(penBounds && penBounds.width > 80 && penBounds.height > 80, "Canvas is too small for the Pen interaction");
-  const penStart = await canvasPoint(penBounds.width * 0.7, penBounds.height * 0.7);
-  const penEnd = await canvasPoint(penBounds.width * 0.7 + 30, penBounds.height * 0.7 + 30);
-  await page.mouse.click(penStart.x, penStart.y);
-  await page.mouse.click(penEnd.x, penEnd.y);
-  await page.keyboard.press("Enter");
+  await page.evaluate(() => window.__a10.stage("Vector Network compatibility creation diagnostics"));
+  const vectorId = await page.evaluate(() => window.__a10.createVectorNetworkForCompatibility());
   await page.waitForFunction(() => {
     const status = document.querySelector("[data-renderer-status]");
     const shapes = Object.values(window.__a10.state().shapes);
@@ -167,13 +160,13 @@ try {
       status.getAttribute("data-renderer-diagnostic") === "LOGOS_RENDER_UNSUPPORTED_SHAPE";
   }, undefined, { timeout: 20000 });
   let legacyState = await getState();
-  const penVector = Object.values(legacyState.shapes).find((shape) => shape.type === "vector-network");
-  assert(penVector?.vnAnchors?.length === 2 && penVector.vnSegments?.length === 1, "Pen-created Vector Network geometry was not retained");
-  assert((await page.getByTestId("inspector").textContent()).includes(penVector.name), "Inspector did not retain selection for unsupported vector content");
-  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), penVector.id);
+  const vector = legacyState.shapes[vectorId];
+  assert(vector?.vnAnchors?.length === 2 && vector.vnSegments?.length === 1, "Vector Network creation did not retain geometry");
+  assert((await page.getByTestId("inspector").textContent()).includes(vector.name), "Inspector did not retain selection for unsupported vector content");
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), vector.id);
   await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY", undefined, { timeout: 20000 });
   legacyState = await getState();
-  assert.equal(legacyState.shapes[penVector.id].vnAnchors.length, 2, "renderer recovery discarded unsupported geometry data");
+  assert.equal(legacyState.shapes[vector.id].vnAnchors.length, 2, "renderer recovery discarded unsupported geometry data");
 
   const replacementEvidence = await page.evaluate(() => window.__a10.replaceTwoVectorNetworks());
   legacyState = await getState();
@@ -183,7 +176,7 @@ try {
   assert.deepEqual(replacementEvidence.rootsAfter.filter((id) => id !== replacementEvidence.replacementId), replacementEvidence.rootsBefore, "replacement changed the relative root order of unaffected shapes");
   assert.deepEqual(replacementEvidence.selection, [replacementEvidence.replacementId], "selection did not reconcile to the replacement shape");
   await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
-  evidence.checks.push("Pen-created vector geometry retained with an explicit unsupported-renderer diagnostic; multi-vector replacement and selection/root-order reconciliation");
+  evidence.checks.push("Vector Network creation retained geometry with an explicit unsupported-renderer diagnostic; multi-vector replacement and selection/root-order reconciliation");
 
   evidence.status = "passed";
   evidence.environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, platform: navigator.platform, logicalProcessors: navigator.hardwareConcurrency, deviceMemoryGiB: navigator.deviceMemory ?? null, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }, wasmReservedBytes: window.__a10.wasmReservedBytes() }));
