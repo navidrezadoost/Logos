@@ -170,10 +170,20 @@ async function run(): Promise<void> {
   document.querySelector<HTMLButtonElement>("[data-testid='renderer-compatibility-overlay'] button")!.click();
   assert(useSelectionStore.getState().selectedIds.includes(unsupportedId), "recovery action did not select the incompatible shape");
   assert(useUiStore.getState().layersPanelOpen, "recovery action did not open Layers");
-  const reflowedOverlay = await waitFor(() => {
-    const element = document.querySelector<HTMLElement>("[data-testid='renderer-compatibility-overlay']");
-    return canvas.width < widthBeforeResize && element?.dataset.frameDisposition === "none" ? element : null;
-  }, "resized canvas to clear stale-frame status");
+  let reflowedOverlay: HTMLElement;
+  try {
+    reflowedOverlay = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>("[data-testid='renderer-compatibility-overlay']");
+      return canvas.width < widthBeforeResize && element?.dataset.frameDisposition === "none" ? element : null;
+    }, "resized canvas to clear stale-frame status");
+  } catch (error) {
+    const bounds = (element: Element | null) => {
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { width: rect.width, height: rect.height, clientWidth: (element as HTMLElement).clientWidth, clientHeight: (element as HTMLElement).clientHeight };
+    };
+    throw new Error(`${String(error)}; canvas=${canvas.width}x${canvas.height}; canvasRect=${JSON.stringify(bounds(canvas))}; rendererContainer=${JSON.stringify(bounds(canvas.parentElement))}; parent=${JSON.stringify(bounds(canvas.parentElement?.parentElement ?? null))}; app=${JSON.stringify(bounds(document.getElementById("app")))}; layers=${JSON.stringify(bounds(document.querySelector("[data-testid='test-layers-panel']")))}`);
+  }
   assert(reflowedOverlay.innerText.includes("No current frame is available"), "cleared pixels were not identified to the user");
   assert(document.querySelector("[data-testid='test-layers-panel']")?.textContent?.includes("Legacy component"), "Layers did not reveal the selected shape");
   const inspector = document.querySelector<HTMLElement>("[data-testid='test-inspector']");
