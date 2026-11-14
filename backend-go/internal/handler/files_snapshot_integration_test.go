@@ -21,8 +21,27 @@ import (
 func snapshotFixture(t *testing.T, payload []byte) (*db.Pool, string, string) {
 	t.Helper()
 	pool := openTestDB(t)
-	profileID := createTestProfile(t, pool)
-	_, projectID := createTestTeamAndProject(t, pool, profileID)
+	var profileID string
+	if err := pool.QueryRow(context.Background(), `
+		INSERT INTO profile (email, password, fullname, lang, theme)
+		VALUES ('snapshot-'||gen_random_uuid()||'@example.com', 'test-only-not-an-auth-credential', 'Snapshot Test User', 'en', 'default')
+		RETURNING id::text`).Scan(&profileID); err != nil {
+		t.Fatalf("create snapshot test profile: %v", err)
+	}
+	teamID, projectID := integrationUUID(t), integrationUUID(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO team (id,name) VALUES ($1,'Snapshot integrity test team')`, teamID); err != nil {
+		t.Fatalf("create snapshot test team: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO team_profile_rel (team_id,profile_id,is_owner,is_admin,can_edit) VALUES ($1,$2,true,true,true)`, teamID, profileID); err != nil {
+		t.Fatalf("grant snapshot test team access: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO project (id,team_id,name) VALUES ($1,$2,'Snapshot integrity test project')`, projectID, teamID); err != nil {
+		t.Fatalf("create snapshot test project: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO project_profile_rel (project_id,profile_id,is_owner,is_admin,can_edit) VALUES ($1,$2,true,true,true)`, projectID, profileID); err != nil {
+		t.Fatalf("grant snapshot test project access: %v", err)
+	}
 	fileID := integrationUUID(t)
 	if _, err := pool.Exec(context.Background(), `
 		INSERT INTO file (id, project_id, name, data)
@@ -30,10 +49,35 @@ func snapshotFixture(t *testing.T, payload []byte) (*db.Pool, string, string) {
 		t.Fatalf("insert snapshot fixture file: %v", err)
 	}
 	t.Cleanup(func() {
-		pool.Exec(context.Background(), `DELETE FROM file_data WHERE file_id = $1`, fileID)   //nolint:errcheck
-		pool.Exec(context.Background(), `DELETE FROM file_change WHERE file_id = $1`, fileID) //nolint:errcheck
-		if _, err := pool.Exec(context.Background(), `DELETE FROM file WHERE id = $1`, fileID); err != nil {
-			t.Errorf("delete snapshot fixture file: %v", err)
+		cleanup, err := pool.Begin(context.Background())
+		if err != nil {
+			t.Errorf("begin snapshot fixture cleanup: %v", err)
+			return
+		}
+		defer cleanup.Rollback(context.Background()) //nolint:errcheck
+		if _, err := cleanup.Exec(context.Background(), `SET LOCAL rules.deletion_protection TO off`); err != nil {
+			t.Errorf("disable deletion protection for disposable fixture cleanup: %v", err)
+			return
+		}
+		for _, stmt := range []struct {
+			query string
+			args  []any
+		}{
+			{`UPDATE profile SET default_project_id=NULL, default_team_id=NULL WHERE id=$1`, []any{profileID}},
+			{`DELETE FROM file_data WHERE file_id=$1`, []any{fileID}},
+			{`DELETE FROM file_change WHERE file_id=$1`, []any{fileID}},
+			{`DELETE FROM file WHERE id=$1`, []any{fileID}},
+			{`DELETE FROM project WHERE id=$1`, []any{projectID}},
+			{`DELETE FROM team WHERE id=$1`, []any{teamID}},
+			{`DELETE FROM profile WHERE id=$1`, []any{profileID}},
+		} {
+			if _, err := cleanup.Exec(context.Background(), stmt.query, stmt.args...); err != nil {
+				t.Errorf("clean snapshot fixture: %v", err)
+				return
+			}
+		}
+		if err := cleanup.Commit(context.Background()); err != nil {
+			t.Errorf("commit snapshot fixture cleanup: %v", err)
 		}
 	})
 	return pool, profileID, fileID
