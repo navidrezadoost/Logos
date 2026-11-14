@@ -33,7 +33,7 @@ The production Layers panel exposes child insertion, rename, sibling/root orderi
 `selectionStore` is the shared selection authority consumed by Canvas, Layers, and Inspector.
 
 - Canvas selection follows the stored top-first root/sibling order, tests descendants before their containing frame, and selects the topmost visible, unlocked shape with axis-aligned bounds. Empty Canvas clicks clear selection. Ctrl/Cmd toggles; Shift selects the interval in that hit order.
-- Hidden and locked objects are not Canvas hit targets. Layers can select either one for inspection. Locked objects cannot use the A10 hierarchy actions.
+- Hidden and locked objects are not Canvas hit targets for point, marquee, scale, or prototype-source selection. Layers can select either one for inspection. Locked objects cannot use the A10 hierarchy actions.
 - Switching to a known page clears selection. A document subscription removes selections whose IDs are no longer in the active page scene after deletion or page membership changes.
 - Selection IDs remain stable across supported mutations; a rejected operation leaves both document references and selection unchanged.
 

@@ -335,7 +335,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
       // ── Prototype tool ──────────────────────────────────────────────────────
       if (isPrototypeTool) {
         const hitShape = shapes.find(
-          (s) => s.parentId === null &&
+          (s) => s.parentId === null && !s.hidden && !s.locked &&
             x >= s.bounds.x && x <= s.bounds.x + s.bounds.w &&
             y >= s.bounds.y && y <= s.bounds.y + s.bounds.h
         );
@@ -387,7 +387,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
       if (activeTool === "scale") {
         // Hit-test: find the topmost shape under the cursor
         const hit = [...shapes].reverse().find(
-          (s) => x >= s.bounds.x && x <= s.bounds.x + s.bounds.w &&
+          (s) => !s.hidden && !s.locked && x >= s.bounds.x && x <= s.bounds.x + s.bounds.w &&
                  y >= s.bounds.y && y <= s.bounds.y + s.bounds.h
         );
         if (hit) {
@@ -583,7 +583,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
         // Marquee — select all shapes whose bounds intersect the drag rect
         const hitIds = shapes
           .filter((s) =>
-            s.bounds.x < minX + w && s.bounds.x + s.bounds.w > minX &&
+            !s.hidden && !s.locked && s.bounds.x < minX + w && s.bounds.x + s.bounds.w > minX &&
             s.bounds.y < minY + h && s.bounds.y + s.bounds.h > minY
           )
           .map((s) => s.id);
