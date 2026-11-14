@@ -8,9 +8,10 @@ if (!url || !outputPath || !executablePath) throw new Error("Usage: CHROME_BIN=/
 
 const browser = await chromium.launch({ executablePath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--enable-webgl", "--disable-features=WebGPU", "--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
 const evidence = { status: "running", checks: [], interactionToReadyFrameMs: [], browserErrors: [] };
+const pageErrors = [];
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 740 }, deviceScaleFactor: 1 });
-  page.on("pageerror", (error) => evidence.browserErrors.push(error.message));
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(url, { waitUntil: "load", timeout: 30000 });
   await page.waitForFunction(() => document.querySelector("#a10-status")?.dataset.status === "ready", undefined, { timeout: 90000 });
   const ready = async (label, action) => {
@@ -143,7 +144,7 @@ try {
   evidence.environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, platform: navigator.platform, logicalProcessors: navigator.hardwareConcurrency, deviceMemoryGiB: navigator.deviceMemory ?? null, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }, wasmReservedBytes: window.__a10.wasmReservedBytes() }));
   evidence.rendererInstances = await page.evaluate(() => window.__a10.rendererInstances());
   evidence.pixelSamples = { childBeforeDeletion: childPixel, afterDeletion: deletedPixel, afterPageSwitch: pageSwitchPixel, afterRecovery: recoveredPixel };
-  evidence.browserErrors = await page.evaluate(() => window.__a10.errors());
+  evidence.browserErrors = [...new Set([...pageErrors, ...(await page.evaluate(() => window.__a10.errors()))])];
   assert.deepEqual(evidence.browserErrors, [], "browser emitted uncaught errors");
   evidence.notes = ["Interaction-to-frame observations are measured from action to the next completed renderer frame and are separate from isolated renderer benchmarks.", "Disposable Chromium test only. No deployment resources or credentials are used."];
   await writeFile(outputPath, JSON.stringify(evidence, null, 2));
