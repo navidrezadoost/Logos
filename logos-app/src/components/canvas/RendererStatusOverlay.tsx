@@ -46,6 +46,8 @@ export function RendererStatusOverlay({
   const isUnsupported = status.state === "UNSUPPORTED_SHAPE";
   const isRejected = status.state === "SCENE_REJECTED";
   const isRecovering = status.state === "RECOVERING";
+  const canRecreate = status.state === "SCENE_REJECTED" &&
+    (status.code === "LOGOS_SCENE_RECOVERY_FAILED" || status.code === "LOGOS_SCENE_MODULE_POISONED");
   const diagnosticCode = isUnsupported
     ? status.code
     : isRejected
@@ -117,15 +119,15 @@ export function RendererStatusOverlay({
             Diagnostic: <code>{diagnosticCode}</code>
           </div>
         )}
-        {((isUnsupported || isRejected) && onSelectShape) || (!(isUnsupported || isRejected) && !isRecovering && onRetry) ? (
+        {((isUnsupported || (isRejected && !canRecreate)) && onSelectShape) || ((!isUnsupported && (!isRejected || canRecreate)) && !isRecovering && onRetry) ? (
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            {(isUnsupported || isRejected) && onSelectShape ? (
+            {(isUnsupported || (isRejected && !canRecreate)) && onSelectShape ? (
               <button type="button" onClick={onSelectShape} style={actionStyle}>
                 Select in Layers
               </button>
             ) : !isRecovering && onRetry ? (
               <button type="button" onClick={onRetry} style={actionStyle}>
-                Retry rendering
+                {canRecreate ? "Recreate renderer" : "Retry rendering"}
               </button>
             ) : null}
           </div>

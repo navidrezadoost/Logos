@@ -24,6 +24,9 @@ interface SelectionState {
 
   /** Clear the selection. */
   clearSelection: () => void;
+
+  /** Keep only IDs still reachable on the active page after a document commit. */
+  reconcileTo: (reachableIds: readonly string[]) => void;
 }
 
 export const useSelectionStore = create<SelectionState>((set, get) => ({
@@ -44,6 +47,14 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
   selectRange: (ids) => set({ selectedIds: Array.from(new Set(ids)) }),
 
   clearSelection: () => set({ selectedIds: [] }),
+
+  reconcileTo: (reachableIds) => set((state) => {
+    const reachable = new Set(reachableIds);
+    const selectedIds = state.selectedIds.filter((id) => reachable.has(id));
+    return selectedIds.length === state.selectedIds.length
+      ? state
+      : { selectedIds };
+  }),
 }));
 
 // Convenience selector
