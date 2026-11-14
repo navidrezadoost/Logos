@@ -526,6 +526,109 @@ func TestExpiredPreRestoreRecoveryPointIsUnavailableButRemainsStoredIntegration(
 	}
 }
 
+// This test characterizes the proposed B7 purge scope on a disposable database.
+// It is not a production cleanup implementation: its SQL documents the minimum
+// classifier a future extension of the existing objects-gc mechanism must use.
+func TestExpiredPreRestorePurgeScopeCharacterizationIntegration(t *testing.T) {
+	pool, profileID, fileID := snapshotFixture(t, []byte(`{"document":"current"}`))
+	ctx := context.Background()
+	past := time.Now().Add(-time.Hour)
+	future := time.Now().Add(time.Hour)
+	type fixture struct {
+		id, label, creator string
+		deletedAt          time.Time
+		dataType           string
+	}
+	fixtures := []fixture{
+		{integrationUUID(t), "internal/pre-restore/10", "system", past, "snapshot"},
+		{integrationUUID(t), "internal/pre-restore/11", "system", future, "snapshot"},
+		{integrationUUID(t), "user snapshot", "user", past, "snapshot"},
+		{integrationUUID(t), "internal/other-system-row", "system", past, "snapshot"},
+		{integrationUUID(t), "", "", past, "fragment"},
+	}
+	for _, item := range fixtures {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO file_change (id,file_id,profile_id,created_at,updated_at,deleted_at,revn,label,created_by)
+			VALUES ($1,$2,$3,now(),now(),$4,10,$5,$6)`, item.id, fileID, profileID, item.deletedAt, item.label, item.creator); err != nil {
+			t.Fatalf("insert characterization change row (%s): %v", item.id, err)
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO file_data (id,file_id,type,data,metadata,deleted_at)
+			VALUES ($1,$2,$3,$4,'{}',$5)`, item.id, fileID, item.dataType, []byte("fixture-only"), item.deletedAt); err != nil {
+			t.Fatalf("insert characterization data row (%s): %v", item.id, err)
+		}
+	}
+
+	// Explicit identity + type + mirrored-retention checks are required. A
+	// deleted_at-only sweep would include the user snapshot and fragment.
+	var legacyCandidates, eligible int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM file_data WHERE deleted_at IS NOT NULL AND deleted_at <= now() AND file_id=$1`, fileID).Scan(&legacyCandidates); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM file_change fc JOIN file_data fd ON fd.file_id=fc.file_id AND fd.id=fc.id
+		 WHERE fc.file_id=$1 AND fc.created_by='system'
+		   AND fc.label LIKE 'internal/pre-restore/%'
+		   AND fd.type='snapshot'
+		   AND fc.deleted_at < now() AND fd.deleted_at=fc.deleted_at
+		   AND fd.deleted_at < now()`, fileID).Scan(&eligible); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCandidates != 4 || eligible != 1 {
+		t.Fatalf("generic deleted_at candidates=%d and strict pre-restore candidates=%d; want 4 and 1", legacyCandidates, eligible)
+	}
+
+	// Characterize physical blob removal while preserving expired metadata and
+	// all non-target bytes. The transaction and test DB are disposable.
+	var targetID string
+	if err := pool.QueryRow(ctx, `
+		SELECT fc.id::text
+		  FROM file_change fc JOIN file_data fd ON fd.file_id=fc.file_id AND fd.id=fc.id
+		 WHERE fc.file_id=$1 AND fc.created_by='system'
+		   AND fc.label LIKE 'internal/pre-restore/%' AND fd.type='snapshot'
+		   AND fc.deleted_at < now() AND fd.deleted_at=fc.deleted_at AND fd.deleted_at < now()`, fileID).Scan(&targetID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+	if _, err := tx.Exec(ctx, `DELETE FROM file_data WHERE file_id=$1 AND id=$2 AND type='snapshot'`, fileID, targetID); err != nil {
+		t.Fatalf("remove characterized recovery payload: %v", err)
+	}
+	var remaining int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM file_change WHERE file_id=$1 AND id=$2`, fileID, targetID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 1 {
+		t.Fatalf("purging payload removed %d metadata rows; want retained metadata row", 1-remaining)
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM file_data WHERE file_id=$1`, fileID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != len(fixtures)-1 {
+		t.Fatalf("remaining payload rows=%d, want %d", remaining, len(fixtures)-1)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit characterized payload purge: %v", err)
+	}
+	committed = true
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM file_data WHERE file_id=$1 AND id=$2`, fileID, targetID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("committed target payload rows=%d; want physical row removal", remaining)
+	}
+}
+
 func TestCreatedSnapshotRecoveryPointCanBeListedAndRestoredIntegration(t *testing.T) {
 	pool, profileID, fileID := snapshotFixture(t, []byte(`{"document":"before"}`))
 	createReq := httptest.NewRequest(http.MethodPost, "/api/rpc/command/create-file-snapshot", strings.NewReader(fmt.Sprintf(`{"fileId":%q,"label":"before change"}`, fileID)))
