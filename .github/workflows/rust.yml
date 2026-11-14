@@ -24,6 +24,11 @@ on:
       - "logos-app/vite.a9-production-canvas-smoke.config.ts"
       - "logos-app/src/test-support/a9-production-canvas-smoke.tsx"
       - "logos-app/test-harness/a9-production-canvas-smoke.html"
+      - "logos-app/vite.a10-editor-interactions-smoke.config.ts"
+      - "logos-app/src/test-support/a10-editor-interactions-smoke.tsx"
+      - "logos-app/test-harness/a10-editor-interactions-smoke.html"
+      - "test/a10/**"
+      - "test/benchmarks/a10-editor-interactions-smoke.mjs"
       - "test/fixtures/p0-document-compat/**"
       - "docs/r1/P0.4-REACT-RUNTIME-VERTICAL-SLICE.md"
       - ".github/workflows/rust.yml"
@@ -556,6 +561,7 @@ jobs:
           npm ci
           node --experimental-strip-types --test ../test/p0.4/react-runtime/fixture-adapter.test.mjs
           node --experimental-strip-types --test ../test/p0.5/renderer-scene-contract/scene-boundary.test.mjs
+          node --test ../test/a10/hierarchy-operations.test.mjs
           npm run build
           ./node_modules/.bin/vite build --config vite.renderer-smoke.config.ts
 
@@ -826,6 +832,58 @@ jobs:
             ${{ runner.temp }}/a9-production-canvas-smoke-dom.html
             ${{ runner.temp }}/a9-production-canvas-smoke-chrome.log
             ${{ runner.temp }}/a9-production-canvas-preview.log
+
+      - name: Build A10 production editor interaction harness
+        working-directory: logos-app
+        run: ./node_modules/.bin/vite build --config vite.a10-editor-interactions-smoke.config.ts
+
+      - name: Verify A10 Canvas, Layers, Inspector, and renderer recovery interactions in Chromium
+        working-directory: logos-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+
+          ./node_modules/.bin/vite preview \
+            --config vite.a10-editor-interactions-smoke.config.ts \
+            --host 127.0.0.1 --port 4179 \
+            >"$RUNNER_TEMP/a10-editor-interactions-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4179/test-harness/a10-editor-interactions-smoke.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4179/test-harness/a10-editor-interactions-smoke.html >/dev/null
+
+          CHROME_BIN="$chrome_bin" \
+            node ../test/benchmarks/a10-editor-interactions-smoke.mjs \
+              http://127.0.0.1:4179/test-harness/a10-editor-interactions-smoke.html \
+              "$RUNNER_TEMP/a10-editor-interactions-evidence.json" \
+              >"$RUNNER_TEMP/a10-editor-interactions-chrome.log" 2>&1 || {
+            cat "$RUNNER_TEMP/a10-editor-interactions-chrome.log"
+            cat "$RUNNER_TEMP/a10-editor-interactions-evidence.json"
+            cat "$RUNNER_TEMP/a10-editor-interactions-preview.log"
+            exit 1
+          }
+
+      - name: Preserve A10 editor interaction and renderer recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a10-editor-interaction-browser-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/a10-editor-interactions-evidence.json
+            ${{ runner.temp }}/a10-editor-interactions-chrome.log
+            ${{ runner.temp }}/a10-editor-interactions-preview.log
 
       - name: Build candidate document validation WASM
         run: |

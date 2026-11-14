@@ -14,11 +14,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import {
   loadRenderWasm,
+  forgetRenderWasmModule,
   initCanvasContext,
   cleanUp,
   type RenderWasmModule,
 } from "../../render-wasm/module";
-import { projectAndSyncScene, syncScene2D, UnsupportedCanvas2DShapeError } from "../../render-wasm/scene";
+import { projectAndSyncScene, syncScene2D, UnsupportedCanvas2DShapeError, isRenderModulePoisoned } from "../../render-wasm/scene";
 import {
   rendererFailureStatus,
   SceneRejectedRenderError,
@@ -36,7 +37,7 @@ import { useWebGPURenderer } from "../../render-webgpu/useWebGPURenderer";
 import { PrototypeOverlay } from "../prototype/PrototypeOverlay";
 import { DRAG_COMPONENT_TYPE } from "../assets/AssetsPanel";
 import { workerPool } from "../../worker";
-import { createRect } from "../../types/shapes";
+import { createRect, type Shape } from "../../types/shapes";
 import { theme } from "../../theme/colors";
 import { RendererStatusOverlay } from "./RendererStatusOverlay";
 
@@ -69,9 +70,12 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [drag, setDrag] = useState<DragState | null>(null);
   const [rendererStatus, setRendererStatus] = useState<RendererStatus | null>(null);
+  const [hierarchyNotice, setHierarchyNotice] = useState<string | null>(null);
   const rendererStatusRef = useRef<RendererStatus | null>(null);
   const lastSuccessfulFrameRef = useRef<{ width: number; height: number; backend: RendererBackend } | null>(null);
+  const successfulFrameCountRef = useRef(0);
   const [renderRetry, setRenderRetry] = useState(0);
+  const [rendererGeneration, setRendererGeneration] = useState(0);
   const [renderMetrics, setRenderMetrics] = useState<Record<string, number> | null>(null);
   const frameMetricRafRef = useRef<number | null>(null);
 
@@ -103,7 +107,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
     zoom, panX, panY, activeTool, setTool, setPan,
     layersPanelOpen, toggleLayersPanel,
   } = useUiStore();
-  const { addRect, addShape, addVectorNetwork, addInstanceShape, updateShape } = useDocumentStore();
+  const { addShape, addVectorNetwork, addInstanceShape, updateShape } = useDocumentStore();
   const { createInstance, components } = useComponentStore();
 
   // Pen tool state
@@ -134,6 +138,9 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
 
     // Initialize background workers (non-blocking)
     workerPool.init();
+    modeRef.current = "loading";
+    setMode("loading");
+    lastSuccessfulFrameRef.current = null;
 
     (async () => {
       const mod = await rendererLoader(WASM_JS_URL, WASM_WASM_URL);
@@ -155,13 +162,15 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
       cancelled = true;
       if (frameMetricRafRef.current !== null) cancelAnimationFrame(frameMetricRafRef.current);
       const mod = moduleRef.current;
-      if (mod && canvasRef.current) {
-        cleanUp(mod, canvasRef.current);
+      if (mod) {
+        const poisoned = isRenderModulePoisoned(mod);
+        cleanUp(mod, canvas, poisoned);
+        if (poisoned) forgetRenderWasmModule(mod);
         moduleRef.current = null;
       }
       workerPool.terminate();
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rendererGeneration]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Re-render on store changes ─────────────────────────────────────────────
   useEffect(() => {
@@ -241,6 +250,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
       }
 
       lastSuccessfulFrameRef.current = { width: canvas.width, height: canvas.height, backend };
+      successfulFrameCountRef.current += 1;
       publishRendererStatus({ state: "READY", backend });
     } catch (error) {
       const lastFrame = lastSuccessfulFrameRef.current;
@@ -407,13 +417,42 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
         return;
       }
 
+      if (activeTool === "select") {
+        const hitOrder = canvasHitOrder(pageScene.page?.rootShapeIds ?? [], pageScene.shapes);
+        const hit = hitOrder.find((shape) =>
+          !shape.hidden && !shape.locked &&
+          x >= shape.bounds.x && x <= shape.bounds.x + shape.bounds.w &&
+          y >= shape.bounds.y && y <= shape.bounds.y + shape.bounds.h
+        );
+        if (!hit) {
+          clearSelection();
+          return;
+        }
+        if (e.shiftKey) {
+          const ordered = hitOrder.map((shape) => shape.id);
+          const selected = useSelectionStore.getState().selectedIds;
+          const anchor = selected[selected.length - 1];
+          const from = anchor ? ordered.indexOf(anchor) : -1;
+          const to = ordered.indexOf(hit.id);
+          if (from >= 0 && to >= 0) {
+            const [start, end] = from < to ? [from, to] : [to, from];
+            selectRange(ordered.slice(start, end + 1));
+          } else select(hit.id);
+        } else if (e.metaKey || e.ctrlKey) {
+          useSelectionStore.getState().toggleSelect(hit.id);
+        } else {
+          select(hit.id);
+        }
+        return;
+      }
+
       // ── Rect / ellipse / frame / slice / etc. drag ────────────────────────
       if (!isDrawTool) return;
       setDrag({ startX: x, startY: y, currentX: x, currentY: y });
       e.preventDefault();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, isDrawTool, isPrototypeTool, isHandTool, pen, zoom, commitPen, panX, panY, proto, shapes]
+    [isPenTool, isDrawTool, isPrototypeTool, isHandTool, activeTool, pageScene, clearSelection, select, selectRange, pen, zoom, commitPen, panX, panY, proto, shapes]
   );
 
   const handleMouseMove = useCallback(
@@ -501,10 +540,6 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
       }
 
       if (!drag) {
-        // No drag — if select tool, clear selection on empty canvas click
-        if (activeTool === "select" && e.target === containerRef.current) {
-          clearSelection();
-        }
         return;
       }
 
@@ -521,8 +556,12 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
       const bounds = { x: minX, y: minY, w, h };
 
       if (activeTool === "rect") {
-        const id = addRect(bounds);
-        select(id);
+        const id = crypto.randomUUID();
+        const count = shapes.filter((shape) => shape.type === "rect").length + 1;
+        const shape = createRect(id, `Rectangle ${count}`, bounds, "#0000ff");
+        const result = useDocumentStore.getState().applyHierarchyOperation({ kind: "create-root", shape });
+        if (!result.ok) setHierarchyNotice(result.diagnostic.code);
+        else { setHierarchyNotice(null); select(id); }
 
       } else if (activeTool === "ellipse") {
         const id = crypto.randomUUID();
@@ -535,8 +574,10 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
         const id = crypto.randomUUID();
         const count = shapes.filter((s) => s.type === "frame").length + 1;
         const shape = createRect(id, `Frame ${count}`, bounds, "#ffffff");
-        addShape({ ...shape, type: "frame" });
-        select(id);
+        const frame = { ...shape, type: "frame" as const };
+        const result = useDocumentStore.getState().applyHierarchyOperation({ kind: "create-root", shape: frame });
+        if (!result.ok) setHierarchyNotice(result.diagnostic.code);
+        else { setHierarchyNotice(null); select(id); }
 
       } else if (activeTool === "selection") {
         // Marquee — select all shapes whose bounds intersect the drag rect
@@ -589,7 +630,7 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
       setTool("select");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isPenTool, isPrototypeTool, isHandTool, pen, drag, activeTool, addRect, addShape, addVectorNetwork, select, selectRange, setTool, shapes, clearSelection, commitPen]
+    [isPenTool, isPrototypeTool, isHandTool, pen, drag, activeTool, addShape, addVectorNetwork, select, selectRange, setTool, shapes, clearSelection, commitPen]
   );
 
   const cursor =
@@ -633,10 +674,21 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
     if (!layersPanelOpen) toggleLayersPanel();
   }
 
+  function recreateRenderer(): void {
+    const mod = moduleRef.current;
+    if (mod && !isRenderModulePoisoned(mod)) {
+      setRenderRetry((attempt) => attempt + 1);
+      return;
+    }
+    publishRendererStatus({ state: "RECOVERING", backend: "wasm", frameDisposition: "unverified" });
+    setRendererGeneration((generation) => generation + 1);
+  }
+
   return (
     <div
       ref={containerRef}
       data-renderer-status={rendererStatus?.state ?? "IDLE"}
+      data-renderer-frame-count={successfulFrameCountRef.current}
       data-renderer-backend={rendererStatus?.backend ?? mode}
       data-renderer-diagnostic={rendererStatus && "code" in rendererStatus ? rendererStatus.code : ""}
       data-renderer-frame-disposition={rendererStatus && "frameDisposition" in rendererStatus ? rendererStatus.frameDisposition : ""}
@@ -676,7 +728,9 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
         addInstanceShape(instanceId, comp.name, { x: canvasX, y: canvasY, w, h }, meta);
       }}
     >
+      {hierarchyNotice && <div role="status" aria-live="polite" data-testid="hierarchy-operation-diagnostic" style={{ position: "absolute", zIndex: 2, left: 8, top: 8, padding: "4px 8px", borderRadius: 4, background: theme.error, color: theme.text }}>{hierarchyNotice}</div>}
       <canvas
+        key={rendererGeneration}
         ref={canvasRef}
         width={size.w}
         height={size.h}
@@ -750,10 +804,28 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
         status={rendererStatus}
         shapeName={incompatibleShape?.name}
         onSelectShape={rendererStatus?.state === "UNSUPPORTED_SHAPE" || rendererStatus?.state === "SCENE_REJECTED" ? selectIncompatibleShape : undefined}
-        onRetry={rendererStatus?.state === "RENDER_FAILED" ? () => setRenderRetry((attempt) => attempt + 1) : undefined}
+        onRetry={rendererStatus?.state === "RENDER_FAILED" || (rendererStatus?.state === "SCENE_REJECTED" && (rendererStatus.code === "LOGOS_SCENE_RECOVERY_FAILED" || rendererStatus.code === "LOGOS_SCENE_MODULE_POISONED")) ? recreateRenderer : undefined}
       />
     </div>
   );
+}
+
+/** Topmost-first hit order: earlier roots/siblings are frontmost; child content
+ * is painted over its owning frame and is therefore considered first. */
+function canvasHitOrder(rootIds: readonly string[], shapes: readonly Shape[]): Shape[] {
+  const byId = new Map(shapes.map((shape) => [shape.id, shape]));
+  const ordered: Shape[] = [];
+  const visited = new Set<string>();
+  const visit = (id: string): void => {
+    if (visited.has(id)) return;
+    visited.add(id);
+    const shape = byId.get(id);
+    if (!shape) return;
+    for (const childId of shape.children) visit(childId);
+    ordered.push(shape);
+  };
+  for (const rootId of rootIds) visit(rootId);
+  return ordered;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

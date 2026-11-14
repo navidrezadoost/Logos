@@ -221,6 +221,14 @@ export async function loadRenderWasm(
   return _loadPromise;
 }
 
+/** Drop the JS singleton after a poisoned module has been abandoned. */
+export function forgetRenderWasmModule(mod: RenderWasmModule): void {
+  if (_module === mod) {
+    _module = null;
+    _loadPromise = null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // WebGL context setup  (mirrors init-canvas-context in api.cljs)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,8 +284,8 @@ export function initCanvasContext(
 /**
  * Clean up the WebGL context resources.
  */
-export function cleanUp(mod: RenderWasmModule, canvas: HTMLCanvasElement): void {
-  mod._clean_up();
+export function cleanUp(mod: RenderWasmModule, canvas: HTMLCanvasElement, abandon = false): void {
+  if (!abandon) mod._clean_up();
   if (_glHandle !== undefined) {
     try {
       const ctx = canvas.getContext("webgl2");
@@ -286,7 +294,7 @@ export function cleanUp(mod: RenderWasmModule, canvas: HTMLCanvasElement): void 
         loseExt?.loseContext();
       }
     } finally {
-      mod.GL.deleteContext(_glHandle);
+      if (!abandon) mod.GL.deleteContext(_glHandle);
       _glHandle = undefined;
     }
   }

@@ -138,6 +138,11 @@ interface CommittedProjectedScene {
 const lastCommittedProjectedScene = new WeakMap<RenderWasmModule, CommittedProjectedScene>();
 const poisonedRenderModules = new WeakSet<RenderWasmModule>();
 
+/** True once compensation failed and the module must never receive mutations. */
+export function isRenderModulePoisoned(mod: RenderWasmModule): boolean {
+  return poisonedRenderModules.has(mod);
+}
+
 export interface ProjectedSceneView {
   readonly zoom: number;
   readonly panX: number;
@@ -156,7 +161,7 @@ export interface ProjectedSceneMetrics {
 
 interface MutableUploadMetrics { uploadMs: number; nativeMs: number; }
 
-function validateA9Capabilities(plan: SceneProjectionPlan): SceneProjectionDiagnostic | null {
+export function validateA9Capabilities(plan: SceneProjectionPlan): SceneProjectionDiagnostic | null {
   const byId = new Map(plan.nodes.filter((node) => !node.synthetic).map((node) => [node.id, node.shape]));
   for (const node of plan.nodes) {
     if (node.synthetic) continue;

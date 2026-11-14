@@ -43,7 +43,7 @@ export function Inspector(): React.ReactElement {
 
   if (selected.length === 0) {
     return (
-      <div style={panelStyle}>
+      <div data-testid="inspector" style={panelStyle}>
         <Header title="No selection" />
         <div style={{ padding: 16, color: "#45475a", fontSize: 12 }}>
           Click a shape to inspect it.
@@ -54,7 +54,7 @@ export function Inspector(): React.ReactElement {
 
   if (selected.length > 1) {
     return (
-      <div style={panelStyle}>
+      <div data-testid="inspector" style={panelStyle}>
         <Header title={`${selected.length} shapes`} />
         <div style={{ padding: 16, color: "#a6adc8", fontSize: 12 }}>
           Multiple shapes selected.
@@ -149,7 +149,7 @@ export function Inspector(): React.ReactElement {
   }
 
   return (
-    <div style={panelStyle}>
+    <div data-testid="inspector" style={panelStyle}>
       <Header title={shape.name} />
 
       <Section title="Layout">

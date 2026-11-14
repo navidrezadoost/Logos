@@ -14,6 +14,8 @@ import { useShallow } from "zustand/react/shallow";
 import { useMemo } from "react";
 import { nanoid } from "nanoid";
 import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, type ComponentMeta, type InstanceMeta, createRect, createVectorNetwork, IDENTITY_TRANSFORM } from "../types/shapes";
+import { useSelectionStore } from "./selectionStore";
+import { planHierarchyOperation, type HierarchyOperation, type HierarchyOperationResult } from "./hierarchyOperations";
 
 /** Generate a proper UUID v4 for shapes — required by the WASM bridge's uuidToU32x4(). */
 const shapeId = (): string => crypto.randomUUID();
@@ -82,10 +84,15 @@ interface DocumentState {
   /**
    * Remove a shape subtree and unlink it from its page / parent.
    */
-  removeShape: (id: string) => void;
+  removeShape: (id: string) => HierarchyOperationResult;
 
   /** Re-order shapes within a page (drag-and-drop in layers panel). */
-  reorderPageShapes: (pageId: string, newOrder: string[]) => void;
+  reorderPageShapes: (pageId: string, newOrder: string[]) => HierarchyOperationResult;
+
+  /** Validate and atomically commit a supported current-page hierarchy operation. */
+  applyHierarchyOperation: (operation: HierarchyOperation) => HierarchyOperationResult;
+  /** Store-internal variant used by existing page-addressed root-order APIs. */
+  applyHierarchyOperationForPage: (pageId: string, operation: HierarchyOperation) => HierarchyOperationResult;
 
   // ── P4.4: Component Variants ──────────────────────────────────────────────
 
@@ -144,30 +151,31 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     return id;
   },
 
-  setCurrentPage: (pageId) => set({ currentPageId: pageId }),
+  setCurrentPage: (pageId) => {
+    if (get().pages[pageId]) set({ currentPageId: pageId });
+  },
 
   // ── Shapes ────────────────────────────────────────────────────────────────
 
   addRect: (bounds, color = "#0000ff") => {
     const id = shapeId(); // crypto.randomUUID() — hex format required by WASM bridge
-    const { currentPageId: pid } = get();
     const name = `Rectangle ${Object.values(get().shapes).filter((s) => s.type === "rect").length + 1}`;
     const shape = createRect(id, name, bounds, color);
 
-    set((s) => ({
-      shapes: { ...s.shapes, [id]: shape },
-      pages: {
-        ...s.pages,
-        [pid]: {
-          ...s.pages[pid],
-          rootShapeIds: [id, ...s.pages[pid].rootShapeIds],
-        },
-      },
-    }));
+    const result = get().applyHierarchyOperation({ kind: "create-root", shape });
+    if (!result.ok) throw new Error(result.diagnostic.code);
     return id;
   },
 
   addShape: (shape) => {
+    if (shape.type === "rect" || shape.type === "frame") {
+      const operation: HierarchyOperation = shape.parentId === null
+        ? { kind: "create-root", shape }
+        : { kind: "insert-child", parentId: shape.parentId, shape, index: 0 };
+      const result = get().applyHierarchyOperation(operation);
+      if (!result.ok) throw new Error(result.diagnostic.code);
+      return shape.id;
+    }
     const { currentPageId: pid } = get();
     set((s) => ({
       shapes: { ...s.shapes, [shape.id]: shape },
@@ -222,69 +230,70 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     return id;
   },
 
-  updateShape: (id, patch) =>
+  updateShape: (id, patch) => {
+    if (Object.prototype.hasOwnProperty.call(patch, "parentId") || Object.prototype.hasOwnProperty.call(patch, "children")) {
+      throw new Error("LOGOS_OPERATION_USE_HIERARCHY_BOUNDARY");
+    }
     set((s) => ({
       shapes: { ...s.shapes, [id]: { ...s.shapes[id], ...patch } },
-    })),
+    }));
+  },
 
-  batchUpdate: (patches) =>
+  batchUpdate: (patches) => {
+    if (Object.values(patches).some((patch) => Object.prototype.hasOwnProperty.call(patch, "parentId") || Object.prototype.hasOwnProperty.call(patch, "children"))) {
+      throw new Error("LOGOS_OPERATION_USE_HIERARCHY_BOUNDARY");
+    }
     set((s) => {
       const next = { ...s.shapes };
       for (const [id, patch] of Object.entries(patches)) {
         if (next[id]) next[id] = { ...next[id], ...patch };
       }
       return { shapes: next };
-    }),
+    });
+  },
 
-  removeShape: (id) =>
-    set((s) => {
-      const shape = s.shapes[id];
-      if (!shape) return s;
-
-      const nextShapes = { ...s.shapes };
-      const removed = new Set<string>();
-      const pending = [id];
-      while (pending.length > 0) {
-        const currentId = pending.pop()!;
-        if (removed.has(currentId)) continue;
-        removed.add(currentId);
-        const current = nextShapes[currentId];
-        if (current) pending.push(...current.children);
-        delete nextShapes[currentId];
-      }
-
-      // Unlink from page root list
-      const nextPages = { ...s.pages };
-      for (const [pid, page] of Object.entries(nextPages)) {
-        if (page.rootShapeIds.some((rootId) => removed.has(rootId))) {
-          nextPages[pid] = {
-            ...page,
-            rootShapeIds: page.rootShapeIds.filter((sid) => !removed.has(sid)),
-          };
-        }
-      }
-
-      // Unlink from parent children list
-      if (shape.parentId && !removed.has(shape.parentId)) {
-        const parent = nextShapes[shape.parentId];
-        if (parent) {
-          nextShapes[shape.parentId] = {
-            ...parent,
-            children: parent.children.filter((cid) => !removed.has(cid)),
-          };
-        }
-      }
-
-      return { shapes: nextShapes, pages: nextPages };
-    }),
+  removeShape: (id) => {
+    const snapshot = get();
+    const owners = Object.keys(snapshot.pages).filter((pageId) => {
+      const [, ...scene] = selectCurrentPageScene({ ...snapshot, currentPageId: pageId });
+      return scene.some((shape) => shape.id === id);
+    });
+    if (owners.length !== 1) {
+      return { ok: false, diagnostic: { code: owners.length === 0 ? "LOGOS_OPERATION_PAGE_OWNERSHIP_UNKNOWN" : "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS" } };
+    }
+    return get().applyHierarchyOperationForPage(owners[0], { kind: "delete", shapeId: id });
+  },
 
   reorderPageShapes: (pageId, newOrder) =>
-    set((s) => ({
-      pages: {
-        ...s.pages,
-        [pageId]: { ...s.pages[pageId], rootShapeIds: newOrder },
-      },
-    })),
+    {
+      const ids = newOrder;
+      return get().applyHierarchyOperationForPage(pageId, { kind: "reorder-root-list", rootShapeIds: ids });
+    },
+
+  applyHierarchyOperation: (operation) => {
+    return get().applyHierarchyOperationForPage(get().currentPageId, operation);
+  },
+
+  applyHierarchyOperationForPage: (pageId, operation) => {
+    const snapshot = get();
+    const pageSnapshot = { ...snapshot, currentPageId: pageId };
+    const [page, ...currentPageShapes] = selectCurrentPageScene(pageSnapshot);
+    if (!page) return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_UNAVAILABLE" } };
+    const currentIds = new Set(currentPageShapes.map((shape) => shape.id));
+    for (const otherPageId of Object.keys(snapshot.pages)) {
+      if (otherPageId === pageId) continue;
+      const [, ...otherPageShapes] = selectCurrentPageScene({ ...snapshot, currentPageId: otherPageId });
+      if (otherPageShapes.some((shape) => currentIds.has(shape.id))) {
+        return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS" } };
+      }
+    }
+    const result = planHierarchyOperation(
+      { pages: snapshot.pages, currentPageId: pageId, shapes: snapshot.shapes, currentPageShapes },
+      operation,
+    );
+    if (result.ok) set({ pages: result.pages, shapes: result.shapes });
+    return result;
+  },
 
   // ── P4.4: Component Variants ──────────────────────────────────────────────
 
@@ -399,3 +408,13 @@ export function useCurrentPageScene(): { page: Page | null; shapes: Shape[] } {
   const snapshot = useDocumentStore(useShallow(selectCurrentPageScene));
   return useMemo(() => ({ page: snapshot[0], shapes: snapshot.slice(1) as Shape[] }), [snapshot]);
 }
+
+useDocumentStore.subscribe((state, previous) => {
+  if (state.currentPageId !== previous.currentPageId) {
+    useSelectionStore.getState().clearSelection();
+    return;
+  }
+  if (state.shapes === previous.shapes && state.pages === previous.pages) return;
+  const [, ...sceneShapes] = selectCurrentPageScene(state);
+  useSelectionStore.getState().reconcileTo(sceneShapes.map((shape) => shape.id));
+});
