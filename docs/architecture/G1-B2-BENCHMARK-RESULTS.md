@@ -1,7 +1,7 @@
 # G1-B2 — Candidate Graph Benchmark Results
 
-**Status:** Local microbenchmark; runtime/retained-memory measurements are not implied.
-**Commit:** Run before final commit; final head SHA will be recorded in the PR description and CI evidence.
+**Status:** Historical measurements below predate G1-B2.1; a clean locked replay is emitted as a machine-readable artifact by the Rust workflow for the exact PR head.
+**Historical provenance:** The old fixture digests used Rust `Debug` output and the run used a temporary local `sha1_smol 1.0.1` Cargo patch. Preserve those values as historical only; do not use them as cross-runtime fixture identities or release thresholds.
 
 ## Environment
 
@@ -17,9 +17,9 @@
 
 The local Cargo cache lacked the `sha1_smol` crate archive required by UUIDv5. Local execution used the upstream `sha1_smol` 1.0.1 source in `/tmp` via a temporary Cargo patch; this patch is not part of the branch. `Cargo.lock` records the registry source and checksum. The output below is from the same locked crate version, but a clean local replay still requires the crate archive or network access.
 
-## Fixture hashes
+## Historical fixture hashes
 
-SHA-256 is over the deterministic Rust `Debug` representation of the generated fixture. All objects are built in ordered vectors, and generated shape plugin maps and extension maps are empty.
+SHA-256 is over the Rust `Debug` representation of the generated fixture. These historical hashes are not the new stable serialized-JSON hashes. All objects were built in ordered vectors, and generated shape plugin maps and extension maps were empty.
 
 | Fixture | Objects | SHA-256 |
 |---|---:|---|
@@ -55,3 +55,9 @@ Times are milliseconds. Allocation counts and requested bytes are for one valida
 The initial indexed-map implementation still recomputed each shape's nearest frame by walking its full ancestor chain. The first measured candidate took 5.25 ms at 513 deep objects and 543.17 ms at 5,001. The memoized iterative frame-membership pass reduced those to 0.231 ms and 2.416 ms, respectively, on the same fixture hashes and machine. Flat validation increased slightly because the memoization map allocates per shape; latency remains approximately proportional to shape count in this fixture. The before/after comparison is diagnostic evidence from this host, not a cross-machine performance guarantee.
 
 The repeated operations clone the complete candidate and validate both the source and result; their costs are therefore higher than graph traversal alone. Allocation counts are requested allocation volume, not retained heap, peak RSS, leak detection, or browser/WASM memory. **Memory leak status: NOT MEASURED.**
+
+## G1-B2.1 exact-head replay
+
+`rust/logos-types/scripts/run_document_core_bench.sh` records the full Git SHA, clean-tree flag, full `rustc -Vv`, Cargo lockfile SHA-256, target, CPU, OS, sample method, fixture schema, and retained-memory limitation before executing the release benchmark with `--locked`. The benchmark hashes `serde_json` serialized fixture bytes and labels inputs `g1-b2-v1-*`. It reports allocation count and requested bytes separately and explicitly sets `retained_memory_measured` to false.
+
+The Rust workflow stores JSONL stdout as `g1-b2-document-core-benchmark-<commit>`. The latest successful artifact and head are recorded in the Draft PR description after hosted CI completes. The checked-in historical timing table above is not replaced or presented as the exact-head replay.

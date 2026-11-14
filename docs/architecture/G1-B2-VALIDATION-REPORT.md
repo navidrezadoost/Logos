@@ -22,6 +22,12 @@
 
 Local Rust tests used a temporary Cargo patch to the upstream `sha1_smol 1.0.1` source in `/tmp` because this machine lacks its registry archive. That patch is outside the repository; the committed lockfile uses the crates.io source and checksum. Hosted CI will resolve the locked crate normally.
 
+## G1-B2.1 shared conformance vectors
+
+Native and Node/WASM wrappers invoke the same immutable vector suite. It compares complete normalized JSON for valid nested documents and cross-page reparent results; complete serialized diagnostics for invalid graphs, malformed/unsupported schema input, and transform/inverse mismatch; fixed UUIDv5 output; deep Frame/Group membership; and rejection of a delete with an external dependent component reference while preserving the input. Hosted Node/WASM execution is required on the final PR head; local WASM runtime execution remains unavailable because the offline cache lacks the wasm-bindgen test dependencies.
+
+Readiness is separated as follows: Rust domain correctness is an executable candidate; cross-platform conformance is established only for vectors and targets actually executed; production document compatibility remains **BLOCKED** pending executable adapters and real historical fixtures. An opaque `CompatibilityEnvelope` is not an editable document.
+
 ## Remaining evidence gates
 
 1. The listed hosted checks passed on code head `1e54f185eca48449c81a87a276046db2281605b0`; the later evidence-only report update does not change tested code.

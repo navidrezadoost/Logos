@@ -3,6 +3,14 @@
 **Status:** Candidate Rust contract only. No Go persistence, saved-file, production React, or Canvas path uses it.
 **Baseline:** Chief Architect accepted PR #93 as an additive candidate core at `c1f8c155b326105459869cd8fd58e349f30f0636`.
 
+## Readiness dimensions
+
+| Dimension | Status | Evidence and limit |
+|---|---|---|
+| Rust domain correctness | Executable candidate | Candidate validators and immutable operations have native tests. |
+| Cross-platform conformance | Verified only for vectors and targets actually executed | Native and Node/WASM tests use shared vectors; claims do not extend to unexecuted targets. |
+| Production document compatibility | **BLOCKED** | Requires executable React/Go/XD adapters and representative real historical fixtures. Opaque compatibility envelopes remain quarantined input, not editable documents. |
+
 ## Architecture inventory
 
 | Boundary | Current representation and ownership observed in this checkout | Compatibility constraint |

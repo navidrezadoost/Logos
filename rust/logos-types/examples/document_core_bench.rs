@@ -128,15 +128,16 @@ fn bench(label: &str, objects: usize, mut f: impl FnMut()) {
     let bytes = ALLOCATED_BYTES.load(Ordering::SeqCst);
     let p50 = percentile(&mut nanos, 50);
     let p95 = percentile(&mut nanos, 95);
-    println!("{{\"case\":\"{label}\",\"objects\":{objects},\"samples\":31,\"p50_ns\":{p50},\"p95_ns\":{p95},\"allocations_per_call\":{allocations},\"allocated_bytes_per_call\":{bytes}}}");
+    println!("{{\"case\":\"{label}\",\"objects\":{objects},\"samples\":31,\"p50_ns\":{p50},\"p95_ns\":{p95},\"requested_allocations_per_call\":{allocations},\"requested_bytes_per_call\":{bytes},\"retained_memory_measured\":false}}");
 }
 fn main() {
     println!("{{\"metadata\":{{\"profile\":\"release\",\"target_arch\":\"{}\",\"rustc_version\":\"{}\",\"cpu_model\":\"{}\"}}}}", std::env::consts::ARCH, option_env!("RUSTC_VERSION").unwrap_or("record rustc -Vv"), option_env!("LOGOS_CPU_MODEL").unwrap_or("record from /proc/cpuinfo"));
     for size in [100, 1_000, 10_000] {
         let doc = flat_document(size);
-        let digest = Sha256::digest(format!("{doc:?}").as_bytes());
+        let serialized = serde_json::to_vec(&doc).expect("fixture serializes");
+        let digest = Sha256::digest(&serialized);
         println!(
-            "{{\"fixture\":\"flat-{size}\",\"sha256\":\"{}\",\"objects\":{}}}",
+            "{{\"fixture\":\"g1-b2-v1-flat-{size}\",\"sha256_serialized_json\":\"{}\",\"objects\":{}}}",
             hex(&digest),
             doc.shapes.len()
         );
@@ -198,9 +199,10 @@ fn main() {
     }
     for depth in [512, 5_000] {
         let doc = deep_document(depth);
-        let digest = Sha256::digest(format!("{doc:?}").as_bytes());
+        let serialized = serde_json::to_vec(&doc).expect("fixture serializes");
+        let digest = Sha256::digest(&serialized);
         println!(
-            "{{\"fixture\":\"deep-{depth}\",\"sha256\":\"{}\",\"objects\":{}}}",
+            "{{\"fixture\":\"g1-b2-v1-deep-{depth}\",\"sha256_serialized_json\":\"{}\",\"objects\":{}}}",
             hex(&digest),
             doc.shapes.len()
         );
