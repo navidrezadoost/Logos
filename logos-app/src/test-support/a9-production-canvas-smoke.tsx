@@ -112,10 +112,13 @@ base.shapes[redId].parentId = groupId;
 base.shapes[groupId] = group;
 
 function installScene(page: Page, shapes: Record<string, Shape>): void {
+  // The renderer projection fixture models only renderer-facing page fields;
+  // provide the document-store page metadata required by atomic hydration.
+  const hydratedPage = { ...page, name: typeof page.name === "string" ? page.name : "A9 renderer fixture" };
   const result = useDocumentStore.getState().hydrateDocument({
-    currentPageId: page.id,
-    pages: { [page.id]: page },
-    pageOrder: [page.id],
+    currentPageId: hydratedPage.id,
+    pages: { [hydratedPage.id]: hydratedPage },
+    pageOrder: [hydratedPage.id],
     shapes,
   });
   assert(result.ok, `test fixture failed hydration: ${result.ok ? "" : result.diagnostic.code}`);
