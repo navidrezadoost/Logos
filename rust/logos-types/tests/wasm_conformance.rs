@@ -3,8 +3,6 @@
 use logos_types::{decode_and_validate_json, stable_import_id, Uuid};
 use wasm_bindgen_test::*;
 
-wasm_bindgen_test_configure!(run_in_node);
-
 #[wasm_bindgen_test]
 fn candidate_golden_decodes_to_same_stable_identity_and_geometry() {
     let fixture = include_str!("fixtures/g1-b1/rust-contract-candidate.json");
