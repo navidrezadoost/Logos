@@ -21,7 +21,8 @@ export type SceneProjectionDiagnosticCode =
   | "LOGOS_SCENE_PARENT_CHILD_MISMATCH"
   | "LOGOS_SCENE_CYCLE"
   | "LOGOS_SCENE_ORPHAN_NODE"
-  | "LOGOS_SCENE_UNSUPPORTED_SHAPE";
+  | "LOGOS_SCENE_UNSUPPORTED_SHAPE"
+  | "LOGOS_SCENE_UNSUPPORTED_CAPABILITY";
 
 export interface SceneProjectionDiagnostic {
   readonly code: SceneProjectionDiagnosticCode;

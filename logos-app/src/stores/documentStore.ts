@@ -11,6 +11,7 @@
 
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
+import { useMemo } from "react";
 import { nanoid } from "nanoid";
 import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, type ComponentMeta, type InstanceMeta, createRect, createVectorNetwork, IDENTITY_TRANSFORM } from "../types/shapes";
 
@@ -79,9 +80,7 @@ interface DocumentState {
   batchUpdate: (patches: Record<string, Partial<Shape>>) => void;
 
   /**
-   * Remove a shape and unlink from its page / parent.
-   * Does not recurse into children – the caller is responsible for that
-   * at the Rust scene graph level.
+   * Remove a shape subtree and unlink it from its page / parent.
    */
   removeShape: (id: string) => void;
 
@@ -243,26 +242,35 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       if (!shape) return s;
 
       const nextShapes = { ...s.shapes };
-      delete nextShapes[id];
+      const removed = new Set<string>();
+      const pending = [id];
+      while (pending.length > 0) {
+        const currentId = pending.pop()!;
+        if (removed.has(currentId)) continue;
+        removed.add(currentId);
+        const current = nextShapes[currentId];
+        if (current) pending.push(...current.children);
+        delete nextShapes[currentId];
+      }
 
       // Unlink from page root list
       const nextPages = { ...s.pages };
       for (const [pid, page] of Object.entries(nextPages)) {
-        if (page.rootShapeIds.includes(id)) {
+        if (page.rootShapeIds.some((rootId) => removed.has(rootId))) {
           nextPages[pid] = {
             ...page,
-            rootShapeIds: page.rootShapeIds.filter((sid) => sid !== id),
+            rootShapeIds: page.rootShapeIds.filter((sid) => !removed.has(sid)),
           };
         }
       }
 
       // Unlink from parent children list
-      if (shape.parentId) {
+      if (shape.parentId && !removed.has(shape.parentId)) {
         const parent = nextShapes[shape.parentId];
         if (parent) {
           nextShapes[shape.parentId] = {
             ...parent,
-            children: parent.children.filter((cid) => cid !== id),
+            children: parent.children.filter((cid) => !removed.has(cid)),
           };
         }
       }
@@ -347,4 +355,47 @@ export function selectCurrentPageShapes(state: {
 
 export function useCurrentPageShapes(): Shape[] {
   return useDocumentStore(useShallow(selectCurrentPageShapes));
+}
+
+/**
+ * Current page scene records in stable document membership. Child records are
+ * discovered through either side of the existing parent/children relation so
+ * malformed one-sided links reach the renderer validator instead of vanishing.
+ * Root order remains the Page.rootShapeIds order. Disconnected parentless
+ * shapes cannot be attributed to a page because Shape has no pageId field.
+ */
+export function selectCurrentPageScene(state: {
+  pages: Record<string, Page>;
+  currentPageId: string;
+  shapes: Record<string, Shape>;
+}): readonly [Page | null, ...Shape[]] {
+  const page = state.pages[state.currentPageId] ?? null;
+  if (!page) return [null];
+
+  const childrenByParent = new Map<string, Shape[]>();
+  for (const shape of Object.values(state.shapes)) {
+    if (shape.parentId) {
+      const children = childrenByParent.get(shape.parentId) ?? [];
+      children.push(shape);
+      childrenByParent.set(shape.parentId, children);
+    }
+  }
+
+  const scoped = new Map<string, Shape>();
+  const pending = [...page.rootShapeIds].reverse();
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    const shape = state.shapes[id];
+    if (!shape || scoped.has(id)) continue;
+    scoped.set(id, shape);
+    const declaredChildren = Array.isArray(shape.children) ? shape.children : [];
+    const linkedChildren = new Set([...declaredChildren, ...(childrenByParent.get(id) ?? []).map((child) => child.id)]);
+    for (const childId of [...linkedChildren].reverse()) pending.push(childId);
+  }
+  return [page, ...scoped.values()];
+}
+
+export function useCurrentPageScene(): { page: Page | null; shapes: Shape[] } {
+  const snapshot = useDocumentStore(useShallow(selectCurrentPageScene));
+  return useMemo(() => ({ page: snapshot[0], shapes: snapshot.slice(1) as Shape[] }), [snapshot]);
 }

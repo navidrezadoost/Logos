@@ -16,7 +16,7 @@ function backendLabel(backend: "canvas2d" | "wasm"): string {
 function frameMessage(status: RendererStatus): string | null {
   if (!("frameDisposition" in status)) return null;
   if (
-    (status.state === "UNSUPPORTED_SHAPE" || status.state === "RECOVERING") &&
+    (status.state === "UNSUPPORTED_SHAPE" || status.state === "SCENE_REJECTED" || status.state === "RECOVERING") &&
     status.frameDisposition === "previous"
   ) {
     return "The canvas is dimmed and shows the last successful frame, not the current document.";
@@ -44,9 +44,12 @@ export function RendererStatusOverlay({
   ) return null;
 
   const isUnsupported = status.state === "UNSUPPORTED_SHAPE";
+  const isRejected = status.state === "SCENE_REJECTED";
   const isRecovering = status.state === "RECOVERING";
   const diagnosticCode = isUnsupported
     ? status.code
+    : isRejected
+      ? status.code
     : status.state === "RENDER_FAILED"
       ? status.code
       : null;
@@ -54,9 +57,13 @@ export function RendererStatusOverlay({
     ? "Checking the updated canvas…"
     : isUnsupported
       ? "Some content can’t be displayed"
+      : isRejected
+        ? "This scene is not supported by the current renderer"
       : "The canvas could not be updated";
   const description = isUnsupported
     ? `This ${status.shapeType} shape is not supported by ${backendLabel(status.backend)}.`
+    : isRejected
+      ? `The current document contains content that cannot be rendered safely${status.shapeType ? ` (${status.shapeType})` : ""}.`
     : isRecovering
       ? "The editor is trying the updated content. The dimmed canvas is not current until rendering succeeds."
       : `The ${backendLabel(status.backend)} could not complete this update. The document was not changed by the renderer.`;
@@ -88,12 +95,12 @@ export function RendererStatusOverlay({
           {title}
         </h2>
         <p style={paragraphStyle}>{description}</p>
-        {isUnsupported && (
+        {(isUnsupported || isRejected) && (
           <p data-testid="renderer-document-safety" style={{ ...paragraphStyle, color: theme.text, fontWeight: 600 }}>
             Your document data has not been deleted or changed by this render failure.
           </p>
         )}
-        {isUnsupported && (
+        {(isUnsupported || isRejected) && status.shapeId && (
           <div style={detailStyle}>
             <span>{shapeName ? `${shapeName} · ` : ""}{status.shapeType}</span>
             <code>{status.shapeId}</code>
@@ -110,9 +117,9 @@ export function RendererStatusOverlay({
             Diagnostic: <code>{diagnosticCode}</code>
           </div>
         )}
-        {(isUnsupported && onSelectShape) || (!isUnsupported && !isRecovering && onRetry) ? (
+        {((isUnsupported || isRejected) && onSelectShape) || (!(isUnsupported || isRejected) && !isRecovering && onRetry) ? (
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            {isUnsupported && onSelectShape ? (
+            {(isUnsupported || isRejected) && onSelectShape ? (
               <button type="button" onClick={onSelectShape} style={actionStyle}>
                 Select in Layers
               </button>

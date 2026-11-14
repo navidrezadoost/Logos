@@ -18,13 +18,14 @@ import {
   cleanUp,
   type RenderWasmModule,
 } from "../../render-wasm/module";
-import { syncScene, syncScene2D } from "../../render-wasm/scene";
+import { projectAndSyncScene, syncScene2D } from "../../render-wasm/scene";
 import {
   rendererFailureStatus,
+  SceneRejectedRenderError,
   type RendererBackend,
   type RendererStatus,
 } from "../../render-wasm/renderer-status";
-import { useCurrentPageShapes, useDocumentStore } from "../../stores/documentStore";
+import { useCurrentPageScene, useCurrentPageShapes, useDocumentStore } from "../../stores/documentStore";
 import { useSelectionStore } from "../../stores/selectionStore";
 import { useUiStore } from "../../stores/uiStore";
 import { usePenStore } from "../../stores/penStore";
@@ -53,7 +54,12 @@ interface DragState {
   currentY: number;
 }
 
-export function Canvas(): React.ReactElement {
+export interface CanvasProps {
+  /** Injection seam used by the real-browser integration harness. */
+  rendererLoader?: typeof loadRenderWasm;
+}
+
+export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): React.ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const moduleRef = useRef<RenderWasmModule | null>(null);
@@ -66,6 +72,8 @@ export function Canvas(): React.ReactElement {
   const rendererStatusRef = useRef<RendererStatus | null>(null);
   const lastSuccessfulFrameRef = useRef<{ width: number; height: number; backend: RendererBackend } | null>(null);
   const [renderRetry, setRenderRetry] = useState(0);
+  const [renderMetrics, setRenderMetrics] = useState<Record<string, number> | null>(null);
+  const frameMetricRafRef = useRef<number | null>(null);
 
   const publishRendererStatus = useCallback((next: RendererStatus) => {
     rendererStatusRef.current = next;
@@ -88,6 +96,7 @@ export function Canvas(): React.ReactElement {
   const scaleDragRef = useRef<ScaleDrag | null>(null);
 
   const shapes = useCurrentPageShapes();
+  const pageScene = useCurrentPageScene();
   const clearSelection = useSelectionStore((s) => s.clearSelection);
   const { select, selectRange } = useSelectionStore();
   const {
@@ -127,7 +136,7 @@ export function Canvas(): React.ReactElement {
     workerPool.init();
 
     (async () => {
-      const mod = await loadRenderWasm(WASM_JS_URL, WASM_WASM_URL);
+      const mod = await rendererLoader(WASM_JS_URL, WASM_WASM_URL);
       if (cancelled) return;
       if (mod !== null) {
         const ok = initCanvasContext(mod, canvas);
@@ -144,6 +153,7 @@ export function Canvas(): React.ReactElement {
 
     return () => {
       cancelled = true;
+      if (frameMetricRafRef.current !== null) cancelAnimationFrame(frameMetricRafRef.current);
       const mod = moduleRef.current;
       if (mod && canvasRef.current) {
         cleanUp(mod, canvasRef.current);
@@ -159,8 +169,9 @@ export function Canvas(): React.ReactElement {
     if (!canvas || modeRef.current === "loading") return;
 
     const backend: RendererBackend = modeRef.current === "wasm" ? "wasm" : "canvas2d";
+    setRenderMetrics(null);
     const previousStatus = rendererStatusRef.current;
-    if (previousStatus && (previousStatus.state === "UNSUPPORTED_SHAPE" || previousStatus.state === "RENDER_FAILED")) {
+    if (previousStatus && (previousStatus.state === "UNSUPPORTED_SHAPE" || previousStatus.state === "SCENE_REJECTED" || previousStatus.state === "RENDER_FAILED")) {
       publishRendererStatus({
         state: "RECOVERING",
         backend,
@@ -173,8 +184,51 @@ export function Canvas(): React.ReactElement {
       if (backend === "wasm") {
         const mod = moduleRef.current;
         if (!mod) throw new Error("renderer module unavailable");
-        syncScene(mod, shapes, size.w, size.h);
+        if (!pageScene.page) throw new SceneRejectedRenderError("LOGOS_SCENE_MISSING_PAGE");
+        const result = projectAndSyncScene(
+          mod,
+          pageScene.page,
+          pageScene.shapes,
+          pageScene.page.rootShapeIds,
+          size.w,
+          size.h,
+          { zoom, panX, panY },
+        );
+        if (!result.ok) {
+          throw new SceneRejectedRenderError(
+            result.diagnostic.code,
+            result.diagnostic.shapeId,
+            result.diagnostic.shapeType,
+          );
+        }
+        if (frameMetricRafRef.current !== null) cancelAnimationFrame(frameMetricRafRef.current);
+        const syncCompletedAt = performance.now();
+        const wasmMetrics = result.metrics;
+        frameMetricRafRef.current = requestAnimationFrame(() => {
+          const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory;
+          setRenderMetrics({
+            ...wasmMetrics,
+            browserFrameLatencyMs: performance.now() - syncCompletedAt,
+            ...(typeof memory?.usedJSHeapSize === "number" ? { observedJsHeapBytes: memory.usedJSHeapSize } : {}),
+          });
+        });
       } else {
+        const unsupported = pageScene.shapes.find((shape) =>
+          shape.parentId !== null || !Array.isArray(shape.children) || shape.children.length > 0 ||
+          shape.type === "group" || shape.type === "bool" || shape.type === "path" ||
+          shape.type === "text" || shape.type === "svg-raw" || shape.type === "component" ||
+          shape.type === "instance" || shape.type === "vector-network" ||
+          shape.rotation !== 0 || !Array.isArray(shape.transform) || shape.transform.length !== 6 ||
+          shape.transform.some((value, index) => value !== [1, 0, 0, 1, 0, 0][index]) ||
+          !Array.isArray(shape.fills) || shape.fills.length > 1 || shape.fills.some((fill) => fill.type !== "solid")
+        );
+        if (unsupported) {
+          throw new SceneRejectedRenderError(
+            "LOGOS_SCENE_UNSUPPORTED_FALLBACK_CAPABILITY",
+            unsupported.id,
+            `${unsupported.type}: Canvas 2D compatibility is limited to flat, untransformed solid-fill shapes`,
+          );
+        }
         const ctx = canvas.getContext("2d");
         if (!ctx) throw new Error("Canvas 2D context unavailable");
         ctx.save();
@@ -199,7 +253,7 @@ export function Canvas(): React.ReactElement {
       );
       publishRendererStatus(rendererFailureStatus(error, backend, previousFrameVisible));
     }
-  }, [shapes, size, zoom, panX, panY, mode, renderRetry, publishRendererStatus]);
+  }, [shapes, pageScene, size, zoom, panX, panY, mode, renderRetry, publishRendererStatus]);
 
   // ── Mouse handlers for draw tools ─────────────────────────────────────────
 
@@ -568,12 +622,13 @@ export function Canvas(): React.ReactElement {
       })()
     : null;
 
-  const incompatibleShape = rendererStatus?.state === "UNSUPPORTED_SHAPE"
-    ? useDocumentStore.getState().shapes[rendererStatus.shapeId]
+  const incompatibleShape = rendererStatus?.state === "UNSUPPORTED_SHAPE" || rendererStatus?.state === "SCENE_REJECTED"
+    ? (rendererStatus.shapeId ? useDocumentStore.getState().shapes[rendererStatus.shapeId] : undefined)
     : undefined;
 
   function selectIncompatibleShape(): void {
-    if (rendererStatus?.state !== "UNSUPPORTED_SHAPE") return;
+    if (rendererStatus?.state !== "UNSUPPORTED_SHAPE" && rendererStatus?.state !== "SCENE_REJECTED") return;
+    if (!rendererStatus.shapeId) return;
     if (!useDocumentStore.getState().shapes[rendererStatus.shapeId]) return;
     select(rendererStatus.shapeId);
     if (!layersPanelOpen) toggleLayersPanel();
@@ -584,6 +639,10 @@ export function Canvas(): React.ReactElement {
       ref={containerRef}
       data-renderer-status={rendererStatus?.state ?? "IDLE"}
       data-renderer-backend={rendererStatus?.backend ?? mode}
+      data-renderer-diagnostic={rendererStatus && "code" in rendererStatus ? rendererStatus.code : ""}
+      data-renderer-frame-disposition={rendererStatus && "frameDisposition" in rendererStatus ? rendererStatus.frameDisposition : ""}
+      data-renderer-metrics={renderMetrics ? JSON.stringify(renderMetrics) : ""}
+      data-canvas-page-id={pageScene.page?.id ?? ""}
       style={{ flex: 1, position: "relative", overflow: "hidden", background: theme.canvas, cursor }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
@@ -691,7 +750,7 @@ export function Canvas(): React.ReactElement {
       <RendererStatusOverlay
         status={rendererStatus}
         shapeName={incompatibleShape?.name}
-        onSelectShape={rendererStatus?.state === "UNSUPPORTED_SHAPE" ? selectIncompatibleShape : undefined}
+        onSelectShape={rendererStatus?.state === "UNSUPPORTED_SHAPE" || rendererStatus?.state === "SCENE_REJECTED" ? selectIncompatibleShape : undefined}
         onRetry={rendererStatus?.state === "RENDER_FAILED" ? () => setRenderRetry((attempt) => attempt + 1) : undefined}
       />
     </div>

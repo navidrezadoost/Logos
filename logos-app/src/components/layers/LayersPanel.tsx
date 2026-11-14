@@ -8,7 +8,7 @@
 
 import { useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCurrentPageShapes, useDocumentStore } from "../../stores/documentStore";
+import { useCurrentPageScene, useDocumentStore } from "../../stores/documentStore";
 import { useSelectionStore, useIsSelected } from "../../stores/selectionStore";
 import type { Shape } from "../../types/shapes";
 import { MultiSelectChips, type ScrollMode } from "../ui/MultiSelectChips";
@@ -17,7 +17,20 @@ import { theme } from "../../theme/colors";
 const ITEM_HEIGHT = 32;
 
 export function LayersPanel(): React.ReactElement {
-  const shapes = useCurrentPageShapes();
+  const { page, shapes: pageShapeRecords } = useCurrentPageScene();
+  const shapesById = new Map(pageShapeRecords.map((shape) => [shape.id, shape]));
+  const treeRows: Array<{ shape: Shape; depth: number }> = [];
+  const visited = new Set<string>();
+  const stack = (page?.rootShapeIds ?? []).slice().reverse().map((id) => ({ id, depth: 0 }));
+  while (stack.length > 0) {
+    const { id, depth } = stack.pop()!;
+    const shape = shapesById.get(id);
+    if (!shape || visited.has(id)) continue;
+    visited.add(id);
+    treeRows.push({ shape, depth });
+    for (const childId of (Array.isArray(shape.children) ? [...shape.children] : []).reverse()) stack.push({ id: childId, depth: depth + 1 });
+  }
+  const shapes = treeRows.map(({ shape }) => shape);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastSelectedIdRef = useRef<string | null>(null);
 
@@ -28,18 +41,18 @@ export function LayersPanel(): React.ReactElement {
 
   const visibleShapes =
     filteredTypes.length === 0
-      ? shapes
-      : shapes.filter((s) => filteredTypes.includes(s.type));
+      ? treeRows
+      : treeRows.filter(({ shape }) => filteredTypes.includes(shape.type));
 
   function handleRowSelect(e: React.MouseEvent<HTMLDivElement>, shape: Shape) {
     const { select, toggleSelect, selectRange } = useSelectionStore.getState();
 
     if (e.shiftKey && lastSelectedIdRef.current) {
-      const start = visibleShapes.findIndex((s) => s.id === lastSelectedIdRef.current);
-      const end = visibleShapes.findIndex((s) => s.id === shape.id);
+      const start = visibleShapes.findIndex(({ shape: item }) => item.id === lastSelectedIdRef.current);
+      const end = visibleShapes.findIndex(({ shape: item }) => item.id === shape.id);
       if (start !== -1 && end !== -1) {
         const [from, to] = start < end ? [start, end] : [end, start];
-          selectRange(visibleShapes.slice(from, to + 1).map((s) => s.id));
+          selectRange(visibleShapes.slice(from, to + 1).map(({ shape: item }) => item.id));
         return;
       }
     }
@@ -114,7 +127,7 @@ export function LayersPanel(): React.ReactElement {
         <div ref={scrollRef} style={{ overflowY: "auto", flex: 1 }}>
           <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
             {virtualizer.getVirtualItems().map((vRow) => {
-              const shape = visibleShapes[vRow.index];
+              const { shape, depth } = visibleShapes[vRow.index];
               return (
                 <div
                   key={shape.id}
@@ -126,7 +139,7 @@ export function LayersPanel(): React.ReactElement {
                     height: ITEM_HEIGHT,
                   }}
                 >
-                  <ShapeRow shape={shape} onSelect={handleRowSelect} />
+                  <ShapeRow shape={shape} depth={depth} onSelect={handleRowSelect} />
                 </div>
               );
             })}
@@ -141,9 +154,11 @@ export function LayersPanel(): React.ReactElement {
 
 function ShapeRow({
   shape,
+  depth,
   onSelect,
 }: {
   shape: Shape;
+  depth: number;
   onSelect: (e: React.MouseEvent<HTMLDivElement>, shape: Shape) => void;
 }): React.ReactElement {
   const isSelected = useIsSelected(shape.id);
@@ -156,7 +171,7 @@ function ShapeRow({
         display: "flex",
         alignItems: "center",
         height: ITEM_HEIGHT,
-        padding: "0 8px",
+        padding: `0 8px 0 ${8 + depth * 14}px`,
         gap: 6,
         cursor: "pointer",
         background: isSelected ? theme.surface : "transparent",

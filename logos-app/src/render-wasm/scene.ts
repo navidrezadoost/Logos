@@ -1,22 +1,15 @@
 /**
  * render-wasm/scene.ts  (M3 revision)
  *
- * Synchronise the Zustand documentStore shapes into the Rust/Skia scene graph.
+ * Synchronise React scene data into the Rust/Skia renderer scene graph.
  *
  * Render path:
- *   documentStore mutation
- *     → useCurrentPageShapes() returns new array
- *     → Canvas.tsx useEffect([shapes, …]) fires
- *     → syncScene(mod, shapes)  ← this file
- *     → _set_shape_base_props() per shape (104-byte batched ABI)
- *     → applySolidFill() per shape
+ *   documentStore mutation → current page scene selector → Canvas effect
+ *     → projectAndSyncScene() → A8 graph validation and ordered child upload
  *     → _render_sync()
  *
- * C2 (updateShape/deleteShape → syncScene):
- *   Resolved by the Zustand subscription pattern. Any mutation to the
- *   `shapes` record triggers useCurrentPageShapes() to emit a new array,
- *   which causes the Canvas.tsx useEffect to fire — no extra wiring needed.
- *   Every syncScene call does a full re-upload of all shapes.
+ * `syncScene()` below is retained for legacy flat adapters. Production Canvas
+ * uses only the hierarchical A8 path.
  *
  * C3 (binary format):
  *   Uses _set_shape_base_props() which reads 104 bytes from WASM heap,
@@ -62,13 +55,14 @@ function rustShapeDiscriminator(shape: Shape): number {
 }
 
 const FLAG_HIDDEN     = 0x02;
+const FLAG_CLIP_CONTENT = 0x01;
 const BLEND_NORMAL    = 0x00;
 const CONSTRAINT_NONE = 0xFF;
 const BASE_PROPS_SIZE = 104;
 
 /**
- * Push all shapes to the Rust scene graph and render a frame.
- * Called whenever the shape list or a shape's properties change.
+ * Legacy flat uploader. Production Canvas must use `projectAndSyncScene` so
+ * nested membership is validated and uploaded through the A8 contract.
  *
  * @param mod    Loaded Emscripten module (null = Canvas 2D, handled by caller).
  * @param shapes Current page shapes in layers order (top shape first).
@@ -121,7 +115,7 @@ export class SceneUploadRecoveryError extends Error {
 }
 
 export type ProjectedSceneSyncResult =
-  | { readonly ok: true; readonly plan: SceneProjectionPlan }
+  | { readonly ok: true; readonly plan: SceneProjectionPlan; readonly metrics: ProjectedSceneMetrics }
   | {
       readonly ok: false;
       readonly diagnostic: SceneProjectionDiagnostic | {
@@ -129,11 +123,93 @@ export type ProjectedSceneSyncResult =
         readonly pageId: string;
         readonly backend: "wasm";
         readonly recovered: boolean;
+      readonly shapeId?: string;
+      readonly shapeType?: string;
       };
     };
 
-const lastCommittedProjectedScene = new WeakMap<RenderWasmModule, SceneProjectionPlan>();
+interface CommittedProjectedScene {
+  readonly plan: SceneProjectionPlan;
+  readonly width: number;
+  readonly height: number;
+  readonly view: ProjectedSceneView;
+}
+
+const lastCommittedProjectedScene = new WeakMap<RenderWasmModule, CommittedProjectedScene>();
 const poisonedRenderModules = new WeakSet<RenderWasmModule>();
+
+export interface ProjectedSceneView {
+  readonly zoom: number;
+  readonly panX: number;
+  readonly panY: number;
+}
+
+export interface ProjectedSceneMetrics {
+  readonly projectionValidationMs: number;
+  readonly wasmUploadMs: number;
+  readonly nativeRendererMs: number;
+  readonly synchronousMainThreadMs: number;
+  readonly wasmReservedBytes: number;
+}
+
+interface MutableUploadMetrics { uploadMs: number; nativeMs: number; }
+
+function validateA9Capabilities(plan: SceneProjectionPlan): SceneProjectionDiagnostic | null {
+  const byId = new Map(plan.nodes.filter((node) => !node.synthetic).map((node) => [node.id, node.shape]));
+  for (const node of plan.nodes) {
+    if (node.synthetic) continue;
+    const shape = node.shape;
+    const reject = (reason: string): SceneProjectionDiagnostic => ({
+      code: "LOGOS_SCENE_UNSUPPORTED_CAPABILITY",
+      pageId: plan.pageId,
+      shapeId: shape.id,
+      shapeType: `${shape.type}: ${reason}`,
+      backend: "wasm",
+    });
+    if (shape.type !== "rect" && shape.type !== "frame" && shape.type !== "group") {
+      return reject("A9 supports only rectangles, frames, and groups");
+    }
+    if (!Array.isArray(shape.transform) || shape.transform.length !== 6 || !shape.transform.every(Number.isFinite)) {
+      return reject("affine transform is malformed");
+    }
+    if (shape.transform.some((value, index) => value !== [1, 0, 0, 1, 0, 0][index]) || shape.rotation !== 0) {
+      return reject("non-identity transforms and rotation are not verified");
+    }
+    if (!shape.bounds || typeof shape.bounds !== "object") return reject("bounds are malformed");
+    const { x, y, w, h } = shape.bounds;
+    if (![x, y, w, h, shape.opacity].every(Number.isFinite) || w < 0 || h < 0 || shape.opacity < 0 || shape.opacity > 1) {
+      return reject("invalid bounds or opacity");
+    }
+    if (!Array.isArray(shape.fills) || shape.fills.length > 1 || shape.fills.some((fill) => !fill || fill.type !== "solid")) {
+      return reject("only zero or one solid fill is verified");
+    }
+    const solidFill = shape.fills[0];
+    if (solidFill?.type === "solid" && (typeof solidFill.color !== "string" || !/^#[0-9a-f]{6}$/i.test(solidFill.color) ||
+        !Number.isFinite(solidFill.opacity) || solidFill.opacity < 0 || solidFill.opacity > 1)) {
+      return reject("solid fill color or opacity is invalid");
+    }
+    if (shape.type === "frame") {
+      // The renderer clips Frame children by default. Its current React shape
+      // contract has no clip switch, so require all descendants to be inside
+      // every Frame; this makes the enabled clip behavior visually equivalent.
+      const stack = [...shape.children];
+      const seen = new Set<string>();
+      while (stack.length) {
+        const childId = stack.pop()!;
+        if (seen.has(childId)) continue;
+        seen.add(childId);
+        const child = byId.get(childId);
+        if (!child) continue; // Structural diagnostics are returned by A8 first.
+        const b = child.bounds;
+        if (b.x < x || b.y < y || b.x + b.w > x + w || b.y + b.h > y + h) {
+          return reject("Frame clipping of out-of-bounds descendants is not qualified");
+        }
+        stack.push(...child.children);
+      }
+    }
+  }
+  return null;
+}
 
 /** Validate the whole candidate graph before invoking any WASM mutator. */
 export function projectAndSyncScene(
@@ -143,13 +219,29 @@ export function projectAndSyncScene(
   orderedRootIds: readonly string[],
   width: number,
   height: number,
+  view: ProjectedSceneView = { zoom: 1, panX: 0, panY: 0 },
 ): ProjectedSceneSyncResult {
+  const startedAt = performance.now();
   const projection = buildSceneProjection(page, pageShapeRecords, orderedRootIds);
   if (!projection.ok) return projection;
+  const capabilityDiagnostic = validateA9Capabilities(projection.plan);
+  if (capabilityDiagnostic) return { ok: false, diagnostic: capabilityDiagnostic };
+  const projectionValidationMs = performance.now() - startedAt;
+  const uploadMetrics: MutableUploadMetrics = { uploadMs: 0, nativeMs: 0 };
 
   try {
-    syncProjectedScene(mod, projection.plan, width, height);
-    return { ok: true, plan: projection.plan };
+    syncProjectedScene(mod, projection.plan, width, height, view, uploadMetrics);
+    return {
+      ok: true,
+      plan: projection.plan,
+      metrics: {
+        projectionValidationMs,
+        wasmUploadMs: uploadMetrics.uploadMs,
+        nativeRendererMs: uploadMetrics.nativeMs,
+        synchronousMainThreadMs: performance.now() - startedAt,
+        wasmReservedBytes: mod.HEAPU8.buffer.byteLength,
+      },
+    };
   } catch (error) {
     if (!(error instanceof SceneUploadRecoveryError)) throw error;
     return {
@@ -175,6 +267,8 @@ function syncProjectedScene(
   plan: SceneProjectionPlan,
   width: number,
   height: number,
+  view: ProjectedSceneView,
+  metrics: MutableUploadMetrics,
 ): void {
   if (poisonedRenderModules.has(mod)) {
     throw new SceneUploadRecoveryError("LOGOS_SCENE_MODULE_POISONED", plan.pageId, false);
@@ -182,13 +276,20 @@ function syncProjectedScene(
 
   const committed = lastCommittedProjectedScene.get(mod);
   try {
-    uploadProjectedPlan(mod, plan, width, height);
-    lastCommittedProjectedScene.set(mod, cloneProjectionPlan(plan));
+    uploadProjectedPlan(mod, plan, width, height, view, metrics);
+    lastCommittedProjectedScene.set(mod, {
+      plan: cloneProjectionPlan(plan), width, height, view: { ...view },
+    });
   } catch {
-    const recoveryPlan = committed ?? emptyProjectionPlan(plan.pageId);
+    const recoveryPlan = committed?.plan ?? emptyProjectionPlan(plan.pageId);
+    const recoveryWidth = committed?.width ?? width;
+    const recoveryHeight = committed?.height ?? height;
+    const recoveryView = committed?.view ?? view;
     try {
-      uploadProjectedPlan(mod, recoveryPlan, width, height);
-      lastCommittedProjectedScene.set(mod, recoveryPlan);
+      uploadProjectedPlan(mod, recoveryPlan, recoveryWidth, recoveryHeight, recoveryView, metrics);
+      lastCommittedProjectedScene.set(mod, {
+        plan: recoveryPlan, width: recoveryWidth, height: recoveryHeight, view: { ...recoveryView },
+      });
     } catch {
       poisonedRenderModules.add(mod);
       throw new SceneUploadRecoveryError("LOGOS_SCENE_RECOVERY_FAILED", plan.pageId, false);
@@ -202,8 +303,12 @@ function uploadProjectedPlan(
   plan: SceneProjectionPlan,
   width: number,
   height: number,
+  view: ProjectedSceneView,
+  metrics: MutableUploadMetrics,
 ): void {
+  const uploadStartedAt = performance.now();
   mod._resize_viewbox(width, height);
+  mod._set_view(view.zoom, view.panX, view.panY);
   mod._begin_scene_upload(plan.nodes.length);
 
   for (const node of plan.nodes) {
@@ -214,7 +319,10 @@ function uploadProjectedPlan(
     uploadChildren(mod, node.id, node.rendererChildrenIds);
   }
 
+  metrics.uploadMs += performance.now() - uploadStartedAt;
+  const rendererStartedAt = performance.now();
   mod._render_sync();
+  metrics.nativeMs += performance.now() - rendererStartedAt;
 }
 
 function uploadChildren(mod: RenderWasmModule, parentId: string, childIds: readonly string[]): void {
@@ -261,7 +369,7 @@ function cloneProjectionPlan(plan: SceneProjectionPlan): SceneProjectionPlan {
  *   [0..16)   id UUID      4×u32 LE
  *   [16..32)  parent_id    4×u32 LE (zeros if null)
  *   [32]      shape_type   u8
- *   [33]      flags        u8  (bit1=hidden)
+ *   [33]      flags        u8  (bit0=clip, bit1=hidden)
  *   [34]      blend_mode   u8  (0=Normal)
  *   [35]      constraint_h u8  (0xFF=None)
  *   [36]      constraint_v u8  (0xFF=None)
@@ -287,8 +395,8 @@ function uploadShapeBatched(mod: RenderWasmModule, shape: Shape, rustType: numbe
     // shape_type [32]
     view.setUint8(32, rustType);
 
-    // flags [33]  bit1 = hidden
-    view.setUint8(33, shape.hidden ? FLAG_HIDDEN : 0);
+    // flags [33]: frame clipping (renderer default) and visibility.
+    view.setUint8(33, (shape.hidden ? FLAG_HIDDEN : 0) | (shape.type === "frame" ? FLAG_CLIP_CONTENT : 0));
 
     // blend_mode [34]
     view.setUint8(34, BLEND_NORMAL);

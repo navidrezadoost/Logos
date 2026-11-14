@@ -8,6 +8,10 @@ on:
       - "bin/generate-types"
       - "logos-app/src/types/generated/**"
       - "logos-app/src/types/rust-generated/**"
+      - "logos-app/src/components/canvas/**"
+      - "logos-app/src/components/layers/**"
+      - "logos-app/src/render-wasm/**"
+      - "logos-app/src/stores/documentStore.ts"
       - ".github/workflows/typecheck.yml"
   pull_request:
     branches: ["main"]
@@ -16,6 +20,10 @@ on:
       - "bin/generate-types"
       - "logos-app/src/types/generated/**"
       - "logos-app/src/types/rust-generated/**"
+      - "logos-app/src/components/canvas/**"
+      - "logos-app/src/components/layers/**"
+      - "logos-app/src/render-wasm/**"
+      - "logos-app/src/stores/documentStore.ts"
 
 jobs:
   generated-types-drift:
