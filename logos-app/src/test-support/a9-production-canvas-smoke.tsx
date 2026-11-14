@@ -194,11 +194,12 @@ async function run(): Promise<void> {
   const targetGroupId = "00000000-0000-4000-8000-000000000041";
   const moved = structuredClone(changed);
   moved[outerFrameId].children = [blueId, nestedFrameId];
+  moved[groupId].parentId = null;
   moved[groupId].children = [];
   moved[redId].parentId = targetGroupId;
   moved[redId].bounds = { x: 165, y: 40, w: 40, h: 40 };
   moved[targetGroupId] = { ...group, id: targetGroupId, name: "Reparent target group", parentId: null, children: [redId], bounds: { x: 150, y: 20, w: 80, h: 80 } };
-  const reparentPage = { ...base.page, rootShapeIds: [targetGroupId, ...base.page.rootShapeIds] };
+  const reparentPage = { ...base.page, rootShapeIds: [targetGroupId, groupId, ...base.page.rootShapeIds] };
   installScene(reparentPage, moved);
   await waitReady("reparent frame");
   frame = pixels();
