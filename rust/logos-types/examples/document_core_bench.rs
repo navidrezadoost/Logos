@@ -131,7 +131,6 @@ fn bench(label: &str, objects: usize, mut f: impl FnMut()) {
     println!("{{\"case\":\"{label}\",\"objects\":{objects},\"samples\":31,\"p50_ns\":{p50},\"p95_ns\":{p95},\"requested_allocations_per_call\":{allocations},\"requested_bytes_per_call\":{bytes},\"retained_memory_measured\":false}}");
 }
 fn main() {
-    println!("{{\"metadata\":{{\"profile\":\"release\",\"target_arch\":\"{}\",\"rustc_version\":\"{}\",\"cpu_model\":\"{}\"}}}}", std::env::consts::ARCH, option_env!("RUSTC_VERSION").unwrap_or("record rustc -Vv"), option_env!("LOGOS_CPU_MODEL").unwrap_or("record from /proc/cpuinfo"));
     for size in [100, 1_000, 10_000] {
         let doc = flat_document(size);
         let serialized = serde_json::to_vec(&doc).expect("fixture serializes");
