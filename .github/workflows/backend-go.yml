@@ -76,5 +76,5 @@ jobs:
       - name: Run snapshot creation and restore integration suite
         env:
           TEST_DATABASE_URL: postgres://logos:snapshot-only@127.0.0.1:5432/logos_p04_snapshot?sslmode=disable
-        run: go test -race ./internal/handler -run 'Test(CreateSnapshot|Restore|HistoricalComplete)' -count=1 -timeout=180s -v
+        run: go test -race ./internal/handler -run 'Test(CreateSnapshot|Restore|HistoricalComplete|ExpiredPreRestore|CreatedSnapshotRecovery|VerifySnapshotBlobStatuses)' -count=1 -timeout=180s -v
         working-directory: backend-go

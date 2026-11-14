@@ -33,6 +33,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -59,6 +60,18 @@ type Snapshot struct {
 
 const snapshotIntegrityMetadataKey = "snapshot-integrity"
 
+const (
+	snapshotStatusVerified         = "verified"
+	snapshotStatusLegacyUnverified = "legacy-unverified"
+	snapshotStatusUnavailable      = "unavailable"
+	snapshotStatusCorrupt          = "corrupt"
+)
+
+var (
+	errSnapshotContentUnavailable = errors.New("snapshot-content-unavailable")
+	errSnapshotContentCorrupt     = errors.New("snapshot-content-corrupt")
+)
+
 type snapshotIntegrityMetadata struct {
 	Version   int    `json:"version"`
 	Algorithm string `json:"algorithm"`
@@ -76,27 +89,27 @@ func integrityMetadata(data []byte) ([]byte, error) {
 // restorable but unverified. A present envelope must be recognized and match.
 func verifySnapshotBlob(data, rawMetadata []byte) (string, error) {
 	if len(data) == 0 {
-		return "unavailable", fmt.Errorf("snapshot-content-unavailable")
+		return snapshotStatusUnavailable, errSnapshotContentUnavailable
 	}
 	var metadata map[string]json.RawMessage
 	if len(rawMetadata) > 0 {
 		if err := json.Unmarshal(rawMetadata, &metadata); err != nil {
-			return "", fmt.Errorf("snapshot-content-corrupt")
+			return snapshotStatusCorrupt, errSnapshotContentCorrupt
 		}
 	}
 	raw, hasIntegrity := metadata[snapshotIntegrityMetadataKey]
 	if !hasIntegrity {
-		return "legacy-unverified", nil
+		return snapshotStatusLegacyUnverified, nil
 	}
 	var integrity snapshotIntegrityMetadata
 	if json.Unmarshal(raw, &integrity) != nil || integrity.Version != 1 || integrity.Algorithm != "sha256" || len(integrity.Digest) != 64 {
-		return "", fmt.Errorf("snapshot-content-corrupt")
+		return snapshotStatusCorrupt, errSnapshotContentCorrupt
 	}
 	digest := sha256.Sum256(data)
 	if hex.EncodeToString(digest[:]) != integrity.Digest {
-		return "", fmt.Errorf("snapshot-content-corrupt")
+		return snapshotStatusCorrupt, errSnapshotContentCorrupt
 	}
-	return "verified", nil
+	return snapshotStatusVerified, nil
 }
 
 // fileEditPermissionTx locks the membership rows used for authorization until
@@ -168,17 +181,23 @@ func GetFileSnapshotsHandler(pool *db.Pool) http.HandlerFunc {
 		}
 
 		rows, err := pool.Query(r.Context(),
-			`SELECT fc.id::text, fc.file_id::text, fc.revn, fc.label,
-			        COALESCE(fc.created_by, 'system'),
-			        fc.profile_id::text, fc.created_at, fc.locked_by::text,
-			        fd.data, COALESCE(fd.metadata, '{}'::jsonb)
-			   FROM file_change fc
-			   LEFT JOIN file_data fd ON fd.file_id=fc.file_id AND fd.id=fc.id AND fd.type='snapshot' AND fd.deleted_at IS NULL
-			  WHERE fc.file_id = $1
-			    AND fc.label IS NOT NULL
-			    AND fc.deleted_at IS NULL
-			  ORDER BY fc.created_at DESC
-			  LIMIT 1000`,
+			`WITH snapshot_rows AS (
+				SELECT fc.id::text AS id, fc.file_id::text AS file_id, fc.revn, fc.label,
+				       COALESCE(fc.created_by, 'system') AS created_by,
+				       fc.profile_id::text AS profile_id, fc.created_at, fc.locked_by::text AS locked_by,
+				       fd.data, COALESCE(fd.metadata, '{}'::jsonb) AS metadata
+				  FROM file_change fc
+				  LEFT JOIN file_data fd ON fd.file_id=fc.file_id AND fd.id=fc.id AND fd.type='snapshot'
+				       AND (fd.deleted_at IS NULL OR (fc.created_by='system' AND fd.deleted_at >= now()))
+				 WHERE fc.file_id=$1 AND fc.label IS NOT NULL
+				   AND ((fc.created_by='system' AND (fc.deleted_at IS NULL OR fc.deleted_at >= now()))
+				        OR (fc.created_by<>'system' AND fc.deleted_at IS NULL))
+			), visible_snapshots AS (
+				(SELECT * FROM snapshot_rows WHERE created_by='system' ORDER BY created_at DESC LIMIT 500)
+				UNION ALL
+				(SELECT * FROM snapshot_rows WHERE created_by<>'system' ORDER BY created_at DESC LIMIT 500)
+			)
+			SELECT * FROM visible_snapshots ORDER BY created_at DESC`,
 			fileID,
 		)
 		if err != nil {
@@ -193,11 +212,26 @@ func GetFileSnapshotsHandler(pool *db.Pool) http.HandlerFunc {
 			var data, metadata []byte
 			if err := rows.Scan(&s.ID, &s.FileID, &s.Revn, &s.Label,
 				&s.CreatedBy, &s.ProfileID, &s.CreatedAt, &s.LockedBy, &data, &metadata); err != nil {
-				continue
+				writeError(w, http.StatusInternalServerError, "snapshot listing failed")
+				return
 			}
 			s.IsLocked = s.LockedBy != nil
-			s.RestoreStatus, _ = verifySnapshotBlob(data, metadata)
+			status, verifyErr := verifySnapshotBlob(data, metadata)
+			if errors.Is(verifyErr, errSnapshotContentUnavailable) {
+				s.RestoreStatus = snapshotStatusUnavailable
+			} else if errors.Is(verifyErr, errSnapshotContentCorrupt) {
+				s.RestoreStatus = snapshotStatusCorrupt
+			} else if verifyErr != nil {
+				writeError(w, http.StatusInternalServerError, "snapshot integrity check failed")
+				return
+			} else {
+				s.RestoreStatus = status
+			}
 			snapshots = append(snapshots, s)
+		}
+		if err := rows.Err(); err != nil {
+			writeError(w, http.StatusInternalServerError, "snapshot listing failed")
+			return
 		}
 
 		writeJSON(w, http.StatusOK, snapshots)
@@ -434,7 +468,10 @@ func RestoreFileSnapshotHandler(pool *db.Pool) http.HandlerFunc {
 		var snap Snapshot
 		if err := tx.QueryRow(r.Context(),
 			`SELECT id::text, file_id::text, revn, label, COALESCE(created_by,'system')
-			   FROM file_change WHERE id=$1 AND label IS NOT NULL AND deleted_at IS NULL FOR SHARE`, params.ID).
+			   FROM file_change
+			  WHERE id=$1 AND label IS NOT NULL
+			    AND (deleted_at IS NULL OR (created_by='system' AND deleted_at >= now()))
+			  FOR SHARE`, params.ID).
 			Scan(&snap.ID, &snap.FileID, &snap.Revn, &snap.Label, &snap.CreatedBy); err != nil {
 			writeError(w, http.StatusNotFound, "snapshot not found")
 			return
@@ -458,7 +495,9 @@ func RestoreFileSnapshotHandler(pool *db.Pool) http.HandlerFunc {
 		var snapRawData, snapMetadata []byte
 		if err := tx.QueryRow(r.Context(),
 			`SELECT data, COALESCE(metadata, '{}'::jsonb) FROM file_data
-			  WHERE file_id=$1 AND id=$2 AND type='snapshot' AND deleted_at IS NULL FOR SHARE`, snap.FileID, snap.ID).
+			  WHERE file_id=$1 AND id=$2 AND type='snapshot'
+			    AND (deleted_at IS NULL OR ($3='system' AND deleted_at >= now()))
+			  FOR SHARE`, snap.FileID, snap.ID, snap.CreatedBy).
 			Scan(&snapRawData, &snapMetadata); err != nil {
 			writeError(w, http.StatusConflict, "snapshot-content-unavailable")
 			return
@@ -475,7 +514,8 @@ func RestoreFileSnapshotHandler(pool *db.Pool) http.HandlerFunc {
 
 		now := time.Now().UTC()
 
-		// Auto-snapshot current state (system, expires in 48h).
+		// Auto-snapshot current state using the legacy system-snapshot retention
+		// convention: future deleted_at means logically available until expiry.
 		autoID := newUUID()
 		autoDeleted := now.Add(48 * time.Hour)
 		if _, err = tx.Exec(r.Context(),
@@ -496,7 +536,7 @@ func RestoreFileSnapshotHandler(pool *db.Pool) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "pre-restore integrity metadata failed")
 			return
 		}
-		if _, err = tx.Exec(r.Context(), `INSERT INTO file_data (id,file_id,type,data,metadata) VALUES ($1,$2,'snapshot',$3,$4)`, autoID, snap.FileID, currentData, preRestoreMetadata); err != nil {
+		if _, err = tx.Exec(r.Context(), `INSERT INTO file_data (id,file_id,type,data,metadata,deleted_at) VALUES ($1,$2,'snapshot',$3,$4,$5)`, autoID, snap.FileID, currentData, preRestoreMetadata, autoDeleted); err != nil {
 			writeError(w, http.StatusInternalServerError, "pre-restore content insert failed")
 			return
 		}

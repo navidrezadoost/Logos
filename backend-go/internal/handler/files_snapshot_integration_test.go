@@ -387,14 +387,51 @@ func TestRestoreFailureRollsBackAndRetryRestoresCompleteSnapshotIntegration(t *t
 	if !bytes.Equal(state.data, want) || state.vern != 1 || state.revn != 0 {
 		t.Fatalf("successful restore state=%+v, want restored bytes, vern 1, unchanged revn 0", state)
 	}
-	var autosWithData int
+	var recoveryID string
+	var fileExpiry, blobExpiry time.Time
+	var recoveryData, recoveryMetadata []byte
 	if err := pool.QueryRow(ctx, `
-		SELECT count(*) FROM file_change fc JOIN file_data fd ON fd.file_id=fc.file_id AND fd.id=fc.id
-		 WHERE fc.file_id=$1 AND fc.label LIKE 'internal/pre-restore/%' AND fd.data=$2`, fileID, []byte(`{"current":"state"}`)).Scan(&autosWithData); err != nil {
+		SELECT fc.id::text, fc.deleted_at, fd.data, fd.metadata, fd.deleted_at
+		  FROM file_change fc JOIN file_data fd ON fd.file_id=fc.file_id AND fd.id=fc.id
+		 WHERE fc.file_id=$1 AND fc.label LIKE 'internal/pre-restore/%' AND fd.data=$2`, fileID, []byte(`{"current":"state"}`)).
+		Scan(&recoveryID, &fileExpiry, &recoveryData, &recoveryMetadata, &blobExpiry); err != nil {
+		t.Fatalf("locate pre-restore recovery point: %v", err)
+	}
+	if !fileExpiry.After(time.Now()) || !blobExpiry.After(time.Now()) || !bytes.Equal(recoveryData, []byte(`{"current":"state"}`)) {
+		t.Fatalf("recovery point content/expiry invalid: expiry=%s/%s content=%s", fileExpiry, blobExpiry, recoveryData)
+	}
+	var digestEnvelope map[string]map[string]any
+	if err := json.Unmarshal(recoveryMetadata, &digestEnvelope); err != nil || digestEnvelope["snapshot-integrity"]["digest"] == nil {
+		t.Fatalf("pre-restore digest metadata invalid: %s (%v)", recoveryMetadata, err)
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/rpc/command/get-file-snapshots?file-id="+fileID, nil)
+	listReq = listReq.WithContext(auth.WithProfileID(listReq.Context(), profileID))
+	listRec := httptest.NewRecorder()
+	handler.GetFileSnapshotsHandler(pool).ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list recovery point: %d %s", listRec.Code, listRec.Body.String())
+	}
+	var listed []struct {
+		ID            string `json:"id"`
+		RestoreStatus string `json:"restoreStatus"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if autosWithData != 1 {
-		t.Fatalf("pre-restore snapshot rows with original content=%d, want 1", autosWithData)
+	listedRecovery := false
+	for _, item := range listed {
+		if item.ID == recoveryID && item.RestoreStatus == "verified" {
+			listedRecovery = true
+		}
+	}
+	if !listedRecovery {
+		t.Fatalf("future-expiring recovery point %s not listed as verified", recoveryID)
+	}
+	if rec := callRestore(t, pool, profileID, recoveryID); rec.Code != http.StatusOK {
+		t.Fatalf("restore pre-restore recovery point: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if recovered := readFileIntegrityState(t, pool, fileID); !bytes.Equal(recovered.data, []byte(`{"current":"state"}`)) {
+		t.Fatalf("recovery restore content=%s, want original pre-restore content", recovered.data)
 	}
 }
 
@@ -403,6 +440,9 @@ func TestHistoricalCompleteSnapshotRestoresAndIncompleteStatusIsReportedIntegrat
 	completeData := []byte(`{"legacy":"complete"}`)
 	completeID := insertSnapshotFixture(t, profileID, fileID, 4, "legacy complete", completeData, nil)
 	incompleteID := insertSnapshotFixture(t, profileID, fileID, 5, "legacy incomplete", nil, nil)
+	corruptID := insertSnapshotFixture(t, profileID, fileID, 6, "corrupt", []byte(`{"corrupt":true}`), []byte(`{"snapshot-integrity":{"version":1,"algorithm":"sha256","digest":"0000000000000000000000000000000000000000000000000000000000000000"}}`))
+	unsupportedID := insertSnapshotFixture(t, profileID, fileID, 7, "unsupported envelope", []byte(`{"future":true}`), []byte(`{"snapshot-integrity":{"version":2,"algorithm":"sha256","digest":"0000000000000000000000000000000000000000000000000000000000000000"}}`))
+	malformedEnvelopeID := insertSnapshotFixture(t, profileID, fileID, 8, "malformed envelope", []byte(`{"future":true}`), []byte(`{"snapshot-integrity":"not-an-envelope"}`))
 	listReq := httptest.NewRequest(http.MethodGet, "/api/rpc/command/get-file-snapshots?file-id="+fileID, nil)
 	listReq = listReq.WithContext(auth.WithProfileID(listReq.Context(), profileID))
 	listRec := httptest.NewRecorder()
@@ -421,7 +461,7 @@ func TestHistoricalCompleteSnapshotRestoresAndIncompleteStatusIsReportedIntegrat
 	for _, snapshot := range snapshots {
 		statusByID[snapshot.ID] = snapshot.RestoreStatus
 	}
-	if statusByID[completeID] != "legacy-unverified" || statusByID[incompleteID] != "unavailable" {
+	if statusByID[completeID] != "legacy-unverified" || statusByID[incompleteID] != "unavailable" || statusByID[corruptID] != "corrupt" || statusByID[unsupportedID] != "corrupt" || statusByID[malformedEnvelopeID] != "corrupt" {
 		t.Fatalf("historical restore statuses=%v", statusByID)
 	}
 	if rec := callRestore(t, pool, profileID, incompleteID); rec.Code != http.StatusConflict {
@@ -432,6 +472,130 @@ func TestHistoricalCompleteSnapshotRestoresAndIncompleteStatusIsReportedIntegrat
 	}
 	if state := readFileIntegrityState(t, pool, fileID); !bytes.Equal(state.data, completeData) {
 		t.Fatalf("legacy complete snapshot did not restore bytes: %s", state.data)
+	}
+}
+
+func TestExpiredPreRestoreRecoveryPointIsUnavailableButRemainsStoredIntegration(t *testing.T) {
+	pool, profileID, fileID := snapshotFixture(t, []byte(`{"before":"restore"}`))
+	snapshotData := []byte(`{"snapshot":"target"}`)
+	snapshotID := insertSnapshotFixture(t, profileID, fileID, 2, "target", snapshotData, snapshotIntegrityMetadata(t, snapshotData))
+	if rec := callRestore(t, pool, profileID, snapshotID); rec.Code != http.StatusOK {
+		t.Fatalf("initial restore: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var recoveryID string
+	if err := pool.QueryRow(context.Background(), `SELECT id::text FROM file_change WHERE file_id=$1 AND created_by='system' AND label LIKE 'internal/pre-restore/%' ORDER BY created_at DESC LIMIT 1`, fileID).Scan(&recoveryID); err != nil {
+		t.Fatalf("locate recovery point: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `UPDATE file_change SET deleted_at=now()-interval '1 second' WHERE file_id=$1 AND id=$2`, fileID, recoveryID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(), `UPDATE file_data SET deleted_at=now()-interval '1 second' WHERE file_id=$1 AND id=$2`, fileID, recoveryID); err != nil {
+		t.Fatal(err)
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/rpc/command/get-file-snapshots?file-id="+fileID, nil)
+	listReq = listReq.WithContext(auth.WithProfileID(listReq.Context(), profileID))
+	listRec := httptest.NewRecorder()
+	handler.GetFileSnapshotsHandler(pool).ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list after recovery expiry: %d %s", listRec.Code, listRec.Body.String())
+	}
+	var listed []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range listed {
+		if item.ID == recoveryID {
+			t.Fatalf("expired recovery point %s remained visible", recoveryID)
+		}
+	}
+	if rec := callRestore(t, pool, profileID, recoveryID); rec.Code != http.StatusNotFound {
+		t.Fatalf("restore expired recovery point: status=%d body=%s, want 404", rec.Code, rec.Body.String())
+	}
+	beforeRejectedRestore := readFileIntegrityState(t, pool, fileID)
+	if !bytes.Equal(beforeRejectedRestore.data, snapshotData) {
+		t.Fatalf("expired recovery attempt changed current file: %s", beforeRejectedRestore.data)
+	}
+	var retained int
+	if err := pool.QueryRow(context.Background(), `SELECT count(*) FROM file_data WHERE file_id=$1 AND id=$2`, fileID, recoveryID).Scan(&retained); err != nil {
+		t.Fatal(err)
+	}
+	if retained != 1 {
+		t.Fatalf("expired content row count=%d, want soft-expired row retained pending physical cleanup", retained)
+	}
+}
+
+func TestCreatedSnapshotRecoveryPointCanBeListedAndRestoredIntegration(t *testing.T) {
+	pool, profileID, fileID := snapshotFixture(t, []byte(`{"document":"before"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/api/rpc/command/create-file-snapshot", strings.NewReader(fmt.Sprintf(`{"fileId":%q,"label":"before change"}`, fileID)))
+	createReq = createReq.WithContext(auth.WithProfileID(createReq.Context(), profileID))
+	createRec := httptest.NewRecorder()
+	handler.CreateFileSnapshotHandler(pool).ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create source snapshot: status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+	var source struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &source); err != nil {
+		t.Fatal(err)
+	}
+	afterChange := []byte(`{"document":"after"}`)
+	if _, err := pool.Exec(context.Background(), `UPDATE file SET data=$1 WHERE id=$2`, afterChange, fileID); err != nil {
+		t.Fatal(err)
+	}
+	if rec := callRestore(t, pool, profileID, source.ID); rec.Code != http.StatusOK {
+		t.Fatalf("restore source snapshot: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if state := readFileIntegrityState(t, pool, fileID); string(state.data) != `{"document":"before"}` {
+		t.Fatalf("source restore content=%s", state.data)
+	}
+	var recoveryID string
+	var recoveryExpiry time.Time
+	var recoveryBytes, recoveryMetadata []byte
+	if err := pool.QueryRow(context.Background(), `
+		SELECT fc.id::text, fc.deleted_at, fd.data, fd.metadata
+		  FROM file_change fc JOIN file_data fd ON fd.file_id=fc.file_id AND fd.id=fc.id
+		 WHERE fc.file_id=$1 AND fc.created_by='system' AND fc.label LIKE 'internal/pre-restore/%'
+		 ORDER BY fc.created_at DESC LIMIT 1`, fileID).Scan(&recoveryID, &recoveryExpiry, &recoveryBytes, &recoveryMetadata); err != nil {
+		t.Fatalf("read generated recovery point: %v", err)
+	}
+	if !recoveryExpiry.After(time.Now()) || !bytes.Equal(recoveryBytes, afterChange) {
+		t.Fatalf("recovery point expiry/content=%s/%s", recoveryExpiry, recoveryBytes)
+	}
+	var metadata map[string]map[string]any
+	if err := json.Unmarshal(recoveryMetadata, &metadata); err != nil || metadata["snapshot-integrity"]["digest"] == nil {
+		t.Fatalf("recovery digest metadata=%s err=%v", recoveryMetadata, err)
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/rpc/command/get-file-snapshots?file-id="+fileID, nil)
+	listReq = listReq.WithContext(auth.WithProfileID(listReq.Context(), profileID))
+	listRec := httptest.NewRecorder()
+	handler.GetFileSnapshotsHandler(pool).ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list recovery point: %d %s", listRec.Code, listRec.Body.String())
+	}
+	var listed []struct {
+		ID            string `json:"id"`
+		RestoreStatus string `json:"restoreStatus"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	visibleAndVerified := false
+	for _, item := range listed {
+		if item.ID == recoveryID && item.RestoreStatus == "verified" {
+			visibleAndVerified = true
+		}
+	}
+	if !visibleAndVerified {
+		t.Fatalf("generated recovery point %s was not listed as verified", recoveryID)
+	}
+	if rec := callRestore(t, pool, profileID, recoveryID); rec.Code != http.StatusOK {
+		t.Fatalf("restore generated recovery point: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if state := readFileIntegrityState(t, pool, fileID); !bytes.Equal(state.data, afterChange) {
+		t.Fatalf("recovery restore content=%s, want %s", state.data, afterChange)
 	}
 }
 
