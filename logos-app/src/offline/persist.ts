@@ -118,9 +118,15 @@ function idbPut<T>(storeName: string, value: T): Promise<void> {
     (db) =>
       new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, "readwrite");
-        tx.objectStore(storeName).put(value);
         tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
+        tx.onerror = () => reject(tx.error ?? new Error("LOGOS_IDB_WRITE_FAILED"));
+        tx.onabort = () => reject(tx.error ?? new Error("LOGOS_IDB_WRITE_ABORTED"));
+        try {
+          const request = tx.objectStore(storeName).put(value);
+          request.onerror = () => reject(request.error ?? new Error("LOGOS_IDB_REQUEST_FAILED"));
+        } catch (error) {
+          reject(error);
+        }
       })
   );
 }
