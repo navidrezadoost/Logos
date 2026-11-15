@@ -88,8 +88,10 @@ async function run(): Promise<void> {
     documentId: uuid(1), pages: liveState.pages, pageOrder: liveState.pageOrder, shapes: liveState.shapes,
   };
   const liveResult = validateReactSnapshot(liveSnapshot, { validateDocumentJson: validate_document_json });
-  assert(!liveResult.ok && liveResult.issues.some((item) => item.code === "UNSUPPORTED_PAGE_ID"),
-    "real initial Zustand page nanoid was unexpectedly remapped or accepted");
+  assert(liveResult.ok,
+    `fresh Zustand page UUID was not accepted by the Rust adapter: ${JSON.stringify(liveResult)}`);
+  assert(JSON.stringify(canonical(liveResult.roundTrip)) === JSON.stringify(canonical(liveSnapshot)),
+    "fresh Zustand page identity changed during Rust adapter round trip");
   const snapshot = deepFreeze(fixture());
   const valid = validateReactSnapshot(snapshot, { validateDocumentJson: validate_document_json },
     () => wasmExports.memory.buffer.byteLength);
