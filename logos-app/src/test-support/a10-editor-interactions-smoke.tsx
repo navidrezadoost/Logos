@@ -9,6 +9,8 @@ import { useDocumentStore } from "../stores/documentStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useUiStore } from "../stores/uiStore";
 import type { Shape } from "../types/shapes";
+import initRust, { evaluate_document_operation_json } from "../document-core/rust-wasm/logos_types";
+import { installRustShadowRuntime, type RustShadowEvidence } from "../document-core/rust-shadow-evaluation";
 
 const status = document.getElementById("a10-status") as HTMLPreElement;
 type WindowHarness = Window & {
@@ -20,6 +22,8 @@ type WindowHarness = Window & {
     createUnsupportedComponentForCompatibility: () => string;
     setShapeFlags: (id: string, flags: { hidden?: boolean; locked?: boolean }) => void;
     rejectInvalidChild: (parentId: string) => boolean;
+    rejectLockedRename: (shapeId: string) => boolean;
+    rejectHierarchyCycle: (parentId: string, descendantId: string) => boolean;
     setShapeTypeForCompatibilityRecovery: (id: string) => void;
     poisonRenderer: () => void;
     clearFailure: () => void;
@@ -29,6 +33,18 @@ type WindowHarness = Window & {
     wasmReservedBytes: () => number | null;
     stage: (name: string) => void;
     errors: () => string[];
+    shadowEvidence: () => RustShadowEvidence[];
+    shadowCommitCount: () => number;
+    shadowWasmReservedBytes: () => number | null;
+    shadowDiscardCount: () => number;
+    exerciseStalePageSwitch: () => void;
+    returnToFirstPage: () => void;
+    unmountDuringShadow: () => void;
+    runUnavailableEvaluator: () => void;
+    setShadowFault: (mode: "rust-rejected" | "invalid-response" | "mismatch" | "throw" | "none") => void;
+    runFaultedRename: () => void;
+    runRepeatedRename: () => void;
+    disposeShadowRuntime: () => void;
   };
 };
 let failureMode: "none" | "always-after-mutation" = "none";
@@ -36,6 +52,14 @@ let renderer: RenderWasmModule | null = null;
 let targetFramebuffer: WebGLFramebuffer | null | undefined;
 let rendererInstanceCount = 0;
 const errors: string[] = [];
+const shadowEvidence: RustShadowEvidence[] = [];
+let shadowCommitCount = 0;
+let shadowDiscardCount = 0;
+let disposeShadowRuntime = () => {};
+let shadowWasmReservedBytes: number | null = null;
+let shadowFaultMode: "none" | "rust-rejected" | "invalid-response" | "mismatch" | "throw" = "none";
+const shadowDocumentId = "10000000-0000-4000-8000-000000000001";
+const shadowPageId = "10000000-0000-4000-8000-000000000002";
 
 function stage(name: string): void {
   status.dataset.stage = name;
@@ -141,6 +165,31 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
       useDocumentStore.getState().pages === before.pages &&
       useSelectionStore.getState().selectedIds === selectedBefore;
   },
+  rejectLockedRename: (shapeId) => {
+    const state = useDocumentStore.getState();
+    const selectedBefore = useSelectionStore.getState().selectedIds;
+    const shape = state.shapes[shapeId];
+    if (!shape) return false;
+    useDocumentStore.getState().updateShape(shapeId, { locked: true });
+    const lockedPages = useDocumentStore.getState().pages;
+    const lockedShapes = useDocumentStore.getState().shapes;
+    const selectedLocked = useSelectionStore.getState().selectedIds;
+    const result = useDocumentStore.getState().applyHierarchyOperation({ kind: "rename", shapeId, name: "must reject locked" });
+    const rejected = !result.ok && useDocumentStore.getState().pages === lockedPages &&
+      useDocumentStore.getState().shapes === lockedShapes && useSelectionStore.getState().selectedIds === selectedLocked;
+    useDocumentStore.getState().updateShape(shapeId, { locked: false });
+    return rejected && selectedBefore === selectedLocked;
+  },
+  rejectHierarchyCycle: (parentId, descendantId) => {
+    useDocumentStore.getState().updateShape(parentId, { locked: false });
+    const before = useDocumentStore.getState();
+    const selectedBefore = useSelectionStore.getState().selectedIds;
+    const result = before.applyHierarchyOperation({ kind: "reparent", shapeId: parentId, parentId: descendantId, preserveWorldPosition: true });
+    const rejectedUnchanged = !result.ok && useDocumentStore.getState().pages === before.pages &&
+      useDocumentStore.getState().shapes === before.shapes && useSelectionStore.getState().selectedIds === selectedBefore;
+    useDocumentStore.getState().updateShape(parentId, { locked: true });
+    return rejectedUnchanged;
+  },
   setShapeTypeForCompatibilityRecovery: (id) => useDocumentStore.getState().updateShape(id, { type: "rect" }),
   poisonRenderer: () => {
     failureMode = "always-after-mutation";
@@ -174,9 +223,56 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
   wasmReservedBytes: () => renderer?.HEAPU8.buffer.byteLength ?? null,
   stage,
   errors: () => [...errors],
+  shadowEvidence: () => [...shadowEvidence],
+  shadowCommitCount: () => shadowCommitCount,
+  shadowWasmReservedBytes: () => shadowWasmReservedBytes,
+  shadowDiscardCount: () => shadowDiscardCount,
+  exerciseStalePageSwitch: () => {
+    const state = useDocumentStore.getState();
+    const existing = Object.values(state.shapes).find((shape) => shape.type === "rect");
+    if (!existing) throw new Error("stale-result probe requires a rectangle");
+    const operation = { kind: "rename", shapeId: existing.id, name: `${existing.name} stale-probe` } as const;
+    state.applyHierarchyOperation(operation);
+    const nextPage = state.pageOrder.find((id) => id !== state.currentPageId);
+    if (nextPage) useDocumentStore.getState().setCurrentPage(nextPage);
+  },
+  returnToFirstPage: () => {
+    const state = useDocumentStore.getState();
+    state.setCurrentPage(state.pageOrder[0]);
+  },
+  unmountDuringShadow: () => {
+    const state = useDocumentStore.getState();
+    const existing = currentPageShapes().find((shape) => shape.type === "rect" && shape.parentId === null);
+    if (!existing) throw new Error("unmount probe requires a root Rectangle");
+    state.applyHierarchyOperation({ kind: "rename", shapeId: existing.id, name: `${existing.name} unmount-probe` });
+    appRoot.unmount();
+  },
+  runUnavailableEvaluator: () => {
+    const state = useDocumentStore.getState();
+    const existing = currentPageShapes().find((shape) => shape.type === "rect");
+    if (!existing) throw new Error("unavailable probe requires a Rectangle");
+    disposeShadowRuntime();
+    state.applyHierarchyOperation({ kind: "rename", shapeId: existing.id, name: `${existing.name} unavailable-probe` });
+    disposeShadowRuntime = installRuntime();
+  },
+  setShadowFault: (mode) => { shadowFaultMode = mode; },
+  runFaultedRename: () => {
+    const existing = currentPageShapes().find((shape) => shape.type === "rect");
+    if (!existing) throw new Error("fault probe requires a Rectangle");
+    useDocumentStore.getState().applyHierarchyOperation({ kind: "rename", shapeId: existing.id, name: `${existing.name} fault-probe` });
+  },
+  runRepeatedRename: () => {
+    const existing = currentPageShapes().find((shape) => shape.type === "rect");
+    if (!existing) throw new Error("repeat probe requires a Rectangle");
+    const state = useDocumentStore.getState();
+    state.applyHierarchyOperation({ kind: "rename", shapeId: existing.id, name: `${existing.name} repeat-a` });
+    useDocumentStore.getState().applyHierarchyOperation({ kind: "rename", shapeId: existing.id, name: `${existing.name} repeat-b` });
+  },
+  disposeShadowRuntime: () => disposeShadowRuntime(),
 };
 
 function App(): React.ReactElement {
+  React.useEffect(() => () => disposeShadowRuntime(), []);
   const [, setPageSwitchTick] = React.useState(0);
   return (
     <div style={{ width: "100%", height: "100%", display: "flex" }}>
@@ -197,9 +293,24 @@ function App(): React.ReactElement {
 }
 
 window.addEventListener("error", (event) => errors.push(event.message));
-createRoot(document.getElementById("root")!).render(<App />);
+const appRoot = createRoot(document.getElementById("root")!);
+useDocumentStore.subscribe((next, previous) => {
+  if (next.pages !== previous.pages || next.shapes !== previous.shapes) shadowCommitCount += 1;
+});
 void (async () => {
   try {
+    const wasmExports = await initRust();
+    shadowWasmReservedBytes = wasmExports.memory.buffer.byteLength;
+    const oldPage = useDocumentStore.getState().pages[useDocumentStore.getState().currentPageId];
+    const hydrated = useDocumentStore.getState().hydrateDocument({
+      pages: { [shadowPageId]: { ...oldPage, id: shadowPageId } },
+      pageOrder: [shadowPageId], currentPageId: shadowPageId, shapes: {},
+    });
+    if (!hydrated.ok) throw new Error(`shadow fixture hydration failed: ${hydrated.diagnostic.code}`);
+    (globalThis as typeof globalThis & { __LOGOS_G1_B9_SHADOW_OPT_IN__?: boolean }).__LOGOS_G1_B9_SHADOW_OPT_IN__ = true;
+    disposeShadowRuntime = installRuntime();
+    if (!(wasmExports.memory.buffer.byteLength > 0)) throw new Error("candidate Rust WASM memory was unavailable");
+    appRoot.render(<App />);
     const started = performance.now();
     while (document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") !== "READY") {
       if (performance.now() - started > 20000) throw new Error("initial renderer did not reach READY");
@@ -212,3 +323,29 @@ void (async () => {
     status.textContent = error instanceof Error ? error.stack ?? error.message : String(error);
   }
 })();
+
+function installRuntime(): () => void {
+  return installRustShadowRuntime({
+    documentId: shadowDocumentId,
+    evaluator: { evaluateDocumentOperationJson: (documentJson, operationJson) => {
+      const fault = shadowFaultMode;
+      shadowFaultMode = "none";
+      if (fault === "throw") throw new Error("injected Rust evaluator exception");
+      if (fault === "invalid-response") return "{invalid-json";
+      if (fault === "rust-rejected") return JSON.stringify({ ok: false, diagnostics: [{ code: "CYCLE", path: "/operation" }] });
+      const raw = evaluate_document_operation_json(documentJson, operationJson);
+      if (fault === "mismatch") {
+        const response = JSON.parse(raw);
+        if (response.document?.shapes?.[0]) response.document.shapes[0].name += " shadow mismatch";
+        return JSON.stringify(response);
+      }
+      return raw;
+    } },
+    report: (item) => shadowEvidence.push({
+      ...item,
+      jsHeapUsedBytes: (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? null,
+      wasmReservedBytes: shadowWasmReservedBytes,
+    }),
+    discard: () => { shadowDiscardCount += 1; },
+  });
+}

@@ -18,8 +18,14 @@ export type OperationConformanceResult =
   | { ok: true; reactNext: ReactDocumentSnapshot; rustNext: ReactDocumentSnapshot; semanticEquivalent: boolean;
       operationJson: string; timingsMs: OperationConformanceTimings };
 
-function currentPageSnapshot(snapshot: ReactDocumentSnapshot): HierarchyDocumentSnapshot {
-  const pageId = snapshot.pageOrder[0];
+export type PreplannedReactOperation = {
+  pageId: string;
+  result: ReturnType<typeof planHierarchyOperation>;
+  planningMs: number;
+};
+
+function currentPageSnapshot(snapshot: ReactDocumentSnapshot, requestedPageId = snapshot.pageOrder[0]): HierarchyDocumentSnapshot {
+  const pageId = requestedPageId;
   const page = snapshot.pages[pageId];
   const reachable = new Set<string>();
   const pending = [...(page?.rootShapeIds ?? [])];
@@ -122,12 +128,18 @@ export function evaluateHierarchyOperationConformance(
   snapshot: ReactDocumentSnapshot,
   operation: Exclude<HierarchyOperation, { kind: `compat-${string}` }>,
   rust: RustOperationEvaluator,
+  preplanned?: PreplannedReactOperation,
 ): OperationConformanceResult {
   const totalStart = performance.now();
   const reactStart = performance.now();
-  const reactPlan = planHierarchyOperation(currentPageSnapshot(snapshot), operation);
+  const pageSnapshot = currentPageSnapshot(snapshot, preplanned?.pageId);
+  const reactPlan = preplanned?.pageId === pageSnapshot.currentPageId
+    ? preplanned.result
+    : planHierarchyOperation(pageSnapshot, operation);
   if (!reactPlan.ok) return { ok: false, phase: "react-plan", code: reactPlan.diagnostic.code };
-  const reactPlanningMs = performance.now() - reactStart;
+  const reactPlanningMs = preplanned?.pageId === pageSnapshot.currentPageId
+    ? preplanned.planningMs
+    : performance.now() - reactStart;
   const reactNext = projectPlan(snapshot, reactPlan);
   if (!reactNext) return { ok: false, phase: "projection", code: "PLANNED_DOCUMENT_PROJECTION_FAILED" };
   const conversionStart = performance.now();
@@ -165,5 +177,6 @@ export function evaluateHierarchyOperationConformance(
   return { ok: true, reactNext, rustNext: projected,
     semanticEquivalent: JSON.stringify(canonical(reactNext)) === JSON.stringify(canonical(projected)), operationJson,
     timingsMs: { reactPlanningMs, candidateConversionMs, rustOperationEvaluationMs,
-      reactProjectionMs: performance.now() - projectionStart, totalMs: performance.now() - totalStart } };
+      reactProjectionMs: performance.now() - projectionStart,
+      totalMs: performance.now() - totalStart + (preplanned ? reactPlanningMs : 0) } };
 }

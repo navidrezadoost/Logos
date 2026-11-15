@@ -833,9 +833,22 @@ jobs:
             ${{ runner.temp }}/a9-production-canvas-smoke-chrome.log
             ${{ runner.temp }}/a9-production-canvas-preview.log
 
+      - name: Build candidate document validation WASM for A10 shadow evaluation
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path rust/Cargo.toml -p logos-types \
+            --target wasm32-unknown-unknown --features wasm --release --locked
+          cargo install --locked --version 0.2.126 wasm-bindgen-cli
+          wasm-bindgen --target web \
+            --out-dir logos-app/src/document-core/rust-wasm \
+            rust/target/wasm32-unknown-unknown/release/logos_types.wasm
+
       - name: Build A10 production editor interaction harness
         working-directory: logos-app
-        run: ./node_modules/.bin/vite build --config vite.a10-editor-interactions-smoke.config.ts
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.json
+          ./node_modules/.bin/vite build --config vite.a10-editor-interactions-smoke.config.ts
 
       - name: Verify A10 Canvas, Layers, Inspector, and renderer recovery interactions in Chromium
         working-directory: logos-app
@@ -884,22 +897,6 @@ jobs:
             ${{ runner.temp }}/a10-editor-interactions-evidence.json
             ${{ runner.temp }}/a10-editor-interactions-chrome.log
             ${{ runner.temp }}/a10-editor-interactions-preview.log
-
-      - name: Build candidate document validation WASM
-        run: |
-          set -euo pipefail
-          cargo build --manifest-path rust/Cargo.toml -p logos-types \
-            --target wasm32-unknown-unknown --features wasm --release --locked
-
-      - name: Install matching wasm-bindgen CLI
-        run: cargo install --locked --version 0.2.126 wasm-bindgen-cli
-
-      - name: Generate browser bindings for candidate document validation
-        run: |
-          set -euo pipefail
-          wasm-bindgen --target web \
-            --out-dir logos-app/src/document-core/rust-wasm \
-            rust/target/wasm32-unknown-unknown/release/logos_types.wasm
 
       - name: Build read-only React/Rust adapter browser harness
         working-directory: logos-app
