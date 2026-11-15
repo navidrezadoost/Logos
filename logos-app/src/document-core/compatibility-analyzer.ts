@@ -82,9 +82,8 @@ function hasAmbiguousPageOwnership(input: unknown): boolean {
 }
 
 function hasSourceShapeDefect(issues: AdapterIssue[]): boolean {
-  return issues.some(({ code }) => [
-    "INVALID_SNAPSHOT", "INVALID_GEOMETRY", "INVALID_TRANSFORM",
-  ].includes(code));
+  return issues.some(({ code, path }) => code === "INVALID_GEOMETRY" || code === "INVALID_TRANSFORM" ||
+    (code === "INVALID_SNAPSHOT" && path !== "/pages"));
 }
 
 /**
