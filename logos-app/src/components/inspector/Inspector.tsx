@@ -10,6 +10,10 @@ import { useSelectionStore } from "../../stores/selectionStore";
 import { useComponentStore } from "../../stores/componentStore";
 import type { FontVariationAxis, Shape, SolidFill } from "../../types/shapes";
 import { theme } from "../../theme/colors";
+import { WASM_SHAPE_TYPE_MAP } from "../../render-wasm/shape-capabilities";
+import { TokenWorkflowControl } from "./TokenWorkflowControl";
+import { useTokenWorkflowPreviewStore } from "../../stores/tokenWorkflowPreviewStore";
+import type { RustTokenEngineLoader } from "../../tokens/rustTokenEngine";
 
 // ---------------------------------------------------------------------------
 // Well-known variable font axes (fvar table metadata when font introspection
@@ -24,9 +28,12 @@ const KNOWN_AXES: Omit<FontVariationAxis, "value">[] = [
   { tag: "ital", name: "Italic",       min: 0,    max: 1,    default: 0   },
 ];
 
-export function Inspector(): React.ReactElement {
+export function Inspector({ tokenEngineLoader }: { tokenEngineLoader?: RustTokenEngineLoader } = {}): React.ReactElement {
   const selectedIds = useSelectionStore((s) => s.selectedIds);
   const { shapes, updateShape, promoteToComponent } = useDocumentStore();
+  const documentId = useDocumentStore((s) => s.documentId);
+  const currentPageId = useDocumentStore((s) => s.currentPageId);
+  const clearTokenPreview = useTokenWorkflowPreviewStore((s) => s.clearPreview);
   const {
     components,
     instances,
@@ -65,6 +72,7 @@ export function Inspector(): React.ReactElement {
 
   const shape = selected[0];
   const solidFill = shape.fills.find((f): f is SolidFill => f.type === "solid");
+  const solidFillIndex = shape.fills.findIndex((f) => f.type === "solid");
 
   // Variable font axes — only shown for text shapes
   const isText = shape.type === "text";
@@ -86,6 +94,7 @@ export function Inspector(): React.ReactElement {
   }
 
   function patchFillColor(color: string) {
+    clearTokenPreview();
     updateShape(shape.id, {
       fills: shape.fills.map((f) =>
         f.type === "solid" ? { ...f, color } : f
@@ -185,6 +194,17 @@ export function Inspector(): React.ReactElement {
               onChange={(v) => patchOpacity(v / 100)}
             />
           </Row>
+          {solidFillIndex === 0 && Object.prototype.hasOwnProperty.call(WASM_SHAPE_TYPE_MAP, shape.type) && (
+            <TokenWorkflowControl
+              key={`${documentId ?? "unverified"}:${currentPageId}:${shape.id}`}
+              shapeId={shape.id}
+              fillHex={solidFill.color}
+              fillIndex={solidFillIndex}
+              pageId={currentPageId}
+              documentId={documentId}
+              engineLoader={tokenEngineLoader}
+            />
+          )}
         </Section>
       )}
 

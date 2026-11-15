@@ -25,6 +25,7 @@ members = [
     "logos-ws",
     "logos-types",
     "logos-tokens",
+    "logos-tokens-wasm",
     "logos-vector",
     "logos-vector-ops",
     "logos-vector-wasm",

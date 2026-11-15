@@ -36,8 +36,10 @@ wasm    = ["wasm-bindgen"]
 ts      = []
 
 [dependencies]
-# UUID generation + serialization.
-uuid = { version = "1", features = ["v4", "v5", "js"] }
+# Stable UUID identities and UUID v5 derivation. UUID v4 generation is test-only;
+# keeping the `js` feature out also lets the narrow token bridge run without
+# wasm-bindgen imports.
+uuid = { version = "1", features = ["v5", "serde"] }
 
 # Timestamp fields for registry entities.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -56,6 +58,7 @@ wasm-bindgen = { version = "0.2", optional = true }
 # JSON round-trip tests.
 serde_json = "1"
 sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "=0.3.76"
