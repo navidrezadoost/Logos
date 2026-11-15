@@ -1,9 +1,13 @@
 import { createElement, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import initRust, { validate_document_json } from "../document-core/rust-wasm/logos_types";
+import initRust, { evaluate_document_operation_json, validate_document_json } from "../document-core/rust-wasm/logos_types";
 import supportedFixture from "../document-core/fixtures/react-supported-v1.json";
+import operationFixture from "../document-core/fixtures/g1-b8-operation-conformance-v1.json";
 import { validateReactSnapshot, type ReactDocumentSnapshot } from "../document-core/react-adapter";
+import { evaluateHierarchyOperationConformance } from "../document-core/operation-conformance";
+import { planHierarchyOperation, type HierarchyDocumentSnapshot } from "../stores/hierarchyOperations";
 import { useDocumentStore } from "../stores/documentStore";
+import { useSelectionStore } from "../stores/selectionStore";
 import type { Shape } from "../types/shapes";
 
 const resultNode = document.querySelector<HTMLPreElement>("#result")!;
@@ -77,6 +81,7 @@ function percentile(values: number[], percentileValue: number): number {
 async function run(): Promise<void> {
   const wasmExports = await initRust();
   const stateBefore = JSON.stringify(useDocumentStore.getState());
+  const selectionBefore = JSON.stringify(useSelectionStore.getState().selectedIds);
   const localStorageBefore = JSON.stringify(Object.keys(localStorage).sort());
   const liveState = useDocumentStore.getState();
   const liveSnapshot: ReactDocumentSnapshot = {
@@ -160,6 +165,124 @@ async function run(): Promise<void> {
   assert(!pageIdResult.ok && pageIdResult.issues.some((item) => item.code === "UNSUPPORTED_PAGE_ID"),
     "nanoid page identity was silently remapped");
 
+  const conformanceBaseline = deepFreeze(clone(operationFixture.reactBaseline)) as unknown as ReactDocumentSnapshot;
+  const conformanceBefore = JSON.stringify(conformanceBaseline);
+  const cases = new Map(operationFixture.cases.map((item) => [item.name, item]));
+  const conformanceResults: Array<{ name: string; outcome: string; equivalent?: boolean; diagnostic?: string;
+    timingsMs?: { reactPlanningMs: number; candidateConversionMs: number; rustOperationEvaluationMs: number;
+      reactProjectionMs: number; totalMs: number } }> = [];
+  let rustEvaluationCalls = 0;
+  const runConformance = (name: string, input: ReactDocumentSnapshot, operation: Parameters<typeof evaluateHierarchyOperationConformance>[1]) => {
+    const fixtureCase = cases.get(name);
+    assert(fixtureCase, `missing shared operation fixture ${name}`);
+    const before = JSON.stringify(input);
+    const result = evaluateHierarchyOperationConformance(input, operation, {
+      evaluateDocumentOperationJson: (documentJson, operationJson) => {
+        rustEvaluationCalls += 1;
+        return evaluate_document_operation_json(documentJson, operationJson);
+      },
+    });
+    assert(JSON.stringify(input) === before, `${name}: conformance evaluation mutated the React input`);
+    assert(JSON.stringify(conformanceBaseline) === conformanceBefore, `${name}: shared baseline mutated`);
+    if (fixtureCase.expected === "success") {
+      assert(result.ok, `${name}: eligible operation rejected: ${JSON.stringify(result)}`);
+      assert(result.semanticEquivalent, `${name}: full React/Rust semantic projection differs: ${JSON.stringify(result)}`);
+      conformanceResults.push({ name, outcome: "equivalent", equivalent: true, timingsMs: result.timingsMs });
+      return result;
+    }
+    assert(!result.ok, `${name}: ineligible operation unexpectedly produced a Rust candidate`);
+    const expectedPhases = fixtureCase.expected === "react-reject" ? ["react-plan"]
+      : fixtureCase.expected === "adapter-reject" ? ["adapter"] : ["react-plan", "adapter"];
+    assert(expectedPhases.includes(result.phase), `${name}: wrong rejection boundary ${result.phase}: ${JSON.stringify(result)}`);
+    const diagnostic = result.phase === "adapter" ? result.issues?.[0]?.code ?? result.code
+      : result.diagnostics?.[0]?.code ?? result.code;
+    assert(fixtureCase.diagnostic === diagnostic,
+      `${name}: stable diagnostic changed; expected ${fixtureCase.diagnostic}, got ${diagnostic}`);
+    conformanceResults.push({ name, outcome: result.phase, diagnostic });
+    return result;
+  };
+  const conformBase = clone(conformanceBaseline);
+  const [outerFrameId, secondRootId] = conformBase.pages[conformBase.pageOrder[0]].rootShapeIds;
+  const [nestedGroupId, secondChildId] = conformBase.shapes[outerFrameId].children;
+  const nestedRectId = conformBase.shapes[nestedGroupId].children[0];
+  const newRootRect = shape(801, "rect", null, [], 0);
+  newRootRect.bounds = { x: 20, y: 20, w: 40, h: 30 };
+  newRootRect.transform = [1, 0, 0, 1, 0, 0];
+  const newRootFrame = shape(802, "frame", null, [], 0);
+  newRootFrame.bounds = { x: 20, y: 20, w: 80, h: 60 };
+  newRootFrame.transform = [1, 0, 0, 1, 0, 0];
+  const insertedChild = shape(803, "rect", null, [], 0);
+  insertedChild.bounds = { x: 140, y: 50, w: 20, h: 20 };
+  insertedChild.transform = [1, 0, 0, 1, 0, 0];
+  runConformance("create-root-rectangle", conformBase, { kind: "create-root", shape: newRootRect });
+  runConformance("create-root-frame", conformBase, { kind: "create-root", shape: newRootFrame });
+  runConformance("insert-child", conformBase, { kind: "insert-child", parentId: outerFrameId, shape: insertedChild, index: 1 });
+  runConformance("rename", conformBase, { kind: "rename", shapeId: nestedGroupId, name: "  Renamed group  " });
+  runConformance("reorder-roots", conformBase, { kind: "reorder-root-list", rootShapeIds: [secondRootId, outerFrameId] });
+  runConformance("reorder-siblings", conformBase, { kind: "reorder", shapeId: secondChildId, toIndex: 0 });
+  runConformance("delete-subtree", conformBase, { kind: "delete", shapeId: nestedGroupId });
+  runConformance("reparent-world-position", conformBase, { kind: "reparent", shapeId: nestedRectId,
+    parentId: outerFrameId, index: 2, preserveWorldPosition: true });
+  runConformance("reject-cycle", conformBase, { kind: "reparent", shapeId: outerFrameId,
+    parentId: nestedRectId, index: 0, preserveWorldPosition: true });
+  runConformance("reject-invalid-sibling-membership", conformBase, { kind: "reorder-root-list",
+    rootShapeIds: [outerFrameId, outerFrameId] });
+  runConformance("reject-duplicate-id", conformBase, { kind: "create-root", shape: { ...newRootRect, id: secondRootId } });
+  const lockedSnapshot = clone(conformBase);
+  lockedSnapshot.shapes[nestedGroupId].locked = true;
+  runConformance("reject-locked-mutation", lockedSnapshot, { kind: "rename", shapeId: nestedGroupId, name: "Must reject" });
+  const multiPageSnapshot = clone(conformBase);
+  const secondPageId = uuid(804);
+  multiPageSnapshot.pages[secondPageId] = { id: secondPageId, name: "Second page", rootShapeIds: [] };
+  multiPageSnapshot.pageOrder.push(secondPageId);
+  runConformance("reject-cross-page-ambiguity", multiPageSnapshot, { kind: "rename", shapeId: nestedGroupId, name: "Must stay local" });
+  const unsupportedGeometry = clone(conformBase);
+  unsupportedGeometry.shapes[nestedRectId].type = "vector-network";
+  runConformance("reject-unsupported-geometry", unsupportedGeometry, { kind: "rename", shapeId: nestedGroupId, name: "Legacy gate" });
+  const unknownExtension = clone(conformBase) as ReactDocumentSnapshot & { futureExtension?: unknown };
+  unknownExtension.futureExtension = { keep: true };
+  runConformance("preserve-unknown-extensions", unknownExtension, { kind: "rename", shapeId: nestedGroupId, name: "Extension gate" });
+  const legacyPageIdentity = clone(conformBase);
+  const canonicalPageId = legacyPageIdentity.pageOrder[0];
+  const legacyPage = legacyPageIdentity.pages[canonicalPageId];
+  delete legacyPageIdentity.pages[canonicalPageId];
+  legacyPage.id = "legacy-nanoid-page";
+  legacyPageIdentity.pages[legacyPage.id] = legacyPage;
+  legacyPageIdentity.pageOrder = [legacyPage.id];
+  runConformance("reject-nanoid-page-identity", legacyPageIdentity, { kind: "rename", shapeId: nestedGroupId, name: "Identity gate" });
+  const noncanonicalDocumentIdentity = clone(conformBase);
+  noncanonicalDocumentIdentity.documentId = "AB111111-1111-4111-8111-111111111111";
+  runConformance("reject-noncanonical-document-identity", noncanonicalDocumentIdentity,
+    { kind: "rename", shapeId: nestedGroupId, name: "Identity case gate" });
+  const legacyCase = cases.get("retain-vector-network-compatibility");
+  assert(legacyCase?.classification === "LEGACY" && legacyCase.expected === "compatibility-retained",
+    "Vector Network creation must remain on the A10.1 compatibility path");
+  const legacyVector = Object.assign(shape(805, "vector-network", null, [], 0), {
+    vnAnchors: [{ id: uuid(806), x: 10, y: 12, handleIn: null, handleOut: null }],
+    vnSegments: [{ id: uuid(807), start: uuid(806), end: uuid(806), kind: "line" }],
+    vnRegions: [{ id: uuid(808), fillRule: "nonzero", segments: [uuid(807)] }],
+  });
+  const legacyBefore = JSON.stringify(conformBase);
+  const legacySnapshot: HierarchyDocumentSnapshot = {
+    pages: conformBase.pages,
+    currentPageId: conformBase.pageOrder[0],
+    shapes: conformBase.shapes,
+    currentPageShapes: Object.values(conformBase.shapes),
+  };
+  const legacyPlan = planHierarchyOperation(legacySnapshot, { kind: "compat-add-shape", shape: legacyVector });
+  assert(legacyPlan.ok, `legacy Vector Network compatibility operation failed: ${JSON.stringify(legacyPlan)}`);
+  assert(JSON.stringify(legacyPlan.shapes[legacyVector.id]) === JSON.stringify(legacyVector),
+    "legacy Vector Network payload changed across the compatibility plan");
+  assert(legacyPlan.renderingDiagnostic?.code === "LOGOS_SCENE_UNSUPPORTED_SHAPE",
+    "legacy Vector Network did not retain its explicit renderer limitation");
+  assert(JSON.stringify(conformBase) === legacyBefore, "legacy compatibility planning mutated its source document");
+  conformanceResults.push({ name: "retain-vector-network-compatibility", outcome: "legacy-retained",
+    diagnostic: legacyPlan.renderingDiagnostic.code });
+  assert(rustEvaluationCalls === 8, `eligible operations were evaluated an unexpected number of times: ${rustEvaluationCalls}`);
+  assert(JSON.stringify(useDocumentStore.getState()) === stateBefore, "conformance proposals reached the production document store");
+  assert(JSON.stringify(useSelectionStore.getState().selectedIds) === selectionBefore,
+    "read-only conformance changed production selection state");
+
   const memory: number[] = [];
   const measurements = [];
   for (const count of [4, 100, 1_000, 10_000]) {
@@ -240,6 +363,9 @@ async function run(): Promise<void> {
     unsupportedFieldIssue: unsupportedResult.issues.map((item) => item.code),
     translatedParentCoordinateRoundTrip: coordinateResult.ok,
     rotatedParentCoordinateIssue: rotatedCoordinateResult.ok ? [] : rotatedCoordinateResult.issues.map((item) => item.code),
+    operationConformance: { fixtureVersion: operationFixture.version, cases: conformanceResults,
+      fullSemanticProjectionCompared: conformanceResults.filter((item) => item.outcome === "equivalent").length,
+      rustEvaluationCalls, productionStateCommitted: false, productionSelectionChanged: false },
     storeUnchanged: true,
     localStorageWrites: storageWrites.length,
     indexedDbOpens: databaseOpens.length,

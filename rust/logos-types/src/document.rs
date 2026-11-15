@@ -830,8 +830,12 @@ where
 
 /// Candidate immutable operations. These are not connected to production
 /// Zustand actions, Go RPCs, or saved documents.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DocumentOperation {
+    Sequence {
+        operations: Vec<DocumentOperation>,
+    },
     CreateShape {
         record: ShapeRecord,
         parent_id: Option<Uuid>,
@@ -859,6 +863,9 @@ pub enum DocumentOperation {
     ReorderChildren {
         page_id: Uuid,
         parent_id: Option<Uuid>,
+        /// The dragged child for a one-object editor reorder. `None` denotes a
+        /// full root-list replacement, whose React policy checks every root.
+        mutation_id: Option<Uuid>,
         expected_ids: Vec<Uuid>,
         ordered_ids: Vec<Uuid>,
     },
@@ -892,7 +899,13 @@ fn apply_to_candidate(
     document: &mut Document,
     operation: &DocumentOperation,
 ) -> Result<(), ValidationDiagnostic> {
+    validate_operation_lock_policy(document, operation)?;
     match operation {
+        DocumentOperation::Sequence { operations } => {
+            for operation in operations {
+                apply_to_candidate(document, operation)?;
+            }
+        }
         DocumentOperation::CreateShape {
             record,
             parent_id,
@@ -1107,6 +1120,7 @@ fn apply_to_candidate(
             parent_id,
             expected_ids,
             ordered_ids,
+            ..
         } => {
             if ordered_ids.len() != expected_ids.len()
                 || ordered_ids.iter().copied().collect::<HashSet<_>>().len() != ordered_ids.len()
@@ -1143,6 +1157,64 @@ fn apply_to_candidate(
                     page.root_shape_ids = ordered_ids.clone();
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// The React hierarchy contract carries its lock bit as an extension until a
+/// versioned core schema decision is made. Honor that marker during conformance
+/// evaluation so the candidate cannot approve an edit React rejects.
+fn validate_operation_lock_policy(
+    document: &Document,
+    operation: &DocumentOperation,
+) -> Result<(), ValidationDiagnostic> {
+    let mut ids = Vec::new();
+    match operation {
+        DocumentOperation::Sequence { operations } => {
+            for operation in operations {
+                validate_operation_lock_policy(document, operation)?;
+            }
+        }
+        DocumentOperation::CreateShape { parent_id, .. } => ids.extend(*parent_id),
+        DocumentOperation::UpdateShape { shape_id, .. } => ids.push(*shape_id),
+        DocumentOperation::DeleteSubtree { shape_id, expected_parent_id } => {
+            ids.extend(subtree_ids(document, *shape_id));
+            ids.extend(*expected_parent_id);
+        }
+        DocumentOperation::ReparentShape { shape_id, expected_parent_id, new_parent_id, .. } => {
+            ids.push(*shape_id);
+            ids.extend(*expected_parent_id);
+            ids.extend(*new_parent_id);
+        }
+        DocumentOperation::ReorderChildren { page_id, parent_id, mutation_id, ordered_ids, .. } => {
+            if let Some(parent_id) = parent_id {
+                ids.push(*parent_id);
+                if let Some(mutation_id) = mutation_id {
+                    ids.push(*mutation_id);
+                } else {
+                    ids.extend(ordered_ids.iter().copied());
+                }
+            } else {
+                ids.extend(ordered_ids.iter().copied());
+                if !document.pages.iter().any(|page| page.id == *page_id) {
+                    return Err(missing_page(*page_id, *page_id));
+                }
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    for id in ids {
+        let locked = document.shapes.iter().find(|record| record.shape.id == id)
+            .and_then(|record| record.extensions.get("react-locked"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if locked {
+            return Err(ValidationDiagnostic::new(
+                ValidationDiagnosticCode::OperationPreconditionFailed,
+                "/operation/locked",
+            ).ids(id, None));
         }
     }
     Ok(())
@@ -1650,6 +1722,7 @@ mod tests {
             &DocumentOperation::ReorderChildren {
                 page_id: id(1),
                 parent_id: None,
+                mutation_id: None,
                 expected_ids: vec![id(2), id(3), id(4)],
                 ordered_ids: vec![id(4), id(3), id(2)],
             },
@@ -1698,6 +1771,7 @@ mod tests {
             &DocumentOperation::ReorderChildren {
                 page_id: id(1),
                 parent_id: Some(id(2)),
+                mutation_id: Some(id(3)),
                 expected_ids: vec![id(3)],
                 ordered_ids: vec![id(999)],
             },
