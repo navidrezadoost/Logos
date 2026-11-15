@@ -37,16 +37,19 @@ function installMemoryIndexedDb(): void {
     objectStoreNames: { contains: () => true },
     createObjectStore: () => ({ createIndex: () => undefined }),
     transaction: () => {
+      status.dataset.idb = "transaction";
       const tx: { oncomplete: (() => void) | null; onerror: (() => void) | null; onabort: (() => void) | null } = {
         oncomplete: null, onerror: null, onabort: null,
       };
       const finish = (callback: () => void): void => queueMicrotask(() => {
         callback();
         tx.oncomplete?.();
+        status.dataset.idb = "complete";
       });
       return Object.assign(tx, {
         objectStore: () => ({
           put(value: { documentId: string }) {
+            status.dataset.idb = "put";
             const request: { onsuccess: (() => void) | null; onerror: (() => void) | null } = {
               onsuccess: null, onerror: null,
             };
@@ -54,6 +57,7 @@ function installMemoryIndexedDb(): void {
             return request;
           },
           get(key: string) {
+            status.dataset.idb = "get";
             const request: { result?: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null } = {
               onsuccess: null, onerror: null,
             };
@@ -68,10 +72,12 @@ function installMemoryIndexedDb(): void {
   };
   const factory = {
     open: () => {
+      status.dataset.idb = "open";
       const request: { result?: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null; onupgradeneeded: ((event: unknown) => void) | null } = {
         onsuccess: null, onerror: null, onupgradeneeded: null,
       };
       queueMicrotask(() => {
+        status.dataset.idb = "opened";
         request.result = database;
         request.onupgradeneeded?.({ target: { result: database } });
         request.onsuccess?.();
@@ -80,6 +86,7 @@ function installMemoryIndexedDb(): void {
     },
   };
   Object.defineProperty(window, "indexedDB", { configurable: true, value: factory });
+  status.dataset.idb = "installed";
 }
 
 async function jsonResponse<T>(response: Response, label: string): Promise<T> {
