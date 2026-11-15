@@ -30,6 +30,58 @@ function fail(error: unknown): void {
   status.textContent = JSON.stringify({ stage, error: String(error), browserErrors }, null, 2);
 }
 
+/** Isolate the identity lifecycle from Chromium's virtual-time IndexedDB scheduler. */
+function installMemoryIndexedDb(): void {
+  const records = new Map<string, unknown>();
+  const database = {
+    objectStoreNames: { contains: () => true },
+    createObjectStore: () => ({ createIndex: () => undefined }),
+    transaction: () => {
+      const tx: { oncomplete: (() => void) | null; onerror: (() => void) | null; onabort: (() => void) | null } = {
+        oncomplete: null, onerror: null, onabort: null,
+      };
+      const finish = (callback: () => void): void => queueMicrotask(() => {
+        callback();
+        tx.oncomplete?.();
+      });
+      return Object.assign(tx, {
+        objectStore: () => ({
+          put(value: { documentId: string }) {
+            const request: { onsuccess: (() => void) | null; onerror: (() => void) | null } = {
+              onsuccess: null, onerror: null,
+            };
+            finish(() => { records.set(value.documentId, value); request.onsuccess?.(); });
+            return request;
+          },
+          get(key: string) {
+            const request: { result?: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null } = {
+              onsuccess: null, onerror: null,
+            };
+            finish(() => { request.result = records.get(key); request.onsuccess?.(); });
+            return request;
+          },
+          index: () => ({ getAll: () => ({ onsuccess: null, onerror: null }) }),
+          delete: (key: string) => { records.delete(key); return {}; },
+        }),
+      });
+    },
+  };
+  const factory = {
+    open: () => {
+      const request: { result?: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null; onupgradeneeded: ((event: unknown) => void) | null } = {
+        onsuccess: null, onerror: null, onupgradeneeded: null,
+      };
+      queueMicrotask(() => {
+        request.result = database;
+        request.onupgradeneeded?.({ target: { result: database } });
+        request.onsuccess?.();
+      });
+      return request;
+    },
+  };
+  Object.defineProperty(window, "indexedDB", { configurable: true, value: factory });
+}
+
 async function jsonResponse<T>(response: Response, label: string): Promise<T> {
   if (!response.ok) {
     throw new Error(`${label}: HTTP ${response.status}: ${await response.text()}`);
@@ -121,6 +173,7 @@ async function run(): Promise<void> {
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
 
   setStage("verified server identity IndexedDB reload");
+  installMemoryIndexedDb();
   setStage("persist verified server identity");
   await persistDocumentNow(config.fileId);
   setStage("reload verified server identity");
