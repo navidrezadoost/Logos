@@ -1,0 +1,21 @@
+{
+  "version": "g1-b9-3-compatibility/v1",
+  "provenance": "synthetic-sanitized",
+  "populationClaim": "none; classifications describe only these generated fixtures",
+  "cases": [
+    { "id": "canonical-nested", "class": "single-page canonical UUID rect/frame/group with nested translated ancestry", "expected": "LOSSLESS_RUST_CANDIDATE" },
+    { "id": "legacy-nanoid-page", "class": "single-page document with historical nanoid page identity", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "multiple-pages", "class": "two canonical pages with disjoint roots", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "vector-network", "class": "Vector Network shape with vector payload", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "component-instance", "class": "component instance metadata on a supported geometric shape", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "multiple-fills", "class": "multiple fills including an unsupported gradient", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "solid-multiple-fills", "class": "multiple supported solid fills on a supported shape", "expected": "LOSSLESS_RUST_CANDIDATE" },
+    { "id": "token-extension", "class": "design-token binding extension", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "plugin-extension", "class": "unknown plugin extension", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "xd-converted", "class": "synthetic XD-converted geometry carrying source provenance", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "sketch-converted", "class": "synthetic Sketch-converted geometry carrying source provenance", "expected": "ADAPTER_INCOMPATIBLE" },
+    { "id": "invalid-hierarchy", "class": "parent-child backlink mismatch", "expected": "INVALID_SOURCE_DOCUMENT" },
+    { "id": "ambiguous-page-ownership", "class": "same reachable root assigned to two pages", "expected": "AMBIGUOUS_OWNERSHIP" },
+    { "id": "transformed-ancestry", "class": "nested shape under rotated frame with unverified pivot semantics", "expected": "ADAPTER_INCOMPATIBLE" }
+  ]
+}
