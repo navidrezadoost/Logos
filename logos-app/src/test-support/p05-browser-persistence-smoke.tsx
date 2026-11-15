@@ -4,7 +4,7 @@ import { getFile } from "../api/client";
 import { useDocumentStore } from "../stores/documentStore";
 import { projectLegacyFileData, encodeGeometryChange } from "./p04-document-adapter";
 import { classifyRustIdentityEligibility } from "../document-core/identity-eligibility";
-import { createOfflineDocument, loadPersistedDocument, stopPersistence, initPersistence } from "../offline/persist";
+import { createOfflineDocument, loadPersistedDocument, persistDocumentNow } from "../offline/persist";
 
 type TestConfig = { fileId: string };
 type VersionedFileDetail = Awaited<ReturnType<typeof getFile>> & { revn: number; vern: number };
@@ -121,9 +121,7 @@ async function run(): Promise<void> {
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
 
   setStage("verified server identity IndexedDB reload");
-  initPersistence(config.fileId);
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  stopPersistence();
+  await persistDocumentNow(config.fileId);
   if (!await loadPersistedDocument(config.fileId) ||
       useDocumentStore.getState().documentId !== config.fileId ||
       useDocumentStore.getState().identitySource !== "server") {
@@ -186,9 +184,7 @@ async function run(): Promise<void> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(newPageId)) {
     throw new Error("new page ID is not a UUID");
   }
-  initPersistence(offlineId);
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  stopPersistence();
+  await persistDocumentNow(offlineId);
   if (!await loadPersistedDocument(offlineId)) throw new Error("offline document did not reload");
   const offlineIdsAfterFirstLoad = JSON.stringify({
     documentId: useDocumentStore.getState().documentId,

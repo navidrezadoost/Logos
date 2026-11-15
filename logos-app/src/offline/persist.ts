@@ -206,6 +206,11 @@ async function writeSnapshot(documentId: string): Promise<void> {
   await idbPut(STORE_SNAPSHOTS, record);
 }
 
+/** Persist the current document immediately; used by explicit save boundaries and verification. */
+export async function persistDocumentNow(documentId: string): Promise<void> {
+  await writeSnapshot(documentId);
+}
+
 /**
  * Create an offline document at the only supported offline identity boundary.
  * The generated ID and empty initial snapshot reach IndexedDB before this
