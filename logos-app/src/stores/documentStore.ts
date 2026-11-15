@@ -12,7 +12,6 @@
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { useMemo } from "react";
-import { nanoid } from "nanoid";
 import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, type ComponentMeta, type InstanceMeta, createRect, createVectorNetwork, IDENTITY_TRANSFORM } from "../types/shapes";
 import { useSelectionStore } from "./selectionStore";
 import { planHierarchyOperation, type HierarchyOperation, type HierarchyOperationResult } from "./hierarchyOperations";
@@ -41,6 +40,8 @@ export interface DocumentHydration {
   shapes: Record<string, Shape>;
 }
 
+export type DocumentIdentitySource = "server" | "offline" | "legacy" | "unknown" | "ambiguous";
+
 export type DocumentHydrationResult =
   | { ok: true }
   | { ok: false; diagnostic: { code: string; pageId?: string; shapeId?: string; relatedShapeId?: string } };
@@ -52,6 +53,9 @@ type CompatibilityHierarchyOperation = Extract<HierarchyOperation, { kind: `comp
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface DocumentState {
+  /** Set only at a verified server or durable offline creation boundary. */
+  documentId: string | null;
+  identitySource: DocumentIdentitySource;
   // Pages
   pages: Record<string, Page>;
   pageOrder: string[];
@@ -68,6 +72,9 @@ interface DocumentState {
 
   /** Atomically validate and load a persisted/imported snapshot without rewriting IDs or unknown fields. */
   hydrateDocument: (document: DocumentHydration) => DocumentHydrationResult;
+  associateServerDocumentIdentity: (requestedId: string, returnedId: string, returnedPageIds: string[]) => boolean;
+  associateOfflineDocumentIdentity: (documentId: string) => boolean;
+  restoreDocumentIdentity: (documentId: string | null, source: DocumentIdentitySource) => void;
 
   /** Add a shape to the current page; returns the new shape id. */
   addRect: (bounds: Rect, color?: string) => string;
@@ -146,7 +153,8 @@ interface DocumentState {
 // Initial state — one page, no shapes
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PAGE_1_ID = nanoid();
+const PAGE_1_ID = crypto.randomUUID();
+const DOCUMENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const INITIAL_PAGE: Page = {
   id: PAGE_1_ID,
@@ -159,6 +167,8 @@ const INITIAL_PAGE: Page = {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
+  documentId: null,
+  identitySource: "unknown",
   pages: { [PAGE_1_ID]: INITIAL_PAGE },
   pageOrder: [PAGE_1_ID],
   currentPageId: PAGE_1_ID,
@@ -167,7 +177,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   // ── Pages ─────────────────────────────────────────────────────────────────
 
   addPage: (name) => {
-    const id = nanoid();
+    const id = crypto.randomUUID();
     const page: Page = { id, name: name ?? `Page ${get().pageOrder.length + 1}`, rootShapeIds: [] };
     set((s) => ({
       pages: { ...s.pages, [id]: page },
@@ -185,6 +195,28 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     if (diagnostic) return { ok: false, diagnostic };
     set(clonePlainData(document));
     return { ok: true };
+  },
+
+  associateServerDocumentIdentity: (requestedId, returnedId, returnedPageIds) => {
+    const state = get();
+    if (!DOCUMENT_UUID.test(requestedId) || requestedId !== returnedId || !DOCUMENT_UUID.test(returnedId) ||
+        !Array.isArray(returnedPageIds) || returnedPageIds.length !== state.pageOrder.length ||
+        returnedPageIds.some((id, index) => id !== state.pageOrder[index])) return false;
+    set({ documentId: returnedId, identitySource: "server" });
+    return true;
+  },
+  associateOfflineDocumentIdentity: (documentId) => {
+    if (!DOCUMENT_UUID.test(documentId)) return false;
+    set({ documentId, identitySource: "offline" });
+    return true;
+  },
+  restoreDocumentIdentity: (documentId, source) => {
+    if ((source === "server" || source === "offline") &&
+        (!documentId || !DOCUMENT_UUID.test(documentId))) {
+      set({ documentId: null, identitySource: "ambiguous" });
+      return;
+    }
+    set({ documentId, identitySource: source });
   },
 
   // ── Shapes ────────────────────────────────────────────────────────────────

@@ -23,6 +23,7 @@
  */
 
 import { useDocumentStore } from "../stores/documentStore";
+import type { DocumentIdentitySource } from "../stores/documentStore";
 import type { SyncStatus } from "./sync";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,9 @@ export interface PersistedDocument {
 }
 
 export interface DocumentSnapshot {
+  /** Present only for snapshots created or verified after the identity contract. */
+  documentId?: string | null;
+  identitySource?: DocumentIdentitySource;
   pages: Record<string, { id: string; name: string; rootShapeIds: string[] }>;
   pageOrder: string[];
   currentPageId: string;
@@ -176,8 +180,10 @@ export function nextLocalClock(): number {
 // ---------------------------------------------------------------------------
 
 function buildSnapshot(): DocumentSnapshot {
-  const { pages, pageOrder, currentPageId, shapes } = useDocumentStore.getState();
+  const { documentId, identitySource, pages, pageOrder, currentPageId, shapes } = useDocumentStore.getState();
   return {
+    documentId,
+    identitySource,
     pages: Object.fromEntries(
       Object.entries(pages).map(([id, p]) => [
         id,
@@ -200,6 +206,28 @@ async function writeSnapshot(documentId: string): Promise<void> {
   await idbPut(STORE_SNAPSHOTS, record);
 }
 
+/**
+ * Create an offline document at the only supported offline identity boundary.
+ * The generated ID and empty initial snapshot reach IndexedDB before this
+ * resolves, so callers must await it before enabling editing.
+ */
+export async function createOfflineDocument(): Promise<string> {
+  const store = useDocumentStore.getState();
+  if (store.documentId && store.identitySource === "offline") return store.documentId;
+  if (store.documentId || Object.keys(store.shapes).length !== 0 || store.pageOrder.length !== 1 ||
+      store.pages[store.pageOrder[0]]?.rootShapeIds.length !== 0) {
+    throw new Error("LOGOS_OFFLINE_CREATION_REQUIRES_NEW_EMPTY_DOCUMENT");
+  }
+  const documentId = crypto.randomUUID();
+  const snapshot = { ...buildSnapshot(), documentId, identitySource: "offline" as const };
+  const record: PersistedDocument = { documentId, savedAt: new Date().toISOString(), snapshot };
+  await idbPut(STORE_SNAPSHOTS, record);
+  if (!useDocumentStore.getState().associateOfflineDocumentIdentity(documentId)) {
+    throw new Error("LOGOS_OFFLINE_IDENTITY_BIND_FAILED");
+  }
+  return documentId;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -213,6 +241,10 @@ async function writeSnapshot(documentId: string): Promise<void> {
 export async function loadPersistedDocument(documentId: string): Promise<boolean> {
   const persisted = await idbGet<PersistedDocument>(STORE_SNAPSHOTS, documentId);
   if (!persisted) return false;
+  if (persisted.documentId !== documentId) {
+    console.warn("[logos/persist] Preserved but did not load a snapshot with mismatched document identity");
+    return false;
+  }
 
   const { snapshot } = persisted;
   const result = useDocumentStore.getState().hydrateDocument({
@@ -224,6 +256,16 @@ export async function loadPersistedDocument(documentId: string): Promise<boolean
   if (!result.ok) {
     console.warn("[logos/persist] Preserved but did not load an invalid document snapshot", result.diagnostic);
     return false;
+  }
+
+  const source = snapshot.identitySource;
+  const storedId = snapshot.documentId;
+  if ((source === "offline" || source === "server") && storedId === documentId) {
+    useDocumentStore.getState().restoreDocumentIdentity(storedId, source);
+  } else {
+    // Pre-contract snapshots have no durable ownership provenance. Preserve
+    // their IDs and keep them on the legacy React path.
+    useDocumentStore.getState().restoreDocumentIdentity(null, "legacy");
   }
 
   console.info(

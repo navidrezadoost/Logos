@@ -10,6 +10,9 @@ on:
       - "backend-go/go.sum"
       - "logos-app/src/api/**"
       - "logos-app/src/stores/documentStore.ts"
+      - "logos-app/src/offline/persist.ts"
+      - "logos-app/src/pages/WorkspacePage.tsx"
+      - "logos-app/src/document-core/identity-eligibility.ts"
       - "logos-app/src/test-support/p04-document-adapter.ts"
       - "logos-app/src/test-support/p05-browser-persistence-smoke.tsx"
       - "logos-app/test-harness/p05-browser-persistence-smoke.html"
@@ -21,6 +24,7 @@ on:
       - "test/p0.5/browser-persistence/**"
       - "docs/r1/P0.4-DOCUMENT-PERSISTENCE-CONTRACT-PROOF.md"
       - "docs/r1/P0.5-BROWSER-API-PERSISTENCE-BOUNDARY.md"
+      - "docs/r1/G1-B9.1-CANONICAL-IDENTITY-ISSUANCE.md"
       - ".github/workflows/p05-browser-persistence.yml"
   workflow_dispatch:
 

@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { getFile } from "../api/client";
 import { useDocumentStore } from "../stores/documentStore";
 import { projectLegacyFileData, encodeGeometryChange } from "./p04-document-adapter";
+import { classifyRustIdentityEligibility } from "../document-core/identity-eligibility";
+import { createOfflineDocument, loadPersistedDocument, stopPersistence, initPersistence } from "../offline/persist";
 
 type TestConfig = { fileId: string };
 type VersionedFileDetail = Awaited<ReturnType<typeof getFile>> & { revn: number; vern: number };
@@ -57,6 +59,14 @@ async function run(): Promise<void> {
     shapes: projection.shapes,
   });
   if (!hydration.ok) throw new Error(`P0.5 fixture failed hydration: ${hydration.diagnostic.code}`);
+  const identityActions = useDocumentStore.getState();
+  if (identityActions.associateServerDocumentIdentity(config.fileId, crypto.randomUUID(), projection.pageOrder) ||
+      identityActions.associateServerDocumentIdentity(config.fileId, before.id, ["wrong-page-id"])) {
+    throw new Error("mismatched server identity or page ownership was accepted");
+  }
+  if (!useDocumentStore.getState().associateServerDocumentIdentity(config.fileId, before.id, projection.pageOrder)) {
+    throw new Error("server file ID/page membership was not bound to its exact returned identity");
+  }
 
   stage = "existing editor geometry command";
   useDocumentStore.getState().updateShape(shapeId, {
@@ -106,6 +116,102 @@ async function run(): Promise<void> {
   if (extension?.sentinel !== "preserve-me") throw new Error("reloaded unknown extension sentinel changed");
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
 
+  stage = "verified server identity IndexedDB reload";
+  initPersistence(config.fileId);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  stopPersistence();
+  if (!await loadPersistedDocument(config.fileId) ||
+      useDocumentStore.getState().documentId !== config.fileId ||
+      useDocumentStore.getState().identitySource !== "server") {
+    throw new Error("verified server document identity did not survive IndexedDB reload");
+  }
+
+  stage = "read-only eligibility classifications";
+  const originalIdentity = useDocumentStore.getState().documentId;
+  const pageId = crypto.randomUUID();
+  const readyInput = {
+    documentId: crypto.randomUUID(), identitySource: "offline" as const,
+    pages: { [pageId]: { id: pageId, name: "Identity test", rootShapeIds: [] } },
+    pageOrder: [pageId], shapes: {},
+  };
+  if (classifyRustIdentityEligibility(readyInput) !== "CANONICAL_UUID_READY") {
+    throw new Error("valid canonical empty document was not Rust-candidate eligible");
+  }
+  const legacyPageId = "historical-nanoid-page";
+  const legacyInput = {
+    ...readyInput, identitySource: "server" as const,
+    pages: { [legacyPageId]: { id: legacyPageId, name: "Legacy", rootShapeIds: [] } },
+    pageOrder: [legacyPageId],
+  };
+  if (classifyRustIdentityEligibility(legacyInput) !== "LEGACY_IDENTITY") {
+    throw new Error("historical page identity was not classified as legacy");
+  }
+  const unsupportedShape = { ...initialShape, type: "vector-network" as const };
+  const unsupportedInput = {
+    ...readyInput,
+    pages: { [pageId]: { id: pageId, name: "Identity test", rootShapeIds: [unsupportedShape.id] } },
+    shapes: { [unsupportedShape.id]: unsupportedShape },
+  };
+  const unsupportedBefore = JSON.stringify(unsupportedInput);
+  if (classifyRustIdentityEligibility(unsupportedInput) !== "UNSUPPORTED_DOCUMENT_CONTENT" ||
+      JSON.stringify(unsupportedInput) !== unsupportedBefore) {
+    throw new Error("unsupported content was not rejected read-only");
+  }
+  if (classifyRustIdentityEligibility({ ...readyInput, documentId: null }) !== "DOCUMENT_ID_UNAVAILABLE" ||
+      classifyRustIdentityEligibility({ ...readyInput, identitySource: "unknown" }) !== "AMBIGUOUS_OWNERSHIP") {
+    throw new Error("missing or unverified document ownership classification failed");
+  }
+  if (useDocumentStore.getState().documentId !== originalIdentity) {
+    throw new Error("eligibility evaluation mutated the live document identity");
+  }
+
+  stage = "offline identity durability and reload";
+  const emptyPageId = crypto.randomUUID();
+  useDocumentStore.getState().restoreDocumentIdentity(null, "unknown");
+  const emptyHydration = useDocumentStore.getState().hydrateDocument({
+    pages: { [emptyPageId]: { id: emptyPageId, name: "Page 1", rootShapeIds: [] } },
+    pageOrder: [emptyPageId], currentPageId: emptyPageId, shapes: {},
+  });
+  if (!emptyHydration.ok) throw new Error(`offline empty fixture hydration failed: ${emptyHydration.diagnostic.code}`);
+  const offlineId = await createOfflineDocument();
+  if (useDocumentStore.getState().documentId !== offlineId ||
+      useDocumentStore.getState().identitySource !== "offline") {
+    throw new Error("offline identity was not bound after durable creation");
+  }
+  const newPageId = useDocumentStore.getState().addPage("Added page");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(newPageId)) {
+    throw new Error("new page ID is not a UUID");
+  }
+  initPersistence(offlineId);
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  stopPersistence();
+  if (!await loadPersistedDocument(offlineId)) throw new Error("offline document did not reload");
+  const offlineIdsAfterFirstLoad = JSON.stringify({
+    documentId: useDocumentStore.getState().documentId,
+    pageOrder: useDocumentStore.getState().pageOrder,
+  });
+  if (!await loadPersistedDocument(offlineId)) throw new Error("offline document did not reload twice");
+  const offlineIdsAfterSecondLoad = JSON.stringify({
+    documentId: useDocumentStore.getState().documentId,
+    pageOrder: useDocumentStore.getState().pageOrder,
+  });
+  if (offlineIdsAfterFirstLoad !== offlineIdsAfterSecondLoad ||
+      useDocumentStore.getState().pages[legacyPageId] !== undefined) {
+    throw new Error("repeated hydration changed offline identities");
+  }
+  // Historical IDs are preserved through the ordinary React editing path.
+  const legacyHydration = useDocumentStore.getState().hydrateDocument({
+    pages: { [legacyPageId]: { id: legacyPageId, name: "Legacy page", rootShapeIds: [] } },
+    pageOrder: [legacyPageId], currentPageId: legacyPageId, shapes: {},
+  });
+  if (!legacyHydration.ok || useDocumentStore.getState().pageOrder[0] !== legacyPageId) {
+    throw new Error("legacy page ID was not preserved during React hydration");
+  }
+  const legacyEditedShapeId = useDocumentStore.getState().addRect({ x: 0, y: 0, w: 10, h: 10 });
+  if (useDocumentStore.getState().pages[legacyPageId]?.rootShapeIds[0] !== legacyEditedShapeId) {
+    throw new Error("legacy document could not use the React compatibility edit path");
+  }
+
   status.dataset.status = "passed";
   status.textContent = JSON.stringify({
     test: "authenticated browser fetch → existing document command → Go update-file → get-file reload",
@@ -120,6 +226,15 @@ async function run(): Promise<void> {
     fill: reloadedShape.fills[0],
     extension,
     browserErrors,
+    identityEvidence: {
+      serverId: before.id,
+      offlineId,
+      newPageId,
+      eligibility: ["CANONICAL_UUID_READY", "LEGACY_IDENTITY", "UNSUPPORTED_DOCUMENT_CONTENT",
+        "DOCUMENT_ID_UNAVAILABLE", "AMBIGUOUS_OWNERSHIP"],
+      repeatedHydrationStable: offlineIdsAfterFirstLoad === offlineIdsAfterSecondLoad,
+      historicalPageId: legacyPageId,
+    },
   }, null, 2);
 }
 
