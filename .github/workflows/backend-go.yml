@@ -37,7 +37,7 @@ jobs:
         working-directory: backend-go
 
   snapshot-integrity-integration:
-    name: Snapshot integrity PostgreSQL integration
+    name: Snapshot and revision fencing PostgreSQL integration
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
@@ -73,8 +73,8 @@ jobs:
           TEST_DATABASE_URL: postgres://logos:snapshot-only@127.0.0.1:5432/logos_p04_snapshot?sslmode=disable
         run: bash test/p0.5/browser-persistence/initialize-disposable-db-schema.sh
 
-      - name: Run snapshot creation and restore integration suite
+      - name: Run snapshot restore and file revision integration suites
         env:
           TEST_DATABASE_URL: postgres://logos:snapshot-only@127.0.0.1:5432/logos_p04_snapshot?sslmode=disable
-        run: go test -race ./internal/handler -run 'Test(CreateSnapshot|Restore|HistoricalComplete|ExpiredPreRestore|CreatedSnapshotRecovery|VerifySnapshotBlobStatuses)' -count=1 -timeout=180s -v
+        run: go test -race ./internal/handler -run 'Test(CreateSnapshot|Restore|HistoricalComplete|ExpiredPreRestore|CreatedSnapshotRecovery|VerifySnapshotBlobStatuses|UpdateFileHandlerRevisionPersistenceIntegration|UpdateFileHandlerRejectsMalformedLegacyCompetingHistoryIntegration)' -count=1 -timeout=180s -v
         working-directory: backend-go

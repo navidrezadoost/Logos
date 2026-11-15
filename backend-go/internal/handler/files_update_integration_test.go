@@ -71,13 +71,13 @@ func TestUpdateFileHandlerRevisionPersistenceIntegration(t *testing.T) {
 			},
 		}
 	}
-	update := func(baseRevn int64, change map[string]any) *httptest.ResponseRecorder {
+	update := func(baseRevn, baseVern int64, change map[string]any) *httptest.ResponseRecorder {
 		t.Helper()
 		body, err := json.Marshal(map[string]any{
 			"id":         created.ID,
 			"session-id": integrationUUID(t),
 			"revn":       baseRevn,
-			"vern":       0,
+			"vern":       baseVern,
 			"changes":    []map[string]any{change},
 		})
 		if err != nil {
@@ -90,9 +90,23 @@ func TestUpdateFileHandlerRevisionPersistenceIntegration(t *testing.T) {
 		return rec
 	}
 
-	first := update(0, makeAdd(shapeA, "First rectangle"))
+	first := update(0, 0, makeAdd(shapeA, "First rectangle"))
 	if first.Code != http.StatusOK {
 		t.Fatalf("first update: status=%d body=%s", first.Code, first.Body.String())
+	}
+	for _, conflict := range []struct {
+		name string
+		revn int64
+		vern int64
+		code string
+	}{
+		{name: "future revn", revn: 2, vern: 0, code: "revn-conflict"},
+		{name: "stale vern", revn: 1, vern: 1, code: "vern-conflict"},
+	} {
+		rejected := update(conflict.revn, conflict.vern, makeAdd(shapeB, "Must not persist"))
+		if rejected.Code != http.StatusUnprocessableEntity || !bytes.Contains(rejected.Body.Bytes(), []byte(conflict.code)) {
+			t.Fatalf("%s: status=%d body=%s, want 422 %s", conflict.name, rejected.Code, rejected.Body.String(), conflict.code)
+		}
 	}
 	// A labeled snapshot is metadata for the existing revision, not a second
 	// operation in the change history. It shares revn 1 with the real update and
@@ -104,7 +118,7 @@ func TestUpdateFileHandlerRevisionPersistenceIntegration(t *testing.T) {
 		integrationUUID(t), created.ID, profileID); err != nil {
 		t.Fatalf("insert labeled snapshot at revision 1: %v", err)
 	}
-	second := update(0, makeAdd(shapeB, "Stale-base rectangle"))
+	second := update(0, 0, makeAdd(shapeB, "Stale-base rectangle"))
 	if second.Code != http.StatusOK {
 		t.Fatalf("stale-base update: status=%d body=%s", second.Code, second.Body.String())
 	}
