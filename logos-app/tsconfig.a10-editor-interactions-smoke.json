@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/vite-env.d.ts",
+    "src/render-webgpu/webgpu-types.d.ts",
+    "src/test-support/a10-editor-interactions-smoke.tsx"
+  ],
+  "exclude": []
+}

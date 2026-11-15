@@ -848,6 +848,7 @@ jobs:
         run: |
           set -euo pipefail
           ./node_modules/.bin/tsc --noEmit -p tsconfig.json
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.a10-editor-interactions-smoke.json
           ./node_modules/.bin/vite build --config vite.a10-editor-interactions-smoke.config.ts
 
       - name: Verify A10 Canvas, Layers, Inspector, and renderer recovery interactions in Chromium
