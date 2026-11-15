@@ -24,6 +24,10 @@ on:
       - "logos-app/g1-b3-adapter-smoke.html"
       - "logos-app/vite.g1-b3-adapter-smoke.config.ts"
       - "test/benchmarks/g1-b3-adapter-browser.mjs"
+      - "logos-app/g1-b9-3-compatibility-smoke.html"
+      - "logos-app/vite.g1-b9-3-compatibility-smoke.config.ts"
+      - "logos-app/tsconfig.g1-b9-3-compatibility-smoke.json"
+      - "test/benchmarks/g1-b9-3-compatibility-browser.mjs"
       - "logos-app/test-harness/**"
       - "logos-app/test/workspace-identity-isolation.test.ts"
       - "logos-app/vite.g1-b9-2-workspace-isolation.config.ts"
@@ -971,6 +975,48 @@ jobs:
           path: |
             ${{ runner.temp }}/g1-b3-adapter-smoke-dom.html
             ${{ runner.temp }}/g1-b3-adapter-preview.log
+
+      - name: Build G1-B9.3 read-only compatibility analyzer harness
+        working-directory: logos-app
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.g1-b9-3-compatibility-smoke.json
+          ./node_modules/.bin/vite build --config vite.g1-b9-3-compatibility-smoke.config.ts
+
+      - name: Verify G1-B9.3 corpus classifications in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+          (
+            cd logos-app
+            ./node_modules/.bin/vite preview --config vite.g1-b9-3-compatibility-smoke.config.ts \
+              --host 127.0.0.1 --port 4178
+          ) >"$RUNNER_TEMP/g1-b9-3-compatibility-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4178/g1-b9-3-compatibility-smoke.html >/dev/null; then break; fi
+            sleep 1
+          done
+          npm ci --prefix test/benchmarks --ignore-scripts --no-audit --no-fund
+          G1_B9_3_CHROME="$chrome_bin" \
+          G1_B9_3_EVIDENCE_PATH="$RUNNER_TEMP/g1-b9-3-compatibility-evidence.json" \
+            node test/benchmarks/g1-b9-3-compatibility-browser.mjs
+
+      - name: Preserve G1-B9.3 compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g1-b9-3-compatibility-chromium-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/g1-b9-3-compatibility-evidence.json
+            ${{ runner.temp }}/g1-b9-3-compatibility-preview.log
 
       - name: Build DT-C3.1 token workflow browser smoke
         working-directory: logos-app
