@@ -62,6 +62,9 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "=0.3.76"
+# wasm-pack's Node test harness needs UUID v4 generation. Keep this feature
+# test-only so the standalone production token bridge has no JS/WASM imports.
+uuid = { version = "1", features = ["js"] }
 
 # ── Type-generation binary ────────────────────────────────────────────────────
 [[bin]]
