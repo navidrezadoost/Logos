@@ -267,12 +267,13 @@ async function run(): Promise<void> {
   diagnostics.shapeId = shapeId;
   diagnostics.unknownExtension = unknown;
 
-  useDocumentStore.setState({
+  const hydration = useDocumentStore.getState().hydrateDocument({
     pages: projection.pages,
     pageOrder: projection.pageOrder,
     currentPageId: projection.currentPageId,
     shapes: projection.shapes,
   });
+  if (!hydration.ok) throw new Error(`P0.4 fixture failed hydration: ${hydration.diagnostic.code}`);
   useUiStore.setState({ activeTool: "scale", zoom: 1, panX: 0, panY: 0 });
   useSelectionStore.setState({ selectedIds: [] });
 

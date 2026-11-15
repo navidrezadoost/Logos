@@ -16,10 +16,14 @@ type WindowHarness = Window & {
     state: () => unknown;
     selection: () => string[];
     addPage: () => string;
+    createVectorNetworkForCompatibility: () => string;
+    createUnsupportedComponentForCompatibility: () => string;
     setShapeFlags: (id: string, flags: { hidden?: boolean; locked?: boolean }) => void;
     rejectInvalidChild: (parentId: string) => boolean;
+    setShapeTypeForCompatibilityRecovery: (id: string) => void;
     poisonRenderer: () => void;
     clearFailure: () => void;
+    replaceTwoVectorNetworks: () => { firstId: string; secondId: string; replacementId: string; rootsBefore: string[]; rootsAfter: string[]; selection: string[] };
     samplePixel: (x: number, y: number) => number[];
     rendererInstances: () => number;
     wasmReservedBytes: () => number | null;
@@ -101,6 +105,30 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
   },
   selection: () => useSelectionStore.getState().selectedIds,
   addPage: () => useDocumentStore.getState().addPage("A10 second page"),
+  createVectorNetworkForCompatibility: () => {
+    const id = useDocumentStore.getState().addVectorNetwork([{ x: 90, y: 280 }, { x: 120, y: 310 }], [{ s: 0, e: 1 }]);
+    useSelectionStore.getState().select(id);
+    return id;
+  },
+  createUnsupportedComponentForCompatibility: () => {
+    const store = useDocumentStore.getState();
+    const base = Object.values(store.shapes).find((shape) => shape.type === "rect");
+    if (!base) throw new Error("Create a rectangle before adding the compatibility component fixture");
+    const id = crypto.randomUUID();
+    store.addShape({
+      ...base,
+      id,
+      type: "component",
+      name: "A10 unsupported compatibility component",
+      bounds: { ...base.bounds, x: base.bounds.x + 40 },
+      parentId: null,
+      children: [],
+      componentMeta: { properties: {} },
+      vendorExtension: { sentinel: "preserved-by-compatibility-operation" },
+    } as Shape);
+    useSelectionStore.getState().select(id);
+    return id;
+  },
   setShapeFlags: (id, flags) => useDocumentStore.getState().updateShape(id, flags),
   rejectInvalidChild: (parentId) => {
     const before = useDocumentStore.getState();
@@ -113,6 +141,7 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
       useDocumentStore.getState().pages === before.pages &&
       useSelectionStore.getState().selectedIds === selectedBefore;
   },
+  setShapeTypeForCompatibilityRecovery: (id) => useDocumentStore.getState().updateShape(id, { type: "rect" }),
   poisonRenderer: () => {
     failureMode = "always-after-mutation";
     const shape = currentPageShapes()[0];
@@ -120,6 +149,26 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
     useDocumentStore.getState().updateShape(shape.id, { opacity: Math.max(0.1, shape.opacity - 0.1) });
   },
   clearFailure: () => { failureMode = "none"; },
+  replaceTwoVectorNetworks: () => {
+    const store = useDocumentStore.getState();
+    const rootsBefore = [...store.pages[store.currentPageId].rootShapeIds];
+    const firstId = store.addVectorNetwork([{ x: 700, y: 300 }, { x: 725, y: 325 }], [{ s: 0, e: 1 }]);
+    const secondId = useDocumentStore.getState().addVectorNetwork([{ x: 740, y: 300 }, { x: 765, y: 325 }], [{ s: 0, e: 1 }]);
+    useSelectionStore.getState().select(firstId);
+    useSelectionStore.getState().toggleSelect(secondId);
+    const replacementId = useDocumentStore.getState().replaceWithVectorNetwork(
+      [firstId, secondId], [{ x: 700, y: 300 }, { x: 765, y: 325 }], [{ s: 0, e: 1 }],
+    );
+    const next = useDocumentStore.getState();
+    return {
+      firstId,
+      secondId,
+      replacementId,
+      rootsBefore,
+      rootsAfter: [...next.pages[next.currentPageId].rootShapeIds],
+      selection: [...useSelectionStore.getState().selectedIds],
+    };
+  },
   samplePixel,
   rendererInstances: () => rendererInstanceCount,
   wasmReservedBytes: () => renderer?.HEAPU8.buffer.byteLength ?? null,

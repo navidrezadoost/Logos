@@ -50,12 +50,13 @@ async function run(): Promise<void> {
   const initialShape = projection.shapes[shapeId];
   if (!initialShape) throw new Error("versioned adapter produced no supported rectangle");
 
-  useDocumentStore.setState({
+  const hydration = useDocumentStore.getState().hydrateDocument({
     pages: projection.pages,
     pageOrder: projection.pageOrder,
     currentPageId: projection.currentPageId,
     shapes: projection.shapes,
   });
+  if (!hydration.ok) throw new Error(`P0.5 fixture failed hydration: ${hydration.diagnostic.code}`);
 
   stage = "existing editor geometry command";
   useDocumentStore.getState().updateShape(shapeId, {

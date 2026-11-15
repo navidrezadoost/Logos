@@ -215,12 +215,16 @@ export async function loadPersistedDocument(documentId: string): Promise<boolean
   if (!persisted) return false;
 
   const { snapshot } = persisted;
-  useDocumentStore.setState({
+  const result = useDocumentStore.getState().hydrateDocument({
     pages: snapshot.pages as ReturnType<typeof useDocumentStore.getState>["pages"],
     pageOrder: snapshot.pageOrder,
     currentPageId: snapshot.currentPageId,
     shapes: snapshot.shapes as ReturnType<typeof useDocumentStore.getState>["shapes"],
   });
+  if (!result.ok) {
+    console.warn("[logos/persist] Preserved but did not load an invalid document snapshot", result.diagnostic);
+    return false;
+  }
 
   console.info(
     `[logos/persist] Restored document "${documentId}" from IndexedDB (saved ${persisted.savedAt})`

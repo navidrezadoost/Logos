@@ -112,9 +112,24 @@ base.shapes[redId].parentId = groupId;
 base.shapes[groupId] = group;
 
 function installScene(page: Page, shapes: Record<string, Shape>): void {
+  // The renderer projection fixture models only renderer-facing page fields;
+  // provide the document-store page metadata required by atomic hydration.
+  const hydratedPage = { ...page, name: typeof page.name === "string" ? page.name : "A9 renderer fixture" };
+  const result = useDocumentStore.getState().hydrateDocument({
+    currentPageId: hydratedPage.id,
+    pages: { [hydratedPage.id]: hydratedPage },
+    pageOrder: [hydratedPage.id],
+    shapes,
+  });
+  assert(result.ok, `test fixture failed hydration: ${result.ok ? "" : result.diagnostic.code}`);
+}
+
+/** Test-only injection used to exercise renderer rejection after store corruption. */
+function injectMalformedScene(page: Page, shapes: Record<string, Shape>): void {
   useDocumentStore.setState((state) => ({
+    pages: { [page.id]: { ...page, name: page.name ?? "A9 malformed renderer fixture" } },
+    pageOrder: [page.id],
     currentPageId: page.id,
-    pages: { ...state.pages, [page.id]: page },
     shapes,
   }));
 }
@@ -229,7 +244,7 @@ async function run(): Promise<void> {
 
   stage("page switch uploads only the selected page");
   const page2: Page = { id: "a9-page-two", name: "A9 second page", rootShapeIds: [yellowId] };
-  installScene(page2, { ...base.shapes, [yellowId]: { ...base.shapes[yellowId], bounds: { x: 200, y: 120, w: 25, h: 25 } } });
+  installScene(page2, { [yellowId]: { ...base.shapes[yellowId], bounds: { x: 200, y: 120, w: 25, h: 25 } } });
   await waitReady("page switch frame");
   frame = pixels();
   expectColor(frame, canvas.width, canvas.height, 210, 130, [255, 255, 0, 255], "second page root");
@@ -239,7 +254,7 @@ async function run(): Promise<void> {
   const beforeInvalid = pixels();
   const invalid = structuredClone(base.shapes);
   invalid[outerFrameId].children.push("00000000-0000-4000-8000-000000000099");
-  installScene(base.page, invalid);
+  injectMalformedScene(base.page, invalid);
   const uploadsBeforeInvalid = uploads;
   await waitRejected("LOGOS_SCENE_MISSING_CHILD", "invalid graph");
   assert(uploads === uploadsBeforeInvalid, "invalid graph mutated native scene upload");

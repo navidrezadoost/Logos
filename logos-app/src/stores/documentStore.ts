@@ -16,6 +16,7 @@ import { nanoid } from "nanoid";
 import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, type ComponentMeta, type InstanceMeta, createRect, createVectorNetwork, IDENTITY_TRANSFORM } from "../types/shapes";
 import { useSelectionStore } from "./selectionStore";
 import { planHierarchyOperation, type HierarchyOperation, type HierarchyOperationResult } from "./hierarchyOperations";
+import { buildSceneProjection } from "../render-wasm/scene-projection";
 
 /** Generate a proper UUID v4 for shapes — required by the WASM bridge's uuidToU32x4(). */
 const shapeId = (): string => crypto.randomUUID();
@@ -30,6 +31,20 @@ export interface Page {
   /** Ordered list of top-level shape IDs on this page. */
   rootShapeIds: string[];
 }
+
+/** Full in-memory load boundary used by offline hydration and import adapters. */
+export interface DocumentHydration {
+  pages: Record<string, Page>;
+  pageOrder: string[];
+  currentPageId: string;
+  shapes: Record<string, Shape>;
+}
+
+export type DocumentHydrationResult =
+  | { ok: true }
+  | { ok: false; diagnostic: { code: string; pageId?: string; shapeId?: string; relatedShapeId?: string } };
+
+type CompatibilityHierarchyOperation = Extract<HierarchyOperation, { kind: `compat-${string}` }>;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Store shape
@@ -50,11 +65,16 @@ interface DocumentState {
   addPage: (name?: string) => string;
   setCurrentPage: (pageId: string) => void;
 
+  /** Atomically validate and load a persisted/imported snapshot without rewriting IDs or unknown fields. */
+  hydrateDocument: (document: DocumentHydration) => DocumentHydrationResult;
+
   /** Add a shape to the current page; returns the new shape id. */
   addRect: (bounds: Rect, color?: string) => string;
 
   /** Add any pre-built shape to the current page; returns the shape id. */
   addShape: (shape: Shape) => string;
+  /** Atomically add a related legacy/template shape batch through the compatibility boundary. */
+  addShapes: (shapes: Shape[]) => string[];
 
   /** Commit a completed pen session as a vector-network shape. */
   addVectorNetwork: (
@@ -91,8 +111,12 @@ interface DocumentState {
 
   /** Validate and atomically commit a supported current-page hierarchy operation. */
   applyHierarchyOperation: (operation: HierarchyOperation) => HierarchyOperationResult;
+  /** Explicit compatibility boundary for legacy additions and subtree deletion/replacement. */
+  applyCompatibilityOperation: (operation: CompatibilityHierarchyOperation) => HierarchyOperationResult;
   /** Store-internal variant used by existing page-addressed root-order APIs. */
   applyHierarchyOperationForPage: (pageId: string, operation: HierarchyOperation) => HierarchyOperationResult;
+  /** Page-scoped compatibility operations are deliberately separate from A10's supported-operation API. */
+  applyCompatibilityOperationForPage: (pageId: string, operation: CompatibilityHierarchyOperation) => HierarchyOperationResult;
 
   // ── P4.4: Component Variants ──────────────────────────────────────────────
 
@@ -155,6 +179,13 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     if (get().pages[pageId]) set({ currentPageId: pageId });
   },
 
+  hydrateDocument: (document) => {
+    const diagnostic = validateDocumentHydration(document);
+    if (diagnostic) return { ok: false, diagnostic };
+    set(clonePlainData(document));
+    return { ok: true };
+  },
+
   // ── Shapes ────────────────────────────────────────────────────────────────
 
   addRect: (bounds, color = "#0000ff") => {
@@ -168,82 +199,100 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   },
 
   addShape: (shape) => {
+    if (!shape || typeof shape !== "object" || typeof shape.id !== "string") throw new Error("LOGOS_OPERATION_INVALID_SHAPE");
+    if (shape.parentId !== null) {
+      const parentOwners = getShapePageOwners(get(), shape.parentId);
+      if (parentOwners.length > 1 || (parentOwners.length === 1 && parentOwners[0] !== get().currentPageId)) {
+        throw new Error("LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS");
+      }
+    }
     if (shape.type === "rect" || shape.type === "frame") {
+      if (shape.type === "frame" && shape.parentId !== null) {
+        const result = get().applyCompatibilityOperation({ kind: "compat-add-shape", shape });
+        if (!result.ok) throw new Error(result.diagnostic.code);
+        return shape.id;
+      }
       const operation: HierarchyOperation = shape.parentId === null
         ? { kind: "create-root", shape }
-        : { kind: "insert-child", parentId: shape.parentId, shape, index: 0 };
+        : { kind: "insert-child", parentId: shape.parentId, shape: { ...shape, parentId: null }, index: 0 };
       const result = get().applyHierarchyOperation(operation);
-      if (!result.ok) throw new Error(result.diagnostic.code);
-      return shape.id;
+      if (result.ok) return shape.id;
+      if (!isRendererLimitation(result.diagnostic.code)) throw new Error(result.diagnostic.code);
     }
-    const { currentPageId: pid } = get();
-    set((s) => ({
-      shapes: { ...s.shapes, [shape.id]: shape },
-      pages: {
-        ...s.pages,
-        [pid]: {
-          ...s.pages[pid],
-          rootShapeIds: [shape.id, ...s.pages[pid].rootShapeIds],
-        },
-      },
-    }));
+    const result = get().applyCompatibilityOperation({ kind: "compat-add-shape", shape });
+    if (!result.ok) throw new Error(result.diagnostic.code);
     return shape.id;
   },
 
+  addShapes: (shapes) => {
+    const state = get();
+    if (!Array.isArray(shapes) || shapes.length === 0) throw new Error("LOGOS_COMPAT_ADD_REQUIRES_SHAPES");
+    for (const shape of shapes) {
+      if (!shape || typeof shape.id !== "string" || (shape.parentId !== null && typeof shape.parentId !== "string")) {
+        throw new Error("LOGOS_OPERATION_INVALID_SHAPE");
+      }
+    }
+    const incomingIds = new Set(shapes.map((shape) => shape.id.toLowerCase()));
+    for (const shape of shapes) {
+      if (shape.parentId !== null && !incomingIds.has(shape.parentId.toLowerCase())) {
+        const owners = getShapePageOwners(state, shape.parentId);
+        if (owners.length > 1 || (owners.length === 1 && owners[0] !== state.currentPageId)) {
+          throw new Error("LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS");
+        }
+      }
+    }
+    const result = get().applyCompatibilityOperation({ kind: "compat-add-shapes", shapes });
+    if (!result.ok) throw new Error(result.diagnostic.code);
+    return shapes.map((shape) => shape.id);
+  },
+
   addVectorNetwork: (anchors, segments, regions = [], fill = "#6c9ef8") => {
+    assertVectorNetworkInput(anchors, segments, regions);
     const id = shapeId();
-    const { currentPageId: pid } = get();
     const count = Object.values(get().shapes).filter((s) => s.type === "vector-network").length + 1;
     const shape = createVectorNetwork(id, `Path ${count}`, anchors, segments, regions, fill);
-    set((s) => ({
-      shapes: { ...s.shapes, [id]: shape },
-      pages: {
-        ...s.pages,
-        [pid]: {
-          ...s.pages[pid],
-          rootShapeIds: [id, ...s.pages[pid].rootShapeIds],
-        },
-      },
-    }));
+    validateVectorNetwork(shape);
+    const result = get().applyCompatibilityOperation({ kind: "compat-add-shape", shape });
+    if (!result.ok) throw new Error(result.diagnostic.code);
     return id;
   },
 
   replaceWithVectorNetwork: (removeIds, anchors, segments, regions = []) => {
+    if (!Array.isArray(removeIds)) throw new Error("LOGOS_COMPAT_REPLACEMENT_INVALID_SELECTION");
+    const state = get();
+    const ownerPagesById = removeIds.map((id) => getShapePageOwners(state, id));
+    if (ownerPagesById.some((owners) => owners.length > 1) || new Set(ownerPagesById.flat()).size > 1 ||
+        ownerPagesById.some((owners) => owners.length === 1 && owners[0] !== state.currentPageId)) {
+      throw new Error("LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS");
+    }
+    if (ownerPagesById.some((owners) => owners.length === 0)) throw new Error("LOGOS_OPERATION_PAGE_OWNERSHIP_UNKNOWN");
+    assertVectorNetworkInput(anchors, segments, regions);
     const id = shapeId();
-    const { currentPageId: pid } = get();
     const count = Object.values(get().shapes).filter((s) => s.type === "vector-network").length + 1;
     const shape = createVectorNetwork(id, `Path ${count}`, anchors, segments, regions);
-    set((s) => {
-      const nextShapes = { ...s.shapes };
-      for (const rid of removeIds) delete nextShapes[rid];
-      nextShapes[id] = shape;
-      const nextPages = { ...s.pages };
-      nextPages[pid] = {
-        ...nextPages[pid],
-        rootShapeIds: [
-          id,
-          ...nextPages[pid].rootShapeIds.filter((sid) => !removeIds.includes(sid)),
-        ],
-      };
-      return { shapes: nextShapes, pages: nextPages };
-    });
+    validateVectorNetwork(shape);
+    const result = get().applyCompatibilityOperation({ kind: "compat-replace-vector-network", removeIds, shape });
+    if (!result.ok) throw new Error(result.diagnostic.code);
     return id;
   },
 
   updateShape: (id, patch) => {
-    if (Object.prototype.hasOwnProperty.call(patch, "parentId") || Object.prototype.hasOwnProperty.call(patch, "children")) {
-      throw new Error("LOGOS_OPERATION_USE_HIERARCHY_BOUNDARY");
-    }
-    set((s) => ({
-      shapes: { ...s.shapes, [id]: { ...s.shapes[id], ...patch } },
-    }));
-  },
-
-  batchUpdate: (patches) => {
-    if (Object.values(patches).some((patch) => Object.prototype.hasOwnProperty.call(patch, "parentId") || Object.prototype.hasOwnProperty.call(patch, "children"))) {
+    if (Object.prototype.hasOwnProperty.call(patch, "id") || Object.prototype.hasOwnProperty.call(patch, "parentId") || Object.prototype.hasOwnProperty.call(patch, "children")) {
       throw new Error("LOGOS_OPERATION_USE_HIERARCHY_BOUNDARY");
     }
     set((s) => {
+      if (!s.shapes[id]) throw new Error("LOGOS_OPERATION_SHAPE_NOT_FOUND");
+      return { shapes: { ...s.shapes, [id]: { ...s.shapes[id], ...clonePlainData(patch) } } };
+    });
+  },
+
+  batchUpdate: (patches) => {
+    if (Object.values(patches).some((patch) => Object.prototype.hasOwnProperty.call(patch, "id") || Object.prototype.hasOwnProperty.call(patch, "parentId") || Object.prototype.hasOwnProperty.call(patch, "children"))) {
+      throw new Error("LOGOS_OPERATION_USE_HIERARCHY_BOUNDARY");
+    }
+    const ids = Object.keys(patches);
+    set((s) => {
+      if (ids.some((id) => !s.shapes[id])) throw new Error("LOGOS_OPERATION_SHAPE_NOT_FOUND");
       const next = { ...s.shapes };
       for (const [id, patch] of Object.entries(patches)) {
         if (next[id]) next[id] = { ...next[id], ...patch };
@@ -261,7 +310,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     if (owners.length !== 1) {
       return { ok: false, diagnostic: { code: owners.length === 0 ? "LOGOS_OPERATION_PAGE_OWNERSHIP_UNKNOWN" : "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS" } };
     }
-    return get().applyHierarchyOperationForPage(owners[0], { kind: "delete", shapeId: id });
+    const validated = get().applyHierarchyOperationForPage(owners[0], { kind: "delete", shapeId: id });
+    if (validated.ok || !isRendererLimitation(validated.diagnostic.code)) return validated;
+    const result = get().applyCompatibilityOperationForPage(owners[0], { kind: "compat-delete", shapeId: id });
+    reportRenderingLimitation(result);
+    return result;
   },
 
   reorderPageShapes: (pageId, newOrder) =>
@@ -271,19 +324,25 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     },
 
   applyHierarchyOperation: (operation) => {
+    if (operation.kind.startsWith("compat-")) return { ok: false, diagnostic: { code: "LOGOS_OPERATION_COMPATIBILITY_BOUNDARY_REQUIRED" } };
     return get().applyHierarchyOperationForPage(get().currentPageId, operation);
   },
 
+  applyCompatibilityOperation: (operation) => {
+    return get().applyCompatibilityOperationForPage(get().currentPageId, operation);
+  },
+
   applyHierarchyOperationForPage: (pageId, operation) => {
+    if (operation.kind.startsWith("compat-")) return { ok: false, diagnostic: { code: "LOGOS_OPERATION_COMPATIBILITY_BOUNDARY_REQUIRED" } };
     const snapshot = get();
     const pageSnapshot = { ...snapshot, currentPageId: pageId };
     const [page, ...currentPageShapes] = selectCurrentPageScene(pageSnapshot);
     if (!page) return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_UNAVAILABLE" } };
-    const currentIds = new Set(currentPageShapes.map((shape) => shape.id));
+    const currentIds = new Set(currentPageShapes.map((shape) => shape.id.toLowerCase()));
     for (const otherPageId of Object.keys(snapshot.pages)) {
       if (otherPageId === pageId) continue;
       const [, ...otherPageShapes] = selectCurrentPageScene({ ...snapshot, currentPageId: otherPageId });
-      if (otherPageShapes.some((shape) => currentIds.has(shape.id))) {
+      if (otherPageShapes.some((shape) => currentIds.has(shape.id.toLowerCase()))) {
         return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS" } };
       }
     }
@@ -291,7 +350,41 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       { pages: snapshot.pages, currentPageId: pageId, shapes: snapshot.shapes, currentPageShapes },
       operation,
     );
-    if (result.ok) set({ pages: result.pages, shapes: result.shapes });
+    if (result.ok) {
+      const selectedBefore = useSelectionStore.getState().selectedIds;
+      set({ pages: result.pages, shapes: result.shapes });
+      if (result.replacementShapeId && selectedBefore.some((id) => result.affectedIds.includes(id))) {
+        useSelectionStore.getState().select(result.replacementShapeId);
+      }
+    }
+    return result;
+  },
+
+  applyCompatibilityOperationForPage: (pageId, operation) => {
+    const snapshot = get();
+    const pageSnapshot = { ...snapshot, currentPageId: pageId };
+    const [page, ...currentPageShapes] = selectCurrentPageScene(pageSnapshot);
+    if (!page) return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_UNAVAILABLE" } };
+    const currentIds = new Set(currentPageShapes.map((shape) => shape.id.toLowerCase()));
+    for (const otherPageId of Object.keys(snapshot.pages)) {
+      if (otherPageId === pageId) continue;
+      const [, ...otherPageShapes] = selectCurrentPageScene({ ...snapshot, currentPageId: otherPageId });
+      if (otherPageShapes.some((shape) => currentIds.has(shape.id.toLowerCase()))) {
+        return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS" } };
+      }
+    }
+    const result = planHierarchyOperation(
+      { pages: snapshot.pages, currentPageId: pageId, shapes: snapshot.shapes, currentPageShapes },
+      operation,
+    );
+    if (result.ok) {
+      const selectedBefore = useSelectionStore.getState().selectedIds;
+      set({ pages: result.pages, shapes: result.shapes });
+      if (result.replacementShapeId && selectedBefore.some((id) => result.affectedIds.includes(id))) {
+        useSelectionStore.getState().select(result.replacementShapeId);
+      }
+    }
+    reportRenderingLimitation(result);
     return result;
   },
 
@@ -300,18 +393,13 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   promoteToComponent: (shapeId, meta) => {
     const shape = get().shapes[shapeId];
     if (!shape) return null;
-    const snapshot = { ...shape };
-    set((s) => ({
-      shapes: {
-        ...s.shapes,
-        [shapeId]: { ...shape, type: "component", componentMeta: meta },
-      },
-    }));
-    return snapshot;
+    if (shape.type !== "frame" && shape.type !== "group") return null;
+    if (getShapePageOwners(get(), shapeId).length !== 1) return null;
+    const result = get().applyCompatibilityOperation({ kind: "compat-promote-component", shapeId, meta });
+    return result.ok ? { ...shape } : null;
   },
 
   addInstanceShape: (instanceId, componentName, bounds, instanceMeta) => {
-    const { currentPageId: pid } = get();
     const instanceShape: Shape = {
       id: instanceId,
       type: "instance",
@@ -327,19 +415,138 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       children: [],
       instanceMeta,
     };
-    set((s) => ({
-      shapes: { ...s.shapes, [instanceId]: instanceShape },
-      pages: {
-        ...s.pages,
-        [pid]: {
-          ...s.pages[pid],
-          rootShapeIds: [instanceId, ...s.pages[pid].rootShapeIds],
-        },
-      },
-    }));
+    const result = get().applyCompatibilityOperation({ kind: "compat-add-shape", shape: instanceShape });
+    if (!result.ok) throw new Error(result.diagnostic.code);
     return instanceId;
   },
 }));
+
+function isRendererLimitation(code: string): boolean {
+  return code === "LOGOS_SCENE_UNSUPPORTED_SHAPE" || code === "LOGOS_SCENE_UNSUPPORTED_CAPABILITY";
+}
+
+function reportRenderingLimitation(result: HierarchyOperationResult): void {
+  if (result.ok && result.renderingDiagnostic) {
+    console.warn("[documentStore] Preserved compatibility content outside the verified A9 renderer contract", result.renderingDiagnostic);
+  }
+}
+
+function validateVectorNetwork(shape: Shape): void {
+  const anchors = shape.vnAnchors;
+  const segments = shape.vnSegments;
+  const regions = shape.vnRegions ?? [];
+  const validPoint = (point: unknown): boolean => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite);
+  if (!Array.isArray(anchors) || !Array.isArray(segments) || !Array.isArray(regions) || anchors.some((anchor) =>
+    !anchor || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y) ||
+    (anchor.hi != null && !validPoint(anchor.hi)) || (anchor.ho != null && !validPoint(anchor.ho))
+  )) throw new Error("LOGOS_VECTOR_NETWORK_INVALID_GEOMETRY");
+  if (segments.some((segment) => !segment || !Number.isInteger(segment.s) || !Number.isInteger(segment.e) ||
+    segment.s < 0 || segment.e < 0 || segment.s >= anchors.length || segment.e >= anchors.length ||
+    (segment.c1 != null && !validPoint(segment.c1)) || (segment.c2 != null && !validPoint(segment.c2))
+  )) throw new Error("LOGOS_VECTOR_NETWORK_INVALID_GEOMETRY");
+  if (regions.some((region) => !Array.isArray(region) || region.some((segmentIndex) =>
+    !Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentIndex >= segments.length
+  ))) throw new Error("LOGOS_VECTOR_NETWORK_INVALID_GEOMETRY");
+}
+
+function assertVectorNetworkInput(anchors: VNAnchor[], segments: VNSegment[], regions: VNRegion[]): void {
+  const candidate: Shape = {
+    id: "00000000-0000-4000-8000-000000000000",
+    type: "vector-network",
+    name: "validation",
+    bounds: { x: 0, y: 0, w: 0, h: 0 },
+    transform: IDENTITY_TRANSFORM,
+    rotation: 0,
+    fills: [],
+    opacity: 1,
+    hidden: false,
+    locked: false,
+    parentId: null,
+    children: [],
+    vnAnchors: anchors,
+    vnSegments: segments,
+    vnRegions: regions,
+  };
+  validateVectorNetwork(candidate);
+}
+
+/**
+ * Validate the load boundary without normalizing identities, unknown fields,
+ * ordering, or unsupported renderer content. Renderer limitations are not
+ * document corruption and remain visible after hydration.
+ */
+export function validateDocumentHydration(document: DocumentHydration): Extract<DocumentHydrationResult, { ok: false }>["diagnostic"] | null {
+  if (!document || !isRecord(document.pages) || !Array.isArray(document.pageOrder) ||
+      !isRecord(document.shapes) || typeof document.currentPageId !== "string") {
+    return { code: "LOGOS_HYDRATION_INVALID_DOCUMENT_SHAPE" };
+  }
+  const pageIds = Object.keys(document.pages);
+  if (pageIds.length === 0 || document.pageOrder.length !== pageIds.length ||
+      new Set(document.pageOrder).size !== pageIds.length ||
+      document.pageOrder.some((id) => !Object.prototype.hasOwnProperty.call(document.pages, id)) ||
+      !document.pageOrder.includes(document.currentPageId)) {
+    return { code: "LOGOS_HYDRATION_INVALID_PAGE_ORDER" };
+  }
+  for (const [pageId, page] of Object.entries(document.pages)) {
+    if (!page || page.id !== pageId || typeof page.name !== "string" || !Array.isArray(page.rootShapeIds) ||
+        page.rootShapeIds.some((id) => typeof id !== "string")) {
+      return { code: "LOGOS_HYDRATION_INVALID_PAGE", pageId };
+    }
+  }
+  for (const [key, shape] of Object.entries(document.shapes)) {
+    if (!shape || typeof shape !== "object" || key !== shape.id || typeof shape.id !== "string") {
+      return { code: "LOGOS_HYDRATION_SHAPE_KEY_MISMATCH", shapeId: shape?.id, relatedShapeId: key };
+    }
+  }
+
+  const owners = new Map<string, string>();
+  const knownIds = new Set<string>();
+  for (const pageId of document.pageOrder) {
+    const [, ...pageShapes] = selectCurrentPageScene({ ...document, currentPageId: pageId });
+    for (const shape of pageShapes) {
+      const canonicalId = shape.id.toLowerCase();
+      const owner = owners.get(canonicalId);
+      if (owner && owner !== pageId) return { code: "LOGOS_HYDRATION_AMBIGUOUS_PAGE_OWNERSHIP", pageId, shapeId: shape.id, relatedShapeId: owner };
+      owners.set(canonicalId, pageId);
+      knownIds.add(shape.id);
+    }
+    const page = document.pages[pageId];
+    const projection = buildSceneProjection(page, pageShapes, page.rootShapeIds);
+    if (!projection.ok && projection.diagnostic.code !== "LOGOS_SCENE_UNSUPPORTED_SHAPE") {
+      return { code: projection.diagnostic.code, pageId, shapeId: projection.diagnostic.shapeId, relatedShapeId: projection.diagnostic.relatedShapeId };
+    }
+  }
+  const unowned = Object.keys(document.shapes).find((id) => !knownIds.has(id));
+  if (unowned) return { code: "LOGOS_HYDRATION_UNOWNED_SHAPE", shapeId: unowned };
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function getShapePageOwners(state: Pick<DocumentState, "pages" | "currentPageId" | "shapes">, shapeId: string): string[] {
+  return Object.keys(state.pages).filter((pageId) => {
+    const [, ...scene] = selectCurrentPageScene({ ...state, currentPageId: pageId });
+    return scene.some((shape) => shape.id === shapeId);
+  });
+}
+
+function clonePlainData<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if (value === null || typeof value !== "object") return value;
+  const cached = seen.get(value as object);
+  if (cached) return cached as T;
+  if (Array.isArray(value)) {
+    const result: unknown[] = [];
+    seen.set(value, result);
+    for (const item of value) result.push(clonePlainData(item, seen));
+    return result as T;
+  }
+  const result: Record<string, unknown> = {};
+  seen.set(value as object, result);
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) result[key] = clonePlainData(item, seen);
+  return result as T;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Selectors

@@ -9,8 +9,9 @@ if (!url || !outputPath || !executablePath) throw new Error("Usage: CHROME_BIN=/
 const browser = await chromium.launch({ executablePath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--enable-webgl", "--disable-features=WebGPU", "--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
 const evidence = { status: "running", checks: [], interactionToReadyFrameMs: [], browserErrors: [] };
 const pageErrors = [];
+let page;
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 740 }, deviceScaleFactor: 1 });
+  page = await browser.newPage({ viewport: { width: 1280, height: 740 }, deviceScaleFactor: 1 });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(url, { waitUntil: "load", timeout: 30000 });
   await page.waitForFunction(() => document.querySelector("#a10-status")?.dataset.status === "ready", undefined, { timeout: 90000 });
@@ -150,6 +151,57 @@ try {
   assert(recoveredPixel[3] > 0, `recreated renderer did not redraw the retained document: ${recoveredPixel}`);
   evidence.checks.push("Poisoned WASM module rejected further uploads and recreated with fresh module/context");
 
+  await page.evaluate(() => window.__a10.stage("Vector Network compatibility creation diagnostics"));
+  const rendererStatusBeforeVector = await page.locator("[data-renderer-status]").evaluate((element) => ({
+    state: element.getAttribute("data-renderer-status"),
+    diagnostic: element.getAttribute("data-renderer-diagnostic"),
+    frameCount: element.getAttribute("data-renderer-frame-count"),
+  }));
+  const vectorId = await page.evaluate(() => window.__a10.createVectorNetworkForCompatibility());
+  await page.waitForFunction((id) => window.__a10.state().shapes[id]?.type === "vector-network", vectorId, { timeout: 5000 });
+  await page.waitForFunction((previous) => {
+    const status = document.querySelector("[data-renderer-status]");
+    const state = status?.getAttribute("data-renderer-status");
+    return state !== previous.state && state !== "READY" && state !== "RENDERING" && state !== "RECOVERING";
+  }, rendererStatusBeforeVector, { timeout: 20000 });
+  const vectorRendererStatus = await page.locator("[data-renderer-status]").evaluate((element) => ({
+    state: element.getAttribute("data-renderer-status"),
+    diagnostic: element.getAttribute("data-renderer-diagnostic"),
+    frameCount: element.getAttribute("data-renderer-frame-count"),
+  }));
+  assert.deepEqual(vectorRendererStatus.state, "SCENE_REJECTED", `Vector Network renderer status did not report scene rejection: ${JSON.stringify(vectorRendererStatus)}`);
+  assert.deepEqual(vectorRendererStatus.diagnostic, "LOGOS_SCENE_UNSUPPORTED_SHAPE", `Vector Network renderer diagnostic did not report the A9 unsupported-shape limit: ${JSON.stringify(vectorRendererStatus)}`);
+  const vectorState = await getState();
+  const vector = vectorState.shapes[vectorId];
+  assert(vector?.vnAnchors?.length === 2 && vector.vnSegments?.length === 1, "Vector Network creation did not retain geometry");
+  assert((await page.getByTestId("inspector").textContent()).includes(vector.name), "Inspector did not retain the rejected Vector Network selection");
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), vector.id);
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY", undefined, { timeout: 20000 });
+  assert.equal((await getState()).shapes[vector.id].vnAnchors.length, 2, "renderer recovery discarded Vector Network geometry");
+
+  const componentId = await page.evaluate(() => window.__a10.createUnsupportedComponentForCompatibility());
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
+    document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
+  let legacyState = await getState();
+  const component = legacyState.shapes[componentId];
+  assert.deepEqual(component.vendorExtension, { sentinel: "preserved-by-compatibility-operation" }, "compatibility add discarded an unknown visual extension");
+  assert((await page.getByTestId("inspector").textContent()).includes(component.name), "Inspector did not retain selection for unsupported component content");
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), componentId);
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY", undefined, { timeout: 20000 });
+  legacyState = await getState();
+  assert.deepEqual(legacyState.shapes[componentId].vendorExtension, { sentinel: "preserved-by-compatibility-operation" }, "renderer recovery discarded preserved extension data");
+
+  const replacementEvidence = await page.evaluate(() => window.__a10.replaceTwoVectorNetworks());
+  legacyState = await getState();
+  assert.equal(legacyState.shapes[replacementEvidence.firstId], undefined, "multi-shape replacement left its first input behind");
+  assert.equal(legacyState.shapes[replacementEvidence.secondId], undefined, "multi-shape replacement left its second input behind");
+  assert.equal(legacyState.shapes[replacementEvidence.replacementId].type, "vector-network", "replacement was not retained as a Vector Network");
+  assert.deepEqual(replacementEvidence.rootsAfter.filter((id) => id !== replacementEvidence.replacementId), replacementEvidence.rootsBefore, "replacement changed the relative root order of unaffected shapes");
+  assert.deepEqual(replacementEvidence.selection, [replacementEvidence.replacementId], "selection did not reconcile to the replacement shape");
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
+    document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
+  evidence.checks.push("Vector Network creation rendered with retained geometry; unsupported legacy component data persisted across diagnostic and recovery; multi-vector replacement and selection/root-order reconciliation");
+
   evidence.status = "passed";
   evidence.environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, platform: navigator.platform, logicalProcessors: navigator.hardwareConcurrency, deviceMemoryGiB: navigator.deviceMemory ?? null, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }, wasmReservedBytes: window.__a10.wasmReservedBytes() }));
   evidence.rendererInstances = await page.evaluate(() => window.__a10.rendererInstances());
@@ -162,6 +214,16 @@ try {
 } catch (error) {
   evidence.status = "failed";
   evidence.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  evidence.failureContext = await page?.locator("[data-renderer-status]").evaluate((element) => ({
+    renderer: {
+      state: element.getAttribute("data-renderer-status"),
+      diagnostic: element.getAttribute("data-renderer-diagnostic"),
+      frameCount: element.getAttribute("data-renderer-frame-count"),
+      frameDisposition: element.getAttribute("data-renderer-frame-disposition"),
+    },
+    shapes: window.__a10?.state ? Object.values(window.__a10.state().shapes).map(({ id, type, parentId, children }) => ({ id, type, parentId, children })) : [],
+    selection: window.__a10?.selection?.() ?? [],
+  })).catch(() => null);
   await writeFile(outputPath, JSON.stringify(evidence, null, 2));
   console.error(JSON.stringify(evidence, null, 2));
   process.exitCode = 1;
