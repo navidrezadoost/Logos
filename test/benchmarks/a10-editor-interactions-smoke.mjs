@@ -255,6 +255,12 @@ try {
   await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
     document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
   evidence.checks.push("Vector Network creation rendered with retained geometry; unsupported legacy component data persisted across diagnostic and recovery; multi-vector replacement and selection/root-order reconciliation");
+  // The replacement assertion intentionally leaves an unsupported Vector Network
+  // in the page. Recover the disposable fixture before measuring later page-switch
+  // interactions, which require a READY renderer frame.
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), replacementEvidence.replacementId);
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY" &&
+    Boolean(document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-metrics")), undefined, { timeout: 20000 });
 
   await ready("return to first page for stale-result probe", () => page.evaluate(() => window.__a10.returnToFirstPage()));
   const discardBeforePageSwitch = await page.evaluate(() => window.__a10.shadowDiscardCount());
