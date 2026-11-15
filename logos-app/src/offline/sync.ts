@@ -112,6 +112,7 @@ function rebaseLocalOp(
 
 interface SyncManagerOptions {
   documentId: string;
+  isCurrent: () => boolean;
   /**
    * Called when an op is ready to be sent to the server.
    * Returns a Promise that resolves when the server acknowledges the op,
@@ -131,8 +132,11 @@ export class SyncManager {
   private readonly sendOp: SyncManagerOptions["sendOp"];
   private readonly fetchServerState: SyncManagerOptions["fetchServerState"];
   private readonly onStatus: StatusListener;
+  private readonly isCurrent: SyncManagerOptions["isCurrent"];
 
   private isSyncing = false;
+  private started = false;
+  private stopped = false;
   private currentStatus: SyncStatus = navigator.onLine ? "online" : "offline";
 
   constructor(opts: SyncManagerOptions) {
@@ -140,17 +144,22 @@ export class SyncManager {
     this.sendOp = opts.sendOp;
     this.fetchServerState = opts.fetchServerState;
     this.onStatus = opts.onStatus;
+    this.isCurrent = opts.isCurrent;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
 
   start(): void {
+    if (this.started || this.stopped || !this.isCurrent()) return;
+    this.started = true;
     window.addEventListener("online", this.handleOnline);
     window.addEventListener("offline", this.handleOffline);
     this.emit(navigator.onLine ? "online" : "offline");
   }
 
   stop(): void {
+    if (this.stopped) return;
+    this.stopped = true;
     window.removeEventListener("online", this.handleOnline);
     window.removeEventListener("offline", this.handleOffline);
   }
@@ -158,6 +167,7 @@ export class SyncManager {
   // ── Event handlers ────────────────────────────────────────────────────────
 
   private handleOnline = (): void => {
+    if (!this.isActive()) return;
     this.emit("syncing");
     this.flushPendingOps().catch((err) => {
       console.error("[logos/sync] Flush failed:", err);
@@ -166,6 +176,7 @@ export class SyncManager {
   };
 
   private handleOffline = (): void => {
+    if (!this.isActive()) return;
     this.emit("offline");
   };
 
@@ -176,11 +187,12 @@ export class SyncManager {
    * Called automatically on reconnect; can also be called manually.
    */
   async flushPendingOps(): Promise<void> {
-    if (this.isSyncing) return;
+    if (!this.isActive() || this.isSyncing) return;
     this.isSyncing = true;
 
     try {
       const ops = await getPendingOps(this.documentId);
+      if (!this.isActive()) return;
       if (ops.length === 0) {
         this.emit("online");
         return;
@@ -192,6 +204,7 @@ export class SyncManager {
       let serverState: Record<string, unknown>;
       try {
         serverState = await this.fetchServerState();
+        if (!this.isActive()) return;
       } catch (err) {
         console.error("[logos/sync] Could not fetch server state:", err);
         this.emit("error");
@@ -202,6 +215,7 @@ export class SyncManager {
       const conflictingShapeIds: string[] = [];
 
       for (const op of ops) {
+        if (!this.isActive()) return;
         const { rebased, hasConflict } = rebaseLocalOp(op.patch, serverState);
         if (hasConflict) {
           hadConflict = true;
@@ -211,6 +225,7 @@ export class SyncManager {
         if (Object.keys(rebased).length > 0) {
           try {
             await this.sendOp(rebased);
+            if (!this.isActive()) return;
           } catch (err) {
             console.error(`[logos/sync] Failed to send op ${op.opId}:`, err);
             this.emit("error");
@@ -219,6 +234,7 @@ export class SyncManager {
         }
 
         if (op.opId !== undefined) {
+          if (!this.isActive()) return;
           await deletePendingOp(op.opId);
         }
       }
@@ -230,6 +246,7 @@ export class SyncManager {
         );
         this.emit("conflict");
         // Apply conflict resolution: pull server state for conflicting shapes
+        if (!this.isActive()) return;
         this.applyServerWins(serverState, conflictingShapeIds);
       } else {
         this.emit("online");
@@ -250,6 +267,7 @@ export class SyncManager {
     serverState: Record<string, unknown>,
     shapeIds: string[]
   ): void {
+    if (!this.isActive()) return;
     const patches: Record<string, unknown> = {};
     for (const id of shapeIds) {
       if (id in serverState) {
@@ -266,8 +284,13 @@ export class SyncManager {
   // ── Status ────────────────────────────────────────────────────────────────
 
   private emit(status: SyncStatus): void {
+    if (!this.isActive()) return;
     this.currentStatus = status;
     this.onStatus(status);
+  }
+
+  private isActive(): boolean {
+    return !this.stopped && this.isCurrent();
   }
 
   get status(): SyncStatus {
@@ -288,11 +311,12 @@ export class SyncManager {
 export function createSyncManager(
   documentId: string,
   onStatus: StatusListener,
-  opts: Partial<Pick<SyncManagerOptions, "sendOp" | "fetchServerState">> = {}
+  opts: Partial<Pick<SyncManagerOptions, "sendOp" | "fetchServerState" | "isCurrent">> = {}
 ): SyncManager {
   return new SyncManager({
     documentId,
     onStatus,
+    isCurrent: opts.isCurrent ?? (() => true),
     sendOp: opts.sendOp ?? (async (op) => {
       // Stub: log locally, no network call.
       // Replace with: ws.send(JSON.stringify({ type: 'OP', payload: op }))

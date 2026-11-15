@@ -19,10 +19,14 @@ on:
       - "logos-app/src/tokens/**"
       - "logos-app/src/test-support/**"
       - "logos-app/src/document-core/**"
+      - "logos-app/src/offline/**"
+      - "logos-app/src/pages/WorkspacePage.tsx"
       - "logos-app/g1-b3-adapter-smoke.html"
       - "logos-app/vite.g1-b3-adapter-smoke.config.ts"
       - "test/benchmarks/g1-b3-adapter-browser.mjs"
       - "logos-app/test-harness/**"
+      - "logos-app/test/workspace-identity-isolation.test.ts"
+      - "logos-app/vite.g1-b9-2-workspace-isolation.config.ts"
       - "logos-app/vite.config.ts"
       - "logos-app/vite.dt-c3-token-workflow-smoke.config.ts"
       - "scripts/build-logos-tokens-wasm.sh"
@@ -37,6 +41,8 @@ on:
       - "logos-app/test-harness/a10-editor-interactions-smoke.html"
       - "test/a10/**"
       - "test/benchmarks/a10-editor-interactions-smoke.mjs"
+      - "test/benchmarks/g1-b9-2-workspace-isolation-browser.mjs"
+      - "docs/r1/G1-B9.2-WORKSPACE-IDENTITY-ISOLATION.md"
       - "test/fixtures/p0-document-compat/**"
       - "docs/r1/P0.4-REACT-RUNTIME-VERTICAL-SLICE.md"
       - ".github/workflows/rust.yml"
@@ -1020,3 +1026,55 @@ jobs:
             ${{ runner.temp }}/dt-c3-token-workflow-evidence.json
             ${{ runner.temp }}/dt-c3-token-workflow-chrome.log
             ${{ runner.temp }}/dt-c3-token-workflow-preview.log
+
+      - name: Test workspace identity lifecycle races
+        working-directory: logos-app
+        run: npm run test:identity
+
+      - name: Typecheck and build workspace route isolation browser harness
+        working-directory: logos-app
+        run: |
+          ./node_modules/.bin/tsc --noEmit
+          ./node_modules/.bin/vite build --config vite.g1-b9-2-workspace-isolation.config.ts
+
+      - name: Verify delayed workspace route change in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+          test -s logos-app/dist/js/render-wasm.js
+          test -s logos-app/dist/js/render-wasm.wasm
+          (
+            cd logos-app
+            ./node_modules/.bin/vite preview --config vite.g1-b9-2-workspace-isolation.config.ts \
+              --host 127.0.0.1 --port 4180
+          ) >"$RUNNER_TEMP/g1-b9-2-workspace-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4180/test-harness/g1-b9-2-workspace-isolation.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          CHROME_BIN="$chrome_bin" node test/benchmarks/g1-b9-2-workspace-isolation-browser.mjs \
+            http://127.0.0.1:4180/test-harness/g1-b9-2-workspace-isolation.html \
+            "$RUNNER_TEMP/g1-b9-2-workspace-isolation-evidence.json" || {
+            cat "$RUNNER_TEMP/g1-b9-2-workspace-isolation-evidence.json" 2>/dev/null || true
+            cat "$RUNNER_TEMP/g1-b9-2-workspace-preview.log"
+            exit 1
+          }
+
+      - name: Preserve workspace identity isolation browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g1-b9-2-workspace-identity-isolation
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/g1-b9-2-workspace-isolation-evidence.json
+            ${{ runner.temp }}/g1-b9-2-workspace-preview.log

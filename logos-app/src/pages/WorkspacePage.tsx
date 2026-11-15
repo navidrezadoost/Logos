@@ -14,9 +14,11 @@ import { useTemplateStore } from "../stores/templateStore";
 import { useProtoStore } from "../stores/prototypeStore";
 import { useUiStore } from "../stores/uiStore";
 import { useDocumentStore } from "../stores/documentStore";
-import { initPersistence, loadPersistedDocument, stopPersistence } from "../offline/persist";
+import { applyPersistedDocument, initPersistence, readPersistedDocument } from "../offline/persist";
 import { createSyncManager } from "../offline/sync";
 import { SyncIndicator, useSyncStatus } from "../offline/indicator";
+import { beginWorkspaceSession } from "../offline/workspace-session";
+import { openWorkspaceSession } from "../offline/open-workspace";
 import { theme } from "../theme/colors";
 import { getFile } from "../api/client";
 
@@ -26,6 +28,7 @@ export function WorkspacePage(): React.ReactElement {
   const pageIdFromUrl = searchParams.get("page-id");
 
   const documentId = fileId ?? "local";
+  const routeKey = `${projectId ?? ""}/${fileId ?? ""}?page-id=${pageIdFromUrl ?? ""}`;
   const layersPanelOpen = useUiStore((s) => s.layersPanelOpen);
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
@@ -33,6 +36,8 @@ export function WorkspacePage(): React.ReactElement {
   const openGallery = useTemplateStore((s) => s.openGallery);
   const setCurrentPage = useDocumentStore((s) => s.setCurrentPage);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [loadedRouteKey, setLoadedRouteKey] = useState<string | null>(null);
+  const [failedRouteKey, setFailedRouteKey] = useState<string | null>(null);
   const { activeTool, setTool } = useUiStore();
   const { startPreview } = useProtoStore();
   const currentPageId = useDocumentStore((s) => s.currentPageId);
@@ -45,46 +50,57 @@ export function WorkspacePage(): React.ReactElement {
   const previewStartId = currentPage?.rootShapeIds[0] ?? null;
 
   useEffect(() => {
-    let mgr: ReturnType<typeof createSyncManager> | null = null;
+    if (!projectId || !fileId) return;
 
-    useDocumentStore.getState().restoreDocumentIdentity(null, "unknown");
-    loadPersistedDocument(documentId)
-      .then(async (restored) => {
-        if (pageIdFromUrl && useDocumentStore.getState().pages[pageIdFromUrl]) {
-          setCurrentPage(pageIdFromUrl);
+    const session = beginWorkspaceSession(documentId, routeKey);
+    setLoadedRouteKey(null);
+    setFailedRouteKey(null);
+    useDocumentStore.getState().resetWorkspaceDocument(session.isCurrent);
+
+    return openWorkspaceSession(session, pageIdFromUrl, {
+      readPersistedDocument,
+      applyPersistedDocument,
+      getFile,
+      associateServerIdentity: (requestedId, returnedId, returnedPageIds, canApply) => {
+        const associated = useDocumentStore.getState().associateServerDocumentIdentity(
+          requestedId,
+          returnedId,
+          returnedPageIds as string[],
+          canApply,
+        );
+        if (!associated && canApply()) {
+          console.warn("[logos/app] Server identity response did not match the active workspace; keeping cached identity classification");
         }
-        // The route key alone is not proof of ownership. Bind the canonical
-        // identity only when the authenticated server returns that exact file.
-        if (fileId && restored) {
-          try {
-            const file = await getFile(fileId);
-            if (Array.isArray(file.data?.pages)) {
-              useDocumentStore.getState().associateServerDocumentIdentity(fileId, file.id, file.data.pages);
-            }
-          } catch {
-            // A cached workspace may still open offline; its identity remains
-            // legacy/unknown and therefore is ineligible for Rust authority.
-          }
-        }
-        initPersistence(documentId, setSyncStatus);
-        mgr = createSyncManager(documentId, setSyncStatus);
-        mgr.start();
-      })
-      .catch((err) => {
-        console.error("[logos/app] Failed to load persisted document:", err);
+        return associated;
+      },
+      selectPage: (pageId, canApply) => useDocumentStore.getState().setCurrentPage(pageId, canApply),
+      startPersistence: (id, isCurrent) => initPersistence(id, (status) => {
+        if (isCurrent()) setSyncStatus(status);
+      }, { isCurrent }),
+      createSyncManager: (id, isCurrent) => createSyncManager(id, (status) => {
+        if (isCurrent()) setSyncStatus(status);
+      }, { isCurrent }),
+      onReady: () => setLoadedRouteKey(routeKey),
+      onError: (error) => {
+        console.error("[logos/app] Failed to load persisted document:", error);
         setSyncStatus("error");
-      });
-
-    return () => {
-      stopPersistence();
-      mgr?.stop();
-    };
-  }, [documentId, pageIdFromUrl, setCurrentPage, setSyncStatus]);
+        setFailedRouteKey(routeKey);
+      },
+    });
+  }, [documentId, fileId, pageIdFromUrl, projectId, routeKey, setCurrentPage, setSyncStatus]);
 
   if (!projectId || !fileId) {
     return (
       <div style={{ padding: 24, color: theme.text }}>
         Invalid workspace URL. <Link to="/">Back to projects</Link>
+      </div>
+    );
+  }
+
+  if (loadedRouteKey !== routeKey) {
+    return (
+      <div data-testid="workspace-loading" data-workspace-id={documentId} role="status" style={{ padding: 24, color: theme.text }}>
+        {failedRouteKey === routeKey ? "This workspace could not be loaded." : "Loading workspace…"}
       </div>
     );
   }
