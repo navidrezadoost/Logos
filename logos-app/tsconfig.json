@@ -20,6 +20,7 @@
   "exclude": [
     "src/test-support/g1-b3-adapter-smoke.ts",
     "src/test-support/a10-editor-interactions-smoke.tsx",
-    "src/test-support/g1-b9-3-compatibility-smoke.ts"
+    "src/test-support/g1-b9-3-compatibility-smoke.ts",
+    "src/test-support/g1-b9-4-revision-smoke.ts"
   ]
 }
