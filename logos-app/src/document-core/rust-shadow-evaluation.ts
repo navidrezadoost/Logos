@@ -35,7 +35,7 @@ export interface RustShadowEvidence {
 
 export interface RustShadowRuntime {
   documentId: string;
-  evaluator: RustOperationEvaluator;
+  evaluator?: RustOperationEvaluator;
   report: (evidence: RustShadowEvidence) => void;
   discard?: (reason: "stale-snapshot" | "runtime-disposed") => void;
 }
@@ -102,6 +102,11 @@ export function scheduleRustShadowEvaluation(
     return;
   }
   const activeGeneration = generation;
+  const evaluator = activeRuntime.evaluator;
+  if (!evaluator) {
+    report({ category: "SHADOW_EVALUATION_FAILED", operation: operation.kind, diagnosticCode: "EVALUATOR_UNAVAILABLE" });
+    return;
+  }
   let captured: ReactDocumentSnapshot;
   let capturedOperation: HierarchyOperation;
   let expectedPlan: HierarchyOperationResult;
@@ -130,7 +135,7 @@ export function scheduleRustShadowEvaluation(
       const result = evaluateHierarchyOperationConformance(
         captured,
         capturedOperation as Exclude<HierarchyOperation, { kind: `compat-${string}` }>,
-        activeRuntime.evaluator,
+        evaluator,
         { pageId, result: expectedPlan, planningMs },
       );
       const afterEvaluation = getCurrent();

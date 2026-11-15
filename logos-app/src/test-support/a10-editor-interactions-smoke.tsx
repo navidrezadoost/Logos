@@ -252,7 +252,9 @@ useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
     const existing = currentPageShapes().find((shape) => shape.type === "rect");
     if (!existing) throw new Error("unavailable probe requires a Rectangle");
     disposeShadowRuntime();
+    disposeShadowRuntime = installRuntime(false);
     state.applyHierarchyOperation({ kind: "rename", shapeId: existing.id, name: `${existing.name} unavailable-probe` });
+    disposeShadowRuntime();
     disposeShadowRuntime = installRuntime();
   },
   setShadowFault: (mode) => { shadowFaultMode = mode; },
@@ -324,10 +326,10 @@ void (async () => {
   }
 })();
 
-function installRuntime(): () => void {
+function installRuntime(evaluatorAvailable = true): () => void {
   return installRustShadowRuntime({
     documentId: shadowDocumentId,
-    evaluator: { evaluateDocumentOperationJson: (documentJson, operationJson) => {
+    ...(evaluatorAvailable ? { evaluator: { evaluateDocumentOperationJson: (documentJson: string, operationJson: string) => {
       const fault = shadowFaultMode;
       shadowFaultMode = "none";
       if (fault === "throw") throw new Error("injected Rust evaluator exception");
@@ -340,7 +342,7 @@ function installRuntime(): () => void {
         return JSON.stringify(response);
       }
       return raw;
-    } },
+    } } } : {}),
     report: (item) => shadowEvidence.push({
       ...item,
       jsHeapUsedBytes: (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? null,
