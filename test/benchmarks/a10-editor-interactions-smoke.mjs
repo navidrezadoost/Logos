@@ -180,8 +180,8 @@ try {
   assert.equal((await getState()).shapes[vector.id].vnAnchors.length, 2, "renderer recovery discarded Vector Network geometry");
 
   const componentId = await page.evaluate(() => window.__a10.createUnsupportedComponentForCompatibility());
-  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE" &&
-    document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_RENDER_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
+    document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
   let legacyState = await getState();
   const component = legacyState.shapes[componentId];
   assert.deepEqual(component.vendorExtension, { sentinel: "preserved-by-compatibility-operation" }, "compatibility add discarded an unknown visual extension");
@@ -198,7 +198,8 @@ try {
   assert.equal(legacyState.shapes[replacementEvidence.replacementId].type, "vector-network", "replacement was not retained as a Vector Network");
   assert.deepEqual(replacementEvidence.rootsAfter.filter((id) => id !== replacementEvidence.replacementId), replacementEvidence.rootsBefore, "replacement changed the relative root order of unaffected shapes");
   assert.deepEqual(replacementEvidence.selection, [replacementEvidence.replacementId], "selection did not reconcile to the replacement shape");
-  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
+    document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
   evidence.checks.push("Vector Network creation rendered with retained geometry; unsupported legacy component data persisted across diagnostic and recovery; multi-vector replacement and selection/root-order reconciliation");
 
   evidence.status = "passed";
