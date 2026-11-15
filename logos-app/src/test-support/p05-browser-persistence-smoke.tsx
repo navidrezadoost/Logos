@@ -12,6 +12,10 @@ type VersionedFileDetail = Awaited<ReturnType<typeof getFile>> & { revn: number;
 const status = document.getElementById("p05-status") as HTMLPreElement;
 
 let stage = "setup";
+function setStage(next: string): void {
+  stage = next;
+  status.dataset.stage = next;
+}
 const browserErrors: string[] = [];
 window.addEventListener("error", (event) => browserErrors.push(event.error?.stack ?? event.message));
 window.addEventListener("unhandledrejection", (event) => browserErrors.push(String(event.reason)));
@@ -34,14 +38,14 @@ async function jsonResponse<T>(response: Response, label: string): Promise<T> {
 }
 
 async function run(): Promise<void> {
-  stage = "load browser test configuration";
+  setStage("load browser test configuration");
   const config = await jsonResponse<TestConfig>(
     await fetch("/__test/config", { credentials: "include" }),
     "browser test configuration",
   );
   if (!config.fileId) throw new Error("browser test configuration omitted fileId");
 
-  stage = "Go get-file with browser session cookie";
+  setStage("Go get-file with browser session cookie");
   const before = await getFile(config.fileId) as VersionedFileDetail;
   if (before.id !== config.fileId || before.revn !== 0) {
     throw new Error(`initial get-file identity/revision=${before.id}/${before.revn}, expected ${config.fileId}/0`);
@@ -68,7 +72,7 @@ async function run(): Promise<void> {
     throw new Error("server file ID/page membership was not bound to its exact returned identity");
   }
 
-  stage = "existing editor geometry command";
+  setStage("existing editor geometry command");
   useDocumentStore.getState().updateShape(shapeId, {
     bounds: { ...initialShape.bounds, x: initialShape.bounds.x + 5 },
   });
@@ -77,7 +81,7 @@ async function run(): Promise<void> {
     throw new Error(`editor command geometry x=${editedShape.bounds.x}, expected ${initialShape.bounds.x + 5}`);
   }
 
-  stage = "Go-compatible update-file operation";
+  setStage("Go-compatible update-file operation");
   const change = encodeGeometryChange(projection, shapeId, editedShape.bounds);
   const updateResponse = await jsonResponse<{ revn: number }>(await fetch("/api/rpc/command/update-file", {
     method: "POST",
@@ -95,7 +99,7 @@ async function run(): Promise<void> {
     throw new Error(`update-file acknowledged base revision ${updateResponse.revn}, expected 0`);
   }
 
-  stage = "Go get-file reload";
+  setStage("Go get-file reload");
   const reloaded = await getFile(config.fileId) as VersionedFileDetail;
   if (reloaded.revn !== 1) throw new Error(`reload revision=${reloaded.revn}, expected 1`);
   const after = projectLegacyFileData(reloaded.data);
@@ -116,7 +120,7 @@ async function run(): Promise<void> {
   if (extension?.sentinel !== "preserve-me") throw new Error("reloaded unknown extension sentinel changed");
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
 
-  stage = "verified server identity IndexedDB reload";
+  setStage("verified server identity IndexedDB reload");
   initPersistence(config.fileId);
   await new Promise((resolve) => setTimeout(resolve, 700));
   stopPersistence();
@@ -126,7 +130,7 @@ async function run(): Promise<void> {
     throw new Error("verified server document identity did not survive IndexedDB reload");
   }
 
-  stage = "read-only eligibility classifications";
+  setStage("read-only eligibility classifications");
   const originalIdentity = useDocumentStore.getState().documentId;
   const pageId = crypto.randomUUID();
   const readyInput = {
@@ -165,7 +169,7 @@ async function run(): Promise<void> {
     throw new Error("eligibility evaluation mutated the live document identity");
   }
 
-  stage = "offline identity durability and reload";
+  setStage("offline identity durability and reload");
   const emptyPageId = crypto.randomUUID();
   useDocumentStore.getState().restoreDocumentIdentity(null, "unknown");
   const emptyHydration = useDocumentStore.getState().hydrateDocument({
