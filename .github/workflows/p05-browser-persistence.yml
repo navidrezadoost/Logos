@@ -89,6 +89,10 @@ jobs:
         working-directory: logos-app
         run: ./node_modules/.bin/tsc --noEmit
 
+      - name: Test document and page identity lifecycle
+        working-directory: logos-app
+        run: npm run test:identity
+
       - name: Initialize fresh disposable historical test schema
         env:
           TEST_DATABASE_URL: postgres://logos:p05-only@127.0.0.1:5432/logos_p04_browser?sslmode=disable

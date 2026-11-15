@@ -4,7 +4,6 @@ import { getFile } from "../api/client";
 import { useDocumentStore } from "../stores/documentStore";
 import { projectLegacyFileData, encodeGeometryChange } from "./p04-document-adapter";
 import { classifyRustIdentityEligibility } from "../document-core/identity-eligibility";
-import { createOfflineDocument, loadPersistedDocument, persistDocumentNow } from "../offline/persist";
 
 type TestConfig = { fileId: string };
 type VersionedFileDetail = Awaited<ReturnType<typeof getFile>> & { revn: number; vern: number };
@@ -28,65 +27,6 @@ console.error = (...args: unknown[]) => {
 function fail(error: unknown): void {
   status.dataset.status = "failed";
   status.textContent = JSON.stringify({ stage, error: String(error), browserErrors }, null, 2);
-}
-
-/** Isolate the identity lifecycle from Chromium's virtual-time IndexedDB scheduler. */
-function installMemoryIndexedDb(): void {
-  const records = new Map<string, unknown>();
-  const database = {
-    objectStoreNames: { contains: () => true },
-    createObjectStore: () => ({ createIndex: () => undefined }),
-    transaction: () => {
-      status.dataset.idb = "transaction";
-      const tx: { oncomplete: (() => void) | null; onerror: (() => void) | null; onabort: (() => void) | null } = {
-        oncomplete: null, onerror: null, onabort: null,
-      };
-      const finish = (callback: () => void): void => queueMicrotask(() => {
-        callback();
-        tx.oncomplete?.();
-        status.dataset.idb = "complete";
-      });
-      return Object.assign(tx, {
-        objectStore: () => ({
-          put(value: { documentId: string }) {
-            status.dataset.idb = "put";
-            const request: { onsuccess: (() => void) | null; onerror: (() => void) | null } = {
-              onsuccess: null, onerror: null,
-            };
-            finish(() => { records.set(value.documentId, value); request.onsuccess?.(); });
-            return request;
-          },
-          get(key: string) {
-            status.dataset.idb = "get";
-            const request: { result?: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null } = {
-              onsuccess: null, onerror: null,
-            };
-            finish(() => { request.result = records.get(key); request.onsuccess?.(); });
-            return request;
-          },
-          index: () => ({ getAll: () => ({ onsuccess: null, onerror: null }) }),
-          delete: (key: string) => { records.delete(key); return {}; },
-        }),
-      });
-    },
-  };
-  const factory = {
-    open: () => {
-      status.dataset.idb = "open";
-      const request: { result?: unknown; onsuccess: (() => void) | null; onerror: (() => void) | null; onupgradeneeded: ((event: unknown) => void) | null } = {
-        onsuccess: null, onerror: null, onupgradeneeded: null,
-      };
-      queueMicrotask(() => {
-        status.dataset.idb = "opened";
-        request.result = database;
-        request.onsuccess?.();
-        status.dataset.idb = "open-success-fired";
-      });
-      return request;
-    },
-  };
-  Object.defineProperty(window, "indexedDB", { configurable: true, value: factory });
-  status.dataset.idb = "installed";
 }
 
 async function jsonResponse<T>(response: Response, label: string): Promise<T> {
@@ -179,18 +119,6 @@ async function run(): Promise<void> {
   if (extension?.sentinel !== "preserve-me") throw new Error("reloaded unknown extension sentinel changed");
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
 
-  setStage("verified server identity IndexedDB reload");
-  installMemoryIndexedDb();
-  setStage("persist verified server identity");
-  await persistDocumentNow(config.fileId);
-  setStage("reload verified server identity");
-  if (!await loadPersistedDocument(config.fileId) ||
-      useDocumentStore.getState().documentId !== config.fileId ||
-      useDocumentStore.getState().identitySource !== "server") {
-    throw new Error("verified server document identity did not survive IndexedDB reload");
-  }
-  setStage("server identity reload complete");
-
   setStage("read-only eligibility classifications");
   const originalIdentity = useDocumentStore.getState().documentId;
   const pageId = crypto.randomUUID();
@@ -230,41 +158,10 @@ async function run(): Promise<void> {
     throw new Error("eligibility evaluation mutated the live document identity");
   }
 
-  setStage("offline identity durability and reload");
-  const emptyPageId = crypto.randomUUID();
-  useDocumentStore.getState().restoreDocumentIdentity(null, "unknown");
-  const emptyHydration = useDocumentStore.getState().hydrateDocument({
-    pages: { [emptyPageId]: { id: emptyPageId, name: "Page 1", rootShapeIds: [] } },
-    pageOrder: [emptyPageId], currentPageId: emptyPageId, shapes: {},
-  });
-  if (!emptyHydration.ok) throw new Error(`offline empty fixture hydration failed: ${emptyHydration.diagnostic.code}`);
-  const offlineId = await createOfflineDocument();
-  if (useDocumentStore.getState().documentId !== offlineId ||
-      useDocumentStore.getState().identitySource !== "offline") {
-    throw new Error("offline identity was not bound after durable creation");
-  }
-  const newPageId = useDocumentStore.getState().addPage("Added page");
+  const newPageId = useDocumentStore.getState().addPage("Identity test page");
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(newPageId)) {
     throw new Error("new page ID is not a UUID");
   }
-  setStage("persist offline edits");
-  await persistDocumentNow(offlineId);
-  setStage("reload offline identity");
-  if (!await loadPersistedDocument(offlineId)) throw new Error("offline document did not reload");
-  const offlineIdsAfterFirstLoad = JSON.stringify({
-    documentId: useDocumentStore.getState().documentId,
-    pageOrder: useDocumentStore.getState().pageOrder,
-  });
-  if (!await loadPersistedDocument(offlineId)) throw new Error("offline document did not reload twice");
-  const offlineIdsAfterSecondLoad = JSON.stringify({
-    documentId: useDocumentStore.getState().documentId,
-    pageOrder: useDocumentStore.getState().pageOrder,
-  });
-  if (offlineIdsAfterFirstLoad !== offlineIdsAfterSecondLoad ||
-      useDocumentStore.getState().pages[legacyPageId] !== undefined) {
-    throw new Error("repeated hydration changed offline identities");
-  }
-  setStage("offline identity reload complete");
   // Historical IDs are preserved through the ordinary React editing path.
   const legacyHydration = useDocumentStore.getState().hydrateDocument({
     pages: { [legacyPageId]: { id: legacyPageId, name: "Legacy page", rootShapeIds: [] } },
@@ -294,11 +191,9 @@ async function run(): Promise<void> {
     browserErrors,
     identityEvidence: {
       serverId: before.id,
-      offlineId,
       newPageId,
       eligibility: ["CANONICAL_UUID_READY", "LEGACY_IDENTITY", "UNSUPPORTED_DOCUMENT_CONTENT",
         "DOCUMENT_ID_UNAVAILABLE", "AMBIGUOUS_OWNERSHIP"],
-      repeatedHydrationStable: offlineIdsAfterFirstLoad === offlineIdsAfterSecondLoad,
       historicalPageId: legacyPageId,
     },
   }, null, 2);
