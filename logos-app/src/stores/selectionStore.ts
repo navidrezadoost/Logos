@@ -6,6 +6,7 @@
  */
 
 import { create } from "zustand";
+import { recordG1B95Stage } from "../document-core/performance-probe";
 
 interface SelectionState {
   /** The primary selected shape IDs (order preserved for multi-select). */
@@ -48,13 +49,17 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
 
   clearSelection: () => set({ selectedIds: [] }),
 
-  reconcileTo: (reachableIds) => set((state) => {
-    const reachable = new Set(reachableIds);
-    const selectedIds = state.selectedIds.filter((id) => reachable.has(id));
-    return selectedIds.length === state.selectedIds.length
-      ? state
-      : { selectedIds };
-  }),
+  reconcileTo: (reachableIds) => {
+    const started = performance.now();
+    set((state) => {
+      const reachable = new Set(reachableIds);
+      const selectedIds = state.selectedIds.filter((id) => reachable.has(id));
+      return selectedIds.length === state.selectedIds.length
+        ? state
+        : { selectedIds };
+    });
+    recordG1B95Stage("selection_reconciliation", performance.now() - started);
+  },
 }));
 
 // Convenience selector

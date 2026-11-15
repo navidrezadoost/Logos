@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/vite-env.d.ts",
+    "src/render-webgpu/webgpu-types.d.ts",
+    "src/document-core/performance-probe.ts",
+    "src/test-support/g1-b9-5-workload.ts",
+    "src/test-support/g1-b9-5-editor-performance-smoke.tsx"
+  ]
+}
