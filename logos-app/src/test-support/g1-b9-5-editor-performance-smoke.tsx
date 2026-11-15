@@ -145,7 +145,7 @@ const root = createRoot(document.getElementById("root")!);
     if (!hydrated.ok) throw new Error(`fixture hydration failed: ${hydrated.diagnostic.code}`);
     useSelectionStore.getState().select(operation === "subtree-delete" ? fixture.redLeaf : fixture.redLeaf);
     useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
-    const snapshot = { documentId: "95000000-0000-4000-8000-000000000001", pageOrder: fixture.pageOrder,
+    const snapshot = { documentId: "95000001-0000-4000-8000-000000000001", pageOrder: fixture.pageOrder,
       pages: { [page.id]: page }, shapes: fixture.shapes };
     const op = makeG1B95Operation(fixture, operation, serial);
     if (op.kind.startsWith("compat-")) throw new Error("unexpected compatibility operation");
@@ -153,7 +153,7 @@ const root = createRoot(document.getElementById("root")!);
     const conformance = evaluateHierarchyOperationConformance(snapshot, supportedOperation, {
       evaluateDocumentOperationJson: (documentJson, operationJson) => evaluate_document_operation_json(documentJson, operationJson),
     });
-    if (!conformance.ok) throw new Error(`Rust candidate rejected ${operation}: ${conformance.phase}/${conformance.code}`);
+    if (!conformance.ok) throw new Error(`Rust candidate rejected ${operation}: ${conformance.phase}/${conformance.code} ${JSON.stringify(conformance.diagnostics ?? conformance.issues ?? [])}`);
     if (!conformance.semanticEquivalent) throw new Error(`React/Rust candidate mismatch for ${operation}`);
     candidate = { ok: true, semanticEquivalent: conformance.semanticEquivalent, timingsMs: conformance.timingsMs };
   },
