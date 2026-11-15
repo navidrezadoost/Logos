@@ -79,8 +79,8 @@ function installMemoryIndexedDb(): void {
       queueMicrotask(() => {
         status.dataset.idb = "opened";
         request.result = database;
-        request.onupgradeneeded?.({ target: { result: database } });
         request.onsuccess?.();
+        status.dataset.idb = "open-success-fired";
       });
       return request;
     },
