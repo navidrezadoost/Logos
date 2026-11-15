@@ -121,12 +121,15 @@ async function run(): Promise<void> {
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
 
   setStage("verified server identity IndexedDB reload");
+  setStage("persist verified server identity");
   await persistDocumentNow(config.fileId);
+  setStage("reload verified server identity");
   if (!await loadPersistedDocument(config.fileId) ||
       useDocumentStore.getState().documentId !== config.fileId ||
       useDocumentStore.getState().identitySource !== "server") {
     throw new Error("verified server document identity did not survive IndexedDB reload");
   }
+  setStage("server identity reload complete");
 
   setStage("read-only eligibility classifications");
   const originalIdentity = useDocumentStore.getState().documentId;
@@ -184,7 +187,9 @@ async function run(): Promise<void> {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(newPageId)) {
     throw new Error("new page ID is not a UUID");
   }
+  setStage("persist offline edits");
   await persistDocumentNow(offlineId);
+  setStage("reload offline identity");
   if (!await loadPersistedDocument(offlineId)) throw new Error("offline document did not reload");
   const offlineIdsAfterFirstLoad = JSON.stringify({
     documentId: useDocumentStore.getState().documentId,
@@ -199,6 +204,7 @@ async function run(): Promise<void> {
       useDocumentStore.getState().pages[legacyPageId] !== undefined) {
     throw new Error("repeated hydration changed offline identities");
   }
+  setStage("offline identity reload complete");
   // Historical IDs are preserved through the ordinary React editing path.
   const legacyHydration = useDocumentStore.getState().hydrateDocument({
     pages: { [legacyPageId]: { id: legacyPageId, name: "Legacy page", rootShapeIds: [] } },
