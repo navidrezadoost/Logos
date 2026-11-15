@@ -170,7 +170,7 @@ try {
     frameCount: element.getAttribute("data-renderer-frame-count"),
   }));
   assert.deepEqual(vectorRendererStatus.state, "SCENE_REJECTED", `Vector Network renderer status did not report scene rejection: ${JSON.stringify(vectorRendererStatus)}`);
-  assert.deepEqual(vectorRendererStatus.diagnostic, "LOGOS_SCENE_UNSUPPORTED_CAPABILITY", `Vector Network renderer diagnostic did not report the A9 capability limit: ${JSON.stringify(vectorRendererStatus)}`);
+  assert.deepEqual(vectorRendererStatus.diagnostic, "LOGOS_SCENE_UNSUPPORTED_SHAPE", `Vector Network renderer diagnostic did not report the A9 unsupported-shape limit: ${JSON.stringify(vectorRendererStatus)}`);
   const vectorState = await getState();
   const vector = vectorState.shapes[vectorId];
   assert(vector?.vnAnchors?.length === 2 && vector.vnSegments?.length === 1, "Vector Network creation did not retain geometry");
