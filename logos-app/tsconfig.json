@@ -17,5 +17,8 @@
     }
   },
   "include": ["src"],
-  "exclude": ["src/test-support/g1-b3-adapter-smoke.ts"]
+  "exclude": [
+    "src/test-support/g1-b3-adapter-smoke.ts",
+    "src/test-support/a10-editor-interactions-smoke.tsx"
+  ]
 }

@@ -58,7 +58,9 @@ try {
 
   await page.evaluate(() => window.__a10.stage("Canvas Frame creation and regular click selection"));
   await page.keyboard.press("f");
+  let commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("Canvas Frame creation", () => dragOnCanvas(60, 50, 300, 250));
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "Frame creation must commit exactly once");
   let state = await getState();
   const frame = Object.values(state.shapes).find((shape) => shape.type === "frame");
   assert(frame, "Toolbar Frame tool did not create a Frame");
@@ -69,7 +71,9 @@ try {
 
   await page.evaluate(() => window.__a10.stage("Layers insertion, hidden/locked behavior, rename, ordering and reparent"));
   let frameRow = await openLayerMenu(frame.id);
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("child insertion through Layers", () => frameRow.getByRole("button", { name: `Add child to ${frame.name}` }).click());
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "child insertion must commit exactly once");
   await page.waitForFunction((frameId) => window.__a10.selection().length === 1 && window.__a10.state().shapes[window.__a10.selection()[0]]?.parentId === frameId, frame.id);
   state = await getState();
   const child = Object.values(state.shapes).find((shape) => shape.parentId === frame.id);
@@ -81,8 +85,26 @@ try {
   const childPixel = await page.evaluate(() => window.__a10.samplePixel(75, 65));
   assert.deepEqual(childPixel, [0, 0, 255, 255], "child pixel did not appear in the Rust renderer");
   assert(await page.evaluate((id) => window.__a10.rejectInvalidChild(id), frame.id), "invalid operation mutated document or selection");
+  frameRow = await openLayerMenu(frame.id);
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
+  await ready("second child insertion through Layers", () => frameRow.getByRole("button", { name: `Add child to ${frame.name}` }).click());
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "second child insertion must commit exactly once");
+  state = await getState();
+  const secondChildId = state.shapes[frame.id].children.find((id) => id !== child.id);
+  assert(secondChildId, "Layers did not create the second child needed for sibling reorder");
+  const secondChild = state.shapes[secondChildId];
+  const siblingOrderBefore = [...state.shapes[frame.id].children];
+  const secondChildRow = await openLayerMenu(secondChild.id);
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
+  await ready("sibling reorder through Layers", () => secondChildRow.getByRole("button", { name: `Move ${secondChild.name} down` }).click());
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "sibling reorder must commit exactly once");
+  state = await getState();
+  assert.deepEqual(state.shapes[frame.id].children, [...siblingOrderBefore].reverse(), "sibling reorder did not change order");
 
   await ready("hidden and locked rendering", () => page.evaluate((id) => window.__a10.setShapeFlags(id, { hidden: true, locked: true }), frame.id));
+  assert(await page.evaluate((id) => window.__a10.rejectLockedRename(id), frame.id), "locked-object rename changed document or selection");
+  assert(await page.evaluate(([parentId, descendantId]) => window.__a10.rejectHierarchyCycle(parentId, descendantId), [frame.id, child.id]),
+    "cycle reparent changed document or selection");
   const outsideChild = await canvasPoint(260, 210);
   await page.mouse.click(outsideChild.x, outsideChild.y);
   assert.deepEqual(await getSelection(), [], "Canvas selected a hidden/locked Frame");
@@ -92,23 +114,51 @@ try {
 
   frameRow = await openLayerMenu(frame.id);
   page.once("dialog", (dialog) => dialog.accept("Renamed Frame"));
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("rename Frame through Layers", () => frameRow.getByRole("button", { name: `Rename ${frame.name}` }).click());
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "rename must commit exactly once");
   await page.waitForFunction((id) => window.__a10.state().shapes[id]?.name === "Renamed Frame", frame.id);
   evidence.checks.push("Layers child insertion, invalid mutation rejection, hidden/locked selection policy, and rename");
 
   await page.keyboard.press("r");
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("Canvas Rectangle creation", () => dragOnCanvas(160, 120, 210, 170));
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "Rectangle creation must commit exactly once");
   state = await getState();
   const rootRect = Object.values(state.shapes).find((shape) => shape.type === "rect" && shape.parentId === null);
   assert(rootRect, "Canvas Rectangle tool did not create a root rectangle");
+  const runFaultProbe = async (mode, category) => {
+    const evidenceBefore = await page.evaluate(() => window.__a10.shadowEvidence().length);
+    const commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
+    if (mode) await page.evaluate((value) => window.__a10.setShadowFault(value), mode);
+    await ready(`shadow fault isolation: ${mode ?? "WASM unavailable"}`, () => page.evaluate((value) =>
+      value ? window.__a10.runFaultedRename() : window.__a10.runUnavailableEvaluator(), mode));
+    await page.waitForFunction(([oldLength, expectedCategory]) =>
+      window.__a10.shadowEvidence().slice(oldLength).some((item) => item.category === expectedCategory), [evidenceBefore, category]);
+    const commitsAfter = await page.evaluate(() => window.__a10.shadowCommitCount());
+    assert.equal(commitsAfter - commitsBefore, 1, `shadow ${mode ?? "unavailable"} failure caused an extra React document commit`);
+  };
+  await runFaultProbe(null, "SHADOW_EVALUATION_FAILED");
+  await runFaultProbe("rust-rejected", "RUST_REJECTED");
+  await runFaultProbe("invalid-response", "SHADOW_EVALUATION_FAILED");
+  await runFaultProbe("throw", "SHADOW_EVALUATION_FAILED");
+  await runFaultProbe("mismatch", "ELIGIBLE_MISMATCH");
+  await page.evaluate(() => window.__a10.runRepeatedRename());
+  await page.waitForFunction(() => window.__a10.shadowEvidence().some((item) => item.category === "ELIGIBLE_EQUIVALENT" && item.operation === "rename"));
   let row = await openLayerMenu(frame.id);
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("root reorder up", () => row.getByRole("button", { name: "Move Renamed Frame up" }).click());
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "root reorder must commit exactly once");
   state = await getState();
   assert(state.pages[state.currentPageId].rootShapeIds.indexOf(frame.id) < state.pages[state.currentPageId].rootShapeIds.indexOf(rootRect.id), "root ordering did not change");
   row = await openLayerMenu(frame.id);
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("root reorder restore", () => row.getByRole("button", { name: "Move Renamed Frame down" }).click());
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "root reorder restore must commit exactly once");
   row = await openLayerMenu(rootRect.id);
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("reparent root rectangle", () => row.locator("select").selectOption(frame.id));
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "reparent must commit exactly once");
   await page.waitForFunction(([shapeId, parentId]) => window.__a10.state().shapes[shapeId]?.parentId === parentId, [rootRect.id, frame.id]);
   state = await getState();
   assert.equal(state.shapes[rootRect.id].bounds.x, 160, "reparent changed world-space x");
@@ -121,7 +171,9 @@ try {
   await row.locator("summary").click();
   await page.locator(`[data-layer-id="${child.id}"]`).click();
   row = await openLayerMenu(frame.id);
+  commitsBefore = await page.evaluate(() => window.__a10.shadowCommitCount());
   await ready("delete subtree through Layers", () => row.getByRole("button", { name: "Delete Renamed Frame" }).click());
+  assert.equal(await page.evaluate(() => window.__a10.shadowCommitCount()) - commitsBefore, 1, "subtree delete must commit exactly once");
   await page.waitForFunction(([frameId, childId, rectId]) => !window.__a10.state().shapes[frameId] && !window.__a10.state().shapes[childId] && !window.__a10.state().shapes[rectId], [frame.id, child.id, rootRect.id]);
   assert.deepEqual(await getSelection(), [], "delete did not reconcile selected descendants");
   const deletedPixel = await page.evaluate(() => window.__a10.samplePixel(75, 65));
@@ -138,7 +190,9 @@ try {
   evidence.checks.push("Subtree deletion, descendant selection cleanup, stale pixels, and page-switch cleanup");
 
   await page.keyboard.press("r");
+  const pageTwoEvidenceStart = await page.evaluate(() => window.__a10.shadowEvidence().length);
   await ready("create page-two recovery target", () => dragOnCanvas(40, 40, 120, 120));
+  await page.waitForFunction((start) => window.__a10.shadowEvidence().slice(start).some((item) => item.category === "ADAPTER_UNSUPPORTED"), pageTwoEvidenceStart);
   const instancesBefore = await page.evaluate(() => window.__a10.rendererInstances());
   await page.evaluate(() => window.__a10.poisonRenderer());
   await page.waitForFunction(() => document.querySelector("[data-renderer-diagnostic]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_RECOVERY_FAILED", undefined, { timeout: 20000 });
@@ -201,6 +255,46 @@ try {
   await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
     document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_SHAPE", undefined, { timeout: 20000 });
   evidence.checks.push("Vector Network creation rendered with retained geometry; unsupported legacy component data persisted across diagnostic and recovery; multi-vector replacement and selection/root-order reconciliation");
+  // The replacement assertion intentionally leaves an unsupported Vector Network
+  // in the page. Recover the disposable fixture before measuring later page-switch
+  // interactions, which require a READY renderer frame.
+  await page.evaluate((id) => window.__a10.setShapeTypeForCompatibilityRecovery(id), replacementEvidence.replacementId);
+  await page.waitForFunction(() => document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "READY" &&
+    Boolean(document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-metrics")), undefined, { timeout: 20000 });
+
+  await ready("return to first page for stale-result probe", () => page.evaluate(() => window.__a10.returnToFirstPage()));
+  const discardBeforePageSwitch = await page.evaluate(() => window.__a10.shadowDiscardCount());
+  await ready("stale shadow result discarded after page switch", () => page.evaluate(() => window.__a10.exerciseStalePageSwitch()));
+  await page.waitForFunction((oldCount) => window.__a10.shadowDiscardCount() > oldCount, discardBeforePageSwitch);
+  const discardBeforeUnmount = await page.evaluate(() => window.__a10.shadowDiscardCount());
+  await ready("return to first page before unmount probe", () => page.evaluate(() => window.__a10.returnToFirstPage()));
+  await page.evaluate(() => window.__a10.unmountDuringShadow());
+  await page.waitForFunction((oldCount) => window.__a10.shadowDiscardCount() > oldCount, discardBeforeUnmount);
+  const shadowEvidence = await page.evaluate(() => window.__a10.shadowEvidence());
+  const equivalentOperations = new Set(shadowEvidence.filter((item) => item.category === "ELIGIBLE_EQUIVALENT").map((item) => item.operation));
+  for (const operation of ["create-root", "insert-child", "rename", "reorder", "reparent", "delete"]) {
+    assert(equivalentOperations.has(operation), `no real editor ${operation} operation reached Rust equivalence`);
+  }
+  assert(shadowEvidence.some((item) => item.category === "REACT_REJECTED"), "React rejection was not classified by the shadow boundary");
+  assert(shadowEvidence.some((item) => item.category === "LEGACY_COMPATIBILITY"), "legacy compatibility operation was not classified");
+  assert(shadowEvidence.some((item) => item.category === "ADAPTER_UNSUPPORTED"), "multi-page/nanoid compatibility boundary was not classified");
+  assert.equal(shadowEvidence.filter((item) => item.category === "ELIGIBLE_MISMATCH").length, 1,
+    "injected semantic mismatch was not uniquely classified or an unexpected mismatch occurred");
+  for (const item of shadowEvidence.filter((entry) => entry.reactStateUnchanged !== undefined)) {
+    assert.equal(item.reactStateUnchanged, true, `shadow evaluation changed React state for ${item.operation}`);
+    assert.equal(item.selectionUnchanged, true, `shadow evaluation changed selection for ${item.operation}`);
+  }
+  const commitCountAfterShadow = await page.evaluate(() => window.__a10.shadowCommitCount());
+  evidence.rustShadow = {
+    classifications: shadowEvidence,
+    equivalentOperations: [...equivalentOperations],
+    documentStoreStructuralCommits: commitCountAfterShadow,
+    staleComparisonsDiscarded: await page.evaluate(() => window.__a10.shadowDiscardCount()),
+    jsHeapUsedBytes: await page.evaluate(() => performance.memory?.usedJSHeapSize ?? null),
+    wasmReservedBytes: await page.evaluate(() => window.__a10.shadowWasmReservedBytes()),
+    memoryNote: "Point observations only; no retained-memory or leak claim.",
+  };
+  evidence.checks.push("Rust shadow evaluation used the actual React hierarchy actions; stale page-switch and editor-unmount results were discarded without a Rust commit");
 
   evidence.status = "passed";
   evidence.environment = await page.evaluate(() => ({ userAgent: navigator.userAgent, platform: navigator.platform, logicalProcessors: navigator.hardwareConcurrency, deviceMemoryGiB: navigator.deviceMemory ?? null, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }, wasmReservedBytes: window.__a10.wasmReservedBytes() }));
@@ -217,8 +311,10 @@ try {
   evidence.failureContext = await page?.locator("[data-renderer-status]").evaluate((element) => ({
     renderer: {
       state: element.getAttribute("data-renderer-status"),
+      backend: element.getAttribute("data-renderer-backend"),
       diagnostic: element.getAttribute("data-renderer-diagnostic"),
       frameCount: element.getAttribute("data-renderer-frame-count"),
+      metrics: Boolean(element.getAttribute("data-renderer-metrics")),
       frameDisposition: element.getAttribute("data-renderer-frame-disposition"),
     },
     shapes: window.__a10?.state ? Object.values(window.__a10.state().shapes).map(({ id, type, parentId, children }) => ({ id, type, parentId, children })) : [],

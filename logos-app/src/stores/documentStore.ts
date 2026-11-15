@@ -17,6 +17,7 @@ import { type Shape, type Rect, type VNAnchor, type VNSegment, type VNRegion, ty
 import { useSelectionStore } from "./selectionStore";
 import { planHierarchyOperation, type HierarchyOperation, type HierarchyOperationResult } from "./hierarchyOperations";
 import { buildSceneProjection } from "../render-wasm/scene-projection";
+import { scheduleRustShadowEvaluation } from "../document-core/rust-shadow-evaluation";
 
 /** Generate a proper UUID v4 for shapes — required by the WASM bridge's uuidToU32x4(). */
 const shapeId = (): string => crypto.randomUUID();
@@ -346,16 +347,45 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS" } };
       }
     }
+    const planningStarted = performance.now();
     const result = planHierarchyOperation(
       { pages: snapshot.pages, currentPageId: pageId, shapes: snapshot.shapes, currentPageShapes },
       operation,
     );
+    const planningMs = performance.now() - planningStarted;
+    const conformanceSnapshot = {
+      // The editor store currently has no document identity field. The dedicated
+      // harness supplies its explicit fixture identity through the shadow runtime.
+      documentId: "",
+      pages: snapshot.pages,
+      pageOrder: snapshot.pageOrder,
+      shapes: snapshot.shapes,
+    };
     if (result.ok) {
       const selectedBefore = useSelectionStore.getState().selectedIds;
       set({ pages: result.pages, shapes: result.shapes });
       if (result.replacementShapeId && selectedBefore.some((id) => result.affectedIds.includes(id))) {
         useSelectionStore.getState().select(result.replacementShapeId);
       }
+      scheduleRustShadowEvaluation(
+        conformanceSnapshot,
+        operation,
+        result,
+        planningMs,
+        result.pages,
+        result.shapes,
+        () => {
+          const current = get();
+          return { pages: current.pages, shapes: current.shapes, currentPageId: current.currentPageId };
+        },
+        () => useSelectionStore.getState().selectedIds,
+      );
+    } else {
+      scheduleRustShadowEvaluation(conformanceSnapshot, operation, result, planningMs,
+        snapshot.pages, snapshot.shapes, () => {
+          const current = get();
+          return { pages: current.pages, shapes: current.shapes, currentPageId: current.currentPageId };
+        }, () => useSelectionStore.getState().selectedIds);
     }
     return result;
   },
@@ -384,6 +414,18 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         useSelectionStore.getState().select(result.replacementShapeId);
       }
     }
+    scheduleRustShadowEvaluation({
+      documentId: "",
+      pages: snapshot.pages,
+      pageOrder: snapshot.pageOrder,
+      shapes: snapshot.shapes,
+    }, operation, result, 0,
+    result.ok ? result.pages : snapshot.pages,
+    result.ok ? result.shapes : snapshot.shapes,
+    () => {
+      const current = get();
+      return { pages: current.pages, shapes: current.shapes, currentPageId: current.currentPageId };
+    });
     reportRenderingLimitation(result);
     return result;
   },
