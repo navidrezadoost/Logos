@@ -46,7 +46,7 @@ pub mod shape;
 pub mod stroke;
 pub mod token;
 pub mod typography;
-/// Narrow browser ABI for read-only validation of candidate documents.
+/// Narrow browser ABI for read-only validation and operation evaluation of candidate documents.
 #[cfg(feature = "wasm")]
 mod wasm_api;
 

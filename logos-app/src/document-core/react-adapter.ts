@@ -31,6 +31,7 @@ export interface RustDocumentValidator {
 export type AdapterIssueCode =
   | "INVALID_SNAPSHOT"
   | "IDENTITY_REQUIRED"
+  | "IDENTITY_NOT_CANONICAL"
   | "UNSUPPORTED_PAGE_ID"
   | "UNSUPPORTED_SHAPE"
   | "UNSUPPORTED_PROPERTY"
@@ -225,6 +226,8 @@ export function toRustCandidate(input: unknown):
   const documentId = input.documentId;
   if (typeof documentId !== "string" || !UUID.test(documentId)) {
     issues.push(issue("IDENTITY_REQUIRED", "/documentId"));
+  } else if (documentId !== documentId.toLowerCase()) {
+    issues.push(issue("IDENTITY_NOT_CANONICAL", "/documentId"));
   }
   if (!Array.isArray(input.pageOrder) || input.pageOrder.length !== 1 ||
       typeof input.pageOrder[0] !== "string" || !isRecord(input.pages) || !isRecord(input.shapes)) {
@@ -243,6 +246,7 @@ export function toRustCandidate(input: unknown):
   } else {
     pageRecord = { id: pageId, name: page.name, rootShapeIds: page.rootShapeIds as string[] };
     if (!UUID.test(pageId)) issues.push(issue("UNSUPPORTED_PAGE_ID", `/pages/${pageId}/id`));
+    else if (pageId !== pageId.toLowerCase()) issues.push(issue("IDENTITY_NOT_CANONICAL", `/pages/${pageId}/id`));
   }
   if (isRecord(page)) {
     for (const key of Object.keys(page)) {
@@ -263,6 +267,7 @@ export function toRustCandidate(input: unknown):
     }
     const shape = raw as unknown as Shape;
     if (!UUID.test(shape.id)) issues.push(issue("IDENTITY_REQUIRED", `${path}/id`));
+    else if (shape.id !== shape.id.toLowerCase()) issues.push(issue("IDENTITY_NOT_CANONICAL", `${path}/id`));
     for (const [field, value] of Object.entries(raw)) {
       if (!SHAPE_KEYS.has(field)) issues.push(issue("UNSUPPORTED_PROPERTY", `${path}/${field}`));
       else if (isDefaultUnsupported(field, value)) issues.push(issue("UNSUPPORTED_PROPERTY", `${path}/${field}`));
@@ -339,7 +344,7 @@ export function toRustCandidate(input: unknown):
   };
 }
 
-function fromRustDocument(document: Record<string, unknown>): ReactDocumentSnapshot {
+export function fromRustDocument(document: Record<string, unknown>): ReactDocumentSnapshot {
   const pages = document.pages as Array<Record<string, unknown>>;
   const records = document.shapes as Array<Record<string, unknown>>;
   const page = pages[0];
