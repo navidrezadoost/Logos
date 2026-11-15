@@ -9,8 +9,9 @@ if (!url || !outputPath || !executablePath) throw new Error("Usage: CHROME_BIN=/
 const browser = await chromium.launch({ executablePath, headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage", "--enable-webgl", "--disable-features=WebGPU", "--ignore-gpu-blocklist", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
 const evidence = { status: "running", checks: [], interactionToReadyFrameMs: [], browserErrors: [] };
 const pageErrors = [];
+let page;
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 740 }, deviceScaleFactor: 1 });
+  page = await browser.newPage({ viewport: { width: 1280, height: 740 }, deviceScaleFactor: 1 });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(url, { waitUntil: "load", timeout: 30000 });
   await page.waitForFunction(() => document.querySelector("#a10-status")?.dataset.status === "ready", undefined, { timeout: 90000 });
@@ -151,13 +152,25 @@ try {
   evidence.checks.push("Poisoned WASM module rejected further uploads and recreated with fresh module/context");
 
   await page.evaluate(() => window.__a10.stage("Vector Network compatibility creation diagnostics"));
+  const rendererStatusBeforeVector = await page.locator("[data-renderer-status]").evaluate((element) => ({
+    state: element.getAttribute("data-renderer-status"),
+    diagnostic: element.getAttribute("data-renderer-diagnostic"),
+    frameCount: element.getAttribute("data-renderer-frame-count"),
+  }));
   const vectorId = await page.evaluate(() => window.__a10.createVectorNetworkForCompatibility());
-  await page.waitForFunction(() => {
-    const shapes = Object.values(window.__a10.state().shapes);
-    return shapes.some((shape) => shape.type === "vector-network") &&
-      document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-status") === "SCENE_REJECTED" &&
-      document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-diagnostic") === "LOGOS_SCENE_UNSUPPORTED_CAPABILITY";
-  }, undefined, { timeout: 20000 });
+  await page.waitForFunction((id) => window.__a10.state().shapes[id]?.type === "vector-network", vectorId, { timeout: 5000 });
+  await page.waitForFunction((previous) => {
+    const status = document.querySelector("[data-renderer-status]");
+    const state = status?.getAttribute("data-renderer-status");
+    return state !== previous.state && state !== "READY" && state !== "RENDERING" && state !== "RECOVERING";
+  }, rendererStatusBeforeVector, { timeout: 20000 });
+  const vectorRendererStatus = await page.locator("[data-renderer-status]").evaluate((element) => ({
+    state: element.getAttribute("data-renderer-status"),
+    diagnostic: element.getAttribute("data-renderer-diagnostic"),
+    frameCount: element.getAttribute("data-renderer-frame-count"),
+  }));
+  assert.deepEqual(vectorRendererStatus.state, "SCENE_REJECTED", `Vector Network renderer status did not report scene rejection: ${JSON.stringify(vectorRendererStatus)}`);
+  assert.deepEqual(vectorRendererStatus.diagnostic, "LOGOS_SCENE_UNSUPPORTED_CAPABILITY", `Vector Network renderer diagnostic did not report the A9 capability limit: ${JSON.stringify(vectorRendererStatus)}`);
   const vectorState = await getState();
   const vector = vectorState.shapes[vectorId];
   assert(vector?.vnAnchors?.length === 2 && vector.vnSegments?.length === 1, "Vector Network creation did not retain geometry");
@@ -200,6 +213,16 @@ try {
 } catch (error) {
   evidence.status = "failed";
   evidence.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  evidence.failureContext = await page?.locator("[data-renderer-status]").evaluate((element) => ({
+    renderer: {
+      state: element.getAttribute("data-renderer-status"),
+      diagnostic: element.getAttribute("data-renderer-diagnostic"),
+      frameCount: element.getAttribute("data-renderer-frame-count"),
+      frameDisposition: element.getAttribute("data-renderer-frame-disposition"),
+    },
+    shapes: window.__a10?.state ? Object.values(window.__a10.state().shapes).map(({ id, type, parentId, children }) => ({ id, type, parentId, children })) : [],
+    selection: window.__a10?.selection?.() ?? [],
+  })).catch(() => null);
   await writeFile(outputPath, JSON.stringify(evidence, null, 2));
   console.error(JSON.stringify(evidence, null, 2));
   process.exitCode = 1;
