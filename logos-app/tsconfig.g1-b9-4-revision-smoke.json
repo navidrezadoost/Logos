@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/document-core/revision-commit-coordinator.ts", "src/test-support/g1-b9-4-revision-smoke.ts"]
+}

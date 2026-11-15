@@ -19,6 +19,11 @@ on:
       - "logos-app/src/tokens/**"
       - "logos-app/src/test-support/**"
       - "logos-app/src/document-core/**"
+      - "logos-app/test/revision-commit-coordinator.test.ts"
+      - "logos-app/g1-b9-4-revision-smoke.html"
+      - "logos-app/vite.g1-b9-4-revision-smoke.config.ts"
+      - "logos-app/tsconfig.g1-b9-4-revision-smoke.json"
+      - "test/benchmarks/g1-b9-4-revision-browser.mjs"
       - "logos-app/src/offline/**"
       - "logos-app/src/pages/WorkspacePage.tsx"
       - "logos-app/g1-b3-adapter-smoke.html"
@@ -1017,6 +1022,53 @@ jobs:
           path: |
             ${{ runner.temp }}/g1-b9-3-compatibility-evidence.json
             ${{ runner.temp }}/g1-b9-3-compatibility-preview.log
+
+      - name: Run G1-B9.4 disposable revision coordinator cases
+        working-directory: logos-app
+        run: ./node_modules/.bin/tsx --test test/revision-commit-coordinator.test.ts
+
+      - name: Build G1-B9.4 Rust/WASM coordinator harness
+        working-directory: logos-app
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.g1-b9-4-revision-smoke.json
+          ./node_modules/.bin/vite build --config vite.g1-b9-4-revision-smoke.config.ts
+
+      - name: Verify G1-B9.4 coordinator with real Rust WASM in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+          test -s logos-app/build/g1-b9-4-revision-smoke/js/logos_types_bg.wasm || find logos-app/build/g1-b9-4-revision-smoke -type f -name '*.wasm' -size +0c | grep -q .
+          (
+            cd logos-app
+            ./node_modules/.bin/vite preview --config vite.g1-b9-4-revision-smoke.config.ts \
+              --host 127.0.0.1 --port 4179
+          ) >"$RUNNER_TEMP/g1-b9-4-revision-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4179/g1-b9-4-revision-smoke.html >/dev/null; then break; fi
+            sleep 1
+          done
+          npm ci --prefix test/benchmarks --ignore-scripts --no-audit --no-fund
+          G1_B9_4_CHROME="$chrome_bin" \
+          G1_B9_4_EVIDENCE_PATH="$RUNNER_TEMP/g1-b9-4-revision-evidence.json" \
+            node test/benchmarks/g1-b9-4-revision-browser.mjs
+
+      - name: Preserve G1-B9.4 Chromium evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g1-b9-4-revision-commit-fencing-chromium
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/g1-b9-4-revision-evidence.json
+            ${{ runner.temp }}/g1-b9-4-revision-preview.log
 
       - name: Build DT-C3.1 token workflow browser smoke
         working-directory: logos-app
