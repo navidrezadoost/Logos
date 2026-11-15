@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getFile } from "../api/client";
 import { useDocumentStore } from "../stores/documentStore";
 import { projectLegacyFileData, encodeGeometryChange } from "./p04-document-adapter";
+import { classifyRustIdentityEligibility } from "../document-core/identity-eligibility";
 
 type TestConfig = { fileId: string };
 type VersionedFileDetail = Awaited<ReturnType<typeof getFile>> & { revn: number; vern: number };
@@ -10,6 +11,10 @@ type VersionedFileDetail = Awaited<ReturnType<typeof getFile>> & { revn: number;
 const status = document.getElementById("p05-status") as HTMLPreElement;
 
 let stage = "setup";
+function setStage(next: string): void {
+  stage = next;
+  status.dataset.stage = next;
+}
 const browserErrors: string[] = [];
 window.addEventListener("error", (event) => browserErrors.push(event.error?.stack ?? event.message));
 window.addEventListener("unhandledrejection", (event) => browserErrors.push(String(event.reason)));
@@ -32,14 +37,14 @@ async function jsonResponse<T>(response: Response, label: string): Promise<T> {
 }
 
 async function run(): Promise<void> {
-  stage = "load browser test configuration";
+  setStage("load browser test configuration");
   const config = await jsonResponse<TestConfig>(
     await fetch("/__test/config", { credentials: "include" }),
     "browser test configuration",
   );
   if (!config.fileId) throw new Error("browser test configuration omitted fileId");
 
-  stage = "Go get-file with browser session cookie";
+  setStage("Go get-file with browser session cookie");
   const before = await getFile(config.fileId) as VersionedFileDetail;
   if (before.id !== config.fileId || before.revn !== 0) {
     throw new Error(`initial get-file identity/revision=${before.id}/${before.revn}, expected ${config.fileId}/0`);
@@ -57,8 +62,16 @@ async function run(): Promise<void> {
     shapes: projection.shapes,
   });
   if (!hydration.ok) throw new Error(`P0.5 fixture failed hydration: ${hydration.diagnostic.code}`);
+  const identityActions = useDocumentStore.getState();
+  if (identityActions.associateServerDocumentIdentity(config.fileId, crypto.randomUUID(), projection.pageOrder) ||
+      identityActions.associateServerDocumentIdentity(config.fileId, before.id, ["wrong-page-id"])) {
+    throw new Error("mismatched server identity or page ownership was accepted");
+  }
+  if (!useDocumentStore.getState().associateServerDocumentIdentity(config.fileId, before.id, projection.pageOrder)) {
+    throw new Error("server file ID/page membership was not bound to its exact returned identity");
+  }
 
-  stage = "existing editor geometry command";
+  setStage("existing editor geometry command");
   useDocumentStore.getState().updateShape(shapeId, {
     bounds: { ...initialShape.bounds, x: initialShape.bounds.x + 5 },
   });
@@ -67,7 +80,7 @@ async function run(): Promise<void> {
     throw new Error(`editor command geometry x=${editedShape.bounds.x}, expected ${initialShape.bounds.x + 5}`);
   }
 
-  stage = "Go-compatible update-file operation";
+  setStage("Go-compatible update-file operation");
   const change = encodeGeometryChange(projection, shapeId, editedShape.bounds);
   const updateResponse = await jsonResponse<{ revn: number }>(await fetch("/api/rpc/command/update-file", {
     method: "POST",
@@ -85,7 +98,7 @@ async function run(): Promise<void> {
     throw new Error(`update-file acknowledged base revision ${updateResponse.revn}, expected 0`);
   }
 
-  stage = "Go get-file reload";
+  setStage("Go get-file reload");
   const reloaded = await getFile(config.fileId) as VersionedFileDetail;
   if (reloaded.revn !== 1) throw new Error(`reload revision=${reloaded.revn}, expected 1`);
   const after = projectLegacyFileData(reloaded.data);
@@ -106,6 +119,62 @@ async function run(): Promise<void> {
   if (extension?.sentinel !== "preserve-me") throw new Error("reloaded unknown extension sentinel changed");
   if (browserErrors.length) throw new Error(`browser errors: ${browserErrors.join(" | ")}`);
 
+  setStage("read-only eligibility classifications");
+  const originalIdentity = useDocumentStore.getState().documentId;
+  const pageId = crypto.randomUUID();
+  const readyInput = {
+    documentId: crypto.randomUUID(), identitySource: "offline" as const,
+    pages: { [pageId]: { id: pageId, name: "Identity test", rootShapeIds: [] } },
+    pageOrder: [pageId], shapes: {},
+  };
+  if (classifyRustIdentityEligibility(readyInput) !== "CANONICAL_UUID_READY") {
+    throw new Error("valid canonical empty document was not Rust-candidate eligible");
+  }
+  const legacyPageId = "historical-nanoid-page";
+  const legacyInput = {
+    ...readyInput, identitySource: "server" as const,
+    pages: { [legacyPageId]: { id: legacyPageId, name: "Legacy", rootShapeIds: [] } },
+    pageOrder: [legacyPageId],
+  };
+  if (classifyRustIdentityEligibility(legacyInput) !== "LEGACY_IDENTITY") {
+    throw new Error("historical page identity was not classified as legacy");
+  }
+  const unsupportedShape = { ...initialShape, type: "vector-network" as const };
+  const unsupportedInput = {
+    ...readyInput,
+    pages: { [pageId]: { id: pageId, name: "Identity test", rootShapeIds: [unsupportedShape.id] } },
+    shapes: { [unsupportedShape.id]: unsupportedShape },
+  };
+  const unsupportedBefore = JSON.stringify(unsupportedInput);
+  if (classifyRustIdentityEligibility(unsupportedInput) !== "UNSUPPORTED_DOCUMENT_CONTENT" ||
+      JSON.stringify(unsupportedInput) !== unsupportedBefore) {
+    throw new Error("unsupported content was not rejected read-only");
+  }
+  if (classifyRustIdentityEligibility({ ...readyInput, documentId: null }) !== "DOCUMENT_ID_UNAVAILABLE" ||
+      classifyRustIdentityEligibility({ ...readyInput, identitySource: "unknown" }) !== "AMBIGUOUS_OWNERSHIP") {
+    throw new Error("missing or unverified document ownership classification failed");
+  }
+  if (useDocumentStore.getState().documentId !== originalIdentity) {
+    throw new Error("eligibility evaluation mutated the live document identity");
+  }
+
+  const newPageId = useDocumentStore.getState().addPage("Identity test page");
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(newPageId)) {
+    throw new Error("new page ID is not a UUID");
+  }
+  // Historical IDs are preserved through the ordinary React editing path.
+  const legacyHydration = useDocumentStore.getState().hydrateDocument({
+    pages: { [legacyPageId]: { id: legacyPageId, name: "Legacy page", rootShapeIds: [] } },
+    pageOrder: [legacyPageId], currentPageId: legacyPageId, shapes: {},
+  });
+  if (!legacyHydration.ok || useDocumentStore.getState().pageOrder[0] !== legacyPageId) {
+    throw new Error("legacy page ID was not preserved during React hydration");
+  }
+  const legacyEditedShapeId = useDocumentStore.getState().addRect({ x: 0, y: 0, w: 10, h: 10 });
+  if (useDocumentStore.getState().pages[legacyPageId]?.rootShapeIds[0] !== legacyEditedShapeId) {
+    throw new Error("legacy document could not use the React compatibility edit path");
+  }
+
   status.dataset.status = "passed";
   status.textContent = JSON.stringify({
     test: "authenticated browser fetch → existing document command → Go update-file → get-file reload",
@@ -120,6 +189,13 @@ async function run(): Promise<void> {
     fill: reloadedShape.fills[0],
     extension,
     browserErrors,
+    identityEvidence: {
+      serverId: before.id,
+      newPageId,
+      eligibility: ["CANONICAL_UUID_READY", "LEGACY_IDENTITY", "UNSUPPORTED_DOCUMENT_CONTENT",
+        "DOCUMENT_ID_UNAVAILABLE", "AMBIGUOUS_OWNERSHIP"],
+      historicalPageId: legacyPageId,
+    },
   }, null, 2);
 }
 

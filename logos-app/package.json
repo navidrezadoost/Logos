@@ -12,6 +12,7 @@
     "icons": "npm run icons:sync && npm run icons:build && npm run icons:workspace",
     "build": "npm run icons:build && tsc -b && vite build",
     "build:spa": "vite build && python scripts/sync-spa-to-dist.py",
+    "test:identity": "tsx --test test/identity-lifecycle.test.ts",
     "logos:shell": "python scripts/sync-logos-workspace.py",
     "preview": "vite preview --port 8888 --host 127.0.0.1",
     "serve": "npm run build:spa && python scripts/serve-frontend.py",
@@ -33,7 +34,9 @@
     "@types/react-dom": "^18.3.1",
     "@types/react-window": "^1.8.8",
     "@vitejs/plugin-react": "^4.3.4",
+    "fake-indexeddb": "^6.2.8",
     "svger-cli": "^4.0.8",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.2",
     "vite": "^6.3.5"
   }

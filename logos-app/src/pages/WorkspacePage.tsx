@@ -18,6 +18,7 @@ import { initPersistence, loadPersistedDocument, stopPersistence } from "../offl
 import { createSyncManager } from "../offline/sync";
 import { SyncIndicator, useSyncStatus } from "../offline/indicator";
 import { theme } from "../theme/colors";
+import { getFile } from "../api/client";
 
 export function WorkspacePage(): React.ReactElement {
   const { projectId, fileId } = useParams<{ projectId: string; fileId: string }>();
@@ -46,10 +47,24 @@ export function WorkspacePage(): React.ReactElement {
   useEffect(() => {
     let mgr: ReturnType<typeof createSyncManager> | null = null;
 
+    useDocumentStore.getState().restoreDocumentIdentity(null, "unknown");
     loadPersistedDocument(documentId)
-      .then(() => {
+      .then(async (restored) => {
         if (pageIdFromUrl && useDocumentStore.getState().pages[pageIdFromUrl]) {
           setCurrentPage(pageIdFromUrl);
+        }
+        // The route key alone is not proof of ownership. Bind the canonical
+        // identity only when the authenticated server returns that exact file.
+        if (fileId && restored) {
+          try {
+            const file = await getFile(fileId);
+            if (Array.isArray(file.data?.pages)) {
+              useDocumentStore.getState().associateServerDocumentIdentity(fileId, file.id, file.data.pages);
+            }
+          } catch {
+            // A cached workspace may still open offline; its identity remains
+            // legacy/unknown and therefore is ineligible for Rust authority.
+          }
         }
         initPersistence(documentId, setSyncStatus);
         mgr = createSyncManager(documentId, setSyncStatus);
