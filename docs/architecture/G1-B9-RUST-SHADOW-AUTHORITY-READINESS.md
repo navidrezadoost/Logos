@@ -76,7 +76,24 @@ The existing A10 Chromium workflow uses production Canvas, Layers and Inspector 
 
 The harness samples the current JS heap and WASM linear-memory reservation and records the G1-B8 stage timings. A10's existing interaction-to-ready-frame observations remain separate. These are disposable Chromium observations, not representative performance results. No leak or retained-memory conclusion follows from a point sample or linear-memory reservation.
 
-The exact final-head CI run and artifact values must be attached to the PR before acceptance. Until those artifacts are available, test/evidence status is **PENDING CI**.
+### Hosted qualification evidence
+
+Final implementation head `459eef800dd69c7eb212c912023f816bc37826d6` passed the hosted qualification workflows. The [Rust workspace run](https://github.com/navidrezadoost/Logos/actions/runs/43681891156) includes the A10 editor Chromium run and preserves `a10-editor-interactions-evidence.json` as an artifact.
+
+| Workflow | Result | Evidence |
+|---|---|---|
+| Rust workspaces, candidate document WASM, renderer compatibility, A8/A9/A10 Chromium and React/Rust adapter Chromium | **PASS** | [Run 43681891156](https://github.com/navidrezadoost/Logos/actions/runs/43681891156) |
+| React app build | **PASS** | [Run 43681891177](https://github.com/navidrezadoost/Logos/actions/runs/43681891177) |
+| React TypeScript check and generated-types drift check | **PASS** | [Run 43681891106](https://github.com/navidrezadoost/Logos/actions/runs/43681891106) |
+| Browser persistence | **PASS** | [Run 43681891128](https://github.com/navidrezadoost/Logos/actions/runs/43681891128) |
+| Ubuntu 22.04 and 24.04 qualifications | **PASS** | [Run 43681891123](https://github.com/navidrezadoost/Logos/actions/runs/43681891123) |
+| Memory benchmark infrastructure gate | **PASS — measurement blocked by policy** | [Run 43681891119](https://github.com/navidrezadoost/Logos/actions/runs/43681891119); this is not a memory result. |
+
+The A10 artifact reports **7 interaction groups passed**, zero uncaught browser errors, renderer instance recreation count **2**, and expected pixel samples: child `[0,0,255,255]`, deleted/page-switched pixels `[0,0,0,0]`, and recreated-renderer pixel `[0,0,207,207]`. The real editor actions reached Rust equivalence for `create-root`, `insert-child`, `rename`, `reorder`, `reparent`, and `delete`. Fault evidence includes evaluator unavailable, Rust rejection, malformed response, thrown exception, and one injected semantic mismatch; invalid operations were classified as React rejections, and compatibility writes remained explicitly classified.
+
+There were **23** action-to-ready-frame observations, ranging from **12.87 ms to 346.04 ms**, with median **74.36 ms**. These are one-run disposable CI observations, not an aggregate benchmark or an editor performance result. The artifact's point observations were JS heap **11,409,545 bytes** and shadow Rust WASM reservation **1,114,112 bytes**; the renderer's separately reported WASM reservation was **270,270,464 bytes**. None establishes retained growth, leak behavior, or production memory requirements.
+
+Final-head CI evidence status is **PASS** for the scoped shadow evaluation. Production authority remains **NOT AUTHORIZED**; editor performance remains **NOT MEASURED**.
 
 ## Authority decision matrix
 
@@ -84,11 +101,11 @@ The exact final-head CI run and artifact values must be attached to the PR befor
 |---|---|---|
 | Identity ownership | Go file/page UUID generation exists; React initial/additional pages use nanoid; Zustand lacks document ID; import aliases are ephemeral. | **BLOCKED** pending canonical issuance and legacy policy. |
 | Lossless conversion | Restricted one-page adapter rejects unsupported fields/content. | **NARROW SUBSET ONLY**; no general document adoption. |
-| Operation semantics | G1-B8 fixtures plus real-editor shadow cases compare proposals; React remains commit owner. | **PENDING final-head Chromium CI**. |
+| Operation semantics | G1-B8 fixtures plus real-editor shadow cases compare proposals; React remains commit owner. | **PASS for the exercised candidate subset**; this does not establish production authority. |
 | Atomicity | One React planner/commit; Rust runs read-only after commit. Candidate never reaches store or renderer. | **SHADOW CONTRACT ONLY**; production authority unchanged. |
 | Renderer | A8/A9 consume committed React state; Rust shadow result is never uploaded. | **React-owned**. |
 | Observability | Sanitized per-operation categories, codes/paths, stage timings and harness memory samples. | **Test evidence only**; production telemetry not authorized or implemented. |
-| Performance | CI timings are to be reported per stage and separated from interaction-to-frame measurements. | **NOT A PERFORMANCE RESULT** until real final-head run; no invented numbers. |
+| Performance | Stage timings and action-to-ready-frame observations are preserved in the final-head CI artifact. | **NOT MEASURED**; one-run observations are not a performance result. |
 | Rollback | Build/runtime gate off by default; React path is unchanged. | **Disable shadow flag/runtime**; no schema or persisted data rollback required. |
 | Controlled pilot | Requires identity decision, broader lossless corpus, policy/diagnostic alignment, production-like latency and retention evidence, and rollback approval. | **NOT AUTHORIZED**. |
 
@@ -97,7 +114,7 @@ The exact final-head CI run and artifact values must be attached to the PR befor
 1. Chief Architect decision on canonical document ID issuance and how `create-file.id`, offline creation, and React page UUID issuance align.
 2. Representative sanitized persisted-document corpus with population counts and adapter classification, including historical nanoid pages and XD/Sketch imports.
 3. Explicit compatibility extensions or lossless preservation contracts for components, instances, Vector Networks, fills, tokens, plugins and unknown fields.
-4. Final-head Chromium/CI artifact evidence for all operation and failure cases, with exact commit SHA and timings; repeatability across supported browsers.
+4. Repeatability across supported browsers; current evidence is one final-head Chromium CI run and is not cross-browser qualification.
 5. Operation policy reconciliation for locks, diagnostics, page ownership and imported coordinates.
 6. Controlled memory-retention study if memory growth or leak safety is to be claimed.
 7. Separate Chief Architect authorization for a bounded, observable Rust-authoritative pilot and its rollback plan.
