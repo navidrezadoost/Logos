@@ -286,7 +286,14 @@ async function run(): Promise<void> {
   await waitFor(() => document.querySelector("[data-testid=token-workflow]"), "token control after fill restoration");
   await bindPreview();
   useDocumentStore.getState().updateShape(shapeId, { type: "unsupported-imported-shape" as Shape["type"] });
-  await waitFor(() => document.querySelector<HTMLElement>("[data-renderer-status]")?.dataset.rendererStatus === "UNSUPPORTED_SHAPE" ? true : null, "unsupported type renderer diagnostic");
+  await waitFor(() => {
+    const status = document.querySelector<HTMLElement>("[data-renderer-status]");
+    const supportedDiagnostic = status?.dataset.rendererDiagnostic === "LOGOS_RENDER_UNSUPPORTED_SHAPE" ||
+      status?.dataset.rendererDiagnostic === "LOGOS_SCENE_UNSUPPORTED_SHAPE";
+    return supportedDiagnostic && (status?.dataset.rendererStatus === "UNSUPPORTED_SHAPE" || status?.dataset.rendererStatus === "SCENE_REJECTED")
+      ? true
+      : null;
+  }, "unsupported type renderer diagnostic");
   assert(!document.querySelector("[data-testid=token-workflow]"), "unsupported renderer type offered token preview");
   assert(useTokenWorkflowPreviewStore.getState().preview === null, "renderer failure left a token preview active");
   useDocumentStore.getState().updateShape(shapeId, { type: "rect" });
