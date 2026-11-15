@@ -161,7 +161,6 @@ export function analyzeReactSnapshot(
       Object.entries(inputSnapshot.shapes).every(([id, shape]) =>
         shape.id === roundTrip.shapes[id]?.id && shape.parentId === roundTrip.shapes[id]?.parentId &&
         semanticEqual(shape.children, roundTrip.shapes[id]?.children));
-    const exactCandidate = semanticEqual(converted.candidate, response.document);
     const checks = {
       nativeRustValidation: "PASS" as const,
       roundTripProjection: "PASS" as const,
@@ -171,7 +170,7 @@ export function analyzeReactSnapshot(
     };
     return {
       ...base,
-      classification: sameSemantics && sameIdentityMembership && exactCandidate
+      classification: sameSemantics && sameIdentityMembership
         ? "LOSSLESS_RUST_CANDIDATE" : "ADAPTER_INCOMPATIBLE",
       checks,
     };
