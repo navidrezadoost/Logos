@@ -185,8 +185,8 @@ export function nextLocalClock(): number {
 // Snapshot write
 // ---------------------------------------------------------------------------
 
-function buildSnapshot(): DocumentSnapshot {
-  const { documentId, identitySource, pages, pageOrder, currentPageId, shapes } = useDocumentStore.getState();
+function buildSnapshot(state = useDocumentStore.getState()): DocumentSnapshot {
+  const { documentId, identitySource, pages, pageOrder, currentPageId, shapes } = state;
   return {
     documentId,
     identitySource,
@@ -202,8 +202,7 @@ function buildSnapshot(): DocumentSnapshot {
   };
 }
 
-async function writeSnapshot(documentId: string): Promise<void> {
-  const snapshot = buildSnapshot();
+async function writeSnapshot(documentId: string, snapshot: DocumentSnapshot): Promise<void> {
   const record: PersistedDocument = {
     documentId,
     savedAt: new Date().toISOString(),
@@ -212,9 +211,21 @@ async function writeSnapshot(documentId: string): Promise<void> {
   await idbPut(STORE_SNAPSHOTS, record);
 }
 
+const snapshotWriteQueues = new Map<string, Promise<void>>();
+
+function enqueueSnapshotWrite(documentId: string, snapshot: DocumentSnapshot): Promise<void> {
+  const previous = snapshotWriteQueues.get(documentId) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => writeSnapshot(documentId, snapshot));
+  snapshotWriteQueues.set(documentId, next);
+  void next.finally(() => {
+    if (snapshotWriteQueues.get(documentId) === next) snapshotWriteQueues.delete(documentId);
+  }).catch(() => undefined);
+  return next;
+}
+
 /** Persist the current document immediately; used by explicit save boundaries and verification. */
 export async function persistDocumentNow(documentId: string): Promise<void> {
-  await writeSnapshot(documentId);
+  await enqueueSnapshotWrite(documentId, buildSnapshot());
 }
 
 /**
@@ -222,21 +233,42 @@ export async function persistDocumentNow(documentId: string): Promise<void> {
  * The generated ID and empty initial snapshot reach IndexedDB before this
  * resolves, so callers must await it before enabling editing.
  */
-export async function createOfflineDocument(): Promise<string> {
+export interface OfflineCreationOptions {
+  /** Writer must resolve only after the initial snapshot reaches durable storage. */
+  writeInitialSnapshot?: (documentId: string, snapshot: DocumentSnapshot) => Promise<void>;
+  /** Prevent an async creation attempt from binding identity after its route owner changes. */
+  isCurrent?: () => boolean;
+}
+
+let offlineCreationPromise: Promise<string> | null = null;
+let offlineCreationCandidate: string | null = null;
+
+export function createOfflineDocument(options: OfflineCreationOptions = {}): Promise<string> {
   const store = useDocumentStore.getState();
-  if (store.documentId && store.identitySource === "offline") return store.documentId;
+  if (store.documentId && store.identitySource === "offline") return Promise.resolve(store.documentId);
+  if (offlineCreationPromise) return offlineCreationPromise;
   if (store.documentId || Object.keys(store.shapes).length !== 0 || store.pageOrder.length !== 1 ||
       store.pages[store.pageOrder[0]]?.rootShapeIds.length !== 0) {
-    throw new Error("LOGOS_OFFLINE_CREATION_REQUIRES_NEW_EMPTY_DOCUMENT");
+    return Promise.reject(new Error("LOGOS_OFFLINE_CREATION_REQUIRES_NEW_EMPTY_DOCUMENT"));
   }
-  const documentId = crypto.randomUUID();
+  const documentId = offlineCreationCandidate ??= crypto.randomUUID();
   const snapshot = { ...buildSnapshot(), documentId, identitySource: "offline" as const };
-  const record: PersistedDocument = { documentId, savedAt: new Date().toISOString(), snapshot };
-  await idbPut(STORE_SNAPSHOTS, record);
-  if (!useDocumentStore.getState().associateOfflineDocumentIdentity(documentId)) {
-    throw new Error("LOGOS_OFFLINE_IDENTITY_BIND_FAILED");
-  }
-  return documentId;
+  const writeInitialSnapshot = options.writeInitialSnapshot ?? enqueueSnapshotWrite;
+  const creation = writeInitialSnapshot(documentId, snapshot).then(() => {
+    if (!(options.isCurrent?.() ?? true)) {
+      offlineCreationCandidate = null;
+      throw new Error("LOGOS_OFFLINE_CREATION_STALE_WORKSPACE");
+    }
+    if (!useDocumentStore.getState().associateOfflineDocumentIdentity(documentId)) {
+      throw new Error("LOGOS_OFFLINE_IDENTITY_BIND_FAILED");
+    }
+    offlineCreationCandidate = null;
+    return documentId;
+  });
+  // Keep the candidate after failure. A retry uses the same identity and an
+  // idempotent IndexedDB key, but identity is never promoted before a write.
+  offlineCreationPromise = creation.finally(() => { offlineCreationPromise = null; });
+  return offlineCreationPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,40 +281,51 @@ export async function createOfflineDocument(): Promise<string> {
  * Call this **before** mounting the React tree so the UI immediately has data.
  * Returns `true` if a snapshot was found and restored, `false` otherwise.
  */
-export async function loadPersistedDocument(documentId: string): Promise<boolean> {
+export async function readPersistedDocument(documentId: string): Promise<PersistedDocument | null> {
   const persisted = await idbGet<PersistedDocument>(STORE_SNAPSHOTS, documentId);
-  if (!persisted) return false;
+  if (!persisted) return null;
   if (persisted.documentId !== documentId) {
     console.warn("[logos/persist] Preserved but did not load a snapshot with mismatched document identity");
+    return null;
+  }
+  return persisted;
+}
+
+/** Synchronous guarded commit; ownership is checked at the Zustand mutation boundary. */
+export function applyPersistedDocument(
+  documentId: string,
+  persisted: PersistedDocument,
+  canApply: () => boolean = () => true
+): boolean {
+  if (!canApply() || persisted.documentId !== documentId || persisted.snapshot.documentId && persisted.snapshot.documentId !== documentId) {
     return false;
   }
-
   const { snapshot } = persisted;
-  const result = useDocumentStore.getState().hydrateDocument({
+  const source = snapshot.identitySource;
+  const trustedSource = (source === "offline" || source === "server") && snapshot.documentId === documentId
+    ? source
+    : source === "unknown" || source === "ambiguous" ? "unknown" : "legacy";
+  const result = useDocumentStore.getState().hydrateWorkspaceDocument({
     pages: snapshot.pages as ReturnType<typeof useDocumentStore.getState>["pages"],
     pageOrder: snapshot.pageOrder,
     currentPageId: snapshot.currentPageId,
     shapes: snapshot.shapes as ReturnType<typeof useDocumentStore.getState>["shapes"],
-  });
+  }, trustedSource === "server" || trustedSource === "offline" ? documentId : null, trustedSource, canApply);
   if (!result.ok) {
     console.warn("[logos/persist] Preserved but did not load an invalid document snapshot", result.diagnostic);
     return false;
   }
-
-  const source = snapshot.identitySource;
-  const storedId = snapshot.documentId;
-  if ((source === "offline" || source === "server") && storedId === documentId) {
-    useDocumentStore.getState().restoreDocumentIdentity(storedId, source);
-  } else {
-    // Pre-contract snapshots have no durable ownership provenance. Preserve
-    // their IDs and keep them on the legacy React path.
-    useDocumentStore.getState().restoreDocumentIdentity(null, "legacy");
-  }
-
   console.info(
     `[logos/persist] Restored document "${documentId}" from IndexedDB (saved ${persisted.savedAt})`
   );
   return true;
+}
+
+/** Backwards-compatible convenience API for non-routed callers and tests. */
+export async function loadPersistedDocument(documentId: string, canApply: () => boolean = () => true): Promise<boolean> {
+  const persisted = await readPersistedDocument(documentId);
+  if (!persisted || !canApply()) return false;
+  return applyPersistedDocument(documentId, persisted, canApply);
 }
 
 /**
@@ -330,8 +373,30 @@ export async function clearPersistedDocument(documentId: string): Promise<void> 
 // Persistence subscription
 // ---------------------------------------------------------------------------
 
-let unsubscribe: (() => void) | null = null;
-let writeTimer: ReturnType<typeof setTimeout> | null = null;
+export interface PersistenceHandle {
+  readonly documentId: string;
+  stop(): void;
+}
+
+export interface PersistenceOptions {
+  isCurrent?: () => boolean;
+  schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+  cancel?: (timer: ReturnType<typeof setTimeout>) => void;
+  writeSnapshot?: (documentId: string, snapshot: DocumentSnapshot) => Promise<void>;
+}
+
+interface ActivePersistence {
+  handle: PersistenceHandle;
+  isCurrent: () => boolean;
+  schedule: NonNullable<PersistenceOptions["schedule"]>;
+  cancel: NonNullable<PersistenceOptions["cancel"]>;
+  writeSnapshot: NonNullable<PersistenceOptions["writeSnapshot"]>;
+  unsubscribe: (() => void) | null;
+  writeTimer: ReturnType<typeof setTimeout> | null;
+  pendingSnapshot: DocumentSnapshot | null;
+}
+
+let activePersistence: ActivePersistence | null = null;
 
 /**
  * Start persisting the document store to IndexedDB.
@@ -344,46 +409,67 @@ let writeTimer: ReturnType<typeof setTimeout> | null = null;
  */
 export function initPersistence(
   documentId: string,
-  onStatus?: (status: SyncStatus) => void
-): void {
-  if (unsubscribe) return; // already initialised
+  onStatus?: (status: SyncStatus) => void,
+  options: PersistenceOptions = {}
+): PersistenceHandle {
+  if (activePersistence?.handle.documentId === documentId && activePersistence.isCurrent()) return activePersistence.handle;
+  stopPersistence();
 
-  onStatus?.("saving");
+  const isCurrent = options.isCurrent ?? (() => true);
+  const schedule = options.schedule ?? ((callback, delay) => setTimeout(callback, delay));
+  const cancel = options.cancel ?? ((timer) => clearTimeout(timer));
+  const write = options.writeSnapshot ?? enqueueSnapshotWrite;
+  const active = {} as ActivePersistence;
+  const handle: PersistenceHandle = { documentId, stop: () => stopPersistence(handle) };
+  Object.assign(active, { handle, isCurrent, schedule, cancel, writeSnapshot: write, unsubscribe: null, writeTimer: null, pendingSnapshot: null });
+  activePersistence = active;
+  const ownsPersistence = () => activePersistence === active && isCurrent();
+  const emit = (status: SyncStatus) => { if (ownsPersistence()) onStatus?.(status); };
 
-  unsubscribe = useDocumentStore.subscribe(() => {
+  emit("saving");
+  active.unsubscribe = useDocumentStore.subscribe((state) => {
+    if (!ownsPersistence()) return;
     // Debounce writes to avoid hammering IDB on every keystroke / drag
-    if (writeTimer) clearTimeout(writeTimer);
-    writeTimer = setTimeout(async () => {
+    if (active.writeTimer) cancel(active.writeTimer);
+    active.pendingSnapshot = buildSnapshot(state);
+    active.writeTimer = schedule(async () => {
+      active.writeTimer = null;
+      const snapshot = active.pendingSnapshot;
+      active.pendingSnapshot = null;
+      if (!snapshot || !ownsPersistence()) return;
       try {
-        onStatus?.("saving");
-        await writeSnapshot(documentId);
-        onStatus?.("saved");
+        emit("saving");
+        await write(documentId, snapshot);
+        emit("saved");
       } catch (err) {
         console.error("[logos/persist] IDB write failed:", err);
-        onStatus?.("error");
+        emit("error");
       }
     }, WRITE_DEBOUNCE_MS);
   });
 
-  // Write an initial snapshot immediately
-  writeSnapshot(documentId)
-    .then(() => onStatus?.("saved"))
+  // Capture before crossing the async IDB boundary. A later route cannot cause
+  // this write to serialize a different document from the shared store.
+  const initialSnapshot = buildSnapshot();
+  write(documentId, initialSnapshot)
+    .then(() => emit("saved"))
     .catch((err) => {
       console.error("[logos/persist] Initial IDB write failed:", err);
-      onStatus?.("error");
+      emit("error");
     });
+  return handle;
 }
 
 /**
  * Stop persisting (e.g., when the user closes the document).
  */
-export function stopPersistence(): void {
-  if (unsubscribe) {
-    unsubscribe();
-    unsubscribe = null;
-  }
-  if (writeTimer) {
-    clearTimeout(writeTimer);
-    writeTimer = null;
-  }
+export function stopPersistence(handle?: PersistenceHandle): void {
+  const active = activePersistence;
+  if (!active || (handle && active.handle !== handle)) return;
+  activePersistence = null;
+  active.unsubscribe?.();
+  active.unsubscribe = null;
+  if (active.writeTimer) active.cancel(active.writeTimer);
+  active.writeTimer = null;
+  active.pendingSnapshot = null;
 }

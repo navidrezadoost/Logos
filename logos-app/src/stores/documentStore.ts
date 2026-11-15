@@ -68,13 +68,15 @@ interface DocumentState {
 
   /** Add a page; returns the new page's id. */
   addPage: (name?: string) => string;
-  setCurrentPage: (pageId: string) => void;
+  setCurrentPage: (pageId: string, canApply?: () => boolean) => void;
 
   /** Atomically validate and load a persisted/imported snapshot without rewriting IDs or unknown fields. */
-  hydrateDocument: (document: DocumentHydration) => DocumentHydrationResult;
-  associateServerDocumentIdentity: (requestedId: string, returnedId: string, returnedPageIds: string[]) => boolean;
-  associateOfflineDocumentIdentity: (documentId: string) => boolean;
-  restoreDocumentIdentity: (documentId: string | null, source: DocumentIdentitySource) => void;
+  hydrateDocument: (document: DocumentHydration, canApply?: () => boolean) => DocumentHydrationResult;
+  hydrateWorkspaceDocument: (document: DocumentHydration, documentId: string | null, identitySource: DocumentIdentitySource, canApply?: () => boolean) => DocumentHydrationResult;
+  resetWorkspaceDocument: (canApply?: () => boolean) => boolean;
+  associateServerDocumentIdentity: (requestedId: string, returnedId: string, returnedPageIds: string[], canApply?: () => boolean) => boolean;
+  associateOfflineDocumentIdentity: (documentId: string, canApply?: () => boolean) => boolean;
+  restoreDocumentIdentity: (documentId: string | null, source: DocumentIdentitySource, canApply?: () => boolean) => boolean;
 
   /** Add a shape to the current page; returns the new shape id. */
   addRect: (bounds: Rect, color?: string) => string;
@@ -186,37 +188,70 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     return id;
   },
 
-  setCurrentPage: (pageId) => {
-    if (get().pages[pageId]) set({ currentPageId: pageId });
+  setCurrentPage: (pageId, canApply = () => true) => {
+    if (canApply() && get().pages[pageId]) set({ currentPageId: pageId });
   },
 
-  hydrateDocument: (document) => {
+  hydrateDocument: (document, canApply = () => true) => {
     const diagnostic = validateDocumentHydration(document);
     if (diagnostic) return { ok: false, diagnostic };
+    if (!canApply()) return { ok: false, diagnostic: { code: "LOGOS_HYDRATION_STALE_WORKSPACE" } };
     set(clonePlainData(document));
     return { ok: true };
   },
+  hydrateWorkspaceDocument: (document, documentId, identitySource, canApply = () => true) => {
+    const diagnostic = validateDocumentHydration(document);
+    if (diagnostic) return { ok: false, diagnostic };
+    if (!canApply()) return { ok: false, diagnostic: { code: "LOGOS_HYDRATION_STALE_WORKSPACE" } };
+    const hasVerifiedIdentity = identitySource === "server" || identitySource === "offline";
+    if (hasVerifiedIdentity && (!documentId || !DOCUMENT_UUID.test(documentId))) {
+      return { ok: false, diagnostic: { code: "LOGOS_HYDRATION_INVALID_IDENTITY" } };
+    }
+    set({
+      ...clonePlainData(document),
+      documentId: hasVerifiedIdentity ? documentId : null,
+      identitySource: hasVerifiedIdentity ? identitySource : identitySource === "legacy" ? "legacy" : "unknown",
+    });
+    return { ok: true };
+  },
 
-  associateServerDocumentIdentity: (requestedId, returnedId, returnedPageIds) => {
+  resetWorkspaceDocument: (canApply = () => true) => {
+    if (!canApply()) return false;
+    useSelectionStore.getState().clearSelection();
+    const pageId = crypto.randomUUID();
+    set({
+      documentId: null,
+      identitySource: "unknown",
+      pages: { [pageId]: { id: pageId, name: "Page 1", rootShapeIds: [] } },
+      pageOrder: [pageId],
+      currentPageId: pageId,
+      shapes: {},
+    });
+    return true;
+  },
+
+  associateServerDocumentIdentity: (requestedId, returnedId, returnedPageIds, canApply = () => true) => {
     const state = get();
-    if (!DOCUMENT_UUID.test(requestedId) || requestedId !== returnedId || !DOCUMENT_UUID.test(returnedId) ||
+    if (!canApply() || !DOCUMENT_UUID.test(requestedId) || requestedId !== returnedId || !DOCUMENT_UUID.test(returnedId) ||
         !Array.isArray(returnedPageIds) || returnedPageIds.length !== state.pageOrder.length ||
         returnedPageIds.some((id, index) => id !== state.pageOrder[index])) return false;
     set({ documentId: returnedId, identitySource: "server" });
     return true;
   },
-  associateOfflineDocumentIdentity: (documentId) => {
-    if (!DOCUMENT_UUID.test(documentId)) return false;
+  associateOfflineDocumentIdentity: (documentId, canApply = () => true) => {
+    if (!canApply() || !DOCUMENT_UUID.test(documentId)) return false;
     set({ documentId, identitySource: "offline" });
     return true;
   },
-  restoreDocumentIdentity: (documentId, source) => {
+  restoreDocumentIdentity: (documentId, source, canApply = () => true) => {
+    if (!canApply()) return false;
     if ((source === "server" || source === "offline") &&
         (!documentId || !DOCUMENT_UUID.test(documentId))) {
       set({ documentId: null, identitySource: "ambiguous" });
-      return;
+      return true;
     }
     set({ documentId, identitySource: source });
+    return true;
   },
 
   // ── Shapes ────────────────────────────────────────────────────────────────
