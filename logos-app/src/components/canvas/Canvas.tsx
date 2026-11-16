@@ -41,6 +41,7 @@ import { createRect, type Shape } from "../../types/shapes";
 import { theme } from "../../theme/colors";
 import { RendererStatusOverlay } from "./RendererStatusOverlay";
 import { useTokenWorkflowPreviewStore } from "../../stores/tokenWorkflowPreviewStore";
+import { activeG1B95Sample, recordG1B95CanvasTimestamp, publishG1B95Frame } from "../../document-core/performance-probe";
 
 const WASM_JS_URL: string =
   typeof __RENDER_WASM_JS__ !== "undefined" ? __RENDER_WASM_JS__ : "/js/render-wasm.js";
@@ -138,6 +139,13 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
   // When WebGPU is unavailable this returns null and has zero overhead.
   const gpuRenderer = useWebGPURenderer(canvasRef, renderedPageShapes, zoom, panX, panY);
 
+  // The dedicated performance harness observes a real React commit before the
+  // normal Canvas render effect. The callback is compiled off in production.
+  useLayoutEffect(() => {
+    const sample = activeG1B95Sample();
+    if (sample) recordG1B95CanvasTimestamp(sample.sampleId, "react_layout_commit_observed", performance.now(), successfulFrameCountRef.current);
+  }, [pageScene, renderedPageShapes, size, zoom, panX, panY]);
+
   // ── Resize observer ────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -208,6 +216,9 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
     const canvas = canvasRef.current;
     if (!canvas || modeRef.current === "loading") return;
 
+    const sample = activeG1B95Sample();
+    if (sample) recordG1B95CanvasTimestamp(sample.sampleId, "renderer_effect_started", performance.now(), successfulFrameCountRef.current);
+
     const backend: RendererBackend = modeRef.current === "wasm" ? "wasm" : "canvas2d";
     setRenderMetrics(null);
     const previousStatus = rendererStatusRef.current;
@@ -241,16 +252,24 @@ export function Canvas({ rendererLoader = loadRenderWasm }: CanvasProps = {}): R
             result.diagnostic.shapeType,
           );
         }
+        if (sample) recordG1B95CanvasTimestamp(sample.sampleId, "wasm_scene_sync_completed", performance.now(), successfulFrameCountRef.current + 1);
         if (frameMetricRafRef.current !== null) cancelAnimationFrame(frameMetricRafRef.current);
         const syncCompletedAt = performance.now();
         const wasmMetrics = result.metrics;
         frameMetricRafRef.current = requestAnimationFrame(() => {
+          const completedGeneration = successfulFrameCountRef.current;
           const memory = (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory;
           setRenderMetrics({
             ...wasmMetrics,
             browserFrameLatencyMs: performance.now() - syncCompletedAt,
             ...(typeof memory?.usedJSHeapSize === "number" ? { observedJsHeapBytes: memory.usedJSHeapSize } : {}),
           });
+          if (sample && completedGeneration === sample.expectedFrameGeneration) {
+            recordG1B95CanvasTimestamp(sample.sampleId, "renderer_completion_raf", performance.now(), completedGeneration);
+            // A second browser frame boundary follows the renderer's sync RAF.
+            // It gives the browser a paint opportunity without readback or IPC.
+            requestAnimationFrame(() => publishG1B95Frame(sample.sampleId, performance.now(), completedGeneration));
+          }
         });
       } else {
         const unsupportedType = pageScene.shapes.find((shape) => shape.type !== "rect" && shape.type !== "frame");

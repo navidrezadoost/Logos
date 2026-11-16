@@ -18,25 +18,37 @@ const status = document.getElementById("g1b95-status") as HTMLPreElement;
 const kinds: G1B95OperationKind[] = ["create", "insert-child", "rename", "sibling-reorder", "root-reorder", "subtree-delete", "reparent"];
 type Stage = { stage: string; milliseconds: number };
 type LastResult = {
-  ok: boolean; diagnostic?: string; operation: G1B95OperationKind; storeActionMs: number;
+  ok: boolean; diagnostic?: string; operation: G1B95OperationKind | "view-control"; storeActionMs: number;
   eventDispatchDelayMs: number; eventTimeStamp: number; uiSelectionUpdateMs: number;
+  handlerStartedAt: number; handlerCompletedAt: number; sampleId: string;
   stages: Stage[]; candidate: unknown; selectionIds: string[];
 };
+type BrowserTiming = { sampleId: string; expectedFrameGeneration: number; interactionStartAt: number;
+  handlerStartedAt: number; handlerCompletedAt: number; reactLayoutCommitAt?: number;
+  rendererEffectStartedAt?: number; wasmSceneSyncCompletedAt?: number; rendererCompletionRafAt?: number;
+  framePublishedAt?: number; actualFrameGeneration?: number; interactionToFrameMs?: number };
 type G1B95Window = Window & {
   __g1b95?: {
-    prepare: (size: G1B95Size, operation: G1B95OperationKind, serial: number) => Promise<void>;
+    prepare: (size: G1B95Size, operation: G1B95OperationKind | "view-control", serial: number, sampleId?: string) => Promise<void>;
     fixture: () => Omit<G1B95Fixture, "shapes">;
     state: () => { page: Page; shapes: Record<string, Shape>; currentPageId: string };
+    selection: () => string[];
     lastResult: () => LastResult | null;
+    timing: (sampleId: string) => BrowserTiming | null;
+    serializedState: () => { json: string; serializationMs: number };
     samplePixel: (x: number, y: number) => number[];
+    samplePixelMeasured: (x: number, y: number) => { rgba: number[]; finishMs: number; readPixelsMs: number };
     errors: () => string[];
   };
   __logosG1B95Probe?: (stage: string, milliseconds: number) => void;
 };
 
 let fixture: G1B95Fixture | null = null;
-let preparedOperation: G1B95OperationKind | null = null;
+let preparedOperation: G1B95OperationKind | "view-control" | null = null;
 let preparedSerial = 0;
+let preparedSampleId = "";
+let activeTiming: BrowserTiming | null = null;
+const completedTimings = new Map<string, BrowserTiming>();
 let candidate: unknown = null;
 let lastResult: LastResult | null = null;
 let currentStages: Stage[] = [];
@@ -55,20 +67,29 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 function samplePixel(x: number, y: number): number[] {
+  return samplePixelMeasured(x, y).rgba;
+}
+
+function samplePixelMeasured(x: number, y: number): { rgba: number[]; finishMs: number; readPixelsMs: number } {
   const canvas = document.querySelector<HTMLCanvasElement>("canvas");
   const gl = canvas?.getContext("webgl2");
   assert(canvas && gl && targetFramebuffer !== undefined, "production Canvas WebGL2 framebuffer is unavailable");
   const pixel = new Uint8Array(4);
+  const finishStartedAt = performance.now();
   gl.finish();
+  const finishMs = performance.now() - finishStartedAt;
   const previous = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+  let readPixelsMs = 0;
   try {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, targetFramebuffer);
     gl.readBuffer(targetFramebuffer === null ? gl.BACK : gl.COLOR_ATTACHMENT0);
+    const readStartedAt = performance.now();
     gl.readPixels(x, canvas.height - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    readPixelsMs = performance.now() - readStartedAt;
   } finally {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, previous);
   }
-  return Array.from(pixel);
+  return { rgba: Array.from(pixel), finishMs, readPixelsMs };
 }
 
 async function instrumentedRendererLoader(jsUrl: string, wasmUrl: string) {
@@ -91,7 +112,10 @@ function ActionButtons(): React.ReactElement {
   return <div data-testid="g1b95-controls" style={{ position: "fixed", zIndex: 1000, top: 4, left: 4, display: "flex", flexWrap: "wrap", gap: 3 }}>
     {kinds.map((kind) => <button key={kind} data-g1b95-operation={kind} onClick={(event) => {
       if (!fixture || preparedOperation !== kind) throw new Error(`No prepared ${kind} workload`);
+      const handlerStartedAt = performance.now();
       const eventDispatchDelayMs = Math.max(0, performance.now() - event.timeStamp);
+      const expectedFrameGeneration = Number(document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-frame-count") ?? 0) + 1;
+      activeTiming = { sampleId: preparedSampleId, expectedFrameGeneration, interactionStartAt: event.timeStamp, handlerStartedAt, handlerCompletedAt: handlerStartedAt };
       const actionStarted = performance.now();
       currentStages = [];
       const operation = makeG1B95Operation(fixture, kind, preparedSerial);
@@ -107,13 +131,30 @@ function ActionButtons(): React.ReactElement {
           uiSelectionUpdateMs = performance.now() - selectionStarted;
         }
       }
+      const handlerCompletedAt = performance.now();
+      activeTiming.handlerCompletedAt = handlerCompletedAt;
       lastResult = {
         ok: result.ok,
         ...(!result.ok ? { diagnostic: result.diagnostic.code } : {}),
         operation: kind, storeActionMs, eventDispatchDelayMs, eventTimeStamp: event.timeStamp, uiSelectionUpdateMs,
+        handlerStartedAt, handlerCompletedAt, sampleId: preparedSampleId,
         stages: [...currentStages], candidate, selectionIds: [...useSelectionStore.getState().selectedIds],
       };
     }}>{kind}</button>)}
+    <button data-g1b95-operation="view-control" onClick={(event) => {
+      if (!fixture || preparedOperation !== "view-control") throw new Error("No prepared view-control workload");
+      const handlerStartedAt = performance.now();
+      const expectedFrameGeneration = Number(document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-frame-count") ?? 0) + 1;
+      activeTiming = { sampleId: preparedSampleId, expectedFrameGeneration, interactionStartAt: event.timeStamp, handlerStartedAt, handlerCompletedAt: handlerStartedAt };
+      const ui = useUiStore.getState();
+      useUiStore.setState({ panX: ui.panX + 1 });
+      const handlerCompletedAt = performance.now();
+      activeTiming.handlerCompletedAt = handlerCompletedAt;
+      lastResult = { ok: true, operation: "view-control", storeActionMs: handlerCompletedAt - handlerStartedAt,
+        eventDispatchDelayMs: Math.max(0, handlerStartedAt - event.timeStamp), eventTimeStamp: event.timeStamp,
+        uiSelectionUpdateMs: 0, handlerStartedAt, handlerCompletedAt, sampleId: preparedSampleId,
+        stages: [], candidate: null, selectionIds: [...useSelectionStore.getState().selectedIds] };
+    }}>view-control</button>
   </div>;
 }
 
@@ -132,10 +173,13 @@ function App(): React.ReactElement {
 window.addEventListener("error", (event) => errors.push(event.message));
 const root = createRoot(document.getElementById("root")!);
 (window as G1B95Window).__g1b95 = {
-  prepare: async (size, operation, serial) => {
+  prepare: async (size, operation, serial, sampleId = `${size}-${operation}-${serial}`) => {
     fixture = buildG1B95Fixture(size, serial);
     preparedOperation = operation;
     preparedSerial = serial;
+    preparedSampleId = sampleId;
+    activeTiming = null;
+    completedTimings.delete(sampleId);
     lastResult = null;
     currentStages = [];
     const page = fixture.page;
@@ -147,15 +191,18 @@ const root = createRoot(document.getElementById("root")!);
     useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
     const snapshot = { documentId: "95000001-0000-4000-8000-000000000001", pageOrder: fixture.pageOrder,
       pages: { [page.id]: page }, shapes: fixture.shapes };
-    const op = makeG1B95Operation(fixture, operation, serial);
-    if (op.kind.startsWith("compat-")) throw new Error("unexpected compatibility operation");
-    const supportedOperation = op as Exclude<HierarchyOperation, { readonly kind: `compat-${string}` }>;
-    const conformance = evaluateHierarchyOperationConformance(snapshot, supportedOperation, {
-      evaluateDocumentOperationJson: (documentJson, operationJson) => evaluate_document_operation_json(documentJson, operationJson),
-    });
-    if (!conformance.ok) throw new Error(`Rust candidate rejected ${operation}: ${conformance.phase}/${conformance.code} ${JSON.stringify(conformance.diagnostics ?? conformance.issues ?? [])}`);
-    if (!conformance.semanticEquivalent) throw new Error(`React/Rust candidate mismatch for ${operation}`);
-    candidate = { ok: true, semanticEquivalent: conformance.semanticEquivalent, timingsMs: conformance.timingsMs };
+    if (operation === "view-control") candidate = null;
+    else {
+      const op = makeG1B95Operation(fixture, operation, serial);
+      if (op.kind.startsWith("compat-")) throw new Error("unexpected compatibility operation");
+      const supportedOperation = op as Exclude<HierarchyOperation, { readonly kind: `compat-${string}` }>;
+      const conformance = evaluateHierarchyOperationConformance(snapshot, supportedOperation, {
+        evaluateDocumentOperationJson: (documentJson, operationJson) => evaluate_document_operation_json(documentJson, operationJson),
+      });
+      if (!conformance.ok) throw new Error(`Rust candidate rejected ${operation}: ${conformance.phase}/${conformance.code} ${JSON.stringify(conformance.diagnostics ?? conformance.issues ?? [])}`);
+      if (!conformance.semanticEquivalent) throw new Error(`React/Rust candidate mismatch for ${operation}`);
+      candidate = { ok: true, semanticEquivalent: conformance.semanticEquivalent, timingsMs: conformance.timingsMs };
+    }
   },
   fixture: () => {
     assert(fixture, "fixture is not prepared");
@@ -166,9 +213,36 @@ const root = createRoot(document.getElementById("root")!);
     const state = useDocumentStore.getState();
     return { page: state.pages[state.currentPageId], shapes: state.shapes, currentPageId: state.currentPageId };
   },
+  selection: () => [...useSelectionStore.getState().selectedIds],
   lastResult: () => lastResult,
+  timing: (sampleId) => {
+    const record = completedTimings.get(sampleId);
+    return record ? structuredClone(record) : null;
+  },
+  serializedState: () => {
+    const started = performance.now();
+    const state = useDocumentStore.getState();
+    const json = JSON.stringify({ page: state.pages[state.currentPageId], shapes: state.shapes, currentPageId: state.currentPageId });
+    return { json, serializationMs: performance.now() - started };
+  },
   samplePixel,
+  samplePixelMeasured,
   errors: () => [...errors],
+  activeSample: () => activeTiming ? { sampleId: activeTiming.sampleId, expectedFrameGeneration: activeTiming.expectedFrameGeneration } : null,
+  recordCanvasStage: (sampleId, stage, timestamp, frameGeneration) => {
+    if (!activeTiming || activeTiming.sampleId !== sampleId || completedTimings.has(sampleId)) return;
+    if (stage === "react_layout_commit_observed") activeTiming.reactLayoutCommitAt = timestamp;
+    if (stage === "renderer_effect_started") activeTiming.rendererEffectStartedAt = timestamp;
+    if (stage === "wasm_scene_sync_completed" && frameGeneration === activeTiming.expectedFrameGeneration) activeTiming.wasmSceneSyncCompletedAt = timestamp;
+    if (stage === "renderer_completion_raf" && frameGeneration === activeTiming.expectedFrameGeneration) activeTiming.rendererCompletionRafAt = timestamp;
+  },
+  publishFrame: (sampleId, timestamp, frameGeneration) => {
+    if (!activeTiming || activeTiming.sampleId !== sampleId || completedTimings.has(sampleId) || frameGeneration !== activeTiming.expectedFrameGeneration) return;
+    const completed = { ...activeTiming, framePublishedAt: timestamp, actualFrameGeneration: frameGeneration,
+      interactionToFrameMs: timestamp - activeTiming.interactionStartAt };
+    completedTimings.set(sampleId, Object.freeze(completed));
+    activeTiming = null;
+  },
 };
 
 void (async () => {
