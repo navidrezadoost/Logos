@@ -17,6 +17,7 @@ import { useSelectionStore } from "./selectionStore";
 import { planHierarchyOperation, type HierarchyOperation, type HierarchyOperationResult } from "./hierarchyOperations";
 import { buildSceneProjection } from "../render-wasm/scene-projection";
 import { scheduleRustShadowEvaluation } from "../document-core/rust-shadow-evaluation";
+import { recordG1B95Stage } from "../document-core/performance-probe";
 
 /** Generate a proper UUID v4 for shapes — required by the WASM bridge's uuidToU32x4(). */
 const shapeId = (): string => crypto.randomUUID();
@@ -402,6 +403,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   applyHierarchyOperationForPage: (pageId, operation) => {
     if (operation.kind.startsWith("compat-")) return { ok: false, diagnostic: { code: "LOGOS_OPERATION_COMPATIBILITY_BOUNDARY_REQUIRED" } };
+    const planningStarted = performance.now();
     const snapshot = get();
     const pageSnapshot = { ...snapshot, currentPageId: pageId };
     const [page, ...currentPageShapes] = selectCurrentPageScene(pageSnapshot);
@@ -414,12 +416,12 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         return { ok: false, diagnostic: { code: "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS" } };
       }
     }
-    const planningStarted = performance.now();
     const result = planHierarchyOperation(
       { pages: snapshot.pages, currentPageId: pageId, shapes: snapshot.shapes, currentPageShapes },
       operation,
     );
     const planningMs = performance.now() - planningStarted;
+    recordG1B95Stage("react_hierarchy_planning_validation", planningMs);
     const conformanceSnapshot = {
       // The editor store currently has no document identity field. The dedicated
       // harness supplies its explicit fixture identity through the shadow runtime.
@@ -430,7 +432,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     };
     if (result.ok) {
       const selectedBefore = useSelectionStore.getState().selectedIds;
+      const publicationStarted = performance.now();
       set({ pages: result.pages, shapes: result.shapes });
+      recordG1B95Stage("zustand_publication_wall", performance.now() - publicationStarted);
       if (result.replacementShapeId && selectedBefore.some((id) => result.affectedIds.includes(id))) {
         useSelectionStore.getState().select(result.replacementShapeId);
       }

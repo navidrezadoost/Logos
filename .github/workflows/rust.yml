@@ -19,6 +19,12 @@ on:
       - "logos-app/src/tokens/**"
       - "logos-app/src/test-support/**"
       - "logos-app/src/document-core/**"
+      - "docs/architecture/G1-B9.5-EDITOR-PERFORMANCE-QUALIFICATION.md"
+      - "logos-app/g1-b9-5-editor-performance.html"
+      - "logos-app/vite.g1-b9-5-editor-performance.config.ts"
+      - "logos-app/tsconfig.g1-b9-5-editor-performance.json"
+      - "test/benchmarks/g1-b9-5-editor-performance.mjs"
+      - "test/g1-b9-5-workload.test.ts"
       - "logos-app/test/revision-commit-coordinator.test.ts"
       - "logos-app/g1-b9-4-revision-smoke.html"
       - "logos-app/vite.g1-b9-4-revision-smoke.config.ts"
@@ -1069,6 +1075,58 @@ jobs:
           path: |
             ${{ runner.temp }}/g1-b9-4-revision-evidence.json
             ${{ runner.temp }}/g1-b9-4-revision-preview.log
+
+      - name: Test G1-B9.5 deterministic workload fixtures
+        working-directory: logos-app
+        run: ./node_modules/.bin/tsx --test ../test/g1-b9-5-workload.test.ts
+
+      - name: Build G1-B9.5 production editor performance harness
+        working-directory: logos-app
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/tsc --noEmit -p tsconfig.g1-b9-5-editor-performance.json
+          ./node_modules/.bin/vite build --config vite.g1-b9-5-editor-performance.config.ts
+          test -s build-g1-b9-5-editor-performance/assets/*.wasm
+          test -s dist/js/render-wasm.js
+          test -s dist/js/render-wasm.wasm
+
+      - name: Measure G1-B9.5 full editor workloads in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_bin="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "$chrome_bin" ]]; then
+            echo "ERROR: No headless Chrome/Chromium binary is installed on this runner" >&2
+            exit 1
+          fi
+          (
+            cd logos-app
+            ./node_modules/.bin/vite preview --config vite.g1-b9-5-editor-performance.config.ts \
+              --host 127.0.0.1 --port 4180
+          ) >"$RUNNER_TEMP/g1-b9-5-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4180/g1-b9-5-editor-performance.html >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4180/js/render-wasm.wasm >/dev/null
+          npm ci --prefix test/benchmarks --ignore-scripts --no-audit --no-fund
+          CHROME_BIN="$chrome_bin" node test/benchmarks/g1-b9-5-editor-performance.mjs \
+            http://127.0.0.1:4180/g1-b9-5-editor-performance.html \
+            "$RUNNER_TEMP/g1-b9-5-editor-performance.json" \
+            "$RUNNER_TEMP/g1-b9-5-pixel-evidence"
+
+      - name: Preserve G1-B9.5 raw, pixel and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g1-b9-5-editor-performance-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/g1-b9-5-editor-performance.json
+            ${{ runner.temp }}/g1-b9-5-pixel-evidence/**
+            ${{ runner.temp }}/g1-b9-5-preview.log
 
       - name: Build DT-C3.1 token workflow browser smoke
         working-directory: logos-app
