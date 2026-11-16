@@ -19,6 +19,7 @@ on:
       - "logos-app/src/tokens/**"
       - "logos-app/src/test-support/**"
       - "logos-app/src/document-core/**"
+      - "docs/architecture/G1-B9.5-EDITOR-PERFORMANCE-QUALIFICATION.md"
       - "logos-app/g1-b9-5-editor-performance.html"
       - "logos-app/vite.g1-b9-5-editor-performance.config.ts"
       - "logos-app/tsconfig.g1-b9-5-editor-performance.json"
