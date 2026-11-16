@@ -227,6 +227,13 @@ async function launchRun(round) {
             assert.equal(browserTiming.sampleId, sampleId);
             assert.equal(browserTiming.actualFrameGeneration, browserTiming.expectedFrameGeneration,
               `${operation} frame generation did not match its sample`);
+            for (const timestamp of [browserTiming.interactionStartAt, browserTiming.handlerStartedAt,
+              browserTiming.handlerCompletedAt, browserTiming.reactLayoutCommitAt,
+              browserTiming.rendererEffectStartedAt, browserTiming.wasmSceneSyncCompletedAt,
+              browserTiming.rendererCompletionRafAt, browserTiming.framePublishedAt]) {
+              assert(Number.isFinite(timestamp), `${operation} browser-local timing stage is missing`);
+            }
+            assert.deepEqual(after.timing, browserTiming, "post-frame extraction changed the browser-local timing sample");
             const frameMetrics = after.metrics;
             evidence.rawSamples.push({
               round, size, shapeCount: size, operation,
