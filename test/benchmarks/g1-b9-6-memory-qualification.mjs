@@ -21,6 +21,7 @@ const runId = randomUUID();
 let runDirectory;
 let report;
 let sourceProvenance;
+let verifiedBuildFiles = new Map();
 
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 function stateHash(state) { return sha256(JSON.stringify(state)); }
@@ -84,9 +85,10 @@ async function verifyPreviewBuild(previewUrl) {
     if (body.length !== artifact.bytes || sha256(body) !== artifact.sha256)
       fail("BLOCKED: served preview artifact does not match its build checksum");
   }
-  return { commitSha: provenance.commitSha, treeSha: provenance.treeSha, sourceIdentity: provenance.sourceIdentity,
+  verifiedBuildFiles = new Map(provenance.buildArtifacts.map((artifact) => [artifact.path, artifact]));
+  return { summary: { commitSha: provenance.commitSha, treeSha: provenance.treeSha, sourceIdentity: provenance.sourceIdentity,
     entry: provenance.entry, artifactCount: provenance.buildArtifacts.length,
-    artifactSetSha256: sha256(JSON.stringify(provenance.buildArtifacts)) };
+    artifactSetSha256: sha256(JSON.stringify(provenance.buildArtifacts)) }, files: verifiedBuildFiles };
 }
 
 async function verifyFinalArtifactSet(directory, runRecords, references) {
@@ -263,9 +265,22 @@ async function launchBrowserRound({ round, previewUrl, runDirectory }) {
     const pageErrors = [];
     const wasmResponses = [];
     const responseTasks = [];
+    const loadedBuildFiles = new Set();
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("response", (response) => {
-    if (new URL(response.url()).pathname === "/js/render-wasm.wasm") responseTasks.push((async () => {
+      const url = new URL(response.url());
+      if (url.origin !== previewUrl.origin) return;
+      const assetPath = decodeURIComponent(url.pathname.slice(1));
+      const resourceType = response.request().resourceType();
+      if (["document", "script", "stylesheet", "worker"].includes(resourceType)) responseTasks.push((async () => {
+        const expected = verifiedBuildFiles.get(assetPath);
+        if (!expected) fail("BLOCKED: browser loaded a build asset absent from source provenance");
+        const body = await response.body();
+        if (response.status() !== 200 || body.byteLength !== expected.bytes || sha256(body) !== expected.sha256)
+          fail("BLOCKED: browser-executed asset differs from the verified source build");
+        loadedBuildFiles.add(assetPath);
+      })());
+      if (url.pathname === "/js/render-wasm.wasm") responseTasks.push((async () => {
         const body = await response.body();
         wasmResponses.push({ status: response.status(), bytes: body.byteLength, sha256: sha256(body) });
       })());
@@ -273,6 +288,9 @@ async function launchBrowserRound({ round, previewUrl, runDirectory }) {
     await page.goto(previewUrl.href, { waitUntil: "load", timeout: 30000 });
     await page.waitForFunction(() => document.querySelector("#g1b95-status")?.dataset.status === "ready", undefined, { timeout: 90000 });
     await Promise.all(responseTasks);
+    if (!loadedBuildFiles.has("g1-b9-5-editor-performance.html") ||
+        ![...loadedBuildFiles].some((file) => file.startsWith("assets/") && file.endsWith(".js")))
+      fail("BLOCKED: actual browser document and application bundle were not verified against the source build");
     if (pageErrors.length || !wasmResponses.length || wasmResponses.some((item) => item.status !== 200 || item.bytes <= 0))
       fail("BLOCKED: production application or renderer WASM failed to load cleanly");
     const browserMeta = await page.evaluate(() => {
@@ -356,7 +374,8 @@ async function main() {
       "No product memory budget is authorized; observed deltas are not leak verdicts or qualification passes."] };
   report.authorization = validateMemoryRunAuthorization(JSON.parse(await readFile(authorizationInput, "utf8")));
   report.status = "RUNNING";
-  report.buildProvenance = await verifyPreviewBuild(previewUrl);
+  const buildProvenance = await verifyPreviewBuild(previewUrl);
+  report.buildProvenance = buildProvenance.summary;
   for (let round = 1; round <= browserRounds; round += 1)
     report.browserRuns.push(await launchBrowserRound({ round, previewUrl, runDirectory }));
   const artifactRefs = report.artifacts;

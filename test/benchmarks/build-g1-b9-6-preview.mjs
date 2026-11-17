@@ -51,7 +51,7 @@ async function main() {
   if (build.error || build.status !== 0) throw new Error("BLOCKED: source-bound Canvas smoke build failed");
   const htmlPath = path.join(outputRoot, "g1-b9-5-editor-performance.html");
   if (!(await stat(htmlPath).catch(() => null))?.isFile()) throw new Error("BLOCKED: expected Canvas smoke HTML missing from build");
-  const buildArtifacts = await listBuildFiles(outputRoot);
+  const buildArtifacts = (await listBuildFiles(outputRoot)).sort((left, right) => left.path.localeCompare(right.path));
   if (!buildArtifacts.some((item) => item.path === "g1-b9-5-editor-performance.html"))
     throw new Error("BLOCKED: smoke HTML is not part of the verified build artifact set");
   const provenance = { schema: "logos.g1-b9-6.build-provenance/v1", commitSha, treeSha, sourceIdentity,
