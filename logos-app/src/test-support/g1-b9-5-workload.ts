@@ -16,6 +16,8 @@ function uuid(counter: number): string {
 }
 
 export interface G1B95Fixture {
+  /** Stable test-only identity for Rust candidate evaluation; never written to the document store. */
+  documentId: string;
   page: Page;
   pageOrder: string[];
   shapes: Record<string, Shape>;
@@ -99,7 +101,8 @@ export function buildG1B95Fixture(size: G1B95Size, serial = 1): G1B95Fixture {
   for (const id of [redLeaf, orangeLeaf, blueLeaf]) shapes[id].bounds = { x: 20, y: 20, w: 60, h: 60 };
 
   const page: Page = { id: pageId, name: `G1-B9.5 ${size}`, rootShapeIds: roots };
-  return { page, pageOrder: [pageId], shapes, idsByLevel, rootA: roots[0], rootB: roots[1], branchA, branchB, redLeaf, orangeLeaf, blueLeaf };
+  return { documentId: uuid(700000 + size), page, pageOrder: [pageId], shapes, idsByLevel,
+    rootA: roots[0], rootB: roots[1], branchA, branchB, redLeaf, orangeLeaf, blueLeaf };
 }
 
 function isDescendantOf(shapes: Record<string, Shape>, id: string, ancestorId: string): boolean {

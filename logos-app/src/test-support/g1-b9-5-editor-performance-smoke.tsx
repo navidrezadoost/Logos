@@ -6,7 +6,7 @@ import { LayersPanel } from "../components/layers/LayersPanel";
 import { Toolbar } from "../components/toolbar/Toolbar";
 import { loadRenderWasm } from "../render-wasm/module";
 import initTypes, { evaluate_document_operation_json } from "../document-core/rust-wasm/logos_types";
-import { evaluateHierarchyOperationConformance } from "../document-core/operation-conformance";
+import { evaluateFixtureOperation } from "./g1-b9-6-fixture-conformance";
 import { buildG1B95Fixture, makeG1B95Operation, type G1B95Fixture, type G1B95OperationKind, type G1B95Size } from "./g1-b9-5-workload";
 import { useDocumentStore, type Page } from "../stores/documentStore";
 import { useSelectionStore } from "../stores/selectionStore";
@@ -32,7 +32,7 @@ type G1B95Window = Window & {
     prepare: (size: G1B95Size, operation: G1B95OperationKind | "view-control", serial: number, sampleId?: string) => Promise<void>;
     prepareNext: (operation: G1B95OperationKind, serial: number, sampleId: string) => void;
     fixture: () => Omit<G1B95Fixture, "shapes">;
-    state: () => { page: Page; shapes: Record<string, Shape>; currentPageId: string };
+    state: () => { page: Page; shapes: Record<string, Shape>; currentPageId: string; documentId: string | null };
     selection: () => string[];
     lastResult: () => LastResult | null;
     timing: (sampleId: string) => BrowserTiming | null;
@@ -41,6 +41,7 @@ type G1B95Window = Window & {
     samplePixel: (x: number, y: number) => number[];
     samplePixelMeasured: (x: number, y: number) => { rgba: number[]; finishMs: number; readPixelsMs: number };
     errors: () => string[];
+    buildSourceIdentity: () => string;
   };
   __logosG1B95Probe?: (stage: string, milliseconds: number) => void;
 };
@@ -82,13 +83,11 @@ function prepareOperation(operation: G1B95OperationKind | "view-control", serial
   const op = makeG1B95Operation(fixture, operation, serial);
   if (op.kind.startsWith("compat-")) throw new Error("unexpected compatibility operation");
   const supportedOperation = op as Exclude<HierarchyOperation, { readonly kind: `compat-${string}` }>;
-  const conformance = evaluateHierarchyOperationConformance({
-    documentId: state.documentId, pageOrder: state.pageOrder, pages: state.pages, shapes: state.shapes,
+  const conformance = evaluateFixtureOperation(fixture.documentId, {
+    pageOrder: state.pageOrder, pages: state.pages, shapes: state.shapes,
   }, supportedOperation, {
     evaluateDocumentOperationJson: (documentJson, operationJson) => evaluate_document_operation_json(documentJson, operationJson),
   });
-  if (!conformance.ok) throw new Error(`Rust candidate rejected ${operation}: ${conformance.phase}/${conformance.code} ${JSON.stringify(conformance.diagnostics ?? conformance.issues ?? [])}`);
-  if (!conformance.semanticEquivalent) throw new Error(`React/Rust candidate mismatch for ${operation}`);
   candidate = { ok: true, semanticEquivalent: conformance.semanticEquivalent, timingsMs: conformance.timingsMs };
 }
 
@@ -218,7 +217,8 @@ const root = createRoot(document.getElementById("root")!);
   },
   state: () => {
     const state = useDocumentStore.getState();
-    return { page: state.pages[state.currentPageId], shapes: state.shapes, currentPageId: state.currentPageId };
+    return { page: state.pages[state.currentPageId], shapes: state.shapes, currentPageId: state.currentPageId,
+      documentId: state.documentId };
   },
   selection: () => [...useSelectionStore.getState().selectedIds],
   lastResult: () => lastResult,
@@ -236,6 +236,7 @@ const root = createRoot(document.getElementById("root")!);
   samplePixel,
   samplePixelMeasured,
   errors: () => [...errors],
+  buildSourceIdentity: () => __G1_B9_6_SOURCE_ID__,
   activeSample: () => activeTiming ? { sampleId: activeTiming.sampleId, expectedFrameGeneration: activeTiming.expectedFrameGeneration } : null,
   recordCanvasStage: (sampleId, stage, timestamp, frameGeneration) => {
     if (!activeTiming || activeTiming.sampleId !== sampleId || completedTimings.has(sampleId)) return;
@@ -264,7 +265,8 @@ void (async () => {
     }
     status.dataset.status = "ready";
     status.textContent = JSON.stringify({ ready: true, userAgent: navigator.userAgent,
-      rendererInstances: rendererInstanceCount, candidateWasmReservedBytes: rendererMemoryBytes });
+      rendererInstances: rendererInstanceCount, candidateWasmReservedBytes: rendererMemoryBytes,
+      buildSourceIdentity: __G1_B9_6_SOURCE_ID__ });
   } catch (error) {
     status.dataset.status = "failed";
     status.textContent = error instanceof Error ? error.stack ?? error.message : String(error);

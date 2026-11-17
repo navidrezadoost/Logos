@@ -1,5 +1,6 @@
 node_modules/
 dist/
 build/
+build-g1-b9-6-memory/
 .env
 *.local

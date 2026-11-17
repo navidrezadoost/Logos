@@ -7,8 +7,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { captureChromiumHeapSnapshot, comparePostGcSnapshots } from "./g1-b9-6-memory-capture.mjs";
-import { assertLoopbackPreviewUrl, MEMORY_OPERATION_SEQUENCE, summarizeMemoryDeltas,
-  validateMemoryArtifacts, validateMemoryRunAuthorization } from "./g1-b9-6-memory-evidence.mjs";
+import { assertCleanSourceStatus, assertLoopbackPreviewUrl, MEMORY_OPERATION_SEQUENCE, summarizeMemoryDeltas,
+  validateBuildProvenance, validateMemoryArtifacts, validateMemoryRunAuthorization,
+  verifyMemoryArtifactFiles } from "./g1-b9-6-memory-evidence.mjs";
 
 const [previewInput, artifactsInput, authorizationInput] = process.argv.slice(2);
 const sizes = [21, 85, 341];
@@ -16,10 +17,10 @@ const warmupCycles = Number(process.env.LOGOS_MEMORY_WARMUP_CYCLES ?? 5);
 const measuredCycles = Number(process.env.LOGOS_MEMORY_MEASURED_CYCLES ?? 3);
 const browserRounds = 2;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
 const runId = randomUUID();
 let runDirectory;
 let report;
+let sourceProvenance;
 
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
 function stateHash(state) { return sha256(JSON.stringify(state)); }
@@ -59,6 +60,40 @@ async function sha256File(filePath) {
   return hash.digest("hex");
 }
 
+function getCleanSourceProvenance() {
+  const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: repoRoot, encoding: "utf8" });
+  assertCleanSourceStatus(status);
+  const commitSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
+  const treeSha = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { cwd: repoRoot, encoding: "utf8" }).trim();
+  if (!/^[a-f0-9]{40}$/i.test(commitSha) || !/^[a-f0-9]{40}$/i.test(treeSha)) fail("BLOCKED: Git source identity is invalid");
+  return { commitSha, treeSha, sourceIdentity: `${commitSha}:${treeSha}` };
+}
+
+async function verifyPreviewBuild(previewUrl) {
+  const provenanceResponse = await fetch(new URL("/g1-b9-6-build-provenance.json", previewUrl));
+  if (!provenanceResponse.ok) fail("BLOCKED: source-bound preview build provenance is unavailable");
+  let parsed;
+  try { parsed = await provenanceResponse.json(); }
+  catch { fail("BLOCKED: preview build provenance is malformed"); }
+  const provenance = validateBuildProvenance(parsed, sourceProvenance.sourceIdentity);
+  for (const artifact of provenance.buildArtifacts) {
+    const artifactPath = artifact.path.split("/").map(encodeURIComponent).join("/");
+    const response = await fetch(new URL(`/${artifactPath}`, previewUrl));
+    if (!response.ok) fail("BLOCKED: a preview build artifact cannot be fetched for source verification");
+    const body = Buffer.from(await response.arrayBuffer());
+    if (body.length !== artifact.bytes || sha256(body) !== artifact.sha256)
+      fail("BLOCKED: served preview artifact does not match its build checksum");
+  }
+  return { commitSha: provenance.commitSha, treeSha: provenance.treeSha, sourceIdentity: provenance.sourceIdentity,
+    entry: provenance.entry, artifactCount: provenance.buildArtifacts.length,
+    artifactSetSha256: sha256(JSON.stringify(provenance.buildArtifacts)) };
+}
+
+async function verifyFinalArtifactSet(directory, runRecords, references) {
+  validateMemoryArtifacts(runRecords, sizes, browserRounds, measuredCycles, references);
+  await verifyMemoryArtifactFiles(directory, references);
+}
+
 async function setupFixture(page, size, fixtureSerial, sampleId) {
   const oldGeneration = await page.locator("[data-renderer-status]").getAttribute("data-renderer-frame-count");
   await page.evaluate(([workloadSize, serial, id]) => window.__g1b95.prepare(workloadSize, "view-control", serial, id),
@@ -80,6 +115,7 @@ async function setupFixture(page, size, fixtureSerial, sampleId) {
   });
   if (setup.rendererStatus !== "READY" || setup.backend !== "wasm" || !setup.metrics) fail("BLOCKED: production Rust/WASM Canvas did not reach READY");
   if (Object.keys(setup.state.shapes).length !== size) fail(`BLOCKED: fixture shape count mismatch for ${size}`);
+  if (setup.state.documentId !== null) fail("FAILED: test fixture must not claim production document identity");
   if (setup.errors.length) fail("BLOCKED: browser runtime error during fixture setup");
   return { ...setup, stateDigest: stateHash(setup.state), fixtureHash: sha256(JSON.stringify({ size, fixture: setup.fixture, state: setup.state })) };
 }
@@ -193,7 +229,7 @@ async function runCycle(page, { round, size, cycle, fixture, fixtureSerial, sour
       backend: document.querySelector("[data-renderer-status]")?.getAttribute("data-renderer-backend"),
       errors: window.__g1b95.errors() };
   });
-  if (stateHash(reset.state) !== fixture.stateDigest || reset.status !== "READY" || reset.backend !== "wasm" || reset.errors.length)
+  if (stateHash(reset.state) !== fixture.stateDigest || reset.state.documentId !== null || reset.status !== "READY" || reset.backend !== "wasm" || reset.errors.length)
     fail(`FAILED: fixture reset did not restore the verified ${size}-shape baseline`);
   assertPixelEqual(reset.pixels.overlap, fixture.pixels.overlap, "reset overlap");
   assertPixelEqual(reset.pixels.create, fixture.pixels.create, "reset create");
@@ -211,7 +247,8 @@ async function captureCheckpoint({ session, runDirectory, runId, browserSessionI
   if (!details.isFile() || details.size !== record.bytes || record.sha256.length !== 64 || await sha256File(filePath) !== record.sha256)
     fail("BLOCKED: raw heap snapshot integrity verification failed");
   const checkpointRecord = { ...record, file };
-  report.artifacts.push({ file, sha256: record.sha256, bytes: record.bytes, status: record.status });
+  report.artifacts.push({ file, sha256: record.sha256, bytes: record.bytes, status: record.status,
+    runId: record.runId, browserSessionId: record.browserSessionId, fixtureHash: record.fixtureHash, checkpoint: record.checkpoint });
   return checkpointRecord;
 }
 
@@ -246,15 +283,19 @@ async function launchBrowserRound({ round, previewUrl, runDirectory }) {
       return { userAgent: navigator.userAgent, chromiumVersion: navigator.userAgent.match(/Chrome\/([0-9.]+)/)?.[1] ?? "unknown",
         viewport: { width: innerWidth, height: innerHeight }, devicePixelRatio,
         rendererStatus: root?.getAttribute("data-renderer-status"), backend: root?.getAttribute("data-renderer-backend"),
+        buildSourceIdentity: window.__g1b95.buildSourceIdentity(),
         bootstrap: JSON.parse(document.querySelector("#g1b95-status")?.textContent ?? "{}"),
         webgl: gl ? { version: gl.getParameter(gl.VERSION), vendor: debug ? gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
           renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER) } : null };
     });
+    if (browserMeta.buildSourceIdentity !== sourceProvenance.sourceIdentity ||
+        browserMeta.bootstrap.buildSourceIdentity !== sourceProvenance.sourceIdentity)
+      fail("BLOCKED: executing browser bundle is not bound to the verified source revision");
     if (browserMeta.rendererStatus !== "READY" || browserMeta.backend !== "wasm" || browserMeta.bootstrap.rendererInstances < 1 || !browserMeta.webgl?.version)
       fail("BLOCKED: actual production Rust/WASM renderer evidence is missing");
     const browserSessionId = randomUUID();
     const cdp = await page.context().newCDPSession(page);
-    const browserRun = { status: "CAPTURED_NOT_QUALIFIED", round, browserSessionId,
+    const browserRun = { status: "CAPTURED_NOT_QUALIFIED", runId, round, browserSessionId,
       browser: { ...browserMeta, platform: process.platform, architecture: process.arch, osRelease: os.release(), node: process.version },
       renderer: { backend: browserMeta.backend, wasmSha256: wasmResponses[0].sha256, wasmBytes: wasmResponses[0].bytes,
         wasmReservedBytes: browserMeta.bootstrap.candidateWasmReservedBytes, wasmResponses }, fixtures: [] };
@@ -299,11 +340,14 @@ async function main() {
   if (!previewInput || !artifactsInput || !authorizationInput) fail("Usage: node g1-b9-6-memory-qualification.mjs <loopback-preview-url> <absolute-artifact-directory-outside-repository> <owner-authorization.json>");
   if (!Number.isInteger(warmupCycles) || warmupCycles < 5 || !Number.isInteger(measuredCycles) || measuredCycles < 2)
     fail("BLOCKED: require at least five warmup cycles and two measured cycles");
+  sourceProvenance = getCleanSourceProvenance();
   const previewUrl = assertLoopbackPreviewUrl(previewInput);
   const outputRoot = await configurePrivateOutput(artifactsInput);
   runDirectory = path.join(outputRoot, runId);
   await mkdir(runDirectory, { recursive: false, mode: 0o700 });
-  report = { schema: "logos.g1-b9-6.memory-evidence/v1", status: "BLOCKED", runId, sourceSha,
+  report = { schema: "logos.g1-b9-6.memory-evidence/v1", status: "BLOCKED", runId,
+    sourceSha: sourceProvenance.commitSha, sourceTreeSha: sourceProvenance.treeSha,
+    sourceIdentity: sourceProvenance.sourceIdentity,
     methodology: { fixtureSizes: sizes, operations: MEMORY_OPERATION_SEQUENCE,
       warmupCycles, measuredCycles, browserRounds, gcPolicy: "EXPLICIT_CHROMIUM_GC_BEFORE_SNAPSHOT",
       endpointPolicy: "memory-only; no performance qualification or retained-memory threshold" },
@@ -312,21 +356,25 @@ async function main() {
       "No product memory budget is authorized; observed deltas are not leak verdicts or qualification passes."] };
   report.authorization = validateMemoryRunAuthorization(JSON.parse(await readFile(authorizationInput, "utf8")));
   report.status = "RUNNING";
+  report.buildProvenance = await verifyPreviewBuild(previewUrl);
   for (let round = 1; round <= browserRounds; round += 1)
     report.browserRuns.push(await launchBrowserRound({ round, previewUrl, runDirectory }));
-  validateMemoryArtifacts(report.browserRuns, sizes, browserRounds, measuredCycles);
   const artifactRefs = report.artifacts;
-  for (const artifact of artifactRefs) {
-    const details = await stat(path.join(runDirectory, artifact.file));
-    if (!details.isFile() || details.size !== artifact.bytes) fail("BLOCKED: final raw artifact set is incomplete");
-  }
+  await verifyFinalArtifactSet(runDirectory, report.browserRuns, artifactRefs);
   report.artifacts = artifactRefs;
   report.status = "OBSERVED_NOT_QUALIFIED";
   report.completedAt = new Date().toISOString();
   const reportContents = `${JSON.stringify(report, null, 2)}\n`;
-  await writeFile(path.join(runDirectory, "memory-report.json"), reportContents, { mode: 0o600, flag: "wx" });
+  const reportPath = path.join(runDirectory, "memory-report.json");
+  await writeFile(reportPath, reportContents, { mode: 0o600, flag: "wx" });
+  // Recheck private snapshots immediately before final manifest publication.
+  // The failure handler rewrites both outputs as BLOCKED on any mismatch.
+  await verifyFinalArtifactSet(runDirectory, report.browserRuns, artifactRefs);
+  const publishedReport = await readFile(reportPath, "utf8");
   await writeJson(path.join(runDirectory, "manifest.json"), { schema: "logos.g1-b9-6.memory-manifest/v1", runId,
-    sourceSha, report: "memory-report.json", reportSha256: sha256(reportContents), artifacts: artifactRefs });
+    status: report.status, sourceSha: sourceProvenance.commitSha, sourceTreeSha: sourceProvenance.treeSha,
+    sourceIdentity: sourceProvenance.sourceIdentity, buildProvenance: report.buildProvenance,
+    report: "memory-report.json", reportSha256: sha256(publishedReport), artifacts: artifactRefs });
   process.stdout.write(`OBSERVED_NOT_QUALIFIED ${runId}\n`);
 }
 
@@ -335,13 +383,17 @@ try {
 } catch (error) {
   const message = error instanceof Error ? error.message : "BLOCKED: unknown qualification failure";
   if (runDirectory) {
-    report ??= { schema: "logos.g1-b9-6.memory-evidence/v1", runId, sourceSha };
+    report ??= { schema: "logos.g1-b9-6.memory-evidence/v1", runId,
+      ...(sourceProvenance ? { sourceSha: sourceProvenance.commitSha, sourceTreeSha: sourceProvenance.treeSha,
+        sourceIdentity: sourceProvenance.sourceIdentity } : {}) };
     report.status = message.startsWith("FAILED:") ? "FAILED" : "BLOCKED";
     report.failure = message.slice(0, 500);
     report.completedAt = new Date().toISOString();
     await writeFile(path.join(runDirectory, "memory-report.json"), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 }).catch(() => {});
     await writeFile(path.join(runDirectory, "manifest.json"), `${JSON.stringify({ schema: "logos.g1-b9-6.memory-manifest/v1",
-      runId, sourceSha, status: report.status, report: "memory-report.json", artifacts: report.artifacts ?? [] }, null, 2)}\n`, { mode: 0o600 }).catch(() => {});
+      runId, ...(sourceProvenance ? { sourceSha: sourceProvenance.commitSha, sourceTreeSha: sourceProvenance.treeSha,
+        sourceIdentity: sourceProvenance.sourceIdentity } : {}), status: report.status,
+      report: "memory-report.json", artifacts: report.artifacts ?? [] }, null, 2)}\n`, { mode: 0o600 }).catch(() => {});
   }
   process.stderr.write(`${report?.status ?? "BLOCKED"}: ${message}\n`);
   process.exitCode = 1;

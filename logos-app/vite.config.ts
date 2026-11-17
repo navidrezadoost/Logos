@@ -63,5 +63,7 @@ export default defineConfig({
     __LOGOS_LAYOUT_WASM__: JSON.stringify("/js/logos_layout_wasm.wasm"),
     __LOGOS_TOKENS_WASM__: JSON.stringify("/js/logos_tokens_wasm.wasm"),
     __LOGOS_VECTOR_WASM__: JSON.stringify("/js/logos_vector_wasm.wasm"),
+    // Empty outside the dedicated, source-bound G1-B9.6 memory smoke build.
+    __G1_B9_6_SOURCE_ID__: JSON.stringify(""),
   },
 });
