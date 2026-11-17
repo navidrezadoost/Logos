@@ -3,9 +3,9 @@ import { dirname } from "node:path";
 import { link, mkdir, open, readFile, rm, unlink } from "node:fs/promises";
 
 // CDP capture primitive only. This does NOT qualify editor memory performance.
-export async function captureChromiumHeapSnapshot({ session, filePath, runId, browserSessionId, fixtureHash, checkpoint, authorizedIsolatedRun = false }) {
+export async function captureChromiumHeapSnapshot({ session, filePath, artifactId, runId, browserSessionId, fixtureHash, checkpoint, authorizedIsolatedRun = false }) {
   if (!authorizedIsolatedRun) throw new Error("BLOCKED: independent disposable-environment authorization required");
-  for (const [key, value] of Object.entries({ filePath, runId, browserSessionId, fixtureHash, checkpoint })) {
+  for (const [key, value] of Object.entries({ filePath, artifactId, runId, browserSessionId, fixtureHash, checkpoint })) {
     if (typeof value !== "string" || !value.trim()) throw new Error(`BLOCKED: ${key} required`);
   }
   if (!session || !["send", "on", "off"].every((key) => typeof session[key] === "function"))
@@ -58,7 +58,7 @@ export async function captureChromiumHeapSnapshot({ session, filePath, runId, br
     }
     await link(partial, filePath); // no-clobber publish
     await unlink(partial);
-    return { status: "CAPTURED_NOT_QUALIFIED", runId, browserSessionId, fixtureHash, checkpoint,
+    return { status: "CAPTURED_NOT_QUALIFIED", artifactId, runId, browserSessionId, fixtureHash, checkpoint,
       gcPolicy: "EXPLICIT_CHROMIUM_GC_BEFORE_SNAPSHOT", gcInvoked: true,
       bytes, chunks, sha256: hash.digest("hex"), nodeCount: nodes.length / fields.length, snapshotSelfSizeBytes };
   } finally {
@@ -77,8 +77,8 @@ export function comparePostGcSnapshots(baseline, after) {
   }
   for (const key of ["runId", "browserSessionId", "fixtureHash"])
     if (!baseline[key] || baseline[key] !== after[key]) throw new Error(`BLOCKED: ${key} mismatch`);
-  if (baseline.checkpoint === after.checkpoint || baseline.sha256 === after.sha256)
-    throw new Error("BLOCKED: snapshots must be distinct");
+  if (!baseline.artifactId || !after.artifactId || baseline.checkpoint === after.checkpoint || baseline.artifactId === after.artifactId)
+    throw new Error("BLOCKED: snapshot checkpoints and artifacts must be distinct");
   return { status: "OBSERVED_POST_GC_SNAPSHOT_DELTA_NOT_QUALIFIED",
     runId: baseline.runId, browserSessionId: baseline.browserSessionId, fixtureHash: baseline.fixtureHash,
     baselineCheckpoint: baseline.checkpoint, afterCheckpoint: after.checkpoint,

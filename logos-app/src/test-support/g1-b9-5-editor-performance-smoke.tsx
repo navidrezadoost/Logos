@@ -30,11 +30,13 @@ type BrowserTiming = { sampleId: string; expectedFrameGeneration: number; intera
 type G1B95Window = Window & {
   __g1b95?: {
     prepare: (size: G1B95Size, operation: G1B95OperationKind | "view-control", serial: number, sampleId?: string) => Promise<void>;
+    prepareNext: (operation: G1B95OperationKind, serial: number, sampleId: string) => void;
     fixture: () => Omit<G1B95Fixture, "shapes">;
     state: () => { page: Page; shapes: Record<string, Shape>; currentPageId: string };
     selection: () => string[];
     lastResult: () => LastResult | null;
     timing: (sampleId: string) => BrowserTiming | null;
+    discardTiming: (sampleId: string) => void;
     serializedState: () => { json: string; serializationMs: number };
     samplePixel: (x: number, y: number) => number[];
     samplePixelMeasured: (x: number, y: number) => { rgba: number[]; finishMs: number; readPixelsMs: number };
@@ -64,6 +66,30 @@ function reportStage(stage: string, milliseconds: number): void {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function prepareOperation(operation: G1B95OperationKind | "view-control", serial: number, sampleId: string): void {
+  assert(fixture, "fixture is not prepared");
+  preparedOperation = operation;
+  preparedSerial = serial;
+  preparedSampleId = sampleId;
+  activeTiming = null;
+  completedTimings.delete(sampleId);
+  lastResult = null;
+  currentStages = [];
+  if (operation === "view-control") { candidate = null; return; }
+  const state = useDocumentStore.getState();
+  const op = makeG1B95Operation(fixture, operation, serial);
+  if (op.kind.startsWith("compat-")) throw new Error("unexpected compatibility operation");
+  const supportedOperation = op as Exclude<HierarchyOperation, { readonly kind: `compat-${string}` }>;
+  const conformance = evaluateHierarchyOperationConformance({
+    documentId: state.documentId, pageOrder: state.pageOrder, pages: state.pages, shapes: state.shapes,
+  }, supportedOperation, {
+    evaluateDocumentOperationJson: (documentJson, operationJson) => evaluate_document_operation_json(documentJson, operationJson),
+  });
+  if (!conformance.ok) throw new Error(`Rust candidate rejected ${operation}: ${conformance.phase}/${conformance.code} ${JSON.stringify(conformance.diagnostics ?? conformance.issues ?? [])}`);
+  if (!conformance.semanticEquivalent) throw new Error(`React/Rust candidate mismatch for ${operation}`);
+  candidate = { ok: true, semanticEquivalent: conformance.semanticEquivalent, timingsMs: conformance.timingsMs };
 }
 
 function samplePixel(x: number, y: number): number[] {
@@ -175,35 +201,16 @@ const root = createRoot(document.getElementById("root")!);
 (window as G1B95Window).__g1b95 = {
   prepare: async (size, operation, serial, sampleId = `${size}-${operation}-${serial}`) => {
     fixture = buildG1B95Fixture(size, serial);
-    preparedOperation = operation;
-    preparedSerial = serial;
-    preparedSampleId = sampleId;
-    activeTiming = null;
-    completedTimings.delete(sampleId);
-    lastResult = null;
-    currentStages = [];
     const page = fixture.page;
     const hydrated = useDocumentStore.getState().hydrateDocument({
       pages: { [page.id]: page }, pageOrder: fixture.pageOrder, currentPageId: page.id, shapes: fixture.shapes,
     });
     if (!hydrated.ok) throw new Error(`fixture hydration failed: ${hydrated.diagnostic.code}`);
-    useSelectionStore.getState().select(operation === "subtree-delete" ? fixture.redLeaf : fixture.redLeaf);
+    useSelectionStore.getState().select(fixture.redLeaf);
     useUiStore.setState({ zoom: 1, panX: 0, panY: 0, activeTool: "select" });
-    const snapshot = { documentId: "95000001-0000-4000-8000-000000000001", pageOrder: fixture.pageOrder,
-      pages: { [page.id]: page }, shapes: fixture.shapes };
-    if (operation === "view-control") candidate = null;
-    else {
-      const op = makeG1B95Operation(fixture, operation, serial);
-      if (op.kind.startsWith("compat-")) throw new Error("unexpected compatibility operation");
-      const supportedOperation = op as Exclude<HierarchyOperation, { readonly kind: `compat-${string}` }>;
-      const conformance = evaluateHierarchyOperationConformance(snapshot, supportedOperation, {
-        evaluateDocumentOperationJson: (documentJson, operationJson) => evaluate_document_operation_json(documentJson, operationJson),
-      });
-      if (!conformance.ok) throw new Error(`Rust candidate rejected ${operation}: ${conformance.phase}/${conformance.code} ${JSON.stringify(conformance.diagnostics ?? conformance.issues ?? [])}`);
-      if (!conformance.semanticEquivalent) throw new Error(`React/Rust candidate mismatch for ${operation}`);
-      candidate = { ok: true, semanticEquivalent: conformance.semanticEquivalent, timingsMs: conformance.timingsMs };
-    }
+    prepareOperation(operation, serial, sampleId);
   },
+  prepareNext: (operation, serial, sampleId) => prepareOperation(operation, serial, sampleId),
   fixture: () => {
     assert(fixture, "fixture is not prepared");
     const { shapes: _shapes, ...metadata } = fixture;
@@ -219,6 +226,7 @@ const root = createRoot(document.getElementById("root")!);
     const record = completedTimings.get(sampleId);
     return record ? structuredClone(record) : null;
   },
+  discardTiming: (sampleId) => { completedTimings.delete(sampleId); },
   serializedState: () => {
     const started = performance.now();
     const state = useDocumentStore.getState();

@@ -25,7 +25,7 @@ class FakeCDP extends EventEmitter {
   }
 }
 const options = (session, filePath) => ({
-  session, filePath, runId: "run-1", browserSessionId: "browser-1", fixtureHash: "fixture-sha256",
+  session, filePath, artifactId: path.basename(filePath), runId: "run-1", browserSessionId: "browser-1", fixtureHash: "fixture-sha256",
   checkpoint: "post-warmup", authorizedIsolatedRun: true,
 });
 async function withTemp(fn) {
@@ -74,11 +74,13 @@ test("missing chunks, malformed snapshots and CDP failure clean up", async () =>
 test("compares only distinct post-GC checkpoints in one run/browser/fixture", () => {
   const baseline = { status: "CAPTURED_NOT_QUALIFIED", gcInvoked: true,
     gcPolicy: "EXPLICIT_CHROMIUM_GC_BEFORE_SNAPSHOT", runId: "r", browserSessionId: "b",
-    fixtureHash: "f", checkpoint: "baseline", sha256: "a", snapshotSelfSizeBytes: 200 };
-  const after = { ...baseline, checkpoint: "after-cycle", sha256: "b", snapshotSelfSizeBytes: 175 };
+    fixtureHash: "f", artifactId: "baseline.heapsnapshot", checkpoint: "baseline", sha256: "a", snapshotSelfSizeBytes: 200 };
+  const after = { ...baseline, artifactId: "after.heapsnapshot", checkpoint: "after-cycle", sha256: "b", snapshotSelfSizeBytes: 175 };
   assert.equal(comparePostGcSnapshots(baseline, after).deltaSnapshotSelfSizeBytes, -25);
   assert.throws(() => comparePostGcSnapshots(baseline, { ...after, fixtureHash: "other" }), /fixtureHash mismatch/);
   assert.throws(() => comparePostGcSnapshots(baseline, { ...after, browserSessionId: "other" }), /browserSessionId mismatch/);
-  assert.throws(() => comparePostGcSnapshots(baseline, { ...after, sha256: "a" }), /distinct/);
+  assert.equal(comparePostGcSnapshots(baseline, { ...after, sha256: "a" }).deltaSnapshotSelfSizeBytes, -25,
+    "identical snapshot content hashes remain valid distinct artifacts");
+  assert.throws(() => comparePostGcSnapshots(baseline, { ...after, artifactId: "baseline.heapsnapshot" }), /distinct/);
   assert.throws(() => comparePostGcSnapshots(baseline, { ...after, gcInvoked: false }), /invalid/);
 });
