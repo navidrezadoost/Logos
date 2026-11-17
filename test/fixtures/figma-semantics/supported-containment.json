@@ -1,0 +1,58 @@
+{
+  "fixtureVersion": 1,
+  "description": "Current React hierarchy subset: ordered page roots and Rectangle children under Frame and Group.",
+  "pageId": "00000000-0000-4000-8000-000000000101",
+  "pageName": "Figma semantics contract fixture",
+  "rootShapeIds": [
+    "00000000-0000-4000-8000-000000000102",
+    "00000000-0000-4000-8000-000000000103",
+    "00000000-0000-4000-8000-000000000104"
+  ],
+  "nodes": [
+    {
+      "id": "00000000-0000-4000-8000-000000000102",
+      "type": "frame",
+      "name": "Frame root",
+      "bounds": { "x": 0, "y": 0, "w": 180, "h": 120 },
+      "parentId": null,
+      "children": ["00000000-0000-4000-8000-000000000105"]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000105",
+      "type": "rect",
+      "name": "Frame child",
+      "bounds": { "x": 10, "y": 10, "w": 30, "h": 24 },
+      "parentId": "00000000-0000-4000-8000-000000000102",
+      "children": []
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000103",
+      "type": "group",
+      "name": "Group root",
+      "bounds": { "x": 220, "y": 0, "w": 180, "h": 120 },
+      "parentId": null,
+      "children": ["00000000-0000-4000-8000-000000000106"]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000106",
+      "type": "rect",
+      "name": "Group child",
+      "bounds": { "x": 230, "y": 10, "w": 30, "h": 24 },
+      "parentId": "00000000-0000-4000-8000-000000000103",
+      "children": []
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000104",
+      "type": "rect",
+      "name": "Rectangle root",
+      "bounds": { "x": 450, "y": 0, "w": 30, "h": 24 },
+      "parentId": null,
+      "children": []
+    }
+  ],
+  "expectedRendererRootOrder": [
+    "00000000-0000-4000-8000-000000000104",
+    "00000000-0000-4000-8000-000000000103",
+    "00000000-0000-4000-8000-000000000102"
+  ]
+}

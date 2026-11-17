@@ -1,0 +1,121 @@
+# Figma Semantic Compatibility Contract
+
+**Status:** Behavioral reference and source-backed compatibility inventory  
+**Scope:** Current React/Zustand editor projection, candidate Rust document contract, renderer and related component/layout/token models  
+**Authority:** This contract sets a target for observable editor behavior. It does not make the Rust candidate production-authoritative or change any saved-file format.
+
+Logos uses Figma Design's observable document hierarchy and editing semantics as the compatibility reference. This means future work must match user-visible structure and behavior where the relevant capability is in scope. Figma's private implementation is not treated as known or copied. This document classifies the current implementation; it does not claim parity based on names or appearance.
+
+## 1. Reference model
+
+The behavioral reference is a design file/document containing ordered pages; each page owns an ordered scene-node tree. Workspace, team, and folder/project organization sit outside the scene tree. Pages contain scene nodes, and nodes have a single parent (or are page roots), stable identity, and ordered children where the node kind permits containment. Frames, groups, sections, components, component sets, instances, and leaf shapes have distinct semantics; they are not interchangeable generic containers.
+
+The user-visible reference rules used here are:
+
+- A document has pages; a page's children are layers in painter order. Figma documents page children as ordered back-to-front (index 0 is bottommost). [Figma Document API](https://developers.figma.com/docs/plugins/accessing-document/), [PageNode API](https://developers.figma.com/docs/plugins/api/PageNode/)
+- Frames are explicit containers. They may nest, clip content, and provide frame-specific constraints or auto layout. Groups are distinct: their bounds follow their contents and they do not behave like frames for constraints. [Frames](https://help.figma.com/hc/en-us/articles/360041539473-Frames-in-Figma-Design), [Groups vs. frames](https://help.figma.com/hc/en-us/articles/360039832054-The-difference-between-frames-and-groups), [Constraints](https://help.figma.com/hc/en-us/articles/360039957734-Apply-constraints-to-define-how-layers-resize)
+- Sections organize canvas content and may contain nested sections and other layer types; sections cannot be children of frames or groups. [Sections](https://help.figma.com/hc/en-us/articles/9771500257687-Organize-your-canvas-with-sections)
+- A component set contains component variants. An instance refers to a main component, can receive supported property overrides and variant swaps, and remains linked until detached. [Component sets and variants](https://help.figma.com/hc/en-us/articles/360056440594-Create-and-use-variants), [InstanceNode API](https://developers.figma.com/docs/plugins/api/InstanceNode/), [Instance changes](https://help.figma.com/hc/en-us/articles/360039150733-Apply-changes-to-instances), [Detach an instance](https://help.figma.com/hc/en-us/articles/360038665754-Detach-an-instance-from-the-component)
+- Visibility and lock state are node properties. Reparenting changes hierarchy and stacking order; an accepted operation must preserve identity and either preserve world geometry or explicitly define the changed geometry. [Figma REST node types](https://developers.figma.com/docs/rest-api/file-node-types/)
+
+The containment matrix below is a **target rule matrix**, not a statement that Logos implements all target node kinds. For components and instances, the tree refers to the exposed scene hierarchy; definition links and overrides remain separate semantic relations.
+
+| Parent | Allowed direct children in the reference model | Current Logos disposition |
+|---|---|---|
+| Document | Pages | **PARTIALLY COMPATIBLE** — React has `pageOrder` and `pages`; there is no active document envelope in that store. Rust `Document` is an additive candidate only. |
+| Page | Section, Frame, Group, Component, Component Set, Instance, leaf shape | **PARTIALLY COMPATIBLE** — `rootShapeIds` is ordered and strict create supports only Frame/Rectangle. Compatibility additions can preserve other legacy node records, with renderer diagnostics for unsupported types. |
+| Section | Section, Frame, Group, Component, Component Set, Instance, leaf shape | **NOT IMPLEMENTED** — no Section shape kind or section-specific nesting rule. |
+| Frame | Frame, Group, Component, Instance, leaf shape | **PARTIALLY COMPATIBLE** — strict child insertion currently accepts Rectangle only; compatibility paths and hydration can retain broader existing trees. Frame-specific clipping/layout parity is not established. |
+| Group | Group, Frame, Component, Instance, leaf shape | **PARTIALLY COMPATIBLE** — strict child insertion currently accepts Rectangle only; group-specific bounds behavior is not established. |
+| Component (main definition) | Frame, Group, Component, Instance, leaf shape | **PARTIALLY COMPATIBLE** — component promotion/metadata exist in React; the component registry/default tree is separately stored and is not one atomic document model. |
+| Component Set | Component variants only | **NOT IMPLEMENTED** — no component-set node or enforced variant membership. |
+| Instance | Exposed instance subtree/overrides as defined by its main component | **PARTIALLY COMPATIBLE** — an `instance` shape and override metadata exist, but resolution is separate, shallow, and not demonstrated as a live linked scene subtree. |
+| Leaf shape | None | **PARTIALLY COMPATIBLE** — primitive shapes exist; the shared scene validator checks graph reciprocity but the React shape type set is broader than the renderer-supported set. |
+
+### Current validated containment subset
+
+These are the only new containment relationships this contract treats as accepted by the current strict hierarchy-operation boundary. The fixture-backed test is [`figma-semantic-compatibility.test.mjs`](../../test/figma-semantics/figma-semantic-compatibility.test.mjs), using [`supported-containment.json`](../../test/fixtures/figma-semantics/supported-containment.json).
+
+| Current operation | Logos parent → child | Status | Acceptance evidence |
+|---|---|---|---|
+| `create-root` | Page → Rectangle | **PARTIALLY COMPATIBLE** | `page-roots-and-ordered-containment` |
+| `create-root` | Page → Frame | **PARTIALLY COMPATIBLE** | `page-roots-and-ordered-containment` |
+| `insert-child` | Frame → Rectangle | **PARTIALLY COMPATIBLE** | `frame-and-group-rectangle-children` |
+| `insert-child` | Group → Rectangle | **PARTIALLY COMPATIBLE** | `frame-and-group-rectangle-children` |
+
+“Partially” reflects that these relationships match the reference's broad hierarchy but the complete Figma behavior (all child node kinds, order convention mapping, frame/group geometry, and persistence round-trip) is not established. Existing compatibility/hydration paths are characterized separately; they do not expand this strict supported subset.
+
+## 2. Current architecture inventory and status
+
+| Area | Current implementation and evidence | Status |
+|---|---|---|
+| Workspace/team/folder/project | Workspace and project resources are outside `documentStore`; no source-backed contract connects them to page/node ownership. | **NOT VERIFIED** |
+| Document and pages | React stores `pages`, explicit `pageOrder`, `currentPageId`, and global shape records. Rust's versioned `Document` contains ordered pages and flat page-owned shape records but is documented as not wired to React, Go, persistence, or existing reads/writes. | **PARTIALLY COMPATIBLE** |
+| Scene graph reciprocity | React `Page.rootShapeIds`, `Shape.parentId`, and ordered `Shape.children`; `buildSceneProjection` and hydration validate root/child reciprocity, unique ownership, cycles and reachability. Rust candidate validates corresponding page/root/parent/child invariants. | **PARTIALLY COMPATIBLE** — graph shape is similar; allowed node-kind rules and conversion/persistence parity differ. |
+| Root and sibling ordering | React stores semantic root/child arrays. Scene projection converts source top-first arrays to renderer back-to-front arrays by reversing them. Figma's page order is back-to-front. There is no demonstrated save/load parity establishing one shared convention. | **PARTIALLY COMPATIBLE** |
+| Frames | React has `frame`, child membership, layout fields and frame creation. Strict creation currently creates page roots; strict child insertion is Rectangle-only. Candidate renderer/transform evidence does not establish full Figma frame constraints, clipping, or nested transforms. | **PARTIALLY COMPATIBLE** |
+| Groups | React has `group` and strict Rectangle child insertion. Dynamic group bounds and group-specific resize/transform semantics are not established. | **PARTIALLY COMPATIBLE** |
+| Sections | No React/Rust document scene-node kind or section containment validation found in the audited paths. | **NOT IMPLEMENTED** |
+| Components | React `component` shape and compatibility promotion carry metadata; `componentStore` separately snapshots defaults and property definitions. Registration and document-shape edits are not proven to be one atomic document transaction. | **PARTIALLY COMPATIBLE** |
+| Component sets/variants | Component properties and variant values exist, but there is no `ComponentSet` node or enforced component-only set membership. | **NOT IMPLEMENTED** |
+| Instances and overrides | React `instance` carries `componentId`, variant properties and override map. Component and instance records live in a separate Zustand store. `applyOverrides` shallow-spreads fields and drops missing shape paths; link propagation, supported-property policy, swaps, detach and persisted fidelity are not established. | **PARTIALLY COMPATIBLE** |
+| Primitive/leaf type system | React includes rectangle, circle/ellipse, path, text, SVG raw, vector network, bool, component and instance. Rust candidate `ShapeType` includes Frame, Rect, Circle, Path, Image, Text, Group, Bool and Component; the sets and field layouts differ. Renderer support is a narrower, separately checked capability set. | **PARTIALLY COMPATIBLE** |
+| Visibility | React `Shape.hidden` exists and is carried in scene data. Cross-surface semantics for nested hidden descendants, selection and every renderer path are not covered by the cited acceptance suite. | **PARTIALLY COMPATIBLE** |
+| Locking | React `Shape.locked` is used by hierarchy operations to reject structural edits; Rust candidate encodes React lock only as an extension in prior conformance evidence. Figma selection and property-edit behavior for locks is not matched end-to-end. | **PARTIALLY COMPATIBLE** |
+| Selection | React has a separate selection store; A10 hierarchy operations reconcile deleted selections and page switching clears selection. Hidden-node selection policy and a full Canvas/Layers/Inspector parity contract remain unverified. | **PARTIALLY COMPATIBLE** |
+| Transforms | React stores both `bounds`, `transform`, and `rotation`. Rust stores `selrect`, affine matrix/inverse, rotation, and optional cached points. Existing G1-B5 evidence identifies unresolved composition/pivot and transformed-parent/Canvas parity. | **INCOMPATIBLE** for claiming general transformed-node parity; keep unsupported transformed conversion gated. |
+| Clipping | Rust `masked_group` exists; React `Shape` has no corresponding canonical field. Renderer has some frame clip traversal, but complete nested transformed clipping equivalence is not demonstrated. | **PARTIALLY COMPATIBLE** |
+| Reparenting | A10 operation has same-page reparent, explicit `preserveWorldPosition: true`, cycle/lock/order checks, and graph validation. Supported transform conversion is restricted; cross-page movement is rejected/ambiguous. Figma parity for all transforms and all node kinds is not established. | **PARTIALLY COMPATIBLE** |
+| Auto Layout/constraints | React shape has partial flex layout attributes; Rust `logos-layout` and renderer modifiers have separate calculation paths, and existing evidence finds no shared parity contract. Rust `Shape` has constraints, but they are not the React layout schema. | **PARTIALLY COMPATIBLE** |
+| Variables/tokens | Tokens, themes and active modes are persisted by a separate `tokenStore`; token workflow preview is transient. No canonical page/document binding is represented in the React `Shape` contract. Rust token schema/engine is not the document's persisted variable model. | **NOT IMPLEMENTED** for Figma-compatible document-scoped variable collections, modes and property bindings; current import/runtime capabilities remain partial and separately scoped. |
+| Identity | React uses stable UUID strings for document/page/shape records. Rust candidate uses UUID values and page IDs; parent and child references reuse shape IDs. Component-store defaults and overrides have their own IDs/paths without a proven durable lifecycle. | **PARTIALLY COMPATIBLE** |
+| Hydration/import and saved files | React hydration is an atomic validated load boundary and preserves unknown shape fields through plain-object data. Rust candidate supports top-level/page/shape extensions and a quarantine envelope. No adapter proves lossless existing-format conversion across React/Rust/Go. | **NOT VERIFIED** for round-trip compatibility; do not rewrite or migrate existing saved documents under this contract. |
+
+### Source inventory
+
+- React page/document projection and hydration: [`documentStore.ts`](../../logos-app/src/stores/documentStore.ts), [`shapes.ts`](../../logos-app/src/types/shapes.ts), [`hierarchyOperations.ts`](../../logos-app/src/stores/hierarchyOperations.ts).
+- Scene graph checks and renderer order conversion: [`scene-projection.ts`](../../logos-app/src/render-wasm/scene-projection.ts), [`scene.ts`](../../logos-app/src/render-wasm/scene.ts).
+- Candidate Rust envelope and graph semantics: [`document.rs`](../../rust/logos-types/src/document.rs), [`shape.rs`](../../rust/logos-types/src/shape.rs).
+- Component definitions, variants and resolution: [`componentStore.ts`](../../logos-app/src/stores/componentStore.ts).
+- Token collections and themes in the current runtime: [`tokenStore.ts`](../../logos-app/src/stores/tokenStore.ts), [`tokenWorkflowPreviewStore.ts`](../../logos-app/src/stores/tokenWorkflowPreviewStore.ts), [`contract.ts`](../../logos-app/src/tokens/contract.ts).
+- Existing renderer transform/clip limitations: [`G1-B5 transform and renderer findings`](G1-B5-TRANSFORM-RENDERER-CONFORMANCE.md).
+- Candidate ownership and boundaries: [`G1-B1 canonical document ADR`](G1-B1-CANONICAL-DOCUMENT-ADR.md); this contract does not amend that proposal or its production-adoption gate.
+
+## 3. Normative behavior for future Logos work
+
+1. **One document graph:** pages own roots; each node has zero or one parent; every parent child-list entry reciprocates the child's parent link; every node is reachable from exactly one page root. No implicit repair, reparenting, ID regeneration, or silent data loss is permitted during load.
+2. **Explicit node-kind rules:** a node kind declares whether it is a container and which kinds it may contain. Section restrictions, ComponentSet membership, and leaf-ness are semantic validation, not UI-only conventions.
+3. **Stable identity:** page, node, component, component-set, and variable identities survive valid edits, save/load, and import/export. Derived renderer IDs and previews are never persisted as user identities.
+4. **Single ordering convention:** persisted sibling lists have a documented order. Adapters map that order explicitly to Figma's back-to-front painter order; a renderer's reversal is not a document mutation.
+5. **Visibility and lock are distinct:** hidden affects rendering/hit testing according to a declared policy; locked remains selectable if the product policy allows it but rejects prohibited mutation. Ancestor effects are explicit and tested.
+6. **Geometry contract:** local bounds, transform matrix, rotation, pivot, coordinate space and composition order have one normative definition. Reparenting either preserves world geometry within a stated tolerance or is rejected before mutation. Unsupported shear, perspective, or ambiguous imported transforms are preserved-and-rejected, not approximated silently.
+7. **Frame and group distinction:** frame clipping, constraints and layout belong to Frames; group bounds and transforms follow group semantics. No generic `isContainer` flag alone can stand in for all behavior.
+8. **Components and instances are graph-linked domain entities:** component definition, set membership, instance main-component identity, variant selection, override paths, detach and deletion consequences are validated together with the scene operation. Overrides identify supported target properties; unknown paths are diagnosed and preserved/quarantined rather than silently applied or discarded.
+9. **Variables are document-scoped semantic data:** collections, modes, aliases, typed values, bindings, and contextual resolution require a versioned document boundary and durable identity. A separate runtime store or visual preview is not evidence of persisted compatibility.
+10. **Atomic operations:** build an immutable proposed change, validate the complete affected graph and operation invariants, then commit once. Rejection leaves document, identity, ordering, selection and renderer-visible state unchanged.
+
+## 4. Existing-document compatibility and migration policy
+
+- Current React/Zustand and saved-file formats remain untouched by this milestone. No schema version, Go persistence boundary, canonical owner, or Rust production authority is changed.
+- Existing data is interpreted only through an explicit adapter. Unknown fields and IDs must be preserved or the adapter rejects/quarantines the source with a stable diagnostic. “Best effort” conversion must not silently drop unsupported shapes, transforms, component data, variable bindings, or hierarchy membership.
+- A fixture generated from the current React shape projection is a characterization fixture, not proof of an existing `.penpot`, `.logos`, server, or legacy file round trip. Real representative documents are still required before migration acceptance.
+- If a valid older document encodes semantics not supported by the active renderer, retain its source data and report the rendering limitation. Do not normalize it into a lossy alternative tree.
+- No compatibility adapter may infer canonical page ownership from a shape's parent alone where a shape can be shared or referenced. Cross-page moves require explicit source and destination ownership plus one atomic operation.
+
+## 5. Minimum compatibility work, in dependency order
+
+1. **Freeze observable vocabulary and order:** add versioned node-kind/containment definitions, one persisted order convention, and a reference fixture set. Keep current adapters as-is until conversions are covered.
+2. **Close graph semantics:** add explicit Section and ComponentSet kinds/rules, validate container-child kinds, and test root/child membership, cycles, reciprocal edges, visibility, locking and deletion effects. Do not retrofit a generic container rule where semantics differ.
+3. **Prove geometry semantics:** choose local-coordinate and pivot rules using real editor-produced fixtures; reconcile `bounds`/`selrect`, `rotation`/matrix, frame clipping and painter ordering. Only then widen reparent support.
+4. **Unify component domain operations:** model definition/set/instance references, supported overrides, variant swap, detach and deletion transactionally; preserve IDs and unknown payloads.
+5. **Reconcile layout and variables:** choose explicit parity fixtures across current layout paths; define document-scoped collections/modes/bindings and versioned import/export before connecting them to shape properties.
+6. **Prove adapters and persistence:** create representative real-format fixtures and lossless-or-reject conversion tests across React, Rust and Go boundaries. Do not change durable formats or promote Rust authority until the canonical ownership decision and migration plan authorize it.
+7. **Qualify actual editor behavior:** Chromium tests must exercise production Canvas, Layers and Inspector; verify pixels, interaction results, selection, and rejected-operation immutability. Report local and hosted evidence separately.
+
+These steps are proposals for future milestones. They do not authorize subsystem rewrites. A rewrite is justified only by a concrete invariant defect that cannot be corrected at a bounded adapter or operation boundary.
+
+## 6. Focused regression fixture and evidence
+
+The deterministic JSON fixture [`supported-containment.json`](../../test/fixtures/figma-semantics/supported-containment.json) defines page roots, a Frame and Group with Rectangle children, IDs, and sibling order. [`figma-semantic-compatibility.test.mjs`](../../test/figma-semantics/figma-semantic-compatibility.test.mjs) hydrates that exact graph, exercises the validated root/child operations, and checks parent-child reciprocity, root/sibling ordering, renderer order projection, and atomic rejection for unsupported child kinds. It is a test of the current supported subset; it does not imply Section, ComponentSet, instance, transformed-parent, layout, or saved-file parity.
+
+The existing [`A10 hierarchy operation tests`](../../test/a10/hierarchy-operations.test.mjs) additionally cover stable IDs, create-root, reparent, cycle rejection, subtree deletion, lock rejection, hydration, and unsupported-rendering diagnostics. These tests are functional contract evidence, not browser pixel or historical-file evidence.
