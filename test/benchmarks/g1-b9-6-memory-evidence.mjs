@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
+import { validateBuildProvenanceRenderer } from "./g1-b9-6-renderer-artifacts.mjs";
 
 export const MEMORY_OPERATION_SEQUENCE = Object.freeze([
   "sibling-reorder", "root-reorder", "create", "insert-child", "rename", "reparent", "subtree-delete",
@@ -64,8 +65,9 @@ export function validateBuildProvenance(record, expectedSourceIdentity) {
     paths.add(artifact.path);
   }
   if (!paths.has(record.entry)) throw new Error("BLOCKED: preview build entry is not in the artifact set");
+  validateBuildProvenanceRenderer(record);
   return { commitSha: record.commitSha, treeSha: record.treeSha, sourceIdentity: record.sourceIdentity,
-    entry: record.entry, buildArtifacts: record.buildArtifacts };
+    entry: record.entry, renderer: record.renderer, buildArtifacts: record.buildArtifacts };
 }
 
 export function assertCleanSourceStatus(statusOutput) {

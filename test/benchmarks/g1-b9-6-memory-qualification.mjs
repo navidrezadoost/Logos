@@ -10,6 +10,7 @@ import { captureChromiumHeapSnapshot, comparePostGcSnapshots } from "./g1-b9-6-m
 import { assertCleanSourceStatus, assertLoopbackPreviewUrl, MEMORY_OPERATION_SEQUENCE, summarizeMemoryDeltas,
   validateBuildProvenance, validateMemoryArtifacts, validateMemoryRunAuthorization,
   verifyMemoryArtifactFiles } from "./g1-b9-6-memory-evidence.mjs";
+import { assertWasmRuntimeEvidence } from "./g1-b9-6-renderer-artifacts.mjs";
 
 const [previewInput, artifactsInput, authorizationInput] = process.argv.slice(2);
 const sizes = [21, 85, 341];
@@ -162,6 +163,10 @@ async function executeOperation(page, { round, size, cycle, operation, operation
       result, state, selection, pixels, errors: window.__g1b95.errors(), firstTiming, finalTiming: window.__g1b95.timing(id), extraDiagnostics };
   }, sampleId);
   await page.evaluate((id) => window.__g1b95.discardTiming(id), sampleId);
+  try {
+    assertWasmRuntimeEvidence({ status: after.status, backend: after.backend,
+      operationSucceeded: after.result?.ok === true, framebufferPixels: Object.values(after.pixels) });
+  } catch (error) { fail(error instanceof Error ? error.message : "BLOCKED: renderer runtime evidence missing"); }
   if (JSON.stringify(observedTiming) !== JSON.stringify(after.firstTiming) || JSON.stringify(after.firstTiming) !== JSON.stringify(after.finalTiming))
     fail(`FAILED: post-frame diagnostics changed frozen timing for ${operation}`);
   if (after.status !== "READY" || after.backend !== "wasm" || !after.metrics || after.errors.length) fail(`FAILED: renderer/browser evidence missing after ${operation}`);

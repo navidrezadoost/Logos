@@ -5,6 +5,7 @@ import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertCleanSourceStatus } from "./g1-b9-6-memory-evidence.mjs";
+import { validateBuildProvenanceRenderer, verifyRendererAssets } from "./g1-b9-6-renderer-artifacts.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const appRoot = path.join(repoRoot, "logos-app");
@@ -44,6 +45,7 @@ async function main() {
   const commitSha = commit.stdout.trim();
   const treeSha = tree.stdout.trim();
   const sourceIdentity = `${commitSha}:${treeSha}`;
+  const renderer = await verifyRendererAssets(path.join(appRoot, "dist", "js"), sourceIdentity);
   const vitePath = path.join(appRoot, "node_modules", "vite", "bin", "vite.js");
   const build = spawnSync(process.execPath, [vitePath, "build", "--config", "vite.g1-b9-6-memory.config.ts"], {
     cwd: appRoot, stdio: "inherit", env: { ...process.env, LOGOS_MEMORY_SOURCE_ID: sourceIdentity },
@@ -55,7 +57,9 @@ async function main() {
   if (!buildArtifacts.some((item) => item.path === "g1-b9-5-editor-performance.html"))
     throw new Error("BLOCKED: smoke HTML is not part of the verified build artifact set");
   const provenance = { schema: "logos.g1-b9-6.build-provenance/v1", commitSha, treeSha, sourceIdentity,
-    entry: "g1-b9-5-editor-performance.html", buildArtifacts };
+    entry: "g1-b9-5-editor-performance.html", renderer, buildArtifacts };
+  validateBuildProvenanceRenderer(provenance);
+  await verifyRendererAssets(path.join(outputRoot, "js"), sourceIdentity, renderer);
   await mkdir(outputRoot, { recursive: true });
   await writeFile(path.join(outputRoot, "g1-b9-6-build-provenance.json"), `${JSON.stringify(provenance, null, 2)}\n`,
     { mode: 0o644, flag: "wx" });
