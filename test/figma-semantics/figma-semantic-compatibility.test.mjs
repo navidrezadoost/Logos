@@ -13,6 +13,8 @@ let server;
 let useDocumentStore;
 let useSelectionStore;
 let createRect;
+let hierarchyContract;
+let buildSceneProjection;
 
 before(async () => {
   server = await createServer({
@@ -26,6 +28,8 @@ before(async () => {
   ({ useDocumentStore } = await server.ssrLoadModule("/src/stores/documentStore.ts"));
   ({ useSelectionStore } = await server.ssrLoadModule("/src/stores/selectionStore.ts"));
   ({ createRect } = await server.ssrLoadModule("/src/types/shapes.ts"));
+  hierarchyContract = await server.ssrLoadModule("/src/document-core/figmaHierarchyContract.ts");
+  ({ buildSceneProjection } = await server.ssrLoadModule("/src/render-wasm/scene-projection.ts"));
 });
 
 after(async () => server?.close());
@@ -66,6 +70,35 @@ test("page-roots-and-ordered-containment", () => {
   assert.equal(store.shapes[rectRootId].parentId, null);
   assert.deepEqual(store.shapes[fixture.rootShapeIds[0]].children, [fixture.nodes[1].id]);
   assert.deepEqual(store.shapes[fixture.rootShapeIds[1]].children, [fixture.nodes[3].id]);
+  const hydratedProjection = buildSceneProjection(
+    store.pages[fixture.pageId],
+    store.shapes,
+    store.pages[fixture.pageId].rootShapeIds,
+  );
+  assert.equal(hydratedProjection.ok, true);
+  assert.deepEqual(hydratedProjection.plan.sourceRootIds, fixture.rootShapeIds);
+  assert.deepEqual(hydratedProjection.plan.rendererRootChildrenIds, fixture.expectedRendererRootOrder);
+  assert.deepEqual(
+    hydratedProjection.plan.nodes.filter((node) => !node.synthetic).map((node) => node.id).sort(),
+    fixture.nodes.map((node) => node.id).sort(),
+  );
+  const liveSnapshot = useDocumentStore.getState();
+  const jsonRoundTrip = JSON.parse(JSON.stringify({
+    pages: liveSnapshot.pages,
+    pageOrder: liveSnapshot.pageOrder,
+    currentPageId: liveSnapshot.currentPageId,
+    shapes: liveSnapshot.shapes,
+  }));
+  const rehydrated = useDocumentStore.getState().hydrateDocument(jsonRoundTrip);
+  assert.equal(rehydrated.ok, true, rehydrated.ok ? "" : rehydrated.diagnostic.code);
+  const afterRoundTrip = useDocumentStore.getState();
+  assert.deepEqual(afterRoundTrip.pageOrder, [fixture.pageId]);
+  assert.deepEqual(afterRoundTrip.pages[fixture.pageId].rootShapeIds, fixture.rootShapeIds);
+  for (const node of fixture.nodes) {
+    assert.equal(afterRoundTrip.shapes[node.id].id, node.id);
+    assert.equal(afterRoundTrip.shapes[node.id].parentId, node.parentId);
+    assert.deepEqual(afterRoundTrip.shapes[node.id].children, node.children);
+  }
 
   const root = {
     ...createRect("00000000-0000-4000-8000-000000000108", "Created frame", { x: 1, y: 2, w: 80, h: 60 }),
@@ -79,6 +112,8 @@ test("page-roots-and-ordered-containment", () => {
   const createdRect = useDocumentStore.getState().applyHierarchyOperation({ kind: "create-root", shape: nextRect });
   assert.equal(createdRect.ok, true);
   assert.equal(useDocumentStore.getState().pages[fixture.pageId].rootShapeIds[0], nextRect.id);
+  const nextPageId = useDocumentStore.getState().addPage("Second page");
+  assert.deepEqual(useDocumentStore.getState().pageOrder, [fixture.pageId, nextPageId]);
 });
 
 test("frame-and-group-rectangle-children", () => {
@@ -115,4 +150,84 @@ test("unsupported-strict-child-kind-rejects-atomically", () => {
   assert.equal(useDocumentStore.getState().pages, before.pages);
   assert.equal(useDocumentStore.getState().shapes, before.shapes);
   assert.equal(useSelectionStore.getState().selectedIds, selectedBefore);
+});
+
+test("versioned-containment-and-order-contract-is-renderer-independent", () => {
+  const contract = hierarchyContract.FIGMA_HIERARCHY_CONTRACT_V1;
+  assert.equal(contract.version, 1);
+  assert.deepEqual(contract.strictOperations, [
+    "create-root", "insert-child", "rename", "delete", "reorder", "reorder-root-list", "reparent",
+  ]);
+  assert.equal(hierarchyContract.allowsStrictContainment("page", "frame"), true);
+  assert.equal(hierarchyContract.allowsStrictContainment("page", "rect"), true);
+  assert.equal(hierarchyContract.allowsStrictContainment("frame", "rect"), true);
+  assert.equal(hierarchyContract.allowsStrictContainment("group", "rect"), true);
+  assert.equal(hierarchyContract.allowsStrictContainment("rect", "rect"), false);
+  assert.equal(hierarchyContract.allowsStrictContainment("frame", "frame"), false);
+  assert.deepEqual(contract.unsupportedReferenceSemantics, ["section", "component-set", "instance"]);
+  assert.match(contract.ordering.roots, /front-to-back/);
+  assert.match(contract.ordering.children, /front-to-back/);
+  assert.match(contract.ordering.renderer, /reverse once/);
+});
+
+test("strict-reorder-reparent-delete-preserve-membership-order-and-selection", () => {
+  const store = hydrateFixture();
+  const [frameId, groupId] = fixture.rootShapeIds;
+  const originalFrameChild = fixture.nodes[1].id;
+  const originalGroupChild = fixture.nodes[3].id;
+  const secondFrameChildId = "00000000-0000-4000-8000-000000000112";
+  const secondFrameChild = createRect(secondFrameChildId, "Second frame child", { x: 60, y: 20, w: 8, h: 8 });
+  assert.equal(store.applyHierarchyOperation({ kind: "insert-child", parentId: frameId, shape: secondFrameChild, index: 1 }).ok, true);
+
+  const reordered = useDocumentStore.getState().applyHierarchyOperation({ kind: "reorder", shapeId: secondFrameChildId, toIndex: 0 });
+  assert.equal(reordered.ok, true);
+  assert.deepEqual(useDocumentStore.getState().shapes[frameId].children, [secondFrameChildId, originalFrameChild]);
+
+  const beforeRootIds = [...fixture.rootShapeIds];
+  const rootOrder = [...beforeRootIds].reverse();
+  const rootsReordered = useDocumentStore.getState().applyHierarchyOperation({ kind: "reorder-root-list", rootShapeIds: rootOrder });
+  assert.equal(rootsReordered.ok, true);
+  assert.deepEqual(useDocumentStore.getState().pages[fixture.pageId].rootShapeIds, rootOrder);
+
+  const moved = useDocumentStore.getState().applyHierarchyOperation({
+    kind: "reparent",
+    shapeId: originalFrameChild,
+    parentId: groupId,
+    index: 1,
+    preserveWorldPosition: true,
+  });
+  assert.equal(moved.ok, true, moved.ok ? "" : moved.diagnostic.code);
+  let state = useDocumentStore.getState();
+  assert.equal(state.shapes[originalFrameChild].id, originalFrameChild);
+  assert.equal(state.shapes[originalFrameChild].parentId, groupId);
+  assert.deepEqual(state.shapes[frameId].children, [secondFrameChildId]);
+  assert.deepEqual(state.shapes[groupId].children, [originalGroupChild, originalFrameChild]);
+  assert.deepEqual(state.pages[fixture.pageId].rootShapeIds, rootOrder);
+
+  useSelectionStore.getState().select(originalGroupChild);
+  const deleted = useDocumentStore.getState().applyHierarchyOperation({ kind: "delete", shapeId: originalGroupChild });
+  assert.equal(deleted.ok, true);
+  state = useDocumentStore.getState();
+  assert.equal(state.shapes[originalGroupChild], undefined);
+  assert.deepEqual(state.shapes[groupId].children, [originalFrameChild]);
+  assert.deepEqual(useSelectionStore.getState().selectedIds, []);
+});
+
+test("strict-rename-commits-once-and-invalid-containment-leaves-all-state-unchanged", () => {
+  const store = hydrateFixture();
+  const rectId = fixture.nodes[1].id;
+  const renamed = store.applyHierarchyOperation({ kind: "rename", shapeId: rectId, name: "Renamed child" });
+  assert.equal(renamed.ok, true);
+  assert.equal(useDocumentStore.getState().shapes[rectId].name, "Renamed child");
+
+  const before = useDocumentStore.getState();
+  useSelectionStore.getState().select(rectId);
+  const selectedBefore = useSelectionStore.getState().selectedIds;
+  const invalidChild = createRect("00000000-0000-4000-8000-000000000113", "Invalid leaf child", { x: 2, y: 2, w: 4, h: 4 });
+  const rejected = useDocumentStore.getState().applyHierarchyOperation({ kind: "insert-child", parentId: rectId, shape: invalidChild });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.diagnostic.code, "LOGOS_OPERATION_PARENT_NOT_CONTAINER");
+  assert.equal(useDocumentStore.getState().pages, before.pages);
+  assert.equal(useDocumentStore.getState().shapes, before.shapes);
+  assert.deepEqual(useSelectionStore.getState().selectedIds, selectedBefore);
 });

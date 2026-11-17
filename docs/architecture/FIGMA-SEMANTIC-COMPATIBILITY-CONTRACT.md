@@ -45,6 +45,26 @@ These are the only new containment relationships this contract treats as accepte
 
 “Partially” reflects that these relationships match the reference's broad hierarchy but the complete Figma behavior (all child node kinds, order convention mapping, frame/group geometry, and persistence round-trip) is not established. Existing compatibility/hydration paths are characterized separately; they do not expand this strict supported subset.
 
+### Versioned strict contract v1
+
+[`figmaHierarchyContract.ts`](../../logos-app/src/document-core/figmaHierarchyContract.ts) defines the current strict subset as a renderer-independent test oracle. Version 1 declares only existing Logos kinds (`frame`, `group`, `rect`), page roots (`frame`, `rect`), and direct children (`frame → rect`, `group → rect`). A Rectangle is a leaf in this subset. The contract module does not create a second store, mutate documents, or participate in production authorization. The existing hierarchy planner and the contract are tested against one another. Renderer capability validation remains a separate boundary and may reject an otherwise semantically valid record.
+
+Sections, Component Sets, and instance semantics are explicitly outside v1. Their names in the reference matrix do not create placeholder Logos nodes or broaden the runtime union. Existing React compatibility records of other types remain governed by their current preservation/rendering diagnostics, outside this strict contract.
+
+### Canonical ordering contract for current React representation
+
+This section makes the current editor projection's order explicit; it does not silently change existing saved arrays or claim that the representation is already a canonical persisted schema.
+
+| Order | Current sequence owner | Meaning in the React/editor representation | Adapter/display boundary |
+|---|---|---|---|
+| Document pages | `pageOrder` | Ordered page sequence; page creation appends, hydration preserves the supplied sequence, and identity association checks it exactly. Its relation to every historical saved-file page order remains **NOT VERIFIED**. | Do not sort, regenerate, or infer this order during hydration/import. |
+| Page roots | `Page.rootShapeIds` | Front-to-back; index 0 is topmost. Root creation inserts at index 0. | Layers presentation walks roots front-to-back. |
+| Container children | `Shape.children` | Front-to-back; index 0 is topmost. Child insertion/reorder indices use this array order. | Layers walks sibling arrays front-to-back and shows the parent row before descendants. |
+| Canvas hit-test | `canvasHitOrder` | Front-to-back candidate order; descendants are visited before their parent so selectable child content is considered over its owner. | This is selection/hit order; it is not itself a persisted sibling array. |
+| Canvas painter / renderer | projected root and child ID arrays | Renderer-facing sibling arrays are back-to-front. | `buildSceneProjection` reverses each root/child sibling array exactly once when creating the renderer plan. This adapter mapping is not written back to document state. |
+
+This convention gives Logos a deterministic current mapping to Figma's documented back-to-front painter order. It does **not** prove equivalence across the production React path, Canvas2D fallback, renderer save/load, or historical Go file formats. The current ordering test checks the source arrays, Layers/canvas-facing order owner by source inspection, and the scene projection's reversal; browser pixel ordering remains renderer qualification evidence.
+
 ## 2. Current architecture inventory and status
 
 | Area | Current implementation and evidence | Status |
@@ -94,7 +114,40 @@ These are the only new containment relationships this contract treats as accepte
 9. **Variables are document-scoped semantic data:** collections, modes, aliases, typed values, bindings, and contextual resolution require a versioned document boundary and durable identity. A separate runtime store or visual preview is not evidence of persisted compatibility.
 10. **Atomic operations:** build an immutable proposed change, validate the complete affected graph and operation invariants, then commit once. Rejection leaves document, identity, ordering, selection and renderer-visible state unchanged.
 
-## 4. Existing-document compatibility and migration policy
+### Executable operation coverage
+
+The hierarchy compatibility tests exercise all seven current strict operation kinds and the v1 containment policy:
+
+| Operation/invariant | Executable evidence |
+|---|---|
+| `create-root` Rectangle and Frame | `page-roots-and-ordered-containment` |
+| `insert-child` Rectangle under Frame and Group | `frame-and-group-rectangle-children` |
+| `rename` | `strict-rename-commits-once-and-invalid-containment-leaves-all-state-unchanged` |
+| `reorder` sibling membership/order | `strict-reorder-reparent-delete-preserve-membership-order-and-selection` |
+| `reorder-root-list` exact root membership/order | `strict-reorder-reparent-delete-preserve-membership-order-and-selection` |
+| `reparent` parent/child reciprocity, stable ID, sibling order and root order | `strict-reorder-reparent-delete-preserve-membership-order-and-selection` |
+| `delete` subtree membership and selected-ID reconciliation | `strict-reorder-reparent-delete-preserve-membership-order-and-selection` |
+| Cycle, lock, malformed membership and rejected-operation immutability | New containment rejection tests plus unchanged [`A10 hierarchy operation tests`](../../test/a10/hierarchy-operations.test.mjs) |
+| Hydration identity/membership vs scene projection order | `hydrateFixture`, current fixture IDs, and the existing A10 hydration tests |
+
+`strict-reorder-reparent-delete-preserve-membership-order-and-selection` exercises a single accepted subset. Existing A10 tests remain the source for cycle prevention and locked-node rejection; this milestone does not replace or weaken them.
+
+## 4. Gap report and smallest safe correction boundaries
+
+No gap below authorizes a renderer, document-store, or persistence rewrite. Each item requires its own acceptance evidence before a compatibility status can be raised.
+
+| Gap / violated invariant | Affected source modules | Smallest safe correction boundary | Required regression evidence | Dependency |
+|---|---|---|---|---|
+| Sections absent; section nesting restrictions cannot be validated. | `logos-app/src/types/shapes.ts`, `hierarchyOperations.ts`, `scene-projection.ts`; Rust `logos-types::ShapeType` and `document.rs` | First define a versioned node-kind/containment adapter and stable unsupported diagnostics. Add a Section kind only in a separately authorized feature slice. | Section root/nesting matrix; reject Section under Frame/Group; retain unknown legacy payload; no rendering or migration claim without browser/fixture evidence. | Contract v1 accepted; before implementing Section. |
+| Component Sets absent; component-only variant membership not enforced. | `componentStore.ts`, `shapes.ts`, `hierarchyOperations.ts`; candidate Rust `shape.rs` | Define IDs and membership as domain relationships before adding UI; keep existing component metadata intact. | Valid/invalid set membership, variants, identity, swap, detach and deletion tests on immutable snapshots. | Section/node vocabulary; component-domain decision. |
+| Frame/Group allowed child kinds and behavior differ from the full reference. | `hierarchyOperations.ts`, `scene-projection.ts`, `scene.ts`, `Canvas.tsx`, `shapes.ts` | Expand only the strict operation's accepted matrix after renderer and property compatibility are separately proven. Do not broaden compatibility/hydration implicitly. | Every new pair has positive operation test, reciprocal graph checks and actual Chromium rendering evidence; rejected pair preserves state. | Node-kind contract, then renderer evidence. |
+| Figma's back-to-front order differs from React's front-to-back sibling arrays. | `documentStore.ts`, `hierarchyOperations.ts`, `LayersPanel.tsx`, `Canvas.tsx`, `scene-projection.ts`, offline persistence adapters | Preserve current arrays and make adapters declare direction. A future saved-format change requires a lossless versioned adapter, not an in-place reverse. | Create, reorder, reparent, render, Layers presentation, hydration and representative save/load fixtures agree on stable IDs and visual stacking. | Ordering contract v1; historical file corpus before persistence work. |
+| General transform, pivot, parent-local coordinate and clip semantics are not equivalent. | `shapes.ts`, `scene.ts`, `scene-projection.ts`, `render-wasm/src/render.rs`, Rust `document_geometry.rs`, import converters | Fix at the narrowest conversion/renderer boundary after selecting one coordinate/pivot convention using real editor-produced examples. Until then reject unsupported cases before mutation. | Rotation/scale/skew, nested frame clip, all world corners, reparent invariance and pixels from actual Chromium. | Ordering and node-kind contract; geometry decision. |
+| `component`, `instance`, defaults and overrides are split across document and component stores. | `documentStore.ts`, `componentStore.ts`, `shapes.ts`, persistence adapters | Add typed, atomic operation/adaptation boundary; do not copy data into a parallel canonical registry until ownership is decided. | Reference integrity, supported override value/path validation, propagation, unknown path handling, detach and round-trip. | Canonical document ownership and component-set semantics. |
+| Document-scoped variables/modes/bindings are not represented by the active React document serialization boundary. | `tokenStore.ts`, `tokenWorkflowPreviewStore.ts`, `tokens/contract.ts`, persistence adapters | Decide versioned document resource and binding boundary; keep current preview transient and token runtime separate until approved. | Collection/mode/alias/binding identity; save/load round-trip; renderer property result; no preview persistence. | Canonical document ownership plus stable ordering/identity. |
+| Lossless cross-format conversion and historical saved-file compatibility remain unverified. | React adapters, Rust `document.rs`/`shape.rs`, Go `filedata` and offline persistence | Build format-specific adapters with preserve-or-reject behavior; do not rewrite legacy payloads or promote Rust production authority in this milestone. | Representative historical and current fixtures, unknown-field preservation, stable IDs/order, repeated round-trip equivalence and rejection atomicity. | Real corpus authorization and canonical ownership decision. |
+
+## 5. Existing-document compatibility and migration policy
 
 - Current React/Zustand and saved-file formats remain untouched by this milestone. No schema version, Go persistence boundary, canonical owner, or Rust production authority is changed.
 - Existing data is interpreted only through an explicit adapter. Unknown fields and IDs must be preserved or the adapter rejects/quarantines the source with a stable diagnostic. “Best effort” conversion must not silently drop unsupported shapes, transforms, component data, variable bindings, or hierarchy membership.
@@ -102,9 +155,9 @@ These are the only new containment relationships this contract treats as accepte
 - If a valid older document encodes semantics not supported by the active renderer, retain its source data and report the rendering limitation. Do not normalize it into a lossy alternative tree.
 - No compatibility adapter may infer canonical page ownership from a shape's parent alone where a shape can be shared or referenced. Cross-page moves require explicit source and destination ownership plus one atomic operation.
 
-## 5. Minimum compatibility work, in dependency order
+## 6. Minimum compatibility work, in dependency order
 
-1. **Freeze observable vocabulary and order:** add versioned node-kind/containment definitions, one persisted order convention, and a reference fixture set. Keep current adapters as-is until conversions are covered.
+1. **Freeze observable vocabulary and order:** use contract v1 to characterize the current strict node-kind/containment subset and array-direction adapters. Keep future node-kind extensions and persisted-order changes behind a separately versioned, lossless-or-reject adapter.
 2. **Close graph semantics:** add explicit Section and ComponentSet kinds/rules, validate container-child kinds, and test root/child membership, cycles, reciprocal edges, visibility, locking and deletion effects. Do not retrofit a generic container rule where semantics differ.
 3. **Prove geometry semantics:** choose local-coordinate and pivot rules using real editor-produced fixtures; reconcile `bounds`/`selrect`, `rotation`/matrix, frame clipping and painter ordering. Only then widen reparent support.
 4. **Unify component domain operations:** model definition/set/instance references, supported overrides, variant swap, detach and deletion transactionally; preserve IDs and unknown payloads.
@@ -114,8 +167,8 @@ These are the only new containment relationships this contract treats as accepte
 
 These steps are proposals for future milestones. They do not authorize subsystem rewrites. A rewrite is justified only by a concrete invariant defect that cannot be corrected at a bounded adapter or operation boundary.
 
-## 6. Focused regression fixture and evidence
+## 7. Focused regression fixture and evidence
 
-The deterministic JSON fixture [`supported-containment.json`](../../test/fixtures/figma-semantics/supported-containment.json) defines page roots, a Frame and Group with Rectangle children, IDs, and sibling order. [`figma-semantic-compatibility.test.mjs`](../../test/figma-semantics/figma-semantic-compatibility.test.mjs) hydrates that exact graph, exercises the validated root/child operations, and checks parent-child reciprocity, root/sibling ordering, renderer order projection, and atomic rejection for unsupported child kinds. It is a test of the current supported subset; it does not imply Section, ComponentSet, instance, transformed-parent, layout, or saved-file parity.
+The deterministic JSON fixture [`supported-containment.json`](../../test/fixtures/figma-semantics/supported-containment.json) defines page roots, a Frame and Group with Rectangle children, IDs, bounds and sibling order. [`figma-semantic-compatibility.test.mjs`](../../test/figma-semantics/figma-semantic-compatibility.test.mjs), run with `npm run test:figma-semantics` from `logos-app`, hydrates that graph, checks the JSON-compatible React state round trip, compares the hydrated IDs/order with scene projection, exercises all seven strict operations, and verifies reciprocal edges, order, stable IDs, lock/cycle/containment rejection and atomicity. It is a characterization of the current React representation and adapter, not an existing `.logos`, Go, or legacy persistence round trip. It does not imply Section, ComponentSet, instance, transformed-parent, layout, or historical saved-file parity.
 
 The existing [`A10 hierarchy operation tests`](../../test/a10/hierarchy-operations.test.mjs) additionally cover stable IDs, create-root, reparent, cycle rejection, subtree deletion, lock rejection, hydration, and unsupported-rendering diagnostics. These tests are functional contract evidence, not browser pixel or historical-file evidence.
