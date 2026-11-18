@@ -62,6 +62,8 @@ Stable diagnostics distinguish malformed runtime records, unsupported node kinds
 
 Diagnostic precedence is fixed: (1) snapshot envelope/version and record structure, kind, flags, bounds and child-list shape; (2) page ordering and IDs, missing Page/parent/child references, local duplicate membership and containment; (3) cycles in all node components, including disconnected components; (4) ownership duplicated across distinct parents; (5) unreachable nodes, parent reciprocity, then Page ownership. Thus cycle errors take precedence over the duplicate-owner or unreachable symptoms that the same cycle can create. If an input has independent defects, the earliest phase above determines the returned stable code.
 
+Operation input has its own fail-closed boundary. The planner validates the snapshot first; an invalid snapshot is returned unchanged with its snapshot diagnostic before operation processing begins. With a valid snapshot, the planner requires a plain operation record and an own, recognized `kind`; unknown discriminators return `SECTION_OPERATION_KIND_UNSUPPORTED`, malformed/missing operation structure returns `SECTION_OPERATION_MALFORMED`, and an exhaustive `switch` dispatches the five declared operations. Every operation validates required fields, UUIDs, indices and optional flags before lookup or mutation. Inserted nodes are checked at runtime for kind, required identity/parent/list/flag fields, bounds, and an empty child list. Delete requires an own `contents` field equal to exactly `delete` or `preserve`; otherwise it returns `SECTION_DELETE_CONTENT_POLICY_UNQUALIFIED`. Valid but missing Page/parent/target references and out-of-range indices are rejected during operation-specific validation. Every rejection returns the exact input snapshot reference, an empty `changedIds` list and no mutation.
+
 ## 5. Geometry contract and explicit unknowns
 
 Section `bounds` are explicitly authored in the candidate and are not calculated from descendants. Reparent, reorder, and preserve-delete operations do not rewrite a child node's bounds. The candidate contains no move or resize operation, so it cannot accidentally claim a world-space transform rule.
@@ -77,6 +79,7 @@ The candidate is exercised by [`section-domain-v1.test.mjs`](../../test/figma-se
 - Frame, Group and supported leaf containment; Section-under-Frame/Group rejection.
 - A matrix-driven check of every Page and node parent/child kind against both the validator and planner, including root-level unqualified relationships.
 - Runtime rejection of unknown kinds, malformed records, flags, child lists, bounds and references.
+- Runtime rejection of unknown operation discriminators, absent/malformed payloads and deletion policies, with exact snapshot identity and immutability checks.
 - Reparenting, root order, self/multi-node/disconnected cycle detection, duplicate ownership, and page-ownership validation.
 - Delete subtree and preserve-content unwrap, including IDs and sibling order.
 - Lock rejection, malformed identity/bounds, duplicate ownership, and exact input immutability on rejection.

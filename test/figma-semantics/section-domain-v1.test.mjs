@@ -212,6 +212,96 @@ test("runtime-snapshot-structure-flags-and-child-lists-fail-closed", () => {
   }
 });
 
+test("malformed-operation-objects-and-unknown-kinds-reject-without-falling-through-to-delete", () => {
+  const snapshot = clone();
+  for (const [operation, code] of [
+    [undefined, "SECTION_OPERATION_MALFORMED"],
+    [null, "SECTION_OPERATION_MALFORMED"],
+    [[], "SECTION_OPERATION_MALFORMED"],
+    [{}, "SECTION_OPERATION_MALFORMED"],
+    [{ kind: 7, id: ids.section, contents: "delete" }, "SECTION_OPERATION_MALFORMED"],
+    [{ kind: "future-operation", id: ids.section, contents: "delete" }, "SECTION_OPERATION_KIND_UNSUPPORTED"],
+    [Object.assign(Object.create({ kind: "delete-section", id: ids.section, contents: "delete" }), {}), "SECTION_OPERATION_MALFORMED"],
+  ]) assertRejectedUnchanged(snapshot, operation, code);
+  assert.ok(snapshot.nodes[ids.section], "unknown operations cannot delete target Section");
+  assert.deepEqual(snapshot.nodes[ids.section].childIds, [ids.nested, ids.frame]);
+});
+
+test("delete-policy-must-be-explicit-and-exact", () => {
+  const snapshot = clone();
+  for (const operation of [
+    { kind: "delete-section", id: ids.section },
+    { kind: "delete-section", id: ids.section, contents: undefined },
+    { kind: "delete-section", id: ids.section, contents: null },
+    { kind: "delete-section", id: ids.section, contents: "unexpected-value" },
+  ]) assertRejectedUnchanged(snapshot, operation, "SECTION_DELETE_CONTENT_POLICY_UNQUALIFIED");
+});
+
+test("operation-payloads-validate-required-fields-references-flags-bounds-and-indices", () => {
+  const snapshot = clone();
+  const validCreate = {
+    kind: "create-section", id: ids.newSection, pageId: ids.page, parentId: null,
+    index: 0, bounds: { x: 0, y: 0, width: 1, height: 1 },
+  };
+  const validNode = node(ids.newLeaf, ids.page, "text");
+  const createWithoutBounds = { ...validCreate };
+  delete createWithoutBounds.bounds;
+  const nodeWithoutChildren = { ...validNode };
+  delete nodeWithoutChildren.childIds;
+  const cases = [
+    [{ kind: "create-section", id: ids.newSection, pageId: ids.page, index: 0, bounds: { x: 0, y: 0, width: 1, height: 1 } }, "SECTION_OPERATION_MALFORMED"],
+    [createWithoutBounds, "SECTION_OPERATION_MALFORMED"],
+    [{ ...validCreate, bounds: null }, "SECTION_INVALID_BOUNDS"],
+    [{ ...validCreate, bounds: "bad-bounds" }, "SECTION_INVALID_BOUNDS"],
+    [{ ...validCreate, id: "bad-id" }, "SECTION_INVALID_UUID"],
+    [{ ...validCreate, pageId: "bad-page-id" }, "SECTION_INVALID_UUID"],
+    [{ ...validCreate, pageId: "40000000-0000-4000-8000-000000000001" }, "SECTION_PAGE_MISSING"],
+    [{ ...validCreate, parentId: "bad-parent-id" }, "SECTION_INVALID_UUID"],
+    [{ ...validCreate, parentId: ids.newLeaf }, "SECTION_PARENT_MISSING"],
+    [{ ...validCreate, index: 0.5 }, "SECTION_INVALID_ORDER_INDEX"],
+    [{ ...validCreate, index: 999 }, "SECTION_INVALID_ORDER_INDEX"],
+    [{ ...validCreate, visible: "yes" }, "SECTION_NODE_FLAG_INVALID"],
+    [{ ...validCreate, locked: null }, "SECTION_NODE_FLAG_INVALID"],
+    [{ kind: "insert-node", parentId: ids.section, index: 2 }, "SECTION_OPERATION_MALFORMED"],
+    [{ kind: "insert-node", parentId: ids.section, index: 2, node: null }, "SECTION_NODE_RECORD_MALFORMED"],
+    [{ kind: "insert-node", parentId: ids.section, index: 2, node: { ...validNode, childIds: null } }, "SECTION_CHILD_LIST_INVALID"],
+    [{ kind: "insert-node", parentId: ids.section, index: 2, node: nodeWithoutChildren }, "SECTION_CHILD_LIST_INVALID"],
+    [{ kind: "insert-node", parentId: ids.section, index: 2, node: { ...validNode, locked: 1 } }, "SECTION_NODE_FLAG_INVALID"],
+    [{ kind: "insert-node", parentId: "bad-parent-id", index: 2, node: validNode }, "SECTION_INVALID_UUID"],
+    [{ kind: "insert-node", parentId: "40000000-0000-4000-8000-000000000001", index: 0, node: validNode }, "SECTION_PARENT_MISSING"],
+    [{ kind: "insert-node", parentId: ids.section, index: 999, node: validNode }, "SECTION_INVALID_ORDER_INDEX"],
+    [{ kind: "reorder", id: ids.secondRoot, index: -1 }, "SECTION_INVALID_ORDER_INDEX"],
+    [{ kind: "reorder", id: ids.secondRoot, index: 999 }, "SECTION_INVALID_ORDER_INDEX"],
+    [{ kind: "reorder", id: "bad-id", index: 0 }, "SECTION_INVALID_UUID"],
+    [{ kind: "reparent", id: ids.secondRoot, index: 0 }, "SECTION_OPERATION_MALFORMED"],
+    [{ kind: "reparent", id: ids.secondRoot, parentId: "bad-parent-id", index: 0 }, "SECTION_INVALID_UUID"],
+    [{ kind: "reparent", id: ids.secondRoot, parentId: null, pageId: "bad-page-id", index: 0 }, "SECTION_INVALID_UUID"],
+    [{ kind: "reparent", id: ids.secondRoot, parentId: null, pageId: "40000000-0000-4000-8000-000000000001", index: 0 }, "SECTION_PAGE_MISSING"],
+    [{ kind: "reparent", id: ids.secondRoot, parentId: null, pageId: ids.page, index: 999 }, "SECTION_INVALID_ORDER_INDEX"],
+    [{ kind: "reparent", id: ids.secondRoot, parentId: ids.newLeaf, index: 0 }, "SECTION_PARENT_MISSING"],
+    [{ kind: "delete-section", contents: "delete" }, "SECTION_OPERATION_MALFORMED"],
+    [{ kind: "delete-section", id: "bad-id", contents: "delete" }, "SECTION_INVALID_UUID"],
+  ];
+  for (const [operation, code] of cases) assertRejectedUnchanged(snapshot, operation, code);
+  assert.ok(snapshot.nodes[ids.section]);
+  assert.deepEqual(snapshot.pages[ids.page].childIds, [ids.section, ids.secondRoot]);
+});
+
+test("valid-operation-is-rejected-immutably-when-its-snapshot-is-malformed", () => {
+  const snapshot = clone();
+  snapshot.nodes[ids.frame].visible = "visible";
+  const before = JSON.stringify(snapshot);
+  const result = domain.planSectionOperation(snapshot, {
+    kind: "create-section", id: ids.newSection, pageId: ids.page, parentId: null,
+    index: 0, bounds: { x: 0, y: 0, width: 10, height: 10 },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostic.code, "SECTION_NODE_FLAG_INVALID");
+  assert.strictEqual(result.snapshot, snapshot);
+  assert.deepEqual(result.changedIds, []);
+  assert.equal(JSON.stringify(snapshot), before);
+});
+
 test("create-root-and-nested-sections-publish-new-immutable-snapshots-in-order", () => {
   const input = clone();
   const original = JSON.stringify(input);

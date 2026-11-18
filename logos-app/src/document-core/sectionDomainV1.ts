@@ -80,6 +80,8 @@ export type SectionOperation =
 
 export type SectionDiagnosticCode =
   | "SECTION_SNAPSHOT_MALFORMED"
+  | "SECTION_OPERATION_MALFORMED"
+  | "SECTION_OPERATION_KIND_UNSUPPORTED"
   | "SECTION_DOMAIN_VERSION_UNSUPPORTED"
   | "SECTION_PAGE_RECORD_MALFORMED"
   | "SECTION_NODE_RECORD_MALFORMED"
@@ -170,13 +172,21 @@ function reject(snapshot: SectionDomainSnapshot, code: SectionDiagnosticCode, de
 }
 
 function validBounds(bounds: SectionBounds): boolean {
-  return Number.isFinite(bounds.x) && Number.isFinite(bounds.y)
-    && Number.isFinite(bounds.width) && Number.isFinite(bounds.height)
-    && bounds.width >= 0 && bounds.height >= 0;
+  return isBounds(bounds);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function isBounds(value: unknown): value is SectionBounds {
@@ -328,143 +338,236 @@ function insertAt(list: string[], id: string, index: number): boolean {
   return true;
 }
 
+const OPERATION_KINDS = new Set<string>([
+  "create-section", "insert-node", "reorder", "reparent", "delete-section",
+]);
+
+function validIndex(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function validateInsertedNodeInput(value: unknown): SectionDiagnosticCode | null {
+  if (!isRecord(value) || !["id", "pageId", "kind", "parentId"]
+    .every((key) => hasOwn(value, key)) || typeof value.id !== "string" || typeof value.pageId !== "string"
+    || !(value.parentId === null || typeof value.parentId === "string")) return "SECTION_NODE_RECORD_MALFORMED";
+  if (!isSectionNodeKind(value.kind)) return "SECTION_NODE_KIND_UNSUPPORTED";
+  if (!hasOwn(value, "locked") || !hasOwn(value, "visible")
+    || typeof value.locked !== "boolean" || typeof value.visible !== "boolean") return "SECTION_NODE_FLAG_INVALID";
+  if (!hasOwn(value, "childIds")) return "SECTION_CHILD_LIST_INVALID";
+  if (!Array.isArray(value.childIds) || value.childIds.some((childId) => typeof childId !== "string")) {
+    return "SECTION_CHILD_LIST_INVALID";
+  }
+  if (value.parentId !== null) return "SECTION_NODE_RECORD_MALFORMED";
+  if (!isSectionUuid(value.id) || !isSectionUuid(value.pageId)) return "SECTION_INVALID_UUID";
+  if (value.kind === "section" && !isBounds(value.bounds)) return "SECTION_INVALID_BOUNDS";
+  if (value.kind !== "section" && value.bounds !== undefined) return "SECTION_INVALID_BOUNDS";
+  if (value.worldBounds !== undefined && !isBounds(value.worldBounds)) return "SECTION_INVALID_BOUNDS";
+  if (value.childIds.length !== 0) return "SECTION_INSERT_REQUIRES_EMPTY_NODE";
+  return null;
+}
+
+/** Runtime validation for callers that bypass the TypeScript operation union. */
+function validateOperationInput(input: unknown): SectionDiagnosticCode | null {
+  if (!isRecord(input)) return "SECTION_OPERATION_MALFORMED";
+  if (!hasOwn(input, "kind")) return "SECTION_OPERATION_MALFORMED";
+  if (typeof input.kind !== "string") return "SECTION_OPERATION_MALFORMED";
+  if (!OPERATION_KINDS.has(input.kind)) return "SECTION_OPERATION_KIND_UNSUPPORTED";
+
+  switch (input.kind) {
+    case "create-section":
+      if (!["id", "pageId", "parentId", "index", "bounds"].every((key) => hasOwn(input, key))
+        || typeof input.id !== "string" || typeof input.pageId !== "string"
+        || !(input.parentId === null || typeof input.parentId === "string")
+          ) return "SECTION_OPERATION_MALFORMED";
+      if (!isSectionUuid(input.id) || !isSectionUuid(input.pageId)
+        || (typeof input.parentId === "string" && !isSectionUuid(input.parentId))) return "SECTION_INVALID_UUID";
+      if (!validIndex(input.index)) return "SECTION_INVALID_ORDER_INDEX";
+      if (!isBounds(input.bounds)) return "SECTION_INVALID_BOUNDS";
+      if ((hasOwn(input, "locked") && typeof input.locked !== "boolean")
+        || (hasOwn(input, "visible") && typeof input.visible !== "boolean")) return "SECTION_NODE_FLAG_INVALID";
+      return null;
+    case "insert-node": {
+      if (!["parentId", "node", "index"].every((key) => hasOwn(input, key)) || typeof input.parentId !== "string") return "SECTION_OPERATION_MALFORMED";
+      if (!isSectionUuid(input.parentId)) return "SECTION_INVALID_UUID";
+      if (!validIndex(input.index)) return "SECTION_INVALID_ORDER_INDEX";
+      return validateInsertedNodeInput(input.node);
+    }
+    case "reorder":
+      if (!hasOwn(input, "id") || !hasOwn(input, "index") || typeof input.id !== "string") return "SECTION_OPERATION_MALFORMED";
+      if (!isSectionUuid(input.id)) return "SECTION_INVALID_UUID";
+      if (!validIndex(input.index)) return "SECTION_INVALID_ORDER_INDEX";
+      return null;
+    case "reparent":
+      if (!["id", "parentId", "index"].every((key) => hasOwn(input, key)) || typeof input.id !== "string"
+        || !(input.parentId === null || typeof input.parentId === "string")) return "SECTION_OPERATION_MALFORMED";
+      if (!isSectionUuid(input.id)
+        || (typeof input.parentId === "string" && !isSectionUuid(input.parentId))
+        || (hasOwn(input, "pageId") && (typeof input.pageId !== "string" || !isSectionUuid(input.pageId)))) {
+        return "SECTION_INVALID_UUID";
+      }
+      if (!validIndex(input.index)) return "SECTION_INVALID_ORDER_INDEX";
+      return null;
+    case "delete-section":
+      if (!hasOwn(input, "id") || typeof input.id !== "string") return "SECTION_OPERATION_MALFORMED";
+      if (!isSectionUuid(input.id)) return "SECTION_INVALID_UUID";
+      if (!hasOwn(input, "contents") || (input.contents !== "delete" && input.contents !== "preserve")) {
+        return "SECTION_DELETE_CONTENT_POLICY_UNQUALIFIED";
+      }
+      return null;
+    default:
+      return "SECTION_OPERATION_KIND_UNSUPPORTED";
+  }
+}
+
 /** Build, validate, and return a new candidate snapshot; rejection returns the exact input reference. */
 export function planSectionOperation(snapshot: SectionDomainSnapshot, operation: SectionOperation): SectionPlanOutcome {
   const initialDiagnostic = validateSectionSnapshot(snapshot);
   if (initialDiagnostic) return reject(snapshot, initialDiagnostic);
+  const operationDiagnostic = validateOperationInput(operation);
+  if (operationDiagnostic) return reject(snapshot, operationDiagnostic);
 
-  if (operation.kind === "create-section") {
-    if (!isSectionUuid(operation.id)) return reject(snapshot, "SECTION_INVALID_UUID");
-    if (snapshot.nodes[operation.id] || snapshot.pages[operation.id]) return reject(snapshot, "SECTION_NODE_ALREADY_EXISTS");
-    const page = snapshot.pages[operation.pageId];
-    if (!page) return reject(snapshot, "SECTION_PAGE_MISSING");
-    if (operation.parentId !== null) {
-      const parent = snapshot.nodes[operation.parentId];
-      if (!parent) return reject(snapshot, "SECTION_PARENT_MISSING");
-      if (parent.kind !== "section") return reject(snapshot, parent.kind === "frame" || parent.kind === "group" ? "SECTION_CONTAINMENT_FORBIDDEN" : "SECTION_RELATIONSHIP_UNQUALIFIED");
-      if (parent.pageId !== operation.pageId) return reject(snapshot, "SECTION_CROSS_PAGE_OPERATION");
-      if (isLockedPath(snapshot, parent.id)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
+  switch (operation.kind) {
+    case "create-section": {
+      if (!isSectionUuid(operation.id)) return reject(snapshot, "SECTION_INVALID_UUID");
+      if (snapshot.nodes[operation.id] || snapshot.pages[operation.id]) return reject(snapshot, "SECTION_NODE_ALREADY_EXISTS");
+      const page = snapshot.pages[operation.pageId];
+      if (!page) return reject(snapshot, "SECTION_PAGE_MISSING");
+      if (operation.parentId !== null) {
+        const parent = snapshot.nodes[operation.parentId];
+        if (!parent) return reject(snapshot, "SECTION_PARENT_MISSING");
+        if (parent.kind !== "section") return reject(snapshot, parent.kind === "frame" || parent.kind === "group" ? "SECTION_CONTAINMENT_FORBIDDEN" : "SECTION_RELATIONSHIP_UNQUALIFIED");
+        if (parent.pageId !== operation.pageId) return reject(snapshot, "SECTION_CROSS_PAGE_OPERATION");
+        if (isLockedPath(snapshot, parent.id)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
+      }
+      if (!validBounds(operation.bounds)) return reject(snapshot, "SECTION_INVALID_BOUNDS");
+      const out = structuredClone(snapshot);
+      const section: SectionDomainNode = {
+        id: operation.id,
+        pageId: operation.pageId,
+        kind: "section",
+        parentId: operation.parentId,
+        childIds: [],
+        locked: operation.locked ?? false,
+        visible: operation.visible ?? true,
+        bounds: { ...operation.bounds },
+      };
+      const siblings = operation.parentId ? out.nodes[operation.parentId].childIds : out.pages[operation.pageId].childIds;
+      if (!insertAt(siblings, section.id, operation.index)) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
+      out.nodes[section.id] = section;
+      return finish(snapshot, out, [section.id]);
     }
-    if (!validBounds(operation.bounds)) return reject(snapshot, "SECTION_INVALID_BOUNDS");
-    const out = structuredClone(snapshot);
-    const section: SectionDomainNode = {
-      id: operation.id,
-      pageId: operation.pageId,
-      kind: "section",
-      parentId: operation.parentId,
-      childIds: [],
-      locked: operation.locked ?? false,
-      visible: operation.visible ?? true,
-      bounds: { ...operation.bounds },
-    };
-    const siblings = operation.parentId ? out.nodes[operation.parentId].childIds : out.pages[operation.pageId].childIds;
-    if (!insertAt(siblings, section.id, operation.index)) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
-    out.nodes[section.id] = section;
-    return finish(snapshot, out, [section.id]);
-  }
 
-  if (operation.kind === "insert-node") {
-    const { node, parentId, index } = operation;
-    if (!isSectionNodeKind(node.kind)) return reject(snapshot, "SECTION_NODE_KIND_UNSUPPORTED");
-    if (!isSectionUuid(node.id)) return reject(snapshot, "SECTION_INVALID_UUID");
-    if (snapshot.nodes[node.id] || snapshot.pages[node.id]) return reject(snapshot, "SECTION_NODE_ALREADY_EXISTS");
-    if (node.childIds.length !== 0) return reject(snapshot, "SECTION_INSERT_REQUIRES_EMPTY_NODE");
-    const parent = snapshot.nodes[parentId];
-    const children = ownerChildren(snapshot, parentId);
-    if (!parent || !children) return reject(snapshot, "SECTION_PARENT_MISSING");
-    if (isLockedPath(snapshot, parentId)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
-    const relation = sectionContainment(parent.kind, node.kind);
-    if (relation === "forbidden") return reject(snapshot, "SECTION_CONTAINMENT_FORBIDDEN");
-    if (relation === "unqualified") return reject(snapshot, "SECTION_RELATIONSHIP_UNQUALIFIED");
-    if (node.pageId !== parent.pageId) return reject(snapshot, "SECTION_CROSS_PAGE_OPERATION");
-    if (!insertAt([...children], node.id, index)) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
-    const out = structuredClone(snapshot);
-    out.nodes[parentId].childIds.splice(index, 0, node.id);
-    out.nodes[node.id] = structuredClone({ ...node, parentId, childIds: [...node.childIds] });
-    return finish(snapshot, out, [parentId, node.id]);
-  }
-
-  if (operation.kind === "reorder") {
-    const node = snapshot.nodes[operation.id];
-    if (!node) return reject(snapshot, "SECTION_TARGET_MISSING");
-    if (isLockedPath(snapshot, node.id)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
-    const siblings = nodeSiblings(snapshot, node);
-    if (!siblings) return reject(snapshot, "SECTION_PARENT_MISSING");
-    const from = siblings.indexOf(node.id);
-    if (!Number.isInteger(operation.index) || operation.index < 0 || operation.index >= siblings.length) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
-    const out = structuredClone(snapshot);
-    const list = nodeSiblings(out, out.nodes[node.id])!;
-    list.splice(from, 1);
-    list.splice(operation.index, 0, node.id);
-    return finish(snapshot, out, [node.parentId ?? node.pageId, node.id]);
-  }
-
-  if (operation.kind === "reparent") {
-    const node = snapshot.nodes[operation.id];
-    const parent = operation.parentId === null ? null : snapshot.nodes[operation.parentId];
-    const destinationPage = operation.parentId === null
-      ? snapshot.pages[operation.pageId ?? node?.pageId ?? ""]
-      : null;
-    const siblings = parent?.childIds ?? destinationPage?.childIds ?? null;
-    if (!node || (operation.parentId !== null && !parent) || (!parent && !destinationPage)) return reject(snapshot, "SECTION_TARGET_MISSING");
-    if (isLockedPath(snapshot, node.id) || (parent && isLockedPath(snapshot, parent.id))) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
-    if (node.kind === "section" && parent && parent.kind !== "section") {
-      return reject(snapshot, parent.kind === "frame" || parent.kind === "group" ? "SECTION_CONTAINMENT_FORBIDDEN" : "SECTION_RELATIONSHIP_UNQUALIFIED");
+    case "insert-node": {
+      const { node, parentId, index } = operation;
+      if (!isSectionNodeKind(node.kind)) return reject(snapshot, "SECTION_NODE_KIND_UNSUPPORTED");
+      if (!isSectionUuid(node.id)) return reject(snapshot, "SECTION_INVALID_UUID");
+      if (snapshot.nodes[node.id] || snapshot.pages[node.id]) return reject(snapshot, "SECTION_NODE_ALREADY_EXISTS");
+      if (node.childIds.length !== 0) return reject(snapshot, "SECTION_INSERT_REQUIRES_EMPTY_NODE");
+      const parent = snapshot.nodes[parentId];
+      const children = ownerChildren(snapshot, parentId);
+      if (!parent || !children) return reject(snapshot, "SECTION_PARENT_MISSING");
+      if (isLockedPath(snapshot, parentId)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
+      const relation = sectionContainment(parent.kind, node.kind);
+      if (relation === "forbidden") return reject(snapshot, "SECTION_CONTAINMENT_FORBIDDEN");
+      if (relation === "unqualified") return reject(snapshot, "SECTION_RELATIONSHIP_UNQUALIFIED");
+      if (node.pageId !== parent.pageId) return reject(snapshot, "SECTION_CROSS_PAGE_OPERATION");
+      if (!insertAt([...children], node.id, index)) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
+      const out = structuredClone(snapshot);
+      out.nodes[parentId].childIds.splice(index, 0, node.id);
+      out.nodes[node.id] = structuredClone({ ...node, parentId, childIds: [...node.childIds] });
+      return finish(snapshot, out, [parentId, node.id]);
     }
-    const relation = sectionContainment(parent?.kind ?? "page", node.kind);
-    if (relation === "forbidden") return reject(snapshot, "SECTION_CONTAINMENT_FORBIDDEN");
-    if (relation === "unqualified") return reject(snapshot, "SECTION_RELATIONSHIP_UNQUALIFIED");
-    const parentPageId = parent?.pageId ?? destinationPage?.id;
-    if (!siblings || parentPageId !== node.pageId) return reject(snapshot, "SECTION_CROSS_PAGE_OPERATION");
-    let ancestor: string | null = parent?.id ?? null;
-    while (ancestor) {
-      if (ancestor === node.id) return reject(snapshot, "SECTION_CYCLE");
-      ancestor = snapshot.nodes[ancestor]?.parentId ?? null;
-    }
-    const oldSiblings = nodeSiblings(snapshot, node);
-    if (!oldSiblings) return reject(snapshot, "SECTION_PARENT_MISSING");
-    const from = oldSiblings.indexOf(node.id);
-    const insertionLimit = siblings === oldSiblings ? siblings.length - 1 : siblings.length;
-    if (!Number.isInteger(operation.index) || operation.index < 0 || operation.index > insertionLimit) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
-    const out = structuredClone(snapshot);
-    nodeSiblings(out, out.nodes[node.id])!.splice(from, 1);
-    const outDestination = parent ? out.nodes[parent.id].childIds : out.pages[destinationPage!.id].childIds;
-    outDestination.splice(operation.index, 0, node.id);
-    out.nodes[node.id].parentId = parent?.id ?? null;
-    return finish(snapshot, out, [node.parentId ?? node.pageId, parent?.id ?? destinationPage!.id, node.id]);
-  }
 
-  const node = snapshot.nodes[operation.id];
-  if (!node) return reject(snapshot, "SECTION_TARGET_MISSING");
-  if (node.kind !== "section") return reject(snapshot, "SECTION_TARGET_NOT_SECTION");
-  if (isLockedPath(snapshot, node.id)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
-  const parentId = node.parentId;
-  const siblings = nodeSiblings(snapshot, node);
-  if (!siblings) return reject(snapshot, "SECTION_PARENT_MISSING");
-  const subtree: string[] = [];
-  const collect = (id: string) => {
-    subtree.push(id);
-    for (const childId of snapshot.nodes[id]?.childIds ?? []) collect(childId);
-  };
-  collect(node.id);
-  if (subtree.some((id) => snapshot.nodes[id]?.locked)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
-  if (operation.contents === "delete") {
-    // Figma documents deleting a Section with its contents. This operation
-    // deletes every descendant scene node and Section as one candidate edit.
-    const out = structuredClone(snapshot);
-    nodeSiblings(out, out.nodes[node.id])!.splice(siblings.indexOf(node.id), 1);
-    for (const id of subtree) delete out.nodes[id];
-    return finish(snapshot, out, [parentId ?? node.pageId, ...subtree]);
+    case "reorder": {
+      const node = snapshot.nodes[operation.id];
+      if (!node) return reject(snapshot, "SECTION_TARGET_MISSING");
+      if (isLockedPath(snapshot, node.id)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
+      const siblings = nodeSiblings(snapshot, node);
+      if (!siblings) return reject(snapshot, "SECTION_PARENT_MISSING");
+      const from = siblings.indexOf(node.id);
+      if (!Number.isInteger(operation.index) || operation.index < 0 || operation.index >= siblings.length) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
+      const out = structuredClone(snapshot);
+      const list = nodeSiblings(out, out.nodes[node.id])!;
+      list.splice(from, 1);
+      list.splice(operation.index, 0, node.id);
+      return finish(snapshot, out, [node.parentId ?? node.pageId, node.id]);
+    }
+
+    case "reparent": {
+      const node = snapshot.nodes[operation.id];
+      const parent = operation.parentId === null ? null : snapshot.nodes[operation.parentId];
+      const destinationPage = operation.parentId === null
+        ? snapshot.pages[operation.pageId ?? node?.pageId ?? ""]
+        : null;
+      const siblings = parent?.childIds ?? destinationPage?.childIds ?? null;
+      if (!node) return reject(snapshot, "SECTION_TARGET_MISSING");
+      if (operation.parentId !== null && !parent) return reject(snapshot, "SECTION_PARENT_MISSING");
+      if (operation.parentId === null && !destinationPage) return reject(snapshot, "SECTION_PAGE_MISSING");
+      if (isLockedPath(snapshot, node.id) || (parent && isLockedPath(snapshot, parent.id))) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
+      if (node.kind === "section" && parent && parent.kind !== "section") {
+        return reject(snapshot, parent.kind === "frame" || parent.kind === "group" ? "SECTION_CONTAINMENT_FORBIDDEN" : "SECTION_RELATIONSHIP_UNQUALIFIED");
+      }
+      const relation = sectionContainment(parent?.kind ?? "page", node.kind);
+      if (relation === "forbidden") return reject(snapshot, "SECTION_CONTAINMENT_FORBIDDEN");
+      if (relation === "unqualified") return reject(snapshot, "SECTION_RELATIONSHIP_UNQUALIFIED");
+      const parentPageId = parent?.pageId ?? destinationPage?.id;
+      if (!siblings || parentPageId !== node.pageId) return reject(snapshot, "SECTION_CROSS_PAGE_OPERATION");
+      let ancestor: string | null = parent?.id ?? null;
+      while (ancestor) {
+        if (ancestor === node.id) return reject(snapshot, "SECTION_CYCLE");
+        ancestor = snapshot.nodes[ancestor]?.parentId ?? null;
+      }
+      const oldSiblings = nodeSiblings(snapshot, node);
+      if (!oldSiblings) return reject(snapshot, "SECTION_PARENT_MISSING");
+      const from = oldSiblings.indexOf(node.id);
+      const insertionLimit = siblings === oldSiblings ? siblings.length - 1 : siblings.length;
+      if (!Number.isInteger(operation.index) || operation.index < 0 || operation.index > insertionLimit) return reject(snapshot, "SECTION_INVALID_ORDER_INDEX");
+      const out = structuredClone(snapshot);
+      nodeSiblings(out, out.nodes[node.id])!.splice(from, 1);
+      const outDestination = parent ? out.nodes[parent.id].childIds : out.pages[destinationPage!.id].childIds;
+      outDestination.splice(operation.index, 0, node.id);
+      out.nodes[node.id].parentId = parent?.id ?? null;
+      return finish(snapshot, out, [node.parentId ?? node.pageId, parent?.id ?? destinationPage!.id, node.id]);
+    }
+
+    case "delete-section": {
+      const node = snapshot.nodes[operation.id];
+      if (!node) return reject(snapshot, "SECTION_TARGET_MISSING");
+      if (node.kind !== "section") return reject(snapshot, "SECTION_TARGET_NOT_SECTION");
+      if (isLockedPath(snapshot, node.id)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
+      const parentId = node.parentId;
+      const siblings = nodeSiblings(snapshot, node);
+      if (!siblings) return reject(snapshot, "SECTION_PARENT_MISSING");
+      const subtree: string[] = [];
+      const collect = (id: string) => {
+        subtree.push(id);
+        for (const childId of snapshot.nodes[id]?.childIds ?? []) collect(childId);
+      };
+      collect(node.id);
+      if (subtree.some((id) => snapshot.nodes[id]?.locked)) return reject(snapshot, "SECTION_LOCKED_ANCESTOR");
+      if (operation.contents === "delete") {
+        // Figma documents deleting a Section with its contents. This operation
+        // deletes every descendant scene node and Section as one candidate edit.
+        const out = structuredClone(snapshot);
+        nodeSiblings(out, out.nodes[node.id])!.splice(siblings.indexOf(node.id), 1);
+        for (const id of subtree) delete out.nodes[id];
+        return finish(snapshot, out, [parentId ?? node.pageId, ...subtree]);
+      }
+      // Preserve mode unwraps one Section by splicing its ordered children into
+      // the former parent's exact sibling slot. Descendant nodes and IDs survive.
+      const out = structuredClone(snapshot);
+      const outSiblings = nodeSiblings(out, out.nodes[node.id])!;
+      const slot = outSiblings.indexOf(node.id);
+      outSiblings.splice(slot, 1, ...node.childIds);
+      for (const childId of node.childIds) out.nodes[childId].parentId = parentId;
+      delete out.nodes[node.id];
+      return finish(snapshot, out, [parentId ?? node.pageId, ...node.childIds, node.id]);
+    }
+    default: {
+      const exhaustiveOperation: never = operation;
+      return reject(snapshot, "SECTION_OPERATION_KIND_UNSUPPORTED", String((exhaustiveOperation as { kind?: unknown }).kind));
+    }
   }
-  // Preserve mode unwraps one Section by splicing its ordered children into
-  // the former parent's exact sibling slot. Descendant nodes and IDs survive.
-  const out = structuredClone(snapshot);
-  const outSiblings = nodeSiblings(out, out.nodes[node.id])!;
-  const slot = outSiblings.indexOf(node.id);
-  outSiblings.splice(slot, 1, ...node.childIds);
-  for (const childId of node.childIds) out.nodes[childId].parentId = parentId;
-  delete out.nodes[node.id];
-  return finish(snapshot, out, [parentId ?? node.pageId, ...node.childIds, node.id]);
 }
 
 function finish(before: SectionDomainSnapshot, after: SectionDomainSnapshot, changedIds: string[]): SectionPlanOutcome {
