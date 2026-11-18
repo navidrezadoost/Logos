@@ -38,8 +38,9 @@ function instance(id, componentId, propertyValues = {}) {
   return { id, source: { kind: "local-component", componentId }, variantSelection: {}, propertyValues, overrides: [], slotContent: {} };
 }
 
-const GENERATOR_VERSION = "fg-c3.4.1-seeded-v1";
-const SEED = 0x0c3c0401;
+const GENERATOR_VERSION = "fg-c3.5-seeded-v1";
+const SEED_MATRIX = [0x0c3c0401, 0x5eedc301, 0x20261118];
+const SAMPLES_PER_SEED = 48;
 function seededRandom(seed) {
   let state = seed >>> 0;
   return () => {
@@ -47,8 +48,7 @@ function seededRandom(seed) {
     return (state >>> 0) / 0x1_0000_0000;
   };
 }
-const random = seededRandom(SEED);
-const caseFor = (name, input, extra = {}) => ({ name, input, generatorVersion: GENERATOR_VERSION, seed: SEED, ...extra });
+const caseFor = (name, input, extra = {}) => ({ name, input, generatorVersion: GENERATOR_VERSION, ...extra });
 
 const cases = [{ name: "positive-generated", input: clone() }];
 for (const negative of negativeCases) {
@@ -136,28 +136,42 @@ cases.push({ name: "mutual-definition-expansion-cycle", input: mutualRecursive }
 
 // Fixed-seed valid graphs vary reference depth and document size while keeping
 // the fixture's component sets, typed properties, overrides, and slots intact.
-for (let sample = 0; sample < 48; sample++) {
-  const input = clone();
-  const depth = 1 + Math.floor(random() * 8);
-  let target = "card";
-  for (let level = 0; level < depth; level++) {
-    const id = `gen-${sample}-component-${level}`;
-    input.components[id] = component(id, target);
-    target = id;
-  }
-  const extraInstances = Math.floor(random() * 9);
-  for (let index = 0; index < extraInstances; index++) {
-    const id = `gen-${sample}-instance-${index}`;
-    const componentId = index % 2 ? target : "card";
-    input.instances[id] = instance(id, componentId);
-  }
-  cases.push(caseFor(`seed-${SEED}-valid-${sample}`, input));
+for (const seed of SEED_MATRIX) {
+  const random = seededRandom(seed);
+  const originalSeedCorpus = seed === SEED_MATRIX[0];
+  const generatedPrefix = originalSeedCorpus ? (sample) => `gen-${sample}` : (sample) => `gen-${seed.toString(16)}-${sample}`;
+  const casePrefix = originalSeedCorpus ? `seed-${seed}` : `seed-${seed.toString(16)}`;
+  for (let sample = 0; sample < SAMPLES_PER_SEED; sample++) {
+    const input = clone();
+    const depth = 1 + Math.floor(random() * 8);
+    let target = "card";
+    for (let level = 0; level < depth; level++) {
+      const id = `${generatedPrefix(sample)}-component-${level}`;
+      input.components[id] = component(id, target);
+      target = id;
+    }
+    const extraInstances = Math.floor(random() * 9);
+    for (let index = 0; index < extraInstances; index++) {
+      const id = `${generatedPrefix(sample)}-instance-${index}`;
+      const componentId = index % 2 ? target : "card";
+      input.instances[id] = instance(id, componentId);
+    }
+    cases.push(caseFor(`${casePrefix}-valid-${sample}`, input, { seed, sample }));
 
-  const mutation = structuredClone(input);
-  const generatedIds = Object.keys(mutation.components).filter((id) => id.startsWith(`gen-${sample}-`));
-  const selected = generatedIds[Math.floor(random() * generatedIds.length)];
-  mutation.components[selected].nodes[`${selected}-ref`].source.componentId = `missing-${sample}`;
-  cases.push(caseFor(`seed-${SEED}-invalid-reference-${sample}`, mutation));
+    const mutation = structuredClone(input);
+    const generatedIds = Object.keys(mutation.components).filter((id) => id.startsWith(`${generatedPrefix(sample)}-`));
+    const selected = generatedIds[Math.floor(random() * generatedIds.length)];
+    mutation.components[selected].nodes[`${selected}-ref`].source.componentId = originalSeedCorpus ? `missing-${sample}` : `missing-${seed.toString(16)}-${sample}`;
+    cases.push(caseFor(`${casePrefix}-invalid-reference-${sample}`, mutation, { seed, sample }));
+  }
+
+  // Exercise several interactions in one invalid document: malformed set
+  // variant selection, an unauthorized swap target, and broken slot topology.
+  const combined = clone();
+  combined.components.card.nodes["card-icon"].variantSelection.size = `unknown-${seed.toString(16)}`;
+  combined.instances["card-instance"].propertyValues["icon-swap"] = { kind: "local-component", componentId: "card" };
+  combined.instances["card-instance"].slotContent["content-slot"].nodes["authored-2"].parentId = "missing-slot-parent";
+  cases.push(caseFor(`seed-${seed.toString(16)}-combined-variant-swap-slot`, combined, { seed, sample: "combined" }));
 }
 
 // The JSON-text entrypoint and JSON.parse must agree on the same wire input.
@@ -182,6 +196,13 @@ cases.push({ name: "unicode-empty-and-unusual-identities", input: unusualKeys })
 cases.push({ name: "long-diagnostic-path", input: (() => { const value = clone(); const key = "k".repeat(1024); value.instances["unresolved-instance"].propertyValues[key] = true; return value; })() });
 cases.push({ name: "large-envelope-256-instances", input: (() => { const value = clone(); for (let i = 0; i < 256; i++) value.instances[`bulk-${String(i).padStart(3, "0")}`] = instance(`bulk-${i}`, "card"); return value; })() });
 cases.push({ name: "deep-containment-graph", input: (() => { const value = clone(); const card = value.components.card; const chain = []; for (let i = 0; i < 48; i++) { const id = `deep-${i}`; chain.push(id); card.nodes[id] = { id, kind: "container", parentId: i ? `deep-${i - 1}` : null, childIds: i < 47 ? [`deep-${i + 1}`] : [] }; } card.rootNodeIds.push(chain[0]); return value; })() });
+const javascriptOnly = clone();
+javascriptOnly.instances["unresolved-instance"].source.locator.nonFinite = Number.NaN;
+cases.push({ name: "unsupported-javascript-only-nan", input: javascriptOnly, supported: false, unsupportedReason: "NaN has no valid JSON wire representation" });
+for (const testCase of cases) {
+  testCase.supportClass = testCase.supported === false ? "typescript-only" : "shared-wire";
+  if (testCase.supportClass === "typescript-only" && !testCase.unsupportedReason) throw new Error(`Unsupported case lacks a reason: ${testCase.name}`);
+}
 
 try {
   const domain = await server.ssrLoadModule("/src/document-core/componentInstanceDomainV1.ts");
@@ -192,20 +213,37 @@ try {
     assert.deepEqual(parsedInput, before, "TypeScript validator must not mutate input");
     return result;
   });
+  const supportedCases = cases.map((testCase, index) => ({ testCase, ts: tsResults[index], index })).filter(({ testCase }) => testCase.supportClass === "shared-wire");
+  const unsupportedCases = cases.filter(({ supportClass }) => supportClass === "typescript-only").map(({ name, unsupportedReason }) => ({ name, reason: unsupportedReason }));
+  const unknownClassifications = cases.filter(({ supportClass }) => !["shared-wire", "typescript-only"].includes(supportClass));
   const cargo = spawnSync("cargo", ["run", "--quiet", "--manifest-path", "spikes/fg-c3-2-1/rust-planner/Cargo.toml", "--bin", "component_instance_validate"], {
-    cwd: root, input: cases.map(({ input, rawLine, rustLine }) => rawLine ?? rustLine ?? JSON.stringify(input)).join("\n") + "\n", encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+    cwd: root, input: supportedCases.map(({ testCase: { input, rawLine, rustLine } }) => rawLine ?? rustLine ?? JSON.stringify(input)).join("\n") + "\n", encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
   });
-  if (cargo.status !== 0) throw new Error(`Rust differential runner failed (${cargo.status}): ${cargo.stderr}`);
-  const rustResults = cargo.stdout.trimEnd().split("\n").map((line) => JSON.parse(line));
-  assert.equal(rustResults.length, cases.length, "one Rust response per shared input");
-
+  const runnerFailures = [];
+  const parserFailures = [];
+  const semanticMismatches = [];
+  if (cargo.error || cargo.status !== 0) {
+    runnerFailures.push({ code: "RUST_RUNNER_FAILED", status: cargo.status, message: cargo.error?.message ?? cargo.stderr });
+  }
+  const rawRustLines = cargo.status === 0 ? cargo.stdout.trimEnd().split("\n") : [];
+  if (cargo.status === 0 && rawRustLines.length !== supportedCases.length) {
+    runnerFailures.push({ code: "RUST_RESPONSE_COUNT_MISMATCH", expected: supportedCases.length, actual: rawRustLines.length });
+  }
+  const rustResults = rawRustLines.map((line, index) => {
+    try { return JSON.parse(line); }
+    catch (error) {
+      parserFailures.push({ case: supportedCases[index]?.testCase.name ?? `response-${index}`, message: String(error) });
+      return null;
+    }
+  });
   let matched = 0;
   const mismatches = [];
-  for (let index = 0; index < cases.length; index++) {
-    const ts = tsResults[index]; const rust = rustResults[index];
+  for (let index = 0; index < Math.min(supportedCases.length, rustResults.length); index++) {
+    const { testCase, ts } = supportedCases[index]; const rust = rustResults[index];
+    if (rust === null) continue;
     const comparableTs = { ok: ts.ok, diagnostics: ts.diagnostics, document: ts.document };
     if (isDeepStrictEqual(comparableTs, rust)) matched++;
-    else mismatches.push({ case: cases[index], typescript: comparableTs, rust, minimization: "full failing input preserved; generated case has bounded depth and size" });
+    else mismatches.push({ case: testCase, typescript: comparableTs, rust, minimization: "full failing input preserved; generated case has bounded depth and size" });
   }
   // On failure only, greedily remove top-level records while preserving the
   // exact mismatch. This deterministic reducer is bounded by the input record
@@ -236,10 +274,30 @@ try {
     mismatch.case.input = candidate;
     mismatch.minimization = `deterministic top-level record reduction removed ${removed} record(s); originalInput preserves the initial failure`;
   }
-  const observedCodes = [...new Set(tsResults.flatMap((result) => result.diagnostics.map((d) => d.code)))].sort();
-  const report = { generatorVersion: GENERATOR_VERSION, seed: SEED, cases: cases.length, matched, divergent: mismatches.length, unsupported: 0, observedDiagnosticCodes: observedCodes, detailPolicy: "exact code/path/severity/detail and semantic JSON payload equality" };
+  const observedCodes = [...new Set(supportedCases.flatMap(({ ts }) => ts.diagnostics.map((d) => d.code)))].sort();
+  const componentJsonInvalidOutcomes = supportedCases
+    .filter(({ ts }) => ts.diagnostics.some(({ code }) => code === "COMPONENT_JSON_INVALID"))
+    .map(({ testCase }) => testCase.name);
+  semanticMismatches.push(...mismatches);
+  const report = {
+    generatorVersion: GENERATOR_VERSION,
+    seedMatrix: SEED_MATRIX,
+    samplesPerSeed: SAMPLES_PER_SEED,
+    cases: cases.length,
+    compared: supportedCases.length,
+    matched,
+    unsupported: unsupportedCases.length,
+    unsupportedCases,
+    unknownClassifications: unknownClassifications.map(({ name, supportClass }) => ({ name, supportClass })),
+    runnerFailures,
+    parserFailures,
+    componentJsonInvalidOutcomes,
+    divergent: semanticMismatches.length,
+    observedDiagnosticCodes: observedCodes,
+    detailPolicy: "exact code/path/severity/detail and semantic JSON payload equality",
+  };
   console.log(JSON.stringify(report));
-  if (mismatches.length) {
+  if (mismatches.length || runnerFailures.length || parserFailures.length || unknownClassifications.length) {
     const failureDir = new URL("../fixtures/figma-semantics/fg-c3-4-1-failures/", import.meta.url);
     await mkdir(failureDir, { recursive: true });
     for (let index = 0; index < mismatches.length; index++) {

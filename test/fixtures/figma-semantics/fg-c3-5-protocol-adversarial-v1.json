@@ -1,0 +1,84 @@
+{
+  "fixtureContractVersion": 1,
+  "proposal": "fg-c3.5-proposal-v1",
+  "executionStatus": "specification-only",
+  "operation": "validateComponentInstanceV1",
+  "cases": [
+    {
+      "id": "valid-clean",
+      "layer": "component-semantic",
+      "request": { "protocolVersion": 2, "semanticVersion": 1, "diagnosticVersion": 1, "requestId": "fg35-clean", "kind": "validateComponentInstanceV1", "componentSemanticVersion": 1, "documentJsonFixture": "component-instance-domain-v1-with-guidance-adjusted-to-two" },
+      "expected": { "kind": "validation", "ok": true, "diagnosticSeverities": [] }
+    },
+    {
+      "id": "valid-warning-only",
+      "layer": "component-semantic",
+      "request": { "protocolVersion": 2, "semanticVersion": 1, "diagnosticVersion": 1, "requestId": "fg35-warning", "kind": "validateComponentInstanceV1", "componentSemanticVersion": 1, "documentJsonFixture": "component-instance-domain-v1" },
+      "expected": { "kind": "validation", "ok": true, "diagnosticCodes": ["COMPONENT_SLOT_GUIDANCE_EXCEEDED"], "diagnosticSeverities": ["warning"] }
+    },
+    {
+      "id": "rejected-component-graph",
+      "layer": "component-semantic",
+      "request": { "protocolVersion": 2, "semanticVersion": 1, "diagnosticVersion": 1, "requestId": "fg35-invalid", "kind": "validateComponentInstanceV1", "componentSemanticVersion": 1, "documentJsonFixture": "component-instance-domain-v1-with-missing-reference" },
+      "expected": { "kind": "validation", "ok": false, "diagnosticCodes": ["COMPONENT_REFERENCE_MISSING"] }
+    },
+    {
+      "id": "unsupported-component-semantic-version",
+      "layer": "protocol-envelope",
+      "request": { "protocolVersion": 2, "semanticVersion": 1, "diagnosticVersion": 1, "requestId": "fg35-version", "kind": "validateComponentInstanceV1", "componentSemanticVersion": 2, "documentJsonFixture": "component-instance-domain-v1" },
+      "expected": { "kind": "protocol-error", "code": "COMPONENT_SEMANTIC_VERSION_UNSUPPORTED", "validatorInvoked": false }
+    },
+    {
+      "id": "malformed-request-envelope",
+      "layer": "transport-parser",
+      "rawRequestText": "{\"protocolVersion\":2,\"requestId\":",
+      "expected": { "kind": "protocol-error", "code": "REQUEST_INVALID", "validatorInvoked": false }
+    },
+    {
+      "id": "duplicate-json-member-policy",
+      "layer": "duplicate-aware-parser",
+      "requestGenerator": { "kind": "valid-envelope-and-component-document", "duplicateMembers": ["outer.requestId", "document.version", "document.nested\\u0070roperty"], "policy": "reject-before-object-materialization" },
+      "expected": { "kind": "protocol-error", "code": "DUPLICATE_JSON_MEMBER", "validatorInvoked": false, "lastWins": false }
+    },
+    {
+      "id": "oversized-document-payload",
+      "layer": "transport-limits",
+      "requestGenerator": { "kind": "valid-envelope-with-documentJson", "documentJsonUtf8Bytes": 786433, "outerFrameBytesAtMost": 1048576 },
+      "expected": { "kind": "protocol-error", "code": "COMPONENT_INPUT_TOO_LARGE", "allocatedParsedDocument": false, "validatorInvoked": false }
+    },
+    {
+      "id": "oversized-request-frame",
+      "layer": "transport-limits",
+      "requestGenerator": { "kind": "valid-envelope-with-documentJson", "outerFrameBytes": 1048577 },
+      "expected": { "kind": "protocol-error", "code": "REQUEST_TOO_LARGE", "allocatedDocument": false, "validatorInvoked": false }
+    },
+    {
+      "id": "excessive-diagnostic-output",
+      "layer": "transport-limits",
+      "requestGenerator": { "kind": "invalid-component-document", "distinctSemanticErrors": 513 },
+      "expected": { "kind": "protocol-error", "code": "RESOURCE_LIMIT_EXCEEDED", "partialDiagnostics": false }
+    },
+    {
+      "id": "stale-response-correlation",
+      "layer": "correlation",
+      "request": { "requestId": "fg35-current", "kind": "validateComponentInstanceV1" },
+      "injectedResponse": { "requestId": "fg35-stale", "operationKind": "validateComponentInstanceV1", "ok": true, "diagnostics": [] },
+      "expected": { "kind": "caller-discard", "acceptAsResponseToCurrentRequest": false }
+    },
+    {
+      "id": "truncated-input-frame",
+      "layer": "framing",
+      "frameGenerator": { "kind": "length-prefixed", "declaredBodyBytes": 20, "actualBodyBytes": 7 },
+      "expected": { "kind": "protocol-error", "code": "FRAME_TRUNCATED", "workerMayContinue": false }
+    },
+    {
+      "id": "restart-after-semantic-rejection",
+      "layer": "process-lifecycle",
+      "sequence": [
+        { "requestId": "fg35-reject", "documentJsonFixture": "component-instance-domain-v1-with-missing-reference", "expectedOk": false },
+        { "requestId": "fg35-after-restart", "documentJsonFixture": "component-instance-domain-v1-with-guidance-adjusted-to-two", "expectedOk": true }
+      ],
+      "expected": { "kind": "recovery-check", "secondRequestCorrelated": true, "partialState": false, "statePersistsAcrossRequests": false }
+    }
+  ]
+}
