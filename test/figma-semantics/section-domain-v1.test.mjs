@@ -56,6 +56,27 @@ function node(id, pageId, kind, parentId = null, extra = {}) {
   return { id, pageId, kind, parentId, childIds: [], locked: false, visible: true, ...extra };
 }
 
+function idFromNumber(value) {
+  return `50000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
+}
+
+function snapshotForEdge(parentKind, childKind, parentId, childId) {
+  const pageId = "10000000-0000-4000-8000-000000000009";
+  const parent = node(parentId, pageId, parentKind, null, {
+    childIds: [childId],
+    ...(parentKind === "section" ? { bounds: { x: 0, y: 0, width: 10, height: 10 } } : {}),
+  });
+  const child = node(childId, pageId, childKind, parentId, {
+    ...(childKind === "section" ? { bounds: { x: 1, y: 1, width: 5, height: 5 } } : {}),
+  });
+  return {
+    version: 1,
+    pageOrder: [pageId],
+    pages: { [pageId]: { id: pageId, childIds: [parentId] } },
+    nodes: { [parentId]: parent, [childId]: child },
+  };
+}
+
 test("fixture-validates-exact-section-ownership-and-stable-ids", () => {
   const snapshot = clone();
   assert.equal(domain.SECTION_DOMAIN_VERSION, 1);
@@ -68,24 +89,127 @@ test("fixture-validates-exact-section-ownership-and-stable-ids", () => {
   assert.equal(domain.isSectionUuid("section-1"), false);
 });
 
-test("matrix-allows-page-and-section-containment-and-supported-leaves", () => {
+test("matrix-driven-containment-covers-every-known-parent-child-kind-and-planner-agrees", () => {
   const { sectionContainment } = domain;
-  const leaves = ["rect", "circle", "ellipse", "path", "text", "svg-raw", "vector-network"];
-  for (const kind of ["section", "frame", "group", ...leaves]) {
-    assert.equal(sectionContainment("page", kind), "allowed", `Page -> ${kind}`);
-    assert.equal(sectionContainment("section", kind), "allowed", `Section -> ${kind}`);
+  const kinds = ["section", "frame", "group", "rect", "circle", "ellipse", "path", "text", "svg-raw", "vector-network", "bool", "component", "component-set", "instance"];
+  const leaves = new Set(["rect", "circle", "ellipse", "path", "text", "svg-raw", "vector-network"]);
+  const unqualified = new Set(["bool", "component", "component-set", "instance"]);
+  const expected = (parent, child) => {
+    if (unqualified.has(parent) || unqualified.has(child)) return "unqualified";
+    if (parent === "page") return "allowed";
+    if (parent === "section") return ["section", "frame", "group", ...leaves].includes(child) ? "allowed" : "forbidden";
+    if (parent === "frame" || parent === "group") return child === "section" ? "forbidden" : ["frame", "group", ...leaves].includes(child) ? "allowed" : "forbidden";
+    return "forbidden";
+  };
+
+  let serial = 1;
+  for (const parent of ["page", ...kinds]) {
+    for (const child of kinds) {
+      const classification = expected(parent, child);
+      assert.equal(sectionContainment(parent, child), classification, `${parent} -> ${child}`);
+      if (parent === "page") continue;
+      const parentId = idFromNumber(serial++);
+      const childId = idFromNumber(serial++);
+      const snapshot = snapshotForEdge(parent, child, parentId, childId);
+      assert.equal(domain.validateSectionSnapshot(snapshot), classification === "allowed"
+        ? null
+        : classification === "unqualified" ? "SECTION_RELATIONSHIP_UNQUALIFIED" : "SECTION_CONTAINMENT_FORBIDDEN",
+      `snapshot validator: ${parent} -> ${child}`);
+      const result = domain.planSectionOperation(snapshot, {
+        kind: "insert-node", parentId, index: 1,
+        node: node(idFromNumber(serial++), snapshot.pages[Object.keys(snapshot.pages)[0]].id, child, null,
+          child === "section" ? { bounds: { x: 2, y: 2, width: 3, height: 3 } } : {}),
+      });
+      assert.equal(result.ok, classification === "allowed", `planner: ${parent} -> ${child}`);
+      if (classification !== "allowed") {
+        assert.equal(result.diagnostic.code, classification === "unqualified"
+          ? "SECTION_RELATIONSHIP_UNQUALIFIED" : "SECTION_CONTAINMENT_FORBIDDEN");
+      } else {
+        assert.equal(domain.validateSectionSnapshot(result.snapshot), null);
+      }
+    }
   }
-  for (const kind of ["frame", "group"]) {
-    assert.equal(sectionContainment(kind, "section"), "forbidden", `${kind} -> Section`);
-    assert.equal(sectionContainment(kind, "rect"), "allowed", `${kind} -> Rectangle`);
+  for (const child of kinds) {
+    const classification = expected("page", child);
+    const rootId = idFromNumber(serial++);
+    const pageId = "10000000-0000-4000-8000-000000000008";
+    const rootSnapshot = {
+      version: 1,
+      pageOrder: [pageId],
+      pages: { [pageId]: { id: pageId, childIds: [rootId] } },
+      nodes: { [rootId]: node(rootId, pageId, child, null,
+        child === "section" ? { bounds: { x: 0, y: 0, width: 10, height: 10 } } : {}) },
+    };
+    assert.equal(domain.validateSectionSnapshot(rootSnapshot), classification === "allowed"
+      ? null : "SECTION_RELATIONSHIP_UNQUALIFIED", `Page-root validator: ${child}`);
+
+    if (classification === "allowed") {
+      const parentId = idFromNumber(serial++);
+      const nestedId = idFromNumber(serial++);
+      const source = snapshotForEdge("section", child, parentId, nestedId);
+      const result = domain.planSectionOperation(source, {
+        kind: "reparent", id: nestedId, parentId: null,
+        pageId: source.pageOrder[0], index: 1,
+      });
+      assert.equal(result.ok, true, `Page-root planner: ${child}`);
+      assert.equal(domain.validateSectionSnapshot(result.snapshot), null);
+    } else {
+      const result = domain.planSectionOperation(rootSnapshot, { kind: "reorder", id: rootId, index: 0 });
+      assert.equal(result.ok, false);
+      assert.equal(result.diagnostic.code, "SECTION_RELATIONSHIP_UNQUALIFIED");
+      assert.strictEqual(result.snapshot, rootSnapshot);
+    }
   }
-  for (const kind of leaves) assert.equal(sectionContainment(kind, "rect"), "forbidden", `${kind} is a leaf`);
+  assert.equal(sectionContainment("page", "future-node"), "unqualified");
+  assert.equal(sectionContainment("future-parent", "rect"), "unqualified");
+});
+
+test("page-root-snapshot-validation-rejects-unqualified-and-unknown-node-kinds", () => {
   for (const kind of ["component", "component-set", "instance", "bool"]) {
-    assert.equal(sectionContainment("page", kind), "unqualified", `Page -> ${kind}`);
-    assert.equal(sectionContainment("section", kind), "unqualified", `Section -> ${kind}`);
-    assert.equal(sectionContainment("section", "instance"), "unqualified");
+    const snapshot = clone();
+    const id = idFromNumber(100 + ["component", "component-set", "instance", "bool"].indexOf(kind));
+    snapshot.nodes[id] = node(id, ids.page, kind);
+    snapshot.pages[ids.page].childIds.push(id);
+    assert.equal(domain.validateSectionSnapshot(snapshot), "SECTION_RELATIONSHIP_UNQUALIFIED", `Page -> ${kind}`);
   }
-  assert.equal(sectionContainment("rect", "rect"), "forbidden");
+  const unknown = clone();
+  unknown.nodes[ids.newLeaf] = node(ids.newLeaf, ids.page, "future-layer");
+  unknown.pages[ids.page].childIds.push(ids.newLeaf);
+  assert.equal(domain.validateSectionSnapshot(unknown), "SECTION_NODE_KIND_UNSUPPORTED");
+  const rejected = domain.planSectionOperation(unknown, { kind: "reorder", id: ids.secondRoot, index: 0 });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.diagnostic.code, "SECTION_NODE_KIND_UNSUPPORTED");
+  assert.strictEqual(rejected.snapshot, unknown);
+
+  const valid = clone();
+  const operation = domain.planSectionOperation(valid, {
+    kind: "insert-node", parentId: ids.section, index: 2,
+    node: node(ids.newLeaf, ids.page, "future-layer"),
+  });
+  assert.equal(operation.ok, false);
+  assert.equal(operation.diagnostic.code, "SECTION_NODE_KIND_UNSUPPORTED");
+  assert.strictEqual(operation.snapshot, valid);
+});
+
+test("runtime-snapshot-structure-flags-and-child-lists-fail-closed", () => {
+  assert.equal(domain.validateSectionSnapshot(null), "SECTION_SNAPSHOT_MALFORMED");
+  for (const mutateAndExpect of [
+    [(s) => { s.pages[ids.page].childIds = "not-an-array"; }, "SECTION_PAGE_RECORD_MALFORMED"],
+    [(s) => { s.nodes[ids.frame].childIds = "not-an-array"; }, "SECTION_CHILD_LIST_INVALID"],
+    [(s) => { s.nodes[ids.frame].locked = 1; }, "SECTION_NODE_FLAG_INVALID"],
+    [(s) => { delete s.nodes[ids.frame].visible; }, "SECTION_NODE_FLAG_INVALID"],
+    [(s) => { s.nodes[ids.frame].parentId = 4; }, "SECTION_NODE_RECORD_MALFORMED"],
+    [(s) => { s.nodes[ids.frame].parentId = ids.newLeaf; }, "SECTION_PARENT_MISSING"],
+    [(s) => { s.nodes[ids.frame].pageId = "40000000-0000-4000-8000-000000000001"; }, "SECTION_PAGE_MISSING"],
+  ]) {
+    const snapshot = clone();
+    mutateAndExpect[0](snapshot);
+    assert.equal(domain.validateSectionSnapshot(snapshot), mutateAndExpect[1]);
+    const result = domain.planSectionOperation(snapshot, { kind: "reorder", id: ids.secondRoot, index: 0 });
+    assert.equal(result.ok, false);
+    assert.equal(result.diagnostic.code, mutateAndExpect[1]);
+    assert.strictEqual(result.snapshot, snapshot);
+  }
 });
 
 test("create-root-and-nested-sections-publish-new-immutable-snapshots-in-order", () => {
@@ -181,6 +305,8 @@ test("reparent-allows-section-nesting-but-prevents-cycles-and-cross-page-moves",
     kind: "reparent", id: ids.secondRoot, parentId: null, pageId: otherPageId, index: 0,
   }, "SECTION_CROSS_PAGE_OPERATION");
   const forged = clone();
+  forged.pages[otherPageId] = { id: otherPageId, childIds: [] };
+  forged.pageOrder.push(otherPageId);
   forged.nodes[ids.secondRoot].pageId = otherPageId;
   assert.equal(domain.validateSectionSnapshot(forged), "SECTION_PAGE_OWNERSHIP_MISMATCH");
 });
@@ -242,7 +368,39 @@ test("locked-ancestor-and-invalid-existing-graphs-reject-without-changing-input"
   const badCycle = clone();
   badCycle.nodes[ids.section].parentId = ids.nested;
   badCycle.nodes[ids.nested].childIds.push(ids.section);
-  assert.equal(domain.validateSectionSnapshot(badCycle), "SECTION_DUPLICATE_OWNERSHIP");
+  assert.equal(domain.validateSectionSnapshot(badCycle), "SECTION_CYCLE");
+});
+
+test("cycle-diagnostics-cover-self-multi-node-and-disconnected-cycles-before-ownership-errors", () => {
+  const self = clone();
+  self.nodes[ids.secondRoot].childIds.push(ids.secondRoot);
+  assert.equal(domain.validateSectionSnapshot(self), "SECTION_CYCLE");
+
+  const multi = clone();
+  multi.nodes[ids.section].parentId = ids.nested;
+  multi.nodes[ids.nested].childIds.push(ids.section);
+  assert.equal(domain.validateSectionSnapshot(multi), "SECTION_CYCLE");
+
+  const disconnected = clone();
+  const a = "60000000-0000-4000-8000-000000000001";
+  const b = "60000000-0000-4000-8000-000000000002";
+  disconnected.nodes[a] = node(a, ids.page, "section", b, {
+    childIds: [b], bounds: { x: 0, y: 0, width: 1, height: 1 },
+  });
+  disconnected.nodes[b] = node(b, ids.page, "section", a, {
+    childIds: [a], bounds: { x: 0, y: 0, width: 1, height: 1 },
+  });
+  assert.equal(domain.validateSectionSnapshot(disconnected), "SECTION_CYCLE");
+});
+
+test("duplicate-child-ownership-is-distinguished-from-cycles", () => {
+  const duplicateInList = clone();
+  duplicateInList.nodes[ids.section].childIds.push(ids.frame);
+  assert.equal(domain.validateSectionSnapshot(duplicateInList), "SECTION_DUPLICATE_OWNERSHIP");
+
+  const duplicateAcrossOwners = clone();
+  duplicateAcrossOwners.pages[ids.page].childIds.push(ids.frame);
+  assert.equal(domain.validateSectionSnapshot(duplicateAcrossOwners), "SECTION_DUPLICATE_OWNERSHIP");
 });
 
 test("bounds-are-stored-separately-and-containment-edits-do-not-transform-child-geometry", () => {

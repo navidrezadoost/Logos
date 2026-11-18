@@ -58,7 +58,9 @@ All relations must also satisfy graph invariants. A move that would make a node 
 
 Mutations inside a locked Section or node, or below a locked ancestor, reject with `SECTION_LOCKED_ANCESTOR`. Deleting or unwrapping a Section also rejects if its affected subtree contains any locked node. The candidate lock rule is a safety rule, not a claim of complete Figma selection/lock parity. Visibility is carried as data and is not used to decide structural validity. Rejected operations preserve the entire input snapshot.
 
-Stable diagnostics distinguish malformed UUIDs, invalid order, missing ownership, duplicate ownership, cycles, cross-Page requests, forbidden containment, unqualified relations, lock rejection and invalid Section bounds.
+Stable diagnostics distinguish malformed runtime records, unsupported node kinds, invalid flags/order, missing ownership, duplicate ownership, cycles, cross-Page requests, forbidden containment, unqualified relations, lock rejection and invalid Section bounds. The validator applies containment checks to both Page-root edges and node-child edges. It validates external JSON at runtime rather than trusting TypeScript types.
+
+Diagnostic precedence is fixed: (1) snapshot envelope/version and record structure, kind, flags, bounds and child-list shape; (2) page ordering and IDs, missing Page/parent/child references, local duplicate membership and containment; (3) cycles in all node components, including disconnected components; (4) ownership duplicated across distinct parents; (5) unreachable nodes, parent reciprocity, then Page ownership. Thus cycle errors take precedence over the duplicate-owner or unreachable symptoms that the same cycle can create. If an input has independent defects, the earliest phase above determines the returned stable code.
 
 ## 5. Geometry contract and explicit unknowns
 
@@ -73,7 +75,9 @@ The candidate is exercised by [`section-domain-v1.test.mjs`](../../test/figma-se
 - The complete matrix for candidate node kinds, including explicit unqualified classes.
 - Page-root and nested Section creation, stable IDs, ordered insertion and reordering.
 - Frame, Group and supported leaf containment; Section-under-Frame/Group rejection.
-- Reparenting, root order, cycle and page-ownership validation.
+- A matrix-driven check of every Page and node parent/child kind against both the validator and planner, including root-level unqualified relationships.
+- Runtime rejection of unknown kinds, malformed records, flags, child lists, bounds and references.
+- Reparenting, root order, self/multi-node/disconnected cycle detection, duplicate ownership, and page-ownership validation.
 - Delete subtree and preserve-content unwrap, including IDs and sibling order.
 - Lock rejection, malformed identity/bounds, duplicate ownership, and exact input immutability on rejection.
 - Child geometry and Section bounds remain unchanged under candidate hierarchy edits.

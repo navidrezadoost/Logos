@@ -79,7 +79,13 @@ export type SectionOperation =
   | { kind: "delete-section"; id: string; contents: "delete" | "preserve" };
 
 export type SectionDiagnosticCode =
+  | "SECTION_SNAPSHOT_MALFORMED"
   | "SECTION_DOMAIN_VERSION_UNSUPPORTED"
+  | "SECTION_PAGE_RECORD_MALFORMED"
+  | "SECTION_NODE_RECORD_MALFORMED"
+  | "SECTION_NODE_KIND_UNSUPPORTED"
+  | "SECTION_NODE_FLAG_INVALID"
+  | "SECTION_CHILD_LIST_INVALID"
   | "SECTION_INVALID_UUID"
   | "SECTION_DUPLICATE_ID"
   | "SECTION_PAGE_ORDER_INVALID"
@@ -129,11 +135,21 @@ export function isSectionUuid(id: string): boolean {
   return UUID.test(id);
 }
 
+const SECTION_NODE_KINDS = new Set<string>([
+  "section", "frame", "group", "rect", "circle", "ellipse", "path", "text",
+  "svg-raw", "vector-network", "bool", "component", "component-set", "instance",
+]);
+
+export function isSectionNodeKind(kind: unknown): kind is SectionNodeKind {
+  return typeof kind === "string" && SECTION_NODE_KINDS.has(kind);
+}
+
 /** Strict containment rules for the supported candidate subset. */
-export function sectionContainment(parent: "page" | SectionNodeKind, child: SectionNodeKind):
+export function sectionContainment(parent: "page" | string, child: string):
   | "allowed"
   | "forbidden"
   | "unqualified" {
+  if (!isSectionNodeKind(child) || (parent !== "page" && !isSectionNodeKind(parent))) return "unqualified";
   if (UNQUALIFIED_KINDS.has(parent as SectionNodeKind) || UNQUALIFIED_KINDS.has(child)) return "unqualified";
   if (parent === "page") return "allowed";
   if (parent === "section") {
@@ -159,57 +175,101 @@ function validBounds(bounds: SectionBounds): boolean {
     && bounds.width >= 0 && bounds.height >= 0;
 }
 
-/** Validates exact ownership, page association, reciprocal edges and acyclicity. */
-export function validateSectionSnapshot(snapshot: SectionDomainSnapshot): SectionDiagnosticCode | null {
-  if (snapshot.version !== SECTION_DOMAIN_VERSION) return "SECTION_DOMAIN_VERSION_UNSUPPORTED";
-  const pageIds = Object.keys(snapshot.pages);
-  if (new Set(snapshot.pageOrder).size !== snapshot.pageOrder.length
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isBounds(value: unknown): value is SectionBounds {
+  if (!isRecord(value)) return false;
+  return Number.isFinite(value.x) && Number.isFinite(value.y)
+    && Number.isFinite(value.width) && Number.isFinite(value.height)
+    && (value.width as number) >= 0 && (value.height as number) >= 0;
+}
+
+/**
+ * Diagnostic precedence is deterministic:
+ * 1. envelope/version and record shape, flags, kinds, bounds and child-list shape;
+ * 2. page order and IDs, missing Page/parent/child references, local duplicate membership and containment;
+ * 3. cycles across every connected or disconnected node component;
+ * 4. duplicate ownership across distinct owners;
+ * 5. unreachable nodes, parent reciprocity, then Page ownership.
+ * This lets cycles win over the secondary unreachable/duplicate-owner symptoms
+ * they can create, while malformed records still fail before graph traversal.
+ */
+export function validateSectionSnapshot(input: unknown): SectionDiagnosticCode | null {
+  if (!isRecord(input)) return "SECTION_SNAPSHOT_MALFORMED";
+  if (input.version !== SECTION_DOMAIN_VERSION) return "SECTION_DOMAIN_VERSION_UNSUPPORTED";
+  if (!Array.isArray(input.pageOrder) || !isRecord(input.pages) || !isRecord(input.nodes)) {
+    return "SECTION_SNAPSHOT_MALFORMED";
+  }
+
+  const snapshot = input as unknown as SectionDomainSnapshot;
+  const pageIds = Object.keys(snapshot.pages).sort();
+  const nodeIds = Object.keys(snapshot.nodes).sort();
+
+  for (const pageId of pageIds) {
+    const page = snapshot.pages[pageId] as unknown;
+    if (!isRecord(page) || page.id !== pageId || !Array.isArray(page.childIds)
+      || page.childIds.some((childId) => typeof childId !== "string")) {
+      return "SECTION_PAGE_RECORD_MALFORMED";
+    }
+  }
+  for (const nodeId of nodeIds) {
+    const node = snapshot.nodes[nodeId] as unknown;
+    if (!isRecord(node) || node.id !== nodeId || typeof node.pageId !== "string"
+      || !(node.parentId === null || typeof node.parentId === "string")) {
+      return "SECTION_NODE_RECORD_MALFORMED";
+    }
+    if (!isSectionNodeKind(node.kind)) return "SECTION_NODE_KIND_UNSUPPORTED";
+    if (typeof node.locked !== "boolean" || typeof node.visible !== "boolean") return "SECTION_NODE_FLAG_INVALID";
+    if (!Array.isArray(node.childIds) || node.childIds.some((childId) => typeof childId !== "string")) {
+      return "SECTION_CHILD_LIST_INVALID";
+    }
+    if (node.kind === "section" && !isBounds(node.bounds)) return "SECTION_INVALID_BOUNDS";
+    if (node.kind !== "section" && node.bounds !== undefined) return "SECTION_INVALID_BOUNDS";
+    if (node.worldBounds !== undefined && !isBounds(node.worldBounds)) return "SECTION_INVALID_BOUNDS";
+  }
+
+  if (snapshot.pageOrder.some((id) => typeof id !== "string")
+    || new Set(snapshot.pageOrder).size !== snapshot.pageOrder.length
     || snapshot.pageOrder.length !== pageIds.length
     || snapshot.pageOrder.some((id) => !snapshot.pages[id])
     || pageIds.some((id) => !snapshot.pageOrder.includes(id))) return "SECTION_PAGE_ORDER_INVALID";
 
-  const allIds = [...pageIds, ...Object.keys(snapshot.nodes)];
+  const allIds = [...pageIds, ...nodeIds];
   if (new Set(allIds).size !== allIds.length) return "SECTION_DUPLICATE_ID";
   if (allIds.some((id) => !isSectionUuid(id))) return "SECTION_INVALID_UUID";
 
-  for (const page of Object.values(snapshot.pages)) {
-    if (page.id !== Object.keys(snapshot.pages).find((key) => snapshot.pages[key] === page)) return "SECTION_PAGE_MISSING";
-  }
-  for (const [id, node] of Object.entries(snapshot.nodes)) {
-    if (node.id !== id) return "SECTION_DUPLICATE_ID";
-    if (node.kind === "section" && (!node.bounds || !validBounds(node.bounds))) return "SECTION_INVALID_BOUNDS";
-    if (node.kind !== "section" && node.bounds !== undefined) return "SECTION_INVALID_BOUNDS";
-    if (node.worldBounds !== undefined && !validBounds(node.worldBounds)) return "SECTION_INVALID_BOUNDS";
-    if (new Set(node.childIds).size !== node.childIds.length) return "SECTION_DUPLICATE_OWNERSHIP";
+  for (const nodeId of nodeIds) {
+    const node = snapshot.nodes[nodeId];
+    if (!snapshot.pages[node.pageId]) return "SECTION_PAGE_MISSING";
+    if (node.parentId !== null && !snapshot.nodes[node.parentId]) return "SECTION_PARENT_MISSING";
   }
 
-  const owners = new Map<string, string>();
-  for (const page of Object.values(snapshot.pages)) {
+  const membershipEdges: Array<{ childId: string; ownerId: string }> = [];
+  for (const pageId of snapshot.pageOrder) {
+    const page = snapshot.pages[pageId];
     if (new Set(page.childIds).size !== page.childIds.length) return "SECTION_DUPLICATE_OWNERSHIP";
     for (const childId of page.childIds) {
-      if (!snapshot.nodes[childId]) return "SECTION_CHILD_MISSING";
-      if (owners.has(childId)) return "SECTION_DUPLICATE_OWNERSHIP";
-      owners.set(childId, page.id);
-    }
-  }
-  for (const node of Object.values(snapshot.nodes)) {
-    for (const childId of node.childIds) {
       const child = snapshot.nodes[childId];
       if (!child) return "SECTION_CHILD_MISSING";
-      if (owners.has(childId)) return "SECTION_DUPLICATE_OWNERSHIP";
-      const relation = sectionContainment(node.kind, child.kind);
+      const relation = sectionContainment("page", child.kind);
       if (relation === "unqualified") return "SECTION_RELATIONSHIP_UNQUALIFIED";
       if (relation === "forbidden") return "SECTION_CONTAINMENT_FORBIDDEN";
-      owners.set(childId, node.id);
+      membershipEdges.push({ childId, ownerId: pageId });
     }
   }
-  for (const [id, node] of Object.entries(snapshot.nodes)) {
-    const owner = owners.get(id);
-    if (!owner) return "SECTION_UNREACHABLE_NODE";
-    const expectedParent = snapshot.pages[owner] ? null : owner;
-    if (node.parentId !== expectedParent) return "SECTION_PARENT_RECIPROCITY_MISMATCH";
-    const ownerPage = snapshot.pages[owner]?.id ?? snapshot.nodes[owner]?.pageId;
-    if (ownerPage !== node.pageId) return "SECTION_PAGE_OWNERSHIP_MISMATCH";
+  for (const ownerId of nodeIds) {
+    const owner = snapshot.nodes[ownerId];
+    if (new Set(owner.childIds).size !== owner.childIds.length) return "SECTION_DUPLICATE_OWNERSHIP";
+    for (const childId of owner.childIds) {
+      const child = snapshot.nodes[childId];
+      if (!child) return "SECTION_CHILD_MISSING";
+      const relation = sectionContainment(owner.kind, child.kind);
+      if (relation === "unqualified") return "SECTION_RELATIONSHIP_UNQUALIFIED";
+      if (relation === "forbidden") return "SECTION_CONTAINMENT_FORBIDDEN";
+      membershipEdges.push({ childId, ownerId });
+    }
   }
 
   const visiting = new Set<string>();
@@ -218,13 +278,26 @@ export function validateSectionSnapshot(snapshot: SectionDomainSnapshot): Sectio
     if (visiting.has(id)) return false;
     if (visited.has(id)) return true;
     visiting.add(id);
-    for (const childId of snapshot.nodes[id]?.childIds ?? []) if (!visit(childId)) return false;
+    for (const childId of snapshot.nodes[id].childIds) if (!visit(childId)) return false;
     visiting.delete(id);
     visited.add(id);
     return true;
   };
-  for (const page of Object.values(snapshot.pages)) {
-    for (const id of page.childIds) if (!visit(id)) return "SECTION_CYCLE";
+  for (const id of nodeIds) if (!visit(id)) return "SECTION_CYCLE";
+
+  const owners = new Map<string, string>();
+  for (const edge of membershipEdges) {
+    if (owners.has(edge.childId)) return "SECTION_DUPLICATE_OWNERSHIP";
+    owners.set(edge.childId, edge.ownerId);
+  }
+  for (const id of nodeIds) {
+    const node = snapshot.nodes[id];
+    const ownerId = owners.get(id);
+    if (!ownerId) return "SECTION_UNREACHABLE_NODE";
+    const expectedParent = snapshot.pages[ownerId] ? null : ownerId;
+    if (node.parentId !== expectedParent) return "SECTION_PARENT_RECIPROCITY_MISMATCH";
+    const ownerPageId = snapshot.pages[ownerId] ? ownerId : snapshot.nodes[ownerId].pageId;
+    if (ownerPageId !== node.pageId) return "SECTION_PAGE_OWNERSHIP_MISMATCH";
   }
   return null;
 }
@@ -292,6 +365,7 @@ export function planSectionOperation(snapshot: SectionDomainSnapshot, operation:
 
   if (operation.kind === "insert-node") {
     const { node, parentId, index } = operation;
+    if (!isSectionNodeKind(node.kind)) return reject(snapshot, "SECTION_NODE_KIND_UNSUPPORTED");
     if (!isSectionUuid(node.id)) return reject(snapshot, "SECTION_INVALID_UUID");
     if (snapshot.nodes[node.id] || snapshot.pages[node.id]) return reject(snapshot, "SECTION_NODE_ALREADY_EXISTS");
     if (node.childIds.length !== 0) return reject(snapshot, "SECTION_INSERT_REQUIRES_EMPTY_NODE");
