@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,8 +83,23 @@ fn keys(v: &Value) -> Vec<String> {
         .map(|o| o.keys().cloned().collect())
         .unwrap_or_default()
 }
+fn js_cmp(a: &str, b: &str) -> Ordering {
+    a.encode_utf16().cmp(b.encode_utf16())
+}
+fn js_sorted_keys(v: &Value) -> Vec<String> {
+    let mut result = keys(v);
+    result.sort_by(|a, b| js_cmp(a, b));
+    result
+}
+fn map_keys_js(v: &Map<String, Value>) -> Vec<String> {
+    let mut result: Vec<String> = v.keys().cloned().collect();
+    result.sort_by(|a, b| js_cmp(a, b));
+    result
+}
 fn fields(v: &Value, allowed: &[&str]) -> Option<String> {
-    keys(v).into_iter().find(|k| !allowed.contains(&k.as_str()))
+    js_sorted_keys(v)
+        .into_iter()
+        .find(|k| !allowed.contains(&k.as_str()))
 }
 fn strict_record(v: &Value, path: &str, allowed: &[&str], ds: &mut Vec<Diagnostic>) -> bool {
     if !rec(v) {
@@ -582,9 +598,11 @@ fn validate_property(
                 } else {
                     &["minimumEntries", "maximumEntries"]
                 };
-                let numeric = |field: &str| own(limits, field).is_none_or(|v| v.as_u64().is_some());
-                let min = own(limits, "minimumEntries").and_then(Value::as_u64);
-                let max = own(limits, "maximumEntries").and_then(Value::as_u64);
+                let numeric = |field: &str| {
+                    own(limits, field).is_none_or(|v| js_nonnegative_integer(v).is_some())
+                };
+                let min = own(limits, "minimumEntries").and_then(js_nonnegative_integer);
+                let max = own(limits, "maximumEntries").and_then(js_nonnegative_integer);
                 let valid = rec(limits)
                     && fields(limits, allowed).is_none()
                     && numeric("minimumEntries")
@@ -866,6 +884,31 @@ fn json_value(v: &Value) -> bool {
         Value::Object(o) => o.values().all(json_value),
     }
 }
+fn js_integer(v: &Value) -> Option<f64> {
+    let n = v.as_f64()?;
+    (n.is_finite() && n.fract() == 0.0).then_some(n)
+}
+fn js_nonnegative_integer(v: &Value) -> Option<f64> {
+    js_integer(v).filter(|n| *n >= 0.0)
+}
+fn normalize_js_numbers(value: &mut Value) {
+    match value {
+        Value::Number(number) if number.is_i64() || number.is_u64() => {
+            let exceeds_safe = number
+                .as_i64()
+                .is_some_and(|n| n.unsigned_abs() > 9_007_199_254_740_991)
+                || number.as_u64().is_some_and(|n| n > 9_007_199_254_740_991);
+            if exceeds_safe {
+                if let Some(n) = number.as_f64().and_then(serde_json::Number::from_f64) {
+                    *number = n;
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(normalize_js_numbers),
+        Value::Object(items) => items.values_mut().for_each(normalize_js_numbers),
+        _ => {}
+    }
+}
 fn override_type_ok(field: &str, value: &Value) -> bool {
     if !json_value(value) {
         return false;
@@ -886,7 +929,8 @@ fn validate_expansion_cycles(
     let Some(instances) = object(instances) else {
         return;
     };
-    for (instance_id, instance) in instances {
+    for instance_id in js_sorted_keys(&Value::Object(instances.clone())) {
+        let instance = &instances[&instance_id];
         let (Some(source), Some(selection)) =
             (own(instance, "source"), own(instance, "variantSelection"))
         else {
@@ -930,19 +974,26 @@ fn validate_expansion_cycles(
                 return;
             };
             stack.push(component_id.to_string());
-            for (node_id, node) in nodes {
+            for node_id in map_keys_js(nodes) {
+                let node = &nodes[&node_id];
                 if own(node, "kind").and_then(Value::as_str) != Some("instance") {
                     continue;
                 }
                 let source_node_path = format!("{path}.nodes.{node_id}.source");
-                let swap = properties.iter().find(|(_, p)| {
-                    own(p, "kind").and_then(Value::as_str) == Some("instance-swap")
-                        && own(p, "targetNodeId").and_then(Value::as_str) == Some(node_id)
+                let swap = map_keys_js(properties).into_iter().find_map(|prop_id| {
+                    let p = &properties[&prop_id];
+                    if own(p, "kind").and_then(Value::as_str) == Some("instance-swap")
+                        && own(p, "targetNodeId").and_then(Value::as_str) == Some(node_id.as_str())
+                    {
+                        Some((prop_id, p))
+                    } else {
+                        None
+                    }
                 });
                 let mut target = None;
                 if let Some((prop_id, prop)) = swap {
                     let selected = if component_id == root_id {
-                        own(root_properties, prop_id)
+                        own(root_properties, &prop_id)
                     } else {
                         None
                     };
@@ -989,11 +1040,12 @@ fn validate_expansion_cycles(
                 }
             }
             if component_id == root_id {
-                for (prop_id, prop) in properties {
+                for prop_id in map_keys_js(properties) {
+                    let prop = &properties[&prop_id];
                     if own(prop, "kind").and_then(Value::as_str) != Some("slot") {
                         continue;
                     }
-                    let Some(content) = own(root_slots, prop_id) else {
+                    let Some(content) = own(root_slots, &prop_id) else {
                         continue;
                     };
                     let (Some(slot_nodes), Some(roots)) = (
@@ -1095,6 +1147,12 @@ fn validate_expansion_cycles(
 /// Validate raw v1 JSON with TypeScript-compatible diagnostics. Success returns
 /// the original JSON value; rejection never exposes a partial document.
 pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
+    let mut normalized = input.clone();
+    normalize_js_numbers(&mut normalized);
+    validate_normalized_document(&normalized)
+}
+
+fn validate_normalized_document(input: &Value) -> ValidationResult {
     let mut ds = Vec::new();
     if !input.is_object() {
         diagnostic(
@@ -1105,7 +1163,7 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
         );
         return result(ds);
     }
-    if own(input, "version").and_then(Value::as_u64) != Some(1) {
+    if own(input, "version").and_then(Value::as_f64) != Some(1.0) {
         diagnostic(
             &mut ds,
             "COMPONENT_VERSION_UNSUPPORTED",
@@ -1147,8 +1205,11 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
         );
         return result(ds);
     }
-    let component_ids: BTreeSet<String> = keys(components).into_iter().collect();
-    let set_ids: BTreeSet<String> = keys(sets).into_iter().collect();
+    let component_order = js_sorted_keys(components);
+    let set_order = js_sorted_keys(sets);
+    let instance_order = js_sorted_keys(instances);
+    let component_ids: BTreeSet<String> = component_order.iter().cloned().collect();
+    let set_ids: BTreeSet<String> = set_order.iter().cloned().collect();
     let mut component_nodes = BTreeMap::<String, BTreeSet<String>>::new();
     let mut sets_by_member = BTreeMap::<String, String>::new();
     let mut identity_owner = BTreeMap::<String, String>::new();
@@ -1165,7 +1226,7 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
                 owners.insert(id.into(), path.into());
             }
         };
-    for id in &component_ids {
+    for id in &component_order {
         let path = format!("$.components.{id}");
         let value = own(components, id).unwrap();
         if !strict_record(
@@ -1235,7 +1296,9 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
             &mut ds,
             &["container", "shape", "text", "instance"],
         );
-        for node_id in &node_ids {
+        let mut node_order: Vec<String> = node_ids.iter().cloned().collect();
+        node_order.sort_by(|a, b| js_cmp(a, b));
+        for node_id in &node_order {
             claim(
                 node_id,
                 &format!("{path}.nodes.{node_id}"),
@@ -1324,7 +1387,7 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
         }
         component_nodes.entry(id.clone()).or_default();
     }
-    for id in &set_ids {
+    for id in &set_order {
         let path = format!("$.componentSets.{id}");
         let value = own(sets, id).unwrap();
         if !strict_record(
@@ -1444,7 +1507,7 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
             );
         }
     }
-    for id in &keys(instances) {
+    for id in &instance_order {
         let path = format!("$.instances.{id}");
         let value = own(instances, id).unwrap();
         if !strict_record(
@@ -1718,23 +1781,23 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
                 ) else {
                     continue;
                 };
-                let entry_count = roots.len() as u64;
+                let entry_count = roots.len() as f64;
                 let guidance = own(prop, "guidance").unwrap_or(&Value::Null);
                 let hard = own(prop, "hardLimits").unwrap_or(&Value::Null);
                 if own(guidance, "minimumEntries")
-                    .and_then(Value::as_u64)
+                    .and_then(js_nonnegative_integer)
                     .is_some_and(|v| entry_count < v)
                     || own(guidance, "maximumEntries")
-                        .and_then(Value::as_u64)
+                        .and_then(js_nonnegative_integer)
                         .is_some_and(|v| entry_count > v)
                 {
                     warning(&mut ds,"COMPONENT_SLOT_GUIDANCE_EXCEEDED",&slot_path,format!("Slot has {entry_count} direct entries outside advisory guidance; retained as a warning."));
                 }
                 if own(hard, "minimumEntries")
-                    .and_then(Value::as_u64)
+                    .and_then(js_nonnegative_integer)
                     .is_some_and(|v| entry_count < v)
                     || own(hard, "maximumEntries")
-                        .and_then(Value::as_u64)
+                        .and_then(js_nonnegative_integer)
                         .is_some_and(|v| entry_count > v)
                 {
                     diagnostic(&mut ds,"COMPONENT_SLOT_HARD_LIMIT_EXCEEDED",&slot_path,format!("Slot has {entry_count} direct entries outside explicitly declared hard limits."));
@@ -1780,10 +1843,9 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
     }
     validate_expansion_cycles(components, sets, instances, &mut ds);
     ds.sort_by(|a, b| {
-        a.path
-            .cmp(&b.path)
-            .then(a.code.cmp(&b.code))
-            .then(a.severity.cmp(&b.severity))
+        js_cmp(&a.path, &b.path)
+            .then(js_cmp(&a.code, &b.code))
+            .then(js_cmp(&a.severity, &b.severity))
     });
     let ok = ds.iter().all(|d| d.severity != "error");
     ValidationResult {
@@ -1809,10 +1871,9 @@ pub fn validate_component_instance_json(source: &str) -> ValidationResult {
 
 fn result(mut diagnostics: Vec<Diagnostic>) -> ValidationResult {
     diagnostics.sort_by(|a, b| {
-        a.path
-            .cmp(&b.path)
-            .then(a.code.cmp(&b.code))
-            .then(a.severity.cmp(&b.severity))
+        js_cmp(&a.path, &b.path)
+            .then(js_cmp(&a.code, &b.code))
+            .then(js_cmp(&a.severity, &b.severity))
     });
     ValidationResult {
         ok: false,

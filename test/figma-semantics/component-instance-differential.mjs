@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,18 @@ function component(id, target, swap = null) {
 function instance(id, componentId, propertyValues = {}) {
   return { id, source: { kind: "local-component", componentId }, variantSelection: {}, propertyValues, overrides: [], slotContent: {} };
 }
+
+const GENERATOR_VERSION = "fg-c3.4.1-seeded-v1";
+const SEED = 0x0c3c0401;
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+    return (state >>> 0) / 0x1_0000_0000;
+  };
+}
+const random = seededRandom(SEED);
+const caseFor = (name, input, extra = {}) => ({ name, input, generatorVersion: GENERATOR_VERSION, seed: SEED, ...extra });
 
 const cases = [{ name: "positive-generated", input: clone() }];
 for (const negative of negativeCases) {
@@ -122,16 +134,66 @@ mutualRecursive.components.beta = { id: "beta", name: "Beta", setId: null, rootN
 mutualRecursive.instances.mutualUse = instance("mutualUse", "alpha");
 cases.push({ name: "mutual-definition-expansion-cycle", input: mutualRecursive });
 
+// Fixed-seed valid graphs vary reference depth and document size while keeping
+// the fixture's component sets, typed properties, overrides, and slots intact.
+for (let sample = 0; sample < 48; sample++) {
+  const input = clone();
+  const depth = 1 + Math.floor(random() * 8);
+  let target = "card";
+  for (let level = 0; level < depth; level++) {
+    const id = `gen-${sample}-component-${level}`;
+    input.components[id] = component(id, target);
+    target = id;
+  }
+  const extraInstances = Math.floor(random() * 9);
+  for (let index = 0; index < extraInstances; index++) {
+    const id = `gen-${sample}-instance-${index}`;
+    const componentId = index % 2 ? target : "card";
+    input.instances[id] = instance(id, componentId);
+  }
+  cases.push(caseFor(`seed-${SEED}-valid-${sample}`, input));
+
+  const mutation = structuredClone(input);
+  const generatedIds = Object.keys(mutation.components).filter((id) => id.startsWith(`gen-${sample}-`));
+  const selected = generatedIds[Math.floor(random() * generatedIds.length)];
+  mutation.components[selected].nodes[`${selected}-ref`].source.componentId = `missing-${sample}`;
+  cases.push(caseFor(`seed-${SEED}-invalid-reference-${sample}`, mutation));
+}
+
+// The JSON-text entrypoint and JSON.parse must agree on the same wire input.
+function rawCase(name, rawLine) {
+  cases.push(caseFor(name, JSON.parse(rawLine), { rawLine }));
+}
+rawCase("duplicate-json-member-last-wins", JSON.stringify(clone()).replace('"version": 1,', '"version": 2, "version": 1,'));
+rawCase("large-integer-rounds-as-javascript-number", JSON.stringify(clone()).replace('"asset-key-1"', '"asset-key-1", "large": 9007199254740993'));
+rawCase("integer-valued-float-and-negative-zero", JSON.stringify(clone()).replace('"asset-key-1"', '"asset-key-1", "float": 1.0, "negativeZero": -0'));
+rawCase("exponent-float-value", JSON.stringify(clone()).replace('"asset-key-1"', '"asset-key-1", "exponent": 1.25e-120'));
+
+const absentOptional = clone(); delete absentOptional.components.card.setId;
+cases.push({ name: "optional-null-value", input: clone() });
+cases.push({ name: "optional-field-absent", input: absentOptional });
+const unusualKeys = clone();
+unusualKeys.components[""] = { id: "", name: "", setId: null, rootNodeIds: [], nodes: {}, properties: {}, variantValues: {} };
+unusualKeys.components["𐀀"] = { id: "", name: "", setId: null, rootNodeIds: [], nodes: {}, properties: { "\uE000": { id: "", name: "", kind: "future" } }, variantValues: {} };
+unusualKeys.components["\uE000"] = { id: "\uE000", name: "", setId: null, rootNodeIds: [], nodes: {}, properties: {}, variantValues: {} };
+Object.defineProperty(unusualKeys.instances, "__proto__", { value: instance("__proto__", "missing"), enumerable: true, configurable: true, writable: true });
+unusualKeys.instances.constructor = instance("constructor", "missing");
+cases.push({ name: "unicode-empty-and-unusual-identities", input: unusualKeys });
+cases.push({ name: "long-diagnostic-path", input: (() => { const value = clone(); const key = "k".repeat(1024); value.instances["unresolved-instance"].propertyValues[key] = true; return value; })() });
+cases.push({ name: "large-envelope-256-instances", input: (() => { const value = clone(); for (let i = 0; i < 256; i++) value.instances[`bulk-${String(i).padStart(3, "0")}`] = instance(`bulk-${i}`, "card"); return value; })() });
+cases.push({ name: "deep-containment-graph", input: (() => { const value = clone(); const card = value.components.card; const chain = []; for (let i = 0; i < 48; i++) { const id = `deep-${i}`; chain.push(id); card.nodes[id] = { id, kind: "container", parentId: i ? `deep-${i - 1}` : null, childIds: i < 47 ? [`deep-${i + 1}`] : [] }; } card.rootNodeIds.push(chain[0]); return value; })() });
+
 try {
   const domain = await server.ssrLoadModule("/src/document-core/componentInstanceDomainV1.ts");
-  const tsResults = cases.map(({ input }) => {
-    const before = structuredClone(input);
-    const result = domain.validateComponentInstanceDocument(input);
-    assert.deepEqual(input, before, "TypeScript validator must not mutate input");
+  const tsResults = cases.map(({ input, rawLine }) => {
+    const parsedInput = rawLine === undefined ? input : JSON.parse(rawLine);
+    const before = structuredClone(parsedInput);
+    const result = domain.validateComponentInstanceDocument(parsedInput);
+    assert.deepEqual(parsedInput, before, "TypeScript validator must not mutate input");
     return result;
   });
   const cargo = spawnSync("cargo", ["run", "--quiet", "--manifest-path", "spikes/fg-c3-2-1/rust-planner/Cargo.toml", "--bin", "component_instance_validate"], {
-    cwd: root, input: cases.map(({ input, rustLine }) => rustLine ?? JSON.stringify(input)).join("\n") + "\n", encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+    cwd: root, input: cases.map(({ input, rawLine, rustLine }) => rawLine ?? rustLine ?? JSON.stringify(input)).join("\n") + "\n", encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
   });
   if (cargo.status !== 0) throw new Error(`Rust differential runner failed (${cargo.status}): ${cargo.stderr}`);
   const rustResults = cargo.stdout.trimEnd().split("\n").map((line) => JSON.parse(line));
@@ -143,12 +205,46 @@ try {
     const ts = tsResults[index]; const rust = rustResults[index];
     const comparableTs = { ok: ts.ok, diagnostics: ts.diagnostics, document: ts.document };
     if (isDeepStrictEqual(comparableTs, rust)) matched++;
-    else mismatches.push({ name: cases[index].name, typescript: comparableTs, rust });
+    else mismatches.push({ case: cases[index], typescript: comparableTs, rust, minimization: "full failing input preserved; generated case has bounded depth and size" });
+  }
+  // On failure only, greedily remove top-level records while preserving the
+  // exact mismatch. This deterministic reducer is bounded by the input record
+  // count and does not affect successful-run cost or validator semantics.
+  for (const mismatch of mismatches) {
+    if (mismatch.case.rawLine !== undefined || !mismatch.case.input || typeof mismatch.case.input !== "object") continue;
+    const candidate = structuredClone(mismatch.case.input);
+    mismatch.originalInput = structuredClone(candidate);
+    const isStillDifferent = (value) => {
+      const ts = domain.validateComponentInstanceDocument(value);
+      const line = spawnSync("cargo", ["run", "--quiet", "--manifest-path", "spikes/fg-c3-2-1/rust-planner/Cargo.toml", "--bin", "component_instance_validate"], {
+        cwd: root, input: `${JSON.stringify(value)}\n`, encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
+      });
+      if (line.status !== 0) return false;
+      const rust = JSON.parse(line.stdout.trim());
+      return !isDeepStrictEqual({ ok: ts.ok, diagnostics: ts.diagnostics, document: ts.document }, rust);
+    };
+    let removed = 0;
+    for (const group of ["components", "componentSets", "instances"]) {
+      const records = candidate[group];
+      if (!records || typeof records !== "object" || Array.isArray(records)) continue;
+      for (const key of Object.keys(records)) {
+        const saved = records[key]; delete records[key];
+        if (isStillDifferent(candidate)) removed++;
+        else records[key] = saved;
+      }
+    }
+    mismatch.case.input = candidate;
+    mismatch.minimization = `deterministic top-level record reduction removed ${removed} record(s); originalInput preserves the initial failure`;
   }
   const observedCodes = [...new Set(tsResults.flatMap((result) => result.diagnostics.map((d) => d.code)))].sort();
-  const report = { cases: cases.length, matched, divergent: mismatches.length, unsupported: 0, observedDiagnosticCodes: observedCodes, detailPolicy: "exact code/path/severity/detail and semantic JSON payload equality" };
+  const report = { generatorVersion: GENERATOR_VERSION, seed: SEED, cases: cases.length, matched, divergent: mismatches.length, unsupported: 0, observedDiagnosticCodes: observedCodes, detailPolicy: "exact code/path/severity/detail and semantic JSON payload equality" };
   console.log(JSON.stringify(report));
   if (mismatches.length) {
+    const failureDir = new URL("../fixtures/figma-semantics/fg-c3-4-1-failures/", import.meta.url);
+    await mkdir(failureDir, { recursive: true });
+    for (let index = 0; index < mismatches.length; index++) {
+      await writeFile(new URL(`${String(index).padStart(3, "0")}-${mismatches[index].case.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`, failureDir), `${JSON.stringify(mismatches[index], null, 2)}\n`);
+    }
     console.error(JSON.stringify(mismatches, null, 2));
     process.exitCode = 1;
   }
