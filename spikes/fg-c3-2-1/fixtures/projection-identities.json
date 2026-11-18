@@ -2,7 +2,7 @@
   {
     "name": "definition-child-reorder",
     "request": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "kind": "deriveIds",
       "addresses": [
         {
@@ -31,14 +31,17 @@
           "slotRoute": [],
           "externalRevision": null
         }
-      ]
+      ],
+      "semanticVersion": 1,
+      "diagnosticVersion": 1,
+      "requestId": "projection-identities-0"
     },
     "relation": "same"
   },
   {
     "name": "nested-component-path",
     "request": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "kind": "deriveIds",
       "addresses": [
         {
@@ -71,14 +74,17 @@
           "slotRoute": [],
           "externalRevision": null
         }
-      ]
+      ],
+      "semanticVersion": 1,
+      "diagnosticVersion": 1,
+      "requestId": "projection-identities-1"
     },
     "relation": "different"
   },
   {
     "name": "same-definition-two-instances",
     "request": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "kind": "deriveIds",
       "addresses": [
         {
@@ -107,14 +113,17 @@
           "slotRoute": [],
           "externalRevision": null
         }
-      ]
+      ],
+      "semanticVersion": 1,
+      "diagnosticVersion": 1,
+      "requestId": "projection-identities-2"
     },
     "relation": "different"
   },
   {
     "name": "definition-node-replaced",
     "request": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "kind": "deriveIds",
       "addresses": [
         {
@@ -143,14 +152,17 @@
           "slotRoute": [],
           "externalRevision": null
         }
-      ]
+      ],
+      "semanticVersion": 1,
+      "diagnosticVersion": 1,
+      "requestId": "projection-identities-3"
     },
     "relation": "different"
   },
   {
     "name": "external-source-revision-updated",
     "request": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "kind": "deriveIds",
       "addresses": [
         {
@@ -179,14 +191,17 @@
           "slotRoute": [],
           "externalRevision": "rev-2"
         }
-      ]
+      ],
+      "semanticVersion": 1,
+      "diagnosticVersion": 1,
+      "requestId": "projection-identities-4"
     },
     "relation": "different"
   },
   {
     "name": "slot-authored-node-identities",
     "request": {
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "kind": "deriveIds",
       "addresses": [
         {
@@ -225,7 +240,10 @@
           ],
           "externalRevision": null
         }
-      ]
+      ],
+      "semanticVersion": 1,
+      "diagnosticVersion": 1,
+      "requestId": "projection-identities-5"
     },
     "relation": "different"
   }
