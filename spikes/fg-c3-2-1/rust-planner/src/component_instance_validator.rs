@@ -19,25 +19,41 @@ thread_local! {
     static EXPANSION_STEPS: Cell<usize> = const { Cell::new(0) };
     static EXPANSION_OVERFLOW: Cell<bool> = const { Cell::new(false) };
     static SEMANTIC_MAX_DEPTH: Cell<usize> = const { Cell::new(usize::MAX) };
+    static SEMANTIC_MAX_WORK: Cell<usize> = const { Cell::new(usize::MAX) };
+    static SEMANTIC_WORK: Cell<usize> = const { Cell::new(0) };
+    static SEMANTIC_OVERFLOW: Cell<bool> = const { Cell::new(false) };
+    static SEMANTIC_BUDGET_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    #[cfg(test)]
+    static LAST_SEMANTIC_WORK: Cell<usize> = const { Cell::new(0) };
+    #[cfg(test)]
+    static LAST_EXPANSION_STEPS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ValidationLimit {
     Diagnostics,
     ExpansionWork,
+    SemanticWork,
 }
 
 struct ValidationBudgetGuard {
-    old: (usize, usize, usize, usize),
+    old: (usize, usize, usize, usize, usize, bool),
 }
 
 impl ValidationBudgetGuard {
-    fn new(max_count: usize, max_bytes: usize, max_expansion_steps: usize) -> Self {
+    fn new(
+        max_count: usize,
+        max_bytes: usize,
+        max_expansion_steps: usize,
+        max_work: usize,
+    ) -> Self {
         let old = (
             DIAGNOSTIC_MAX_COUNT.with(|value| value.replace(max_count)),
             DIAGNOSTIC_MAX_BYTES.with(|value| value.replace(max_bytes)),
             EXPANSION_MAX_STEPS.with(|value| value.replace(max_expansion_steps)),
             SEMANTIC_MAX_DEPTH.with(|value| value.replace(64)),
+            SEMANTIC_MAX_WORK.with(|value| value.replace(max_work)),
+            SEMANTIC_BUDGET_ACTIVE.with(|value| value.replace(true)),
         );
         // Count the serialized JSON diagnostic array, including its brackets
         // and separators. This matches the Go response validator's byte rule.
@@ -45,11 +61,15 @@ impl ValidationBudgetGuard {
         DIAGNOSTIC_OVERFLOW.with(|value| value.set(false));
         EXPANSION_STEPS.with(|value| value.set(0));
         EXPANSION_OVERFLOW.with(|value| value.set(false));
+        SEMANTIC_WORK.with(|value| value.set(0));
+        SEMANTIC_OVERFLOW.with(|value| value.set(false));
         Self { old }
     }
 
     fn exceeded(&self) -> Option<ValidationLimit> {
-        if EXPANSION_OVERFLOW.with(Cell::get) {
+        if SEMANTIC_OVERFLOW.with(Cell::get) {
+            Some(ValidationLimit::SemanticWork)
+        } else if EXPANSION_OVERFLOW.with(Cell::get) {
             Some(ValidationLimit::ExpansionWork)
         } else if DIAGNOSTIC_OVERFLOW.with(Cell::get) {
             Some(ValidationLimit::Diagnostics)
@@ -61,14 +81,35 @@ impl ValidationBudgetGuard {
 
 impl Drop for ValidationBudgetGuard {
     fn drop(&mut self) {
+        #[cfg(test)]
+        LAST_SEMANTIC_WORK.with(|value| value.set(SEMANTIC_WORK.with(Cell::get)));
+        #[cfg(test)]
+        LAST_EXPANSION_STEPS.with(|value| value.set(EXPANSION_STEPS.with(Cell::get)));
         DIAGNOSTIC_MAX_COUNT.with(|value| value.set(self.old.0));
         DIAGNOSTIC_MAX_BYTES.with(|value| value.set(self.old.1));
         EXPANSION_MAX_STEPS.with(|value| value.set(self.old.2));
         SEMANTIC_MAX_DEPTH.with(|value| value.set(self.old.3));
+        SEMANTIC_MAX_WORK.with(|value| value.set(self.old.4));
+        SEMANTIC_BUDGET_ACTIVE.with(|value| value.set(self.old.5));
+        DIAGNOSTIC_OVERFLOW.with(|value| value.set(false));
+        EXPANSION_OVERFLOW.with(|value| value.set(false));
+        SEMANTIC_OVERFLOW.with(|value| value.set(false));
+        SEMANTIC_WORK.with(|value| value.set(0));
     }
 }
 
+#[cfg(test)]
+fn last_work_stats() -> (usize, usize) {
+    (
+        LAST_SEMANTIC_WORK.with(Cell::get),
+        LAST_EXPANSION_STEPS.with(Cell::get),
+    )
+}
+
 fn consume_expansion_step() -> bool {
+    if !consume_semantic_work(1) {
+        return false;
+    }
     EXPANSION_STEPS.with(|steps| {
         let next = steps.get().saturating_add(1);
         let max = EXPANSION_MAX_STEPS.with(Cell::get);
@@ -80,6 +121,33 @@ fn consume_expansion_step() -> bool {
             true
         }
     })
+}
+
+/// Charge deterministic work before bounded validator operations. Exhaustion
+/// is sticky and budgeted entry points discard partial results.
+fn consume_semantic_work(amount: usize) -> bool {
+    if !SEMANTIC_BUDGET_ACTIVE.with(Cell::get) {
+        return true;
+    }
+    if DIAGNOSTIC_OVERFLOW.with(Cell::get) || SEMANTIC_OVERFLOW.with(Cell::get) {
+        return false;
+    }
+    SEMANTIC_WORK.with(|work| {
+        let next = work.get().saturating_add(amount);
+        if next > SEMANTIC_MAX_WORK.with(Cell::get) {
+            work.set(SEMANTIC_MAX_WORK.with(Cell::get));
+            SEMANTIC_OVERFLOW.with(|overflow| overflow.set(true));
+            false
+        } else {
+            work.set(next);
+            true
+        }
+    })
+}
+
+fn charge_sorted_work(count: usize) -> bool {
+    let levels = (usize::BITS - count.max(1).leading_zeros()) as usize;
+    consume_semantic_work(count.saturating_mul(levels.max(1)))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,6 +200,15 @@ fn warning(
     );
 }
 fn push_diagnostic(ds: &mut Vec<Diagnostic>, value: Diagnostic) {
+    if !consume_semantic_work(
+        value
+            .path
+            .len()
+            .saturating_add(value.code.len())
+            .saturating_add(value.detail.len()),
+    ) {
+        return;
+    }
     let encoded_bytes = serde_json::to_vec(&value).map_or(usize::MAX, |json| json.len());
     let count_limit = DIAGNOSTIC_MAX_COUNT.with(Cell::get);
     let byte_limit = DIAGNOSTIC_MAX_BYTES.with(Cell::get);
@@ -168,7 +245,11 @@ fn arr(v: &Value) -> Option<&Vec<Value>> {
     v.as_array()
 }
 fn string_array(v: &Value) -> Option<Vec<&str>> {
-    arr(v)?
+    let values = arr(v)?;
+    if !consume_semantic_work(values.len()) {
+        return Some(Vec::new());
+    }
+    values
         .iter()
         .map(|item| item.as_str().filter(|s| !s.is_empty()))
         .collect()
@@ -183,24 +264,37 @@ fn rec(v: &Value) -> bool {
     object(v).is_some()
 }
 fn keys(v: &Value) -> Vec<String> {
-    object(v)
-        .map(|o| o.keys().cloned().collect())
-        .unwrap_or_default()
+    let Some(o) = object(v) else {
+        return Vec::new();
+    };
+    if !consume_semantic_work(o.len()) {
+        return Vec::new();
+    }
+    o.keys().cloned().collect()
 }
 fn js_cmp(a: &str, b: &str) -> Ordering {
     a.encode_utf16().cmp(b.encode_utf16())
 }
 fn js_sorted_keys(v: &Value) -> Vec<String> {
+    if !object(v).is_some_and(|m| charge_sorted_work(m.len())) {
+        return Vec::new();
+    }
     let mut result = keys(v);
     result.sort_by(|a, b| js_cmp(a, b));
     result
 }
 fn map_keys_js(v: &Map<String, Value>) -> Vec<String> {
+    if !charge_sorted_work(v.len()) {
+        return Vec::new();
+    }
     let mut result: Vec<String> = v.keys().cloned().collect();
     result.sort_by(|a, b| js_cmp(a, b));
     result
 }
 fn fields(v: &Value, allowed: &[&str]) -> Option<String> {
+    if !charge_sorted_work(object(v).map_or(0, Map::len)) {
+        return None;
+    }
     js_sorted_keys(v)
         .into_iter()
         .find(|k| !allowed.contains(&k.as_str()))
@@ -359,7 +453,13 @@ fn validate_node_graph(
         );
         return ids;
     };
+    if !consume_semantic_work(nodes.len().saturating_add(roots.len())) {
+        return ids;
+    }
     for (id, n) in nodes {
+        if !consume_semantic_work(1) {
+            break;
+        }
         let (Some(kind), Some(parent), Some(children)) = (
             own(n, "kind").and_then(Value::as_str),
             own(n, "parentId"),
@@ -440,6 +540,9 @@ fn validate_node_graph(
     }
     let mut root_seen = BTreeSet::new();
     for root in &roots {
+        if !consume_semantic_work(1) {
+            break;
+        }
         if !root_seen.insert(*root) || !ids.contains(*root) {
             diagnostic(
                 ds,
@@ -508,6 +611,10 @@ fn validate_node_graph(
             .and_then(string_array)
         {
             for child in children {
+                if !consume_semantic_work(1) {
+                    stack.pop();
+                    return false;
+                }
                 if !ids.contains(child) {
                     diagnostic(
                         ds,
@@ -527,6 +634,9 @@ fn validate_node_graph(
         true
     }
     for root in roots {
+        if !consume_semantic_work(1) {
+            break;
+        }
         if !walk(
             root,
             None,
@@ -704,6 +814,9 @@ fn validate_property(
                 );
             }
             for key in ["guidance", "hardLimits"] {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 let Some(limits) = own(value, key) else {
                     continue;
                 };
@@ -814,9 +927,13 @@ fn validate_nested_selection(
                 return;
             };
             let selection_obj = object(selection).unwrap();
+            if !consume_semantic_work(members.len().saturating_mul(selection_obj.len().max(1))) {
+                return;
+            }
             let valid = selection_obj.len() == props.len()
                 && selection_obj.iter().all(|(key, value)| {
-                    own(&Value::Object(props.clone()), key)
+                    props
+                        .get(key)
                         .and_then(|p| own(p, "values"))
                         .and_then(arr)
                         .is_some_and(|v| v.contains(value))
@@ -901,6 +1018,9 @@ fn resolve_local(
             let members = own(set, "memberComponentIds")?.as_array()?;
             let props = own(set, "properties")?.as_object()?;
             let sel = selection.as_object()?;
+            if !consume_semantic_work(members.len().saturating_mul(sel.len().max(1))) {
+                return None;
+            }
             let found: Vec<String> = members
                 .iter()
                 .filter_map(|id| {
@@ -943,6 +1063,9 @@ fn validate_slot_content(
     );
     if let Some(nodes) = own(content, "nodes").and_then(object) {
         for (id, node) in nodes {
+            if !consume_semantic_work(1) {
+                break;
+            }
             if own(node, "kind").and_then(Value::as_str) == Some("instance") {
                 let node_path = path_member(&path_member(path, "nodes"), id);
                 if fields(
@@ -1005,7 +1128,10 @@ fn js_integer(v: &Value) -> Option<f64> {
 fn js_nonnegative_integer(v: &Value) -> Option<f64> {
     js_integer(v).filter(|n| *n >= 0.0)
 }
-fn normalize_js_numbers(value: &mut Value) {
+fn normalize_js_numbers(value: &mut Value) -> bool {
+    if !consume_semantic_work(1) {
+        return false;
+    }
     match value {
         Value::Number(number) if number.is_i64() || number.is_u64() => {
             let exceeds_safe = number
@@ -1018,10 +1144,23 @@ fn normalize_js_numbers(value: &mut Value) {
                 }
             }
         }
-        Value::Array(items) => items.iter_mut().for_each(normalize_js_numbers),
-        Value::Object(items) => items.values_mut().for_each(normalize_js_numbers),
+        Value::Array(items) => {
+            for item in items {
+                if !normalize_js_numbers(item) {
+                    return false;
+                }
+            }
+        }
+        Value::Object(items) => {
+            for item in items.values_mut() {
+                if !normalize_js_numbers(item) {
+                    return false;
+                }
+            }
+        }
         _ => {}
     }
+    true
 }
 fn override_type_ok(field: &str, value: &Value) -> bool {
     if !json_value(value) {
@@ -1044,6 +1183,9 @@ fn validate_expansion_cycles(
         return true;
     };
     for instance_id in js_sorted_keys(&Value::Object(instances.clone())) {
+        if !consume_semantic_work(1) {
+            break;
+        }
         if !consume_expansion_step() {
             return false;
         }
@@ -1096,6 +1238,9 @@ fn validate_expansion_cycles(
             };
             stack.push(component_id.to_string());
             for node_id in map_keys_js(nodes) {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 if !consume_expansion_step() {
                     stack.pop();
                     return false;
@@ -1107,6 +1252,9 @@ fn validate_expansion_cycles(
                 let source_node_path = format!("{path}.nodes.{node_id}.source");
                 let mut swap = None;
                 for prop_id in map_keys_js(properties) {
+                    if !consume_semantic_work(1) {
+                        break;
+                    }
                     if !consume_expansion_step() {
                         stack.pop();
                         return false;
@@ -1173,6 +1321,9 @@ fn validate_expansion_cycles(
             }
             if component_id == root_id {
                 for prop_id in map_keys_js(properties) {
+                    if !consume_semantic_work(1) {
+                        break;
+                    }
                     if !consume_expansion_step() {
                         stack.pop();
                         return false;
@@ -1234,6 +1385,9 @@ fn validate_expansion_cycles(
                         }
                         if let Some(children) = own(node, "childIds").and_then(arr) {
                             for child in children.iter().filter_map(Value::as_str) {
+                                if !consume_semantic_work(1) {
+                                    break;
+                                }
                                 if !walk_slot(
                                     child,
                                     slot_nodes,
@@ -1261,6 +1415,9 @@ fn validate_expansion_cycles(
                         prop_id
                     );
                     for root_node in roots.iter().filter_map(Value::as_str) {
+                        if !consume_semantic_work(1) {
+                            break;
+                        }
                         if !walk_slot(
                             root_node,
                             slot_nodes,
@@ -1304,7 +1461,13 @@ fn validate_expansion_cycles(
 /// the original JSON value; rejection never exposes a partial document.
 pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
     let mut normalized = input.clone();
-    normalize_js_numbers(&mut normalized);
+    if !normalize_js_numbers(&mut normalized) {
+        return ValidationResult {
+            ok: false,
+            diagnostics: Vec::new(),
+            document: None,
+        };
+    }
     validate_normalized_document(&normalized)
 }
 
@@ -1316,9 +1479,48 @@ pub fn validate_component_instance_document_bounded(
     max_diagnostic_bytes: usize,
     max_expansion_steps: usize,
 ) -> Result<ValidationResult, ValidationLimit> {
-    let guard =
-        ValidationBudgetGuard::new(max_diagnostics, max_diagnostic_bytes, max_expansion_steps);
-    let result = validate_component_instance_document(input);
+    validate_component_instance_document_with_budgets(
+        input,
+        max_diagnostics,
+        max_diagnostic_bytes,
+        max_expansion_steps,
+        5_000_000,
+    )
+}
+
+fn validate_component_instance_document_with_budgets(
+    input: &Value,
+    max_diagnostics: usize,
+    max_diagnostic_bytes: usize,
+    max_expansion_steps: usize,
+    max_semantic_work: usize,
+) -> Result<ValidationResult, ValidationLimit> {
+    let guard = ValidationBudgetGuard::new(
+        max_diagnostics,
+        max_diagnostic_bytes,
+        max_expansion_steps,
+        max_semantic_work,
+    );
+    fn charge_tree(value: &Value) -> bool {
+        // Charge input inspection plus normalization and two document copies.
+        if !consume_semantic_work(4) {
+            return false;
+        }
+        match value {
+            Value::Array(items) => items.iter().all(charge_tree),
+            Value::Object(items) => items.values().all(charge_tree),
+            _ => true,
+        }
+    }
+    let result = if charge_tree(input) {
+        validate_component_instance_document(input)
+    } else {
+        ValidationResult {
+            ok: false,
+            diagnostics: Vec::new(),
+            document: None,
+        }
+    };
     let exceeded = guard.exceeded();
     drop(guard);
     match exceeded {
@@ -1402,6 +1604,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
             }
         };
     for id in &component_order {
+        if !consume_semantic_work(1) {
+            return result(ds);
+        }
         let path = format!("$.components.{id}");
         let value = own(components, id).unwrap();
         if !strict_record(
@@ -1474,6 +1679,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         let mut node_order: Vec<String> = node_ids.iter().cloned().collect();
         node_order.sort_by(|a, b| js_cmp(a, b));
         for node_id in &node_order {
+            if !consume_semantic_work(1) {
+                break;
+            }
             claim(
                 node_id,
                 &format!("{path}.nodes.{node_id}"),
@@ -1487,14 +1695,23 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
             own(value, "nodes"),
         ) {
             for (prop_id, prop) in props {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 let p = path_member(&path_member(&path, "properties"), prop_id);
                 validate_property(prop, prop_id, &p, &node_ids, &mut ds, false);
                 validate_property_target(prop, nodes, &p, &mut ds);
             }
             for (prop_id, prop) in props {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 if own(prop, "kind").and_then(Value::as_str) == Some("instance-swap") {
                     if let Some(ids) = own(prop, "allowedComponentIds").and_then(arr) {
                         for allowed in ids {
+                            if !consume_semantic_work(1) {
+                                break;
+                            }
                             if let Some(allowed) = allowed.as_str() {
                                 if !component_ids.contains(allowed) {
                                     diagnostic(
@@ -1514,6 +1731,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
                         .and_then(arr)
                     {
                         for preferred in ids {
+                            if !consume_semantic_work(1) {
+                                break;
+                            }
                             if let Some(preferred) = preferred.as_str() {
                                 if !component_ids.contains(preferred) {
                                     diagnostic(&mut ds,"COMPONENT_PROPERTY_INVALID",format!("{path}.properties.{prop_id}.guidance.preferredComponentIds"),format!("Unknown preferred component ID {preferred}."));
@@ -1538,6 +1758,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         }
         if let Some(nodes) = own(value, "nodes").and_then(object) {
             for (node_id, node) in nodes {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 if own(node, "kind").and_then(Value::as_str) == Some("instance")
                     && has(node, "source")
                 {
@@ -1563,6 +1786,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         component_nodes.entry(id.clone()).or_default();
     }
     for id in &set_order {
+        if !consume_semantic_work(1) {
+            return result(ds);
+        }
         let path = format!("$.componentSets.{id}");
         let value = own(sets, id).unwrap();
         if !strict_record(
@@ -1598,6 +1824,16 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         }
         claim(id, &path, &mut identity_owner, &mut ds);
         let members = members.unwrap();
+        if !consume_semantic_work(
+            members.len().saturating_mul(
+                props
+                    .as_ref()
+                    .map_or(0, |properties| properties.len())
+                    .max(1),
+            ),
+        ) {
+            return result(ds);
+        }
         if members.iter().collect::<BTreeSet<_>>().len() != members.len() {
             diagnostic(
                 &mut ds,
@@ -1607,6 +1843,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
             );
         }
         for member in &members {
+            if !consume_semantic_work(1) {
+                break;
+            }
             if !component_ids.contains(*member) || sets_by_member.get(*member) != Some(id) {
                 diagnostic(
                     &mut ds,
@@ -1618,6 +1857,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         }
         let props = props.unwrap();
         for (prop_id, prop) in props {
+            if !consume_semantic_work(1) {
+                break;
+            }
             validate_property(
                 prop,
                 prop_id,
@@ -1629,6 +1871,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         }
         let mut combos = BTreeSet::<String>::new();
         for member_id in members {
+            if !consume_semantic_work(1) {
+                break;
+            }
             let Some(member) = own(components, member_id) else {
                 continue;
             };
@@ -1669,6 +1914,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         }
     }
     for (member_id, set_id) in &sets_by_member {
+        if !consume_semantic_work(1) {
+            return result(ds);
+        }
         let listed = own(sets, set_id)
             .and_then(|x| own(x, "memberComponentIds"))
             .and_then(arr)
@@ -1683,6 +1931,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         }
     }
     for id in &instance_order {
+        if !consume_semantic_work(1) {
+            return result(ds);
+        }
         let path = format!("$.instances.{id}");
         let value = own(instances, id).unwrap();
         if !strict_record(
@@ -1760,9 +2011,16 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
             let props = own(set, "properties")
                 .and_then(object)
                 .unwrap_or(&empty_props);
+            let member_count = own(set, "memberComponentIds")
+                .and_then(arr)
+                .map_or(0, Vec::len);
+            if !consume_semantic_work(member_count.saturating_mul(props.len().max(1))) {
+                return result(ds);
+            }
             let valid = selection.len() == props.len()
                 && selection.iter().all(|(p, v)| {
-                    own(&Value::Object(props.clone()), p)
+                    props
+                        .get(p)
                         .and_then(|x| own(x, "values"))
                         .and_then(string_array)
                         .is_some_and(|values| values.contains(&v.as_str().unwrap_or_default()))
@@ -1823,6 +2081,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
                 .and_then(object)
                 .unwrap_or(&empty_props);
             for (prop_id, prop_value) in property_values {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 let prop = props.get(prop_id);
                 let ppath = format!("{path}.propertyValues.{prop_id}");
                 let Some(prop) = prop else {
@@ -1867,6 +2128,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
             }
             let mut override_addresses = BTreeSet::new();
             for (index, override_value) in overrides.iter().enumerate() {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 let opath = format!("{path}.overrides.{index}");
                 let address = own(override_value, "address");
                 if !rec(override_value)
@@ -1929,6 +2193,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
                 }
             }
             for (prop_id, content) in slot_content {
+                if !consume_semantic_work(1) {
+                    break;
+                }
                 let slot_path = format!("{path}.slotContent.{prop_id}");
                 let prop = props.get(prop_id);
                 if prop.is_none_or(|p| own(p, "kind").and_then(Value::as_str) != Some("slot")) {
@@ -1983,6 +2250,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
                         .cloned()
                         .unwrap_or_default();
                     for root in roots {
+                        if !consume_semantic_work(1) {
+                            break;
+                        }
                         let root_id = root.as_str().unwrap_or_default();
                         let node = nodes.get(root_id);
                         let target = node
@@ -2017,6 +2287,9 @@ fn validate_normalized_document(input: &Value) -> ValidationResult {
         }
     }
     validate_expansion_cycles(components, sets, instances, &mut ds);
+    if !charge_sorted_work(ds.len()) {
+        return result(ds);
+    }
     ds.sort_by(|a, b| {
         js_cmp(&a.path, &b.path)
             .then(js_cmp(&a.code, &b.code))
@@ -2060,6 +2333,7 @@ fn result(mut diagnostics: Vec<Diagnostic>) -> ValidationResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     const POSITIVE: &str =
         include_str!("../../../../test/fixtures/figma-semantics/component-instance-domain-v1.json");
@@ -2176,6 +2450,118 @@ mod tests {
         assert_eq!(
             validate_component_instance_document_bounded(&input, exact_count, exact_bytes, 0),
             Err(ValidationLimit::ExpansionWork)
+        );
+    }
+
+    #[test]
+    fn total_semantic_work_budget_rejects_partial_results_and_resets_between_calls() {
+        let input: Value = serde_json::from_str(POSITIVE).unwrap();
+        assert_eq!(
+            validate_component_instance_document_with_budgets(&input, 512, 768 * 1024, 100_000, 1),
+            Err(ValidationLimit::SemanticWork),
+        );
+        let (work, _) = last_work_stats();
+        assert_eq!(
+            work, 1,
+            "work counter must stop at the configured inclusive cap"
+        );
+        let started = std::time::Instant::now();
+        let recovered =
+            validate_component_instance_document_bounded(&input, 512, 768 * 1024, 100_000);
+        let elapsed = started.elapsed().as_micros();
+        assert!(
+            recovered.is_ok(),
+            "budget state leaked across requests: {recovered:?}"
+        );
+        let (recovered_work, _) = last_work_stats();
+        assert!(
+            recovered_work > work,
+            "representative input work must be observable"
+        );
+        assert!(
+            validate_component_instance_document_with_budgets(
+                &input,
+                512,
+                768 * 1024,
+                100_000,
+                recovered_work,
+            )
+            .is_ok(),
+            "the inclusive total-work boundary must pass"
+        );
+        assert_eq!(last_work_stats().0, recovered_work);
+        assert_eq!(
+            validate_component_instance_document_with_budgets(
+                &input,
+                512,
+                768 * 1024,
+                100_000,
+                recovered_work - 1,
+            ),
+            Err(ValidationLimit::SemanticWork),
+            "one-over total work must fail closed",
+        );
+        eprintln!(
+            "FG-C3.6.1 representative fixture: semantic_work={recovered_work}, elapsed_us={}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn high_cardinality_variant_matching_is_precharged_before_candidate_scan() {
+        let mut components = Map::new();
+        let mut members = Vec::new();
+        let mut selection = Map::new();
+        let mut properties = Map::new();
+        let mut values = Map::new();
+        for index in 0..40 {
+            let key = format!("variant-{index}");
+            selection.insert(key.clone(), Value::String("v".into()));
+            properties.insert(key.clone(), json!({"values":["v"]}));
+            values.insert(key, Value::String("v".into()));
+        }
+        for index in 0..40 {
+            let id = format!("member-{index}");
+            members.push(Value::String(id.clone()));
+            components.insert(id, json!({"variantValues":values}));
+        }
+        let sets = json!({"set":{"memberComponentIds":members,"properties":properties}});
+        let refv = json!({"kind":"local-set","componentSetId":"set"});
+        let guard = ValidationBudgetGuard::new(512, 768 * 1024, 100_000, 500);
+        assert_eq!(
+            resolve_local(
+                &refv,
+                &Value::Object(selection),
+                &Value::Object(components),
+                &sets
+            ),
+            None
+        );
+        assert_eq!(guard.exceeded(), Some(ValidationLimit::SemanticWork));
+        drop(guard);
+        assert_eq!(
+            last_work_stats().0,
+            500,
+            "precharge must stop at the deterministic cap"
+        );
+    }
+
+    #[test]
+    fn diagnostic_overflow_short_circuits_and_limit_priority_is_stable() {
+        let input = json!({"version":0});
+        assert_eq!(
+            validate_component_instance_document_with_budgets(&input, 0, 1, 100, 1000),
+            Err(ValidationLimit::Diagnostics),
+        );
+        let (diag_limited_work, _) = last_work_stats();
+        assert!(
+            diag_limited_work < 1000,
+            "diagnostic exhaustion must stop semantic work"
+        );
+        assert_eq!(
+            validate_component_instance_document_with_budgets(&input, 0, 1, 100, 1),
+            Err(ValidationLimit::SemanticWork),
+            "semantic resource exhaustion has deterministic priority when simultaneous",
         );
     }
 }

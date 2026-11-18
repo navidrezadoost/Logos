@@ -321,6 +321,12 @@ fn validate_component_instance_v1(
             "/documentJson",
             "Component validation exceeded its semantic work budget.",
         ),
+        Err(component_instance_validator::ValidationLimit::SemanticWork) => error(
+            Some(request_id),
+            "COMPONENT_RESOURCE_LIMIT",
+            "/documentJson",
+            "Component validation exceeded its total semantic work budget.",
+        ),
     }
 }
 
