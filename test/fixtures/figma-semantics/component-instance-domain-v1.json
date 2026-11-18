@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "components": {
+    "icon-small": {
+      "id": "icon-small",
+      "name": "Icon / Small",
+      "setId": "icon-set",
+      "rootNodeIds": [
+        "icon-small-root"
+      ],
+      "nodes": {
+        "icon-small-root": {
+          "id": "icon-small-root",
+          "kind": "shape",
+          "parentId": null,
+          "childIds": []
+        }
+      },
+      "properties": {},
+      "variantValues": {
+        "size": "small"
+      }
+    },
+    "icon-large": {
+      "id": "icon-large",
+      "name": "Icon / Large",
+      "setId": "icon-set",
+      "rootNodeIds": [
+        "icon-large-root"
+      ],
+      "nodes": {
+        "icon-large-root": {
+          "id": "icon-large-root",
+          "kind": "shape",
+          "parentId": null,
+          "childIds": []
+        }
+      },
+      "properties": {},
+      "variantValues": {
+        "size": "large"
+      }
+    },
+    "card": {
+      "id": "card",
+      "name": "Card",
+      "setId": null,
+      "rootNodeIds": [
+        "card-surface",
+        "card-label",
+        "card-icon"
+      ],
+      "nodes": {
+        "card-surface": {
+          "id": "card-surface",
+          "kind": "container",
+          "parentId": null,
+          "childIds": []
+        },
+        "card-label": {
+          "id": "card-label",
+          "kind": "text",
+          "parentId": null,
+          "childIds": []
+        },
+        "card-icon": {
+          "id": "card-icon",
+          "kind": "instance",
+          "parentId": null,
+          "childIds": [],
+          "source": {
+            "kind": "local-set",
+            "componentSetId": "icon-set"
+          },
+          "variantSelection": {
+            "size": "small"
+          }
+        }
+      },
+      "properties": {
+        "show-icon": {
+          "id": "show-icon",
+          "name": "Show icon",
+          "kind": "boolean",
+          "targetNodeId": "card-icon",
+          "defaultValue": true
+        },
+        "label-text": {
+          "id": "label-text",
+          "name": "Label",
+          "kind": "text",
+          "targetNodeId": "card-label",
+          "defaultValue": "Hello"
+        },
+        "icon-swap": {
+          "id": "icon-swap",
+          "name": "Icon",
+          "kind": "instance-swap",
+          "targetNodeId": "card-icon",
+          "allowedComponentIds": [
+            "icon-small",
+            "icon-large"
+          ],
+          "defaultComponentId": "icon-small"
+        },
+        "content-slot": {
+          "id": "content-slot",
+          "name": "Content",
+          "kind": "slot",
+          "targetNodeId": "card-surface",
+          "guidance": {
+            "minimumEntries": 1,
+            "maximumEntries": 1,
+            "preferredComponentIds": [
+              "icon-small"
+            ]
+          },
+          "hardLimits": {
+            "maximumEntries": 3
+          }
+        }
+      },
+      "variantValues": {}
+    }
+  },
+  "componentSets": {
+    "icon-set": {
+      "id": "icon-set",
+      "name": "Icon",
+      "memberComponentIds": [
+        "icon-small",
+        "icon-large"
+      ],
+      "properties": {
+        "size": {
+          "id": "size",
+          "name": "Size",
+          "kind": "variant",
+          "values": [
+            "small",
+            "large"
+          ],
+          "defaultValue": "small"
+        }
+      }
+    }
+  },
+  "instances": {
+    "card-instance": {
+      "id": "card-instance",
+      "source": {
+        "kind": "local-component",
+        "componentId": "card"
+      },
+      "variantSelection": {},
+      "propertyValues": {
+        "show-icon": false,
+        "label-text": "A different label",
+        "icon-swap": {
+          "kind": "local-component",
+          "componentId": "icon-large"
+        }
+      },
+      "overrides": [
+        {
+          "address": {
+            "targetNodeId": "card-surface",
+            "field": "fills"
+          },
+          "value": []
+        },
+        {
+          "address": {
+            "targetNodeId": "card-label",
+            "field": "text"
+          },
+          "value": "Overridden"
+        }
+      ],
+      "slotContent": {
+        "content-slot": {
+          "rootNodeIds": [
+            "authored-1",
+            "authored-2"
+          ],
+          "nodes": {
+            "authored-1": {
+              "id": "authored-1",
+              "kind": "shape",
+              "parentId": null,
+              "childIds": []
+            },
+            "authored-2": {
+              "id": "authored-2",
+              "kind": "instance",
+              "parentId": null,
+              "childIds": [],
+              "source": {
+                "kind": "local-component",
+                "componentId": "icon-small"
+              },
+              "variantSelection": {}
+            }
+          }
+        }
+      }
+    },
+    "button-instance": {
+      "id": "button-instance",
+      "source": {
+        "kind": "local-set",
+        "componentSetId": "icon-set"
+      },
+      "variantSelection": {
+        "size": "large"
+      },
+      "propertyValues": {},
+      "overrides": [],
+      "slotContent": {}
+    },
+    "unresolved-instance": {
+      "id": "unresolved-instance",
+      "source": {
+        "kind": "unresolved",
+        "locator": {
+          "library": "Old Library",
+          "key": "asset-key-1"
+        }
+      },
+      "variantSelection": {},
+      "propertyValues": {},
+      "overrides": [],
+      "slotContent": {}
+    }
+  }
+}

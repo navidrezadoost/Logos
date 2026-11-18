@@ -1,0 +1,175 @@
+[
+  {
+    "name": "invalid-variant-selection",
+    "path": [
+      "instances",
+      "button-instance",
+      "variantSelection",
+      "size"
+    ],
+    "value": "medium",
+    "expected": "COMPONENT_VARIANT_SELECTION_INVALID"
+  },
+  {
+    "name": "boolean-wrong-type",
+    "path": [
+      "instances",
+      "card-instance",
+      "propertyValues",
+      "show-icon"
+    ],
+    "value": "false",
+    "expected": "COMPONENT_PROPERTY_VALUE_INVALID"
+  },
+  {
+    "name": "text-wrong-type",
+    "path": [
+      "instances",
+      "card-instance",
+      "propertyValues",
+      "label-text"
+    ],
+    "value": 42,
+    "expected": "COMPONENT_PROPERTY_VALUE_INVALID"
+  },
+  {
+    "name": "instance-swap-not-allowed",
+    "path": [
+      "instances",
+      "card-instance",
+      "propertyValues",
+      "icon-swap",
+      "componentId"
+    ],
+    "value": "card",
+    "expected": "COMPONENT_PROPERTY_VALUE_INVALID"
+  },
+  {
+    "name": "orphaned-override-target",
+    "path": [
+      "instances",
+      "card-instance",
+      "overrides",
+      0,
+      "address",
+      "targetNodeId"
+    ],
+    "value": "deleted-node",
+    "expected": "COMPONENT_OVERRIDE_TARGET_MISSING"
+  },
+  {
+    "name": "slot-owned-by-nonslot-property",
+    "path": [
+      "instances",
+      "card-instance",
+      "slotContent",
+      "not-a-slot"
+    ],
+    "value": {
+      "rootNodeIds": [],
+      "nodes": {}
+    },
+    "expected": "COMPONENT_SLOT_INVALID"
+  },
+  {
+    "name": "hard-slot-limit",
+    "path": [
+      "components",
+      "card",
+      "properties",
+      "content-slot",
+      "hardLimits",
+      "maximumEntries"
+    ],
+    "value": 1,
+    "expected": "COMPONENT_SLOT_HARD_LIMIT_EXCEEDED"
+  },
+  {
+    "name": "unknown-property-kind",
+    "path": [
+      "components",
+      "card",
+      "properties",
+      "label-text",
+      "kind"
+    ],
+    "value": "future-kind",
+    "expected": "COMPONENT_PROPERTY_KIND_UNSUPPORTED"
+  },
+  {
+    "name": "unknown-import-field",
+    "path": [
+      "components",
+      "card",
+      "futurePayload"
+    ],
+    "value": {
+      "keep": true
+    },
+    "expected": "COMPONENT_UNKNOWN_FIELD"
+  },
+  {
+    "name": "missing-local-reference",
+    "path": [
+      "components",
+      "card",
+      "nodes",
+      "card-icon",
+      "source",
+      "componentSetId"
+    ],
+    "value": "missing-set",
+    "expected": "COMPONENT_REFERENCE_MISSING"
+  },
+  {
+    "name": "duplicate-variant-combination",
+    "path": [
+      "components",
+      "icon-large",
+      "variantValues",
+      "size"
+    ],
+    "value": "small",
+    "expected": "COMPONENT_VARIANT_DUPLICATE"
+  },
+  {
+    "name": "nested-set-invalid-selection",
+    "path": [
+      "components",
+      "card",
+      "nodes",
+      "card-icon",
+      "variantSelection",
+      "size"
+    ],
+    "value": "medium",
+    "expected": "COMPONENT_VARIANT_SELECTION_INVALID"
+  },
+  {
+    "name": "only-allow-preferred-rejects-unlisted-slot-entry",
+    "path": [
+      "components",
+      "card",
+      "properties",
+      "content-slot",
+      "onlyAllowPreferredInstances"
+    ],
+    "value": true,
+    "expected": "COMPONENT_SLOT_CONTENT_NOT_ALLOWED"
+  },
+  {
+    "name": "slot-reference-cycle",
+    "path": [
+      "instances",
+      "card-instance",
+      "slotContent",
+      "content-slot",
+      "nodes",
+      "authored-2",
+      "source",
+      "componentId"
+    ],
+    "value": "card",
+    "expected": "COMPONENT_REFERENCE_CYCLE"
+  }
+]
