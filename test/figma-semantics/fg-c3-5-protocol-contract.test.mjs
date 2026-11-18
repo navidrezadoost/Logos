@@ -5,10 +5,10 @@ import test from "node:test";
 const path = new URL("../fixtures/figma-semantics/fg-c3-5-protocol-adversarial-v1.json", import.meta.url);
 const contract = JSON.parse(await readFile(path, "utf8"));
 
-test("FG-C3.5 adversarial protocol fixtures are versioned and specification-only", () => {
+test("FG-C3.5 adversarial protocol fixture records FG-C3.6 local execution", () => {
   assert.equal(contract.fixtureContractVersion, 1);
   assert.equal(contract.proposal, "fg-c3.5-proposal-v1");
-  assert.equal(contract.executionStatus, "specification-only");
+  assert.equal(contract.executionStatus, "executed-by-fg-c3.6-local-tests");
   assert.equal(contract.operation, "validateComponentInstanceV1");
   assert.equal(contract.cases.length, 12);
   assert.equal(new Set(contract.cases.map(({ id }) => id)).size, contract.cases.length);
@@ -20,8 +20,9 @@ test("FG-C3.5 adversarial protocol fixtures are versioned and specification-only
   assert.ok(contract.cases.every(({ expected }) => expected && typeof expected.kind === "string"));
 });
 
-test("the proposed operation does not appear as an enabled existing planner capability", async () => {
+test("isolated validation operation is implemented but remains unadvertised", async () => {
   const source = await readFile(new URL("../../spikes/fg-c3-2-1/rust-planner/src/lib.rs", import.meta.url), "utf8");
   assert.match(source, /"componentInstanceDomain": \{"status": "not-supported-here"/);
-  assert.doesNotMatch(source, /RequestBody::ValidateComponentInstance/);
+  assert.match(source, /ValidateComponentInstanceV1/);
+  assert.doesNotMatch(source, /"componentInstanceDomain": \{"status": "supported"/);
 });

@@ -8,6 +8,7 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"unicode/utf16"
 )
 
 const (
@@ -17,8 +18,9 @@ const (
 )
 
 var uuidText = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-var knownDiagnosticCodes = words(`DOCUMENT_SCHEMA_INVALID UNSUPPORTED_SCHEMA_VERSION MALFORMED_ID RESERVED_RENDERER_ID DUPLICATE_ID MISSING_PAGE MISSING_SHAPE CROSS_PAGE_REFERENCE ROOT_PARENT_MISMATCH DUPLICATE_ROOT_MEMBERSHIP DUPLICATE_CHILD DUPLICATE_CHILD_MEMBERSHIP INVALID_SIBLING_ORDER PARENT_CHILD_MISMATCH NON_CONTAINER_PARENT CYCLE ORPHAN_SHAPE INVALID_GEOMETRY GEOMETRY_OUT_OF_RANGE NON_FINITE_TRANSFORM SINGULAR_TRANSFORM TRANSFORM_INVERSE_MISMATCH INVALID_OPACITY INVALID_FRAME_REFERENCE FRAME_MEMBERSHIP_MISMATCH INVALID_COMPONENT_REFERENCE EXTENSION_KEY_COLLISION OPERATION_PRECONDITION_FAILED INVALID_OPERATION REQUEST_INVALID REQUEST_INVALID_UTF8 REQUEST_ID_INVALID REQUEST_TOO_LARGE PROTOCOL_VERSION_UNSUPPORTED SEMANTIC_VERSION_UNSUPPORTED DIAGNOSTIC_VERSION_UNSUPPORTED OPERATION_INVALID PROJECTION_ADDRESS_INVALID DETACH_ID_INVALID DETACH_ID_COLLISION RESPONSE_TOO_LARGE FRAME_TRUNCATED PLANNER_INTERNAL_ERROR`)
-var knownErrorCodes = words(`REQUEST_INVALID REQUEST_INVALID_UTF8 REQUEST_ID_INVALID REQUEST_TOO_LARGE PROTOCOL_VERSION_UNSUPPORTED SEMANTIC_VERSION_UNSUPPORTED DIAGNOSTIC_VERSION_UNSUPPORTED OPERATION_INVALID PROJECTION_ADDRESS_INVALID DETACH_ID_INVALID DETACH_ID_COLLISION RESPONSE_TOO_LARGE FRAME_TRUNCATED PLANNER_INTERNAL_ERROR`)
+var componentDiagnosticCodes = words(`COMPONENT_AMBIGUOUS_SOURCE COMPONENT_DOCUMENT_MALFORMED COMPONENT_DUPLICATE_ID COMPONENT_ID_MISMATCH COMPONENT_JSON_INVALID COMPONENT_NODE_GRAPH_INVALID COMPONENT_NODE_KIND_UNSUPPORTED COMPONENT_OVERRIDE_FIELD_INVALID COMPONENT_OVERRIDE_INVALID COMPONENT_OVERRIDE_TARGET_MISSING COMPONENT_PROPERTY_INVALID COMPONENT_PROPERTY_KIND_UNSUPPORTED COMPONENT_PROPERTY_VALUE_INVALID COMPONENT_RECORD_MALFORMED COMPONENT_REFERENCE_CYCLE COMPONENT_REFERENCE_INVALID COMPONENT_REFERENCE_MISSING COMPONENT_REFERENCE_UNRESOLVED COMPONENT_SET_MEMBERSHIP_INVALID COMPONENT_SLOT_CONTENT_NOT_ALLOWED COMPONENT_SLOT_GUIDANCE_EXCEEDED COMPONENT_SLOT_HARD_LIMIT_EXCEEDED COMPONENT_SLOT_INVALID COMPONENT_UNKNOWN_FIELD COMPONENT_VARIANT_DUPLICATE COMPONENT_VARIANT_INVALID COMPONENT_VARIANT_SELECTION_INVALID COMPONENT_VERSION_UNSUPPORTED`)
+var knownDiagnosticCodes = words(`DOCUMENT_SCHEMA_INVALID UNSUPPORTED_SCHEMA_VERSION MALFORMED_ID RESERVED_RENDERER_ID DUPLICATE_ID MISSING_PAGE MISSING_SHAPE CROSS_PAGE_REFERENCE ROOT_PARENT_MISMATCH DUPLICATE_ROOT_MEMBERSHIP DUPLICATE_CHILD DUPLICATE_CHILD_MEMBERSHIP INVALID_SIBLING_ORDER PARENT_CHILD_MISMATCH NON_CONTAINER_PARENT CYCLE ORPHAN_SHAPE INVALID_GEOMETRY GEOMETRY_OUT_OF_RANGE NON_FINITE_TRANSFORM SINGULAR_TRANSFORM TRANSFORM_INVERSE_MISMATCH INVALID_OPACITY INVALID_FRAME_REFERENCE FRAME_MEMBERSHIP_MISMATCH INVALID_COMPONENT_REFERENCE EXTENSION_KEY_COLLISION OPERATION_PRECONDITION_FAILED INVALID_OPERATION PROJECTION_ADDRESS_INVALID DETACH_ID_INVALID DETACH_ID_COLLISION REQUEST_INVALID REQUEST_INVALID_UTF8 REQUEST_ID_INVALID REQUEST_TOO_LARGE REQUEST_RESOURCE_LIMIT DUPLICATE_JSON_MEMBER COMPONENT_INPUT_TOO_LARGE COMPONENT_RESOURCE_LIMIT COMPONENT_DIAGNOSTIC_LIMIT COMPONENT_SEMANTIC_VERSION_UNSUPPORTED PROTOCOL_VERSION_UNSUPPORTED SEMANTIC_VERSION_UNSUPPORTED DIAGNOSTIC_VERSION_UNSUPPORTED OPERATION_INVALID RESPONSE_TOO_LARGE FRAME_TRUNCATED PLANNER_INTERNAL_ERROR`)
+var knownErrorCodes = words(`REQUEST_INVALID REQUEST_INVALID_UTF8 REQUEST_ID_INVALID REQUEST_TOO_LARGE REQUEST_RESOURCE_LIMIT DUPLICATE_JSON_MEMBER COMPONENT_INPUT_TOO_LARGE COMPONENT_RESOURCE_LIMIT COMPONENT_DIAGNOSTIC_LIMIT COMPONENT_SEMANTIC_VERSION_UNSUPPORTED PROTOCOL_VERSION_UNSUPPORTED SEMANTIC_VERSION_UNSUPPORTED DIAGNOSTIC_VERSION_UNSUPPORTED OPERATION_INVALID PROJECTION_ADDRESS_INVALID DETACH_ID_INVALID DETACH_ID_COLLISION RESPONSE_TOO_LARGE FRAME_TRUNCATED PLANNER_INTERNAL_ERROR`)
 
 type protocolDiagnostic struct {
 	Code      string  `json:"code"`
@@ -35,11 +37,18 @@ type plannerError struct {
 // validateResponse validates protocol metadata and every protocol-owned field.
 // The document candidate remains an open payload, but its identity is checked.
 func validateResponse(request, raw []byte) error {
+	if err := scanUniqueJSON(raw); err != nil {
+		return errors.New("response contains malformed or duplicate JSON members")
+	}
+	requestParseErr := scanUniqueJSON(request)
 	var req map[string]json.RawMessage
 	if err := json.Unmarshal(request, &req); err != nil {
 		req = nil
 	}
 	wantID := stringField(req["requestId"])
+	if requestParseErr != nil {
+		wantID = nil
+	}
 	if wantID != nil && (*wantID == "" || len(*wantID) > 128) {
 		wantID = nil
 	}
@@ -55,7 +64,7 @@ func validateResponse(request, raw []byte) error {
 	if err := dec.Decode(&extra); err != io.EOF {
 		return errors.New("response contains trailing or malformed JSON")
 	}
-	allowed := set("protocolVersion", "semanticVersion", "diagnosticVersion", "requestId", "ok", "phase", "document", "operationKind", "diagnostics", "ids", "error", "capabilities", "limits")
+	allowed := set("protocolVersion", "semanticVersion", "diagnosticVersion", "componentSemanticVersion", "requestId", "ok", "phase", "document", "operationKind", "diagnostics", "ids", "error", "capabilities", "limits")
 	for key := range envelope {
 		if !allowed[key] {
 			return fmt.Errorf("unknown response field %q", key)
@@ -78,7 +87,7 @@ func validateResponse(request, raw []byte) error {
 		return errors.New("response ok is missing or malformed")
 	}
 	if rawErr, hasErr := envelope["error"]; hasErr {
-		if ok || hasErr && hasAny(envelope, "phase", "document", "operationKind", "ids", "capabilities", "limits") {
+		if ok || hasErr && hasAny(envelope, "phase", "document", "operationKind", "ids", "capabilities", "limits", "componentSemanticVersion") {
 			return errors.New("contradictory error and result fields")
 		}
 		var e plannerError
@@ -100,7 +109,7 @@ func validateResponse(request, raw []byte) error {
 	}
 	switch *kind {
 	case "capabilities":
-		if !ok || hasAny(envelope, "phase", "document", "operationKind", "ids", "diagnostics") {
+		if !ok || hasAny(envelope, "phase", "document", "operationKind", "ids", "diagnostics", "componentSemanticVersion") {
 			return errors.New("capabilities response has contradictory fields")
 		}
 		return validateCapabilities(envelope)
@@ -117,7 +126,7 @@ func validateResponse(request, raw []byte) error {
 			if err := json.Unmarshal(envelope["diagnostics"], &successDiagnostics); err != nil || len(successDiagnostics) != 0 {
 				return errors.New("successful evaluation must not contain diagnostics")
 			}
-			if *phase != "evaluated" || hasAny(envelope, "error", "ids", "capabilities", "limits") {
+			if *phase != "evaluated" || hasAny(envelope, "error", "ids", "capabilities", "limits", "componentSemanticVersion") {
 				return errors.New("successful evaluation has contradictory fields")
 			}
 			var doc map[string]json.RawMessage
@@ -143,7 +152,7 @@ func validateResponse(request, raw []byte) error {
 				return errors.New("candidate operation kind does not match request")
 			}
 		} else {
-			if *phase == "evaluated" || hasAny(envelope, "document", "operationKind", "ids", "error", "capabilities", "limits") {
+			if *phase == "evaluated" || hasAny(envelope, "document", "operationKind", "ids", "error", "capabilities", "limits", "componentSemanticVersion") {
 				return errors.New("rejected evaluation has contradictory fields")
 			}
 			var rejectedDiagnostics []json.RawMessage
@@ -153,7 +162,7 @@ func validateResponse(request, raw []byte) error {
 		}
 		return nil
 	case "deriveIds", "checkDetachIds":
-		if !ok || hasAny(envelope, "phase", "document", "operationKind", "diagnostics", "error", "capabilities", "limits") {
+		if !ok || hasAny(envelope, "phase", "document", "operationKind", "diagnostics", "error", "capabilities", "limits", "componentSemanticVersion") {
 			return errors.New("identity response has contradictory fields")
 		}
 		var ids []string
@@ -164,9 +173,98 @@ func validateResponse(request, raw []byte) error {
 			return validateDerivedIdentities(req, ids)
 		}
 		return validateDetachIdentities(req, ids)
+	case "validateComponentInstanceV1":
+		return validateComponentInstanceResponse(req, envelope, ok)
 	default:
 		return errors.New("unknown request operation cannot produce a successful response")
 	}
+}
+
+type componentValidationDiagnostic struct {
+	Code     string `json:"code"`
+	Path     string `json:"path"`
+	Severity string `json:"severity"`
+	Detail   string `json:"detail"`
+}
+
+func validateComponentInstanceResponse(req, envelope map[string]json.RawMessage, ok bool) error {
+	allowedResponse := set("protocolVersion", "semanticVersion", "diagnosticVersion", "componentSemanticVersion", "requestId", "operationKind", "ok", "phase", "diagnostics")
+	for key := range envelope {
+		if !allowedResponse[key] {
+			return fmt.Errorf("component validation response contains forbidden field %q", key)
+		}
+	}
+	if !intFieldIs(envelope["componentSemanticVersion"], 1) || intFieldIs(req["componentSemanticVersion"], 1) == false {
+		return errors.New("component semantic version does not match request")
+	}
+	if stringField(envelope["operationKind"]) == nil || *stringField(envelope["operationKind"]) != "validateComponentInstanceV1" {
+		return errors.New("component validation operation kind is missing or mismatched")
+	}
+	phase := stringField(envelope["phase"])
+	if phase == nil || *phase != "component-validation" {
+		return errors.New("component validation phase is missing or invalid")
+	}
+	if _, present := envelope["document"]; present {
+		return errors.New("validation-only response must not contain a document")
+	}
+	var diagnostics []componentValidationDiagnostic
+	if err := decodeStrict(envelope["diagnostics"], &diagnostics); err != nil || diagnostics == nil || len(diagnostics) > 512 {
+		return errors.New("component diagnostics are missing, malformed, or over limit")
+	}
+	// The contract limit applies to the UTF-8 JSON diagnostic array bytes,
+	// including member names, escaping, commas and brackets.
+	diagnosticBytes := len(envelope["diagnostics"])
+	if diagnosticBytes > 768<<10 {
+		return errors.New("component diagnostic payload exceeds limit")
+	}
+	containsError := false
+	for index, diagnostic := range diagnostics {
+		if !componentDiagnosticCodes[diagnostic.Code] || !(diagnostic.Path == "$" || strings.HasPrefix(diagnostic.Path, "$.")) || diagnostic.Detail == "" {
+			return fmt.Errorf("component diagnostic %d has invalid fields", index)
+		}
+		switch diagnostic.Severity {
+		case "error":
+			containsError = true
+		case "warning":
+		default:
+			return fmt.Errorf("component diagnostic %d has invalid severity", index)
+		}
+		if index > 0 {
+			previous := diagnostics[index-1]
+			if compareUTF16(previous.Path, diagnostic.Path) > 0 ||
+				(compareUTF16(previous.Path, diagnostic.Path) == 0 && compareUTF16(previous.Code, diagnostic.Code) > 0) ||
+				(compareUTF16(previous.Path, diagnostic.Path) == 0 && previous.Code == diagnostic.Code && compareUTF16(previous.Severity, diagnostic.Severity) > 0) {
+				return errors.New("component diagnostics are not in deterministic order")
+			}
+		}
+	}
+	if ok && containsError {
+		return errors.New("successful validation contains an error diagnostic")
+	}
+	if !ok && !containsError {
+		return errors.New("rejected validation has no error diagnostic")
+	}
+	return nil
+}
+
+func compareUTF16(left, right string) int {
+	a := utf16.Encode([]rune(left))
+	b := utf16.Encode([]rune(right))
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
+	}
+	if len(a) < len(b) {
+		return -1
+	}
+	if len(a) > len(b) {
+		return 1
+	}
+	return 0
 }
 
 type definitionStep struct {

@@ -87,7 +87,7 @@ Limits must be checked before unbounded recursion/allocation. They are part of t
 
 ## Adversarial transport fixture plan
 
-`test/fixtures/figma-semantics/fg-c3-5-protocol-adversarial-v1.json` defines twelve deterministic scenarios. They specify future expected behavior only; they do not execute or prove a Component/Instance transport operation. The companion contract-fixture test checks fixture shape and keeps the operation unadvertised.
+`test/fixtures/figma-semantics/fg-c3-5-protocol-adversarial-v1.json` defines twelve deterministic scenarios. At FG-C3.5 these specified future behavior only. FG-C3.6 converted them into local framed Rust/Go qualification tests; the fixture now records exact semantic diagnostics and the status of each case. See [FG-C3.6 isolated protocol qualification](FG-C3.6-ISOLATED-PROTOCOL-QUALIFICATION.md) for implementation and run evidence.
 
 Coverage includes clean success; warning-only success; invalid graph; unsupported component semantic version; malformed envelope; strict duplicate-key rejection; document-payload and outer-frame size limits; excessive diagnostics; stale response correlation; truncated frame; and process restart after validation rejection. Size-heavy inputs use deterministic generation directives rather than committing multi-megabyte blobs. No fixture asks the planner to persist, render, authorize, or migrate a document.
 
@@ -97,20 +97,13 @@ The retained FG-C3.4.1 seed and its generated documents/case names remain unchan
 
 Every case is classified as `shared-wire` or `typescript-only`; unclassified cases fail the run. Rust process/spawn/count faults are runner failures; invalid JSON output lines are parser failures; result differences after valid responses are semantic divergences. A JavaScript-only NaN case is explicitly unsupported because no JSON text can represent it. It is still checked for TypeScript input purity, but excluded from shared parity counts. The report separately lists validator outcomes carrying `COMPONENT_JSON_INVALID` (the non-object and malformed-text cases); these are semantic API results, distinct from a harness response-parser failure.
 
-Latest local run: **339 total cases; 338 compared; 338 matched; 1 explicitly unsupported; 0 runner failures; 0 parser failures; 0 semantic divergences.** The cases are 37 fixed cases, 144 seeded valid documents, 144 controlled-invalid mutations, 3 combined variant/swap/slot mutations, 10 wire/runtime boundaries, and one JavaScript-only NaN input. The two specification tests pass **2/2**. These are local results, not hosted CI, a production corpus, transport execution, or performance qualification.
+Latest local run: **339 total cases; 338 compared; 338 matched; 1 explicitly unsupported; 0 runner failures; 0 parser failures; 0 semantic divergences.** The cases are 37 fixed cases, 144 seeded valid documents, 144 controlled-invalid mutations, 3 combined variant/swap/slot mutations, 10 wire/runtime boundaries, and one JavaScript-only NaN input. The two fixture-contract tests pass **2/2**. These are local results, not hosted CI, a production corpus, or performance qualification. FG-C3.6 transport evidence is recorded separately below.
 
 ## Readiness decision
 
-**NOT READY** for Component/Instance protocol exposure. The semantic candidate is well tested over a bounded JSON corpus, but the operation is not implemented; duplicate-aware parsing, resource-limit enforcement, framed adversarial tests, restart/cancellation behavior, and transport correlation have not been qualified. Semantic parity is not transport qualification. Nothing here establishes production authority or canonical-document ownership.
+**FG-C3.5 historical verdict: NOT READY.** At the time of this proposal the operation was not implemented and transport controls were unqualified. FG-C3.6 has since implemented and locally qualified the isolated protocol operation, strict parser, resource limits, framed adversarial behavior, response validation, timeout and process recovery. This follow-up does not authorize capability advertisement, production deployment, Rust authority transfer, durable transaction safety, or canonical-document ownership. Those remain separate decisions.
 
-Smallest separately authorizable implementation sequence:
-
-1. Chief Architect approves protocol v2 additive operation, strict duplicate policy, and proposed limits.
-2. Implement duplicate-aware bounded envelope/document parsing and validation-only response, leaving capability advertisement disabled.
-3. Execute the adversarial framed fixtures against a disposable process, including stale correlation and kill/restart cases.
-4. Qualify response size, depth, cancellation, and timeout behavior with resource observations.
-5. Run TypeScript/Rust differential corpus and existing planner protocol suite on the resulting head.
-6. Request a separate Chief Architect decision to advertise the isolated capability. Production authority, persistence, rendering, and migration require separate decisions.
+The historical implementation sequence is complete through local qualification; the remaining adoption gate is a separate Chief Architect decision to advertise the isolated capability. Production authority, persistence, rendering, deployment isolation, and migration require separate decisions.
 
 ## Reproduction
 

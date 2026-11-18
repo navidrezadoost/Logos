@@ -1,12 +1,86 @@
 //! Pure, isolated semantic validator for the TypeScript Component/Instance v1
-//! candidate contract. It intentionally accepts raw JSON so structural errors
-//! can retain TypeScript-compatible diagnostics instead of becoming serde
-//! failures. This module is not wired into the planner protocol or Document.
+//! candidate contract. It intentionally accepts parsed JSON values so
+//! structural errors retain TypeScript-compatible diagnostics instead of
+//! becoming serde failures. The protocol-v2 caller applies bounded strict
+//! parsing first; this module remains outside Document and persistence.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
+
+thread_local! {
+    static DIAGNOSTIC_MAX_COUNT: Cell<usize> = const { Cell::new(usize::MAX) };
+    static DIAGNOSTIC_MAX_BYTES: Cell<usize> = const { Cell::new(usize::MAX) };
+    static DIAGNOSTIC_BYTES: Cell<usize> = const { Cell::new(0) };
+    static DIAGNOSTIC_OVERFLOW: Cell<bool> = const { Cell::new(false) };
+    static EXPANSION_MAX_STEPS: Cell<usize> = const { Cell::new(usize::MAX) };
+    static EXPANSION_STEPS: Cell<usize> = const { Cell::new(0) };
+    static EXPANSION_OVERFLOW: Cell<bool> = const { Cell::new(false) };
+    static SEMANTIC_MAX_DEPTH: Cell<usize> = const { Cell::new(usize::MAX) };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValidationLimit {
+    Diagnostics,
+    ExpansionWork,
+}
+
+struct ValidationBudgetGuard {
+    old: (usize, usize, usize, usize),
+}
+
+impl ValidationBudgetGuard {
+    fn new(max_count: usize, max_bytes: usize, max_expansion_steps: usize) -> Self {
+        let old = (
+            DIAGNOSTIC_MAX_COUNT.with(|value| value.replace(max_count)),
+            DIAGNOSTIC_MAX_BYTES.with(|value| value.replace(max_bytes)),
+            EXPANSION_MAX_STEPS.with(|value| value.replace(max_expansion_steps)),
+            SEMANTIC_MAX_DEPTH.with(|value| value.replace(64)),
+        );
+        // Count the serialized JSON diagnostic array, including its brackets
+        // and separators. This matches the Go response validator's byte rule.
+        DIAGNOSTIC_BYTES.with(|value| value.set(2));
+        DIAGNOSTIC_OVERFLOW.with(|value| value.set(false));
+        EXPANSION_STEPS.with(|value| value.set(0));
+        EXPANSION_OVERFLOW.with(|value| value.set(false));
+        Self { old }
+    }
+
+    fn exceeded(&self) -> Option<ValidationLimit> {
+        if EXPANSION_OVERFLOW.with(Cell::get) {
+            Some(ValidationLimit::ExpansionWork)
+        } else if DIAGNOSTIC_OVERFLOW.with(Cell::get) {
+            Some(ValidationLimit::Diagnostics)
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for ValidationBudgetGuard {
+    fn drop(&mut self) {
+        DIAGNOSTIC_MAX_COUNT.with(|value| value.set(self.old.0));
+        DIAGNOSTIC_MAX_BYTES.with(|value| value.set(self.old.1));
+        EXPANSION_MAX_STEPS.with(|value| value.set(self.old.2));
+        SEMANTIC_MAX_DEPTH.with(|value| value.set(self.old.3));
+    }
+}
+
+fn consume_expansion_step() -> bool {
+    EXPANSION_STEPS.with(|steps| {
+        let next = steps.get().saturating_add(1);
+        let max = EXPANSION_MAX_STEPS.with(Cell::get);
+        if next > max {
+            EXPANSION_OVERFLOW.with(|overflow| overflow.set(true));
+            false
+        } else {
+            steps.set(next);
+            true
+        }
+    })
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,12 +105,15 @@ fn diagnostic(
     path: impl Into<String>,
     detail: impl Into<String>,
 ) {
-    ds.push(Diagnostic {
-        code: code.into(),
-        path: path.into(),
-        severity: "error".into(),
-        detail: detail.into(),
-    });
+    push_diagnostic(
+        ds,
+        Diagnostic {
+            code: code.into(),
+            path: path.into(),
+            severity: "error".into(),
+            detail: detail.into(),
+        },
+    );
 }
 fn warning(
     ds: &mut Vec<Diagnostic>,
@@ -44,12 +121,39 @@ fn warning(
     path: impl Into<String>,
     detail: impl Into<String>,
 ) {
-    ds.push(Diagnostic {
-        code: code.into(),
-        path: path.into(),
-        severity: "warning".into(),
-        detail: detail.into(),
+    push_diagnostic(
+        ds,
+        Diagnostic {
+            code: code.into(),
+            path: path.into(),
+            severity: "warning".into(),
+            detail: detail.into(),
+        },
+    );
+}
+fn push_diagnostic(ds: &mut Vec<Diagnostic>, value: Diagnostic) {
+    let encoded_bytes = serde_json::to_vec(&value).map_or(usize::MAX, |json| json.len());
+    let count_limit = DIAGNOSTIC_MAX_COUNT.with(Cell::get);
+    let byte_limit = DIAGNOSTIC_MAX_BYTES.with(Cell::get);
+    let current_bytes = DIAGNOSTIC_BYTES.with(Cell::get);
+    let separator_bytes = usize::from(!ds.is_empty());
+    if ds.len() >= count_limit
+        || current_bytes
+            .saturating_add(separator_bytes)
+            .saturating_add(encoded_bytes)
+            > byte_limit
+    {
+        DIAGNOSTIC_OVERFLOW.with(|overflow| overflow.set(true));
+        return;
+    }
+    DIAGNOSTIC_BYTES.with(|bytes| {
+        bytes.set(
+            current_bytes
+                .saturating_add(separator_bytes)
+                .saturating_add(encoded_bytes),
+        )
     });
+    ds.push(value);
 }
 fn object(v: &Value) -> Option<&Map<String, Value>> {
     v.as_object()
@@ -356,9 +460,13 @@ fn validate_node_graph(
         memberships: &mut BTreeMap<String, String>,
         path: &str,
         ds: &mut Vec<Diagnostic>,
-    ) {
+    ) -> bool {
+        if !consume_expansion_step() || stack.len() >= SEMANTIC_MAX_DEPTH.with(Cell::get) {
+            EXPANSION_OVERFLOW.with(|overflow| overflow.set(true));
+            return false;
+        }
         let Some(node) = nodes.get(id) else {
-            return;
+            return true;
         };
         if stack.iter().any(|x| x == id) {
             diagnostic(
@@ -367,7 +475,7 @@ fn validate_node_graph(
                 path_member(&path_member(path, "nodes"), id),
                 "Node containment cycle detected.",
             );
-            return;
+            return true;
         }
         let expected = parent;
         let actual = own(node, "parentId").and_then(Value::as_str);
@@ -408,14 +516,18 @@ fn validate_node_graph(
                         format!("Missing child {child}."),
                     );
                 } else {
-                    walk(child, Some(id), stack, nodes, ids, memberships, path, ds);
+                    if !walk(child, Some(id), stack, nodes, ids, memberships, path, ds) {
+                        stack.pop();
+                        return false;
+                    }
                 }
             }
         }
         stack.pop();
+        true
     }
     for root in roots {
-        walk(
+        if !walk(
             root,
             None,
             &mut Vec::new(),
@@ -424,7 +536,9 @@ fn validate_node_graph(
             &mut memberships,
             path,
             ds,
-        );
+        ) {
+            break;
+        }
     }
     if memberships.len() != ids.len() {
         diagnostic(
@@ -925,11 +1039,14 @@ fn validate_expansion_cycles(
     sets: &Value,
     instances: &Value,
     ds: &mut Vec<Diagnostic>,
-) {
+) -> bool {
     let Some(instances) = object(instances) else {
-        return;
+        return true;
     };
     for instance_id in js_sorted_keys(&Value::Object(instances.clone())) {
+        if !consume_expansion_step() {
+            return false;
+        }
         let instance = &instances[&instance_id];
         let (Some(source), Some(selection)) =
             (own(instance, "source"), own(instance, "variantSelection"))
@@ -952,7 +1069,11 @@ fn validate_expansion_cycles(
             components: &Value,
             sets: &Value,
             ds: &mut Vec<Diagnostic>,
-        ) {
+        ) -> bool {
+            if !consume_expansion_step() || stack.len() >= SEMANTIC_MAX_DEPTH.with(Cell::get) {
+                EXPANSION_OVERFLOW.with(|overflow| overflow.set(true));
+                return false;
+            }
             if stack.iter().any(|x| x == component_id) {
                 let mut chain = stack.clone();
                 chain.push(component_id.into());
@@ -962,34 +1083,42 @@ fn validate_expansion_cycles(
                     path,
                     format!("Active component expansion cycle: {}.", chain.join(" -> ")),
                 );
-                return;
+                return true;
             }
             let Some(component) = own(components, component_id) else {
-                return;
+                return true;
             };
             let (Some(properties), Some(nodes)) = (
                 own(component, "properties").and_then(object),
                 own(component, "nodes").and_then(object),
             ) else {
-                return;
+                return true;
             };
             stack.push(component_id.to_string());
             for node_id in map_keys_js(nodes) {
+                if !consume_expansion_step() {
+                    stack.pop();
+                    return false;
+                }
                 let node = &nodes[&node_id];
                 if own(node, "kind").and_then(Value::as_str) != Some("instance") {
                     continue;
                 }
                 let source_node_path = format!("{path}.nodes.{node_id}.source");
-                let swap = map_keys_js(properties).into_iter().find_map(|prop_id| {
+                let mut swap = None;
+                for prop_id in map_keys_js(properties) {
+                    if !consume_expansion_step() {
+                        stack.pop();
+                        return false;
+                    }
                     let p = &properties[&prop_id];
                     if own(p, "kind").and_then(Value::as_str) == Some("instance-swap")
                         && own(p, "targetNodeId").and_then(Value::as_str) == Some(node_id.as_str())
                     {
-                        Some((prop_id, p))
-                    } else {
-                        None
+                        swap = Some((prop_id, p));
+                        break;
                     }
-                });
+                }
                 let mut target = None;
                 if let Some((prop_id, prop)) = swap {
                     let selected = if component_id == root_id {
@@ -1026,7 +1155,7 @@ fn validate_expansion_cycles(
                     }
                 }
                 if let Some(id) = target {
-                    expand(
+                    if !expand(
                         &id,
                         &source_node_path,
                         stack,
@@ -1036,11 +1165,18 @@ fn validate_expansion_cycles(
                         components,
                         sets,
                         ds,
-                    );
+                    ) {
+                        stack.pop();
+                        return false;
+                    }
                 }
             }
             if component_id == root_id {
                 for prop_id in map_keys_js(properties) {
+                    if !consume_expansion_step() {
+                        stack.pop();
+                        return false;
+                    }
                     let prop = &properties[&prop_id];
                     if own(prop, "kind").and_then(Value::as_str) != Some("slot") {
                         continue;
@@ -1065,16 +1201,22 @@ fn validate_expansion_cycles(
                         components: &Value,
                         sets: &Value,
                         ds: &mut Vec<Diagnostic>,
-                    ) {
+                        depth: usize,
+                    ) -> bool {
+                        if !consume_expansion_step() || depth >= SEMANTIC_MAX_DEPTH.with(Cell::get)
+                        {
+                            EXPANSION_OVERFLOW.with(|overflow| overflow.set(true));
+                            return false;
+                        }
                         let Some(node) = slot_nodes.get(id) else {
-                            return;
+                            return true;
                         };
                         if own(node, "kind").and_then(Value::as_str) == Some("instance") {
                             if let (Some(src), Some(sel)) =
                                 (own(node, "source"), own(node, "variantSelection"))
                             {
                                 if let Some(target) = resolve_local(src, sel, components, sets) {
-                                    expand(
+                                    if !expand(
                                         &target,
                                         &format!("{path}.nodes.{id}.source"),
                                         stack,
@@ -1084,13 +1226,15 @@ fn validate_expansion_cycles(
                                         components,
                                         sets,
                                         ds,
-                                    );
+                                    ) {
+                                        return false;
+                                    }
                                 }
                             }
                         }
                         if let Some(children) = own(node, "childIds").and_then(arr) {
                             for child in children.iter().filter_map(Value::as_str) {
-                                walk_slot(
+                                if !walk_slot(
                                     child,
                                     slot_nodes,
                                     path,
@@ -1101,9 +1245,13 @@ fn validate_expansion_cycles(
                                     components,
                                     sets,
                                     ds,
-                                );
+                                    depth + 1,
+                                ) {
+                                    return false;
+                                }
                             }
                         }
+                        true
                     }
                     let path = format!(
                         "$.instances.{}.slotContent.{}",
@@ -1113,7 +1261,7 @@ fn validate_expansion_cycles(
                         prop_id
                     );
                     for root_node in roots.iter().filter_map(Value::as_str) {
-                        walk_slot(
+                        if !walk_slot(
                             root_node,
                             slot_nodes,
                             &path,
@@ -1124,13 +1272,18 @@ fn validate_expansion_cycles(
                             components,
                             sets,
                             ds,
-                        );
+                            0,
+                        ) {
+                            stack.pop();
+                            return false;
+                        }
                     }
                 }
             }
             stack.pop();
+            true
         }
-        expand(
+        if !expand(
             &root,
             &root_path,
             &mut Vec::new(),
@@ -1140,8 +1293,11 @@ fn validate_expansion_cycles(
             components,
             sets,
             ds,
-        );
+        ) {
+            return false;
+        }
     }
+    true
 }
 
 /// Validate raw v1 JSON with TypeScript-compatible diagnostics. Success returns
@@ -1150,6 +1306,25 @@ pub fn validate_component_instance_document(input: &Value) -> ValidationResult {
     let mut normalized = input.clone();
     normalize_js_numbers(&mut normalized);
     validate_normalized_document(&normalized)
+}
+
+/// Protocol-bound validator entrypoint. Parsing is bounded by the caller;
+/// this guard bounds diagnostic accumulation and recursive instance expansion.
+pub fn validate_component_instance_document_bounded(
+    input: &Value,
+    max_diagnostics: usize,
+    max_diagnostic_bytes: usize,
+    max_expansion_steps: usize,
+) -> Result<ValidationResult, ValidationLimit> {
+    let guard =
+        ValidationBudgetGuard::new(max_diagnostics, max_diagnostic_bytes, max_expansion_steps);
+    let result = validate_component_instance_document(input);
+    let exceeded = guard.exceeded();
+    drop(guard);
+    match exceeded {
+        Some(limit) => Err(limit),
+        None => Ok(result),
+    }
 }
 
 fn validate_normalized_document(input: &Value) -> ValidationResult {
@@ -1963,5 +2138,44 @@ mod tests {
         assert_eq!(syntax, wrong_shape);
         assert_eq!(syntax.diagnostics[0].code, "COMPONENT_JSON_INVALID");
         assert!(syntax.document.is_none());
+    }
+
+    #[test]
+    fn protocol_budget_count_and_serialized_bytes_are_inclusive_and_fail_closed() {
+        let input: Value = serde_json::from_str(POSITIVE).unwrap();
+        let semantic = validate_component_instance_document(&input);
+        let exact_count = semantic.diagnostics.len();
+        let exact_bytes = serde_json::to_vec(&semantic.diagnostics).unwrap().len();
+        assert!(exact_count > 0);
+        assert!(exact_bytes > 2);
+        assert!(validate_component_instance_document_bounded(
+            &input,
+            exact_count,
+            exact_bytes,
+            100_000,
+        )
+        .is_ok());
+        assert_eq!(
+            validate_component_instance_document_bounded(
+                &input,
+                exact_count - 1,
+                exact_bytes,
+                100_000,
+            ),
+            Err(ValidationLimit::Diagnostics)
+        );
+        assert_eq!(
+            validate_component_instance_document_bounded(
+                &input,
+                exact_count,
+                exact_bytes - 1,
+                100_000,
+            ),
+            Err(ValidationLimit::Diagnostics)
+        );
+        assert_eq!(
+            validate_component_instance_document_bounded(&input, exact_count, exact_bytes, 0),
+            Err(ValidationLimit::ExpansionWork)
+        );
     }
 }

@@ -12,11 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 const (
-	MaxRequestBytes  = 1 << 20
-	MaxResponseBytes = 1 << 20
+	MaxRequestBytes            = 1 << 20
+	MaxResponseBytes           = 1 << 20
+	MaxComponentDocumentBytes  = 768 << 10
+	ComponentValidationTimeout = 2 * time.Second
 )
 
 type Planner struct {
@@ -37,6 +40,11 @@ func NewPlanner(path string) *Planner { return &Planner{Path: path, gate: make(c
 func (p *Planner) Call(ctx context.Context, request []byte) ([]byte, error) {
 	if len(request) > MaxRequestBytes {
 		return errorResponse(request, "REQUEST_TOO_LARGE", "Request exceeds the coordinator limit."), nil
+	}
+	if requestKind(request) == "validateComponentInstanceV1" {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, ComponentValidationTimeout)
+		defer cancel()
 	}
 	select {
 	case p.gate <- struct{}{}:
@@ -79,6 +87,35 @@ func (p *Planner) Call(ctx context.Context, request []byte) ([]byte, error) {
 		return nil, fmt.Errorf("planner response rejected: %w", err)
 	}
 	return got.body, nil
+}
+
+// ValidateComponentInstanceV1 is an isolated qualification-only call. It
+// returns status and diagnostics only; the planner response validator rejects
+// document payloads and the standard capability handshake remains unchanged.
+func (p *Planner) ValidateComponentInstanceV1(ctx context.Context, requestID string, documentJSON []byte) ([]byte, error) {
+	request, err := json.Marshal(struct {
+		ProtocolVersion          int    `json:"protocolVersion"`
+		SemanticVersion          int    `json:"semanticVersion"`
+		DiagnosticVersion        int    `json:"diagnosticVersion"`
+		RequestID                string `json:"requestId"`
+		Kind                     string `json:"kind"`
+		ComponentSemanticVersion int    `json:"componentSemanticVersion"`
+		DocumentJSON             string `json:"documentJson"`
+	}{2, 1, 1, requestID, "validateComponentInstanceV1", 1, string(documentJSON)})
+	if err != nil {
+		return nil, err
+	}
+	return p.Call(ctx, request)
+}
+
+func requestKind(request []byte) string {
+	var envelope struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(request, &envelope) != nil {
+		return ""
+	}
+	return envelope.Kind
 }
 
 func (p *Planner) start(ctx context.Context) error {

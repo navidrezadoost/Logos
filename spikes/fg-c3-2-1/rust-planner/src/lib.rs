@@ -2,6 +2,7 @@
 
 pub mod component_instance_v1;
 pub mod component_instance_validator;
+mod strict_json;
 
 use logos_types::{apply_operation, decode_and_validate_json, DocumentOperation};
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,13 @@ pub const SEMANTIC_VERSION: u32 = 1;
 pub const DIAGNOSTIC_VERSION: u32 = 1;
 pub const MAX_REQUEST_BYTES: usize = 1 << 20;
 pub const MAX_RESPONSE_BYTES: usize = 1 << 20;
+pub const MAX_COMPONENT_DOCUMENT_BYTES: usize = 768 << 10;
+pub const MAX_JSON_NESTING: usize = 64;
+pub const MAX_JSON_VALUES: usize = 100_000;
+pub const MAX_COMPONENT_DIAGNOSTICS: usize = 512;
+pub const MAX_COMPONENT_DIAGNOSTIC_BYTES: usize = 768 << 10;
+pub const MAX_COMPONENT_EXPANSION_STEPS: usize = 100_000;
+pub const COMPONENT_REQUEST_DEADLINE_MS: u64 = 2_000;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +51,10 @@ enum RequestBody {
     CheckDetachIds {
         existing_ids: Vec<String>,
         candidate_ids: Vec<String>,
+    },
+    ValidateComponentInstanceV1 {
+        component_semantic_version: u32,
+        document_json: String,
     },
 }
 
@@ -84,15 +96,49 @@ struct IdentityName<'a> {
 /// Evaluate one already framed protocol request. Complete malformed JSON is a
 /// request-level error; callers can safely continue with the next frame.
 pub fn handle_json(raw: &str) -> String {
-    let value: Value = match serde_json::from_str(raw) {
+    if raw.len() > MAX_REQUEST_BYTES {
+        return error(
+            None,
+            "REQUEST_TOO_LARGE",
+            "/",
+            "Request exceeds the protocol byte limit.",
+        );
+    }
+    let value: Value = match strict_json::parse_bounded(raw, MAX_JSON_NESTING, MAX_JSON_VALUES) {
         Ok(value) => value,
-        Err(_) => return error(None, "REQUEST_INVALID", "/", "Request is not valid JSON."),
+        Err(strict_json::StrictJsonError::DuplicateMember) => {
+            return error(
+                None,
+                "DUPLICATE_JSON_MEMBER",
+                "/",
+                "Request contains a duplicate decoded object member.",
+            )
+        }
+        Err(strict_json::StrictJsonError::DepthLimit | strict_json::StrictJsonError::WorkLimit) => {
+            return error(
+                None,
+                "REQUEST_RESOURCE_LIMIT",
+                "/",
+                "Request exceeds a parser resource limit.",
+            )
+        }
+        Err(strict_json::StrictJsonError::Invalid) => {
+            return error(None, "REQUEST_INVALID", "/", "Request is not valid JSON.")
+        }
     };
     let request_id = value
         .get("requestId")
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty() && id.len() <= 128)
         .map(str::to_owned);
+    if !request_fields_are_allowed(&value) {
+        return error(
+            request_id.as_deref(),
+            "REQUEST_INVALID",
+            "/",
+            "Request contains unknown fields for its operation.",
+        );
+    }
     let request: Request = match serde_json::from_value(value) {
         Ok(value) => value,
         Err(_) => {
@@ -167,6 +213,114 @@ pub fn handle_json(raw: &str) -> String {
             existing_ids,
             candidate_ids,
         } => check_detach_ids(&request_id, existing_ids, candidate_ids),
+        RequestBody::ValidateComponentInstanceV1 { component_semantic_version, document_json } => {
+            validate_component_instance_v1(&request_id, component_semantic_version, &document_json)
+        }
+    }
+}
+
+fn request_fields_are_allowed(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    let operation_fields: &[&str] = match object.get("kind").and_then(Value::as_str) {
+        Some("capabilities") => &[],
+        Some("evaluate") => &["document", "operation"],
+        Some("deriveIds") => &["addresses"],
+        Some("checkDetachIds") => &["existingIds", "candidateIds"],
+        Some("validateComponentInstanceV1") => &["componentSemanticVersion", "documentJson"],
+        _ => return true,
+    };
+    let common = [
+        "protocolVersion",
+        "semanticVersion",
+        "diagnosticVersion",
+        "requestId",
+        "kind",
+    ];
+    object
+        .keys()
+        .all(|key| common.contains(&key.as_str()) || operation_fields.contains(&key.as_str()))
+}
+
+fn validate_component_instance_v1(
+    request_id: &str,
+    component_version: u32,
+    document_json: &str,
+) -> String {
+    if component_version != 1 {
+        return error(
+            Some(request_id),
+            "COMPONENT_SEMANTIC_VERSION_UNSUPPORTED",
+            "/componentSemanticVersion",
+            "Component semantic version is not supported.",
+        );
+    }
+    if document_json.len() > MAX_COMPONENT_DOCUMENT_BYTES {
+        return error(
+            Some(request_id),
+            "COMPONENT_INPUT_TOO_LARGE",
+            "/documentJson",
+            "Component document exceeds the UTF-8 byte limit.",
+        );
+    }
+    let document = match strict_json::parse_bounded(
+        document_json,
+        MAX_JSON_NESTING,
+        MAX_JSON_VALUES,
+    ) {
+        Ok(value) => value,
+        Err(strict_json::StrictJsonError::DuplicateMember) => {
+            return error(
+                Some(request_id),
+                "DUPLICATE_JSON_MEMBER",
+                "/documentJson",
+                "Component document contains a duplicate decoded object member.",
+            )
+        }
+        Err(strict_json::StrictJsonError::DepthLimit | strict_json::StrictJsonError::WorkLimit) => {
+            return error(
+                Some(request_id),
+                "COMPONENT_RESOURCE_LIMIT",
+                "/documentJson",
+                "Component document exceeds a parser resource limit.",
+            )
+        }
+        Err(strict_json::StrictJsonError::Invalid) => {
+            return json!({"protocolVersion": PROTOCOL_VERSION,"semanticVersion": SEMANTIC_VERSION,"diagnosticVersion": DIAGNOSTIC_VERSION,"componentSemanticVersion":1,"requestId":request_id,"operationKind":"validateComponentInstanceV1","ok":false,"phase":"component-validation","diagnostics":[{"code":"COMPONENT_JSON_INVALID","path":"$","severity":"error","detail":"Component document is not valid JSON text."}]}).to_string();
+        }
+    };
+    let result = component_instance_validator::validate_component_instance_document_bounded(
+        &document,
+        MAX_COMPONENT_DIAGNOSTICS,
+        MAX_COMPONENT_DIAGNOSTIC_BYTES,
+        MAX_COMPONENT_EXPANSION_STEPS,
+    );
+    match result {
+        Ok(validation) => json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "semanticVersion": SEMANTIC_VERSION,
+            "diagnosticVersion": DIAGNOSTIC_VERSION,
+            "componentSemanticVersion": 1,
+            "requestId": request_id,
+            "operationKind": "validateComponentInstanceV1",
+            "ok": validation.ok,
+            "phase": "component-validation",
+            "diagnostics": validation.diagnostics,
+        })
+        .to_string(),
+        Err(component_instance_validator::ValidationLimit::Diagnostics) => error(
+            Some(request_id),
+            "COMPONENT_DIAGNOSTIC_LIMIT",
+            "/documentJson",
+            "Component validation exceeded the diagnostic count or byte limit.",
+        ),
+        Err(component_instance_validator::ValidationLimit::ExpansionWork) => error(
+            Some(request_id),
+            "COMPONENT_RESOURCE_LIMIT",
+            "/documentJson",
+            "Component validation exceeded its semantic work budget.",
+        ),
     }
 }
 
@@ -370,6 +524,25 @@ mod tests {
     fn bounded_response_replaces_large_payload_with_structured_error() {
         let result: Value =
             serde_json::from_str(&bounded_response("x".repeat(300), 100, Some("unit-1"))).unwrap();
+        assert_eq!(result["error"]["code"], "RESPONSE_TOO_LARGE");
+    }
+
+    #[test]
+    fn response_size_boundary_is_inclusive_and_one_over_rejects() {
+        assert_eq!(
+            bounded_response(
+                "x".repeat(MAX_RESPONSE_BYTES),
+                MAX_RESPONSE_BYTES,
+                Some("unit-1"),
+            ),
+            "x".repeat(MAX_RESPONSE_BYTES)
+        );
+        let result: Value = serde_json::from_str(&bounded_response(
+            "x".repeat(MAX_RESPONSE_BYTES + 1),
+            MAX_RESPONSE_BYTES,
+            Some("unit-1"),
+        ))
+        .unwrap();
         assert_eq!(result["error"]["code"], "RESPONSE_TOO_LARGE");
     }
 
