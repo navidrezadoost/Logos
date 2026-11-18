@@ -1,0 +1,232 @@
+[
+  {
+    "name": "definition-child-reorder",
+    "request": {
+      "protocolVersion": 1,
+      "kind": "deriveIds",
+      "addresses": [
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": null
+        },
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": null
+        }
+      ]
+    },
+    "relation": "same"
+  },
+  {
+    "name": "nested-component-path",
+    "request": {
+      "protocolVersion": 1,
+      "kind": "deriveIds",
+      "addresses": [
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": null
+        },
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            },
+            {
+              "componentId": "66666666-6666-4666-8666-666666666666",
+              "throughInstanceNodeId": "77777777-7777-4777-8777-777777777777"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": null
+        }
+      ]
+    },
+    "relation": "different"
+  },
+  {
+    "name": "same-definition-two-instances",
+    "request": {
+      "protocolVersion": 1,
+      "kind": "deriveIds",
+      "addresses": [
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": null
+        },
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "88888888-8888-4888-8888-888888888888",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": null
+        }
+      ]
+    },
+    "relation": "different"
+  },
+  {
+    "name": "definition-node-replaced",
+    "request": {
+      "protocolVersion": 1,
+      "kind": "deriveIds",
+      "addresses": [
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": null
+        },
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "99999999-9999-4999-8999-999999999999",
+          "slotRoute": [],
+          "externalRevision": null
+        }
+      ]
+    },
+    "relation": "different"
+  },
+  {
+    "name": "external-source-revision-updated",
+    "request": {
+      "protocolVersion": 1,
+      "kind": "deriveIds",
+      "addresses": [
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": "rev-1"
+        },
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [],
+          "externalRevision": "rev-2"
+        }
+      ]
+    },
+    "relation": "different"
+  },
+  {
+    "name": "slot-authored-node-identities",
+    "request": {
+      "protocolVersion": 1,
+      "kind": "deriveIds",
+      "addresses": [
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [
+            {
+              "propertyId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "authoredNodeId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+            }
+          ],
+          "externalRevision": null
+        },
+        {
+          "documentId": "11111111-1111-4111-8111-111111111111",
+          "instanceId": "22222222-2222-4222-8222-222222222222",
+          "definitionRoute": [
+            {
+              "componentId": "33333333-3333-4333-8333-333333333333",
+              "throughInstanceNodeId": "44444444-4444-4444-8444-444444444444"
+            }
+          ],
+          "definitionNodeId": "55555555-5555-4555-8555-555555555555",
+          "slotRoute": [
+            {
+              "propertyId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "authoredNodeId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+            }
+          ],
+          "externalRevision": null
+        }
+      ]
+    },
+    "relation": "different"
+  }
+]
