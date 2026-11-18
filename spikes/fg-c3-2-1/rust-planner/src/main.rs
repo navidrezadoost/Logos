@@ -3,6 +3,87 @@ use fg_c3_2_1_rust_planner_spike::{
 };
 use std::io::{self, Read, Write};
 
+#[cfg(feature = "fg-c3-7-test-oom")]
+fn test_process_evidence(stage: &str, rss_kib: Option<u64>) -> io::Result<()> {
+    let Ok(path) = std::env::var("FG_C3_7_TEST_EVIDENCE_FILE") else {
+        return Ok(());
+    };
+    let cgroup_data = std::fs::read_to_string("/proc/self/cgroup")?;
+    let cgroup = cgroup_data
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))
+        .unwrap_or("unavailable")
+        .to_owned();
+    let rss = rss_kib.map_or_else(|| "unavailable".to_owned(), |value| value.to_string());
+    let content = format!(
+        "stage={stage}\npid={}\ncgroup={cgroup}\nrss_kib={rss}\n",
+        std::process::id()
+    );
+    std::fs::write(path, content)
+}
+
+#[cfg(feature = "fg-c3-7-test-oom")]
+fn test_oom_if_armed() -> io::Result<()> {
+    let Ok(marker) = std::env::var("FG_C3_7_TEST_OOM_TRIGGER_FILE") else {
+        return Ok(());
+    };
+    if !std::path::Path::new(&marker).exists() {
+        return Ok(());
+    }
+    let bytes = std::env::var("FG_C3_7_TEST_OOM_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(256 * 1024 * 1024);
+    if !(64 * 1024 * 1024..=512 * 1024 * 1024).contains(&bytes) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "test-only OOM allocation must be between 64 and 512 MiB",
+        ));
+    }
+    let _ = std::fs::remove_file(marker);
+    let mut allocation = Vec::<u8>::new();
+    test_process_evidence("oom-pressure-started", None)?;
+    let page_size = 4096;
+    let checkpoint = 1024 * 1024;
+    while allocation.len() < bytes {
+        let start = allocation.len();
+        let end = (start + checkpoint).min(bytes);
+        allocation.resize(end, 0);
+        for page in (start..end).step_by(page_size) {
+            allocation[page] = 1;
+        }
+        let status = std::fs::read_to_string("/proc/self/status")?;
+        let rss_kib = status.lines().find_map(|line| {
+            let rest = line.strip_prefix("VmRSS:")?;
+            rest.split_whitespace().next()?.parse::<u64>().ok()
+        });
+        test_process_evidence("oom-pressure-progress", rss_kib)?;
+    }
+    std::hint::black_box(&allocation);
+    std::thread::sleep(std::time::Duration::from_secs(30));
+    Ok(())
+}
+
+#[cfg(not(feature = "fg-c3-7-test-oom"))]
+fn test_oom_if_armed() -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(feature = "fg-c3-7-test-oom")]
+fn test_process_ready_evidence() -> io::Result<()> {
+    let status = std::fs::read_to_string("/proc/self/status")?;
+    let rss_kib = status.lines().find_map(|line| {
+        let rest = line.strip_prefix("VmRSS:")?;
+        rest.split_whitespace().next()?.parse::<u64>().ok()
+    });
+    test_process_evidence("ready", rss_kib)
+}
+
+#[cfg(not(feature = "fg-c3-7-test-oom"))]
+fn test_process_ready_evidence() -> io::Result<()> {
+    Ok(())
+}
+
 fn write_frame(output: &mut impl Write, response: &str) -> io::Result<()> {
     let length = u32::try_from(response.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "response length overflow"))?;
@@ -12,6 +93,7 @@ fn write_frame(output: &mut impl Write, response: &str) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
+    test_process_ready_evidence()?;
     let response_limit = std::env::var("FG_C3_2_2_TEST_RESPONSE_LIMIT")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -69,6 +151,7 @@ fn main() -> io::Result<()> {
             )?;
             return Ok(());
         }
+        test_oom_if_armed()?;
         let raw = match std::str::from_utf8(&request) {
             Ok(raw) => raw,
             Err(_) => {

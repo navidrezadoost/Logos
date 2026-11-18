@@ -7,6 +7,8 @@
 **Branch:** `core/g1-b9-6-memory-evidence-foundation`
 **Host:** Linux `6.12.112-1-MANJARO`, x86_64, systemd 261.3, Go `1.27.1-X:nodwarf5`
 
+This report records the original FG-C3.7 shared-unit experiment. Its statements that Rust-planner OOM recovery was not demonstrated are historical and were addressed by the separately scoped follow-up in [FG-C3.7.1](FG-C3.7.1-PLANNER-OOM-RECOVERY.md). FG-C3.7.1 does not change this report's historical measurements or qualify production behavior.
+
 ## Result
 
 The host exposes cgroup v2 `cpu`, `memory`, and `pids` controllers. The active user systemd manager can create and collect a disposable transient service with enforced resource properties. The test exercised a Rust planner inside that service, verified resource events, and emitted a machine-readable `FG_C3_7_EVIDENCE` record.

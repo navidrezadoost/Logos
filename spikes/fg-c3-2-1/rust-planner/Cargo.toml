@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 wasm = []
+fg-c3-7-test-oom = []
 
 [dependencies]
 logos-types = { path = "../../../rust/logos-types", features = ["wasm"] }

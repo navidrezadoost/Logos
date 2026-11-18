@@ -28,7 +28,7 @@ if ! command -v python3 >/dev/null; then
   exit 2
 fi
 
-cargo build --manifest-path spikes/fg-c3-2-1/rust-planner/Cargo.toml --locked
+cargo build --manifest-path spikes/fg-c3-2-1/rust-planner/Cargo.toml --locked --features fg-c3-7-test-oom
 test_binary="$repo_root/.fg-c3-7-test-$$"
 trap 'rm -f "$test_binary"' EXIT
 go -C spikes/fg-c3-2-1/go-coordinator test -c -o "$test_binary"
