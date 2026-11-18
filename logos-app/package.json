@@ -13,7 +13,7 @@
     "build": "npm run icons:build && tsc -b && vite build",
     "build:spa": "vite build && python scripts/sync-spa-to-dist.py",
     "test:identity": "tsx --test test/identity-lifecycle.test.ts test/workspace-identity-isolation.test.ts",
-    "test:figma-semantics": "node --test ../test/figma-semantics/figma-semantic-compatibility.test.mjs ../test/a10/hierarchy-operations.test.mjs",
+    "test:figma-semantics": "node --test ../test/figma-semantics/figma-semantic-compatibility.test.mjs ../test/figma-semantics/section-domain-v1.test.mjs ../test/a10/hierarchy-operations.test.mjs",
     "logos:shell": "python scripts/sync-logos-workspace.py",
     "preview": "vite preview --port 8888 --host 127.0.0.1",
     "test:g1-b9-6-fixture": "tsx --test test/g1-b9-6-fixture-conformance.test.ts",
