@@ -20,14 +20,16 @@ const (
 )
 
 type Planner struct {
-	Path string
-	Env  []string
-	gate chan struct{}
-	cmd  *exec.Cmd
-	in   io.WriteCloser
-	out  *bufio.Reader
-	wait chan error
-	pid  int
+	Path  string
+	Args  []string
+	Env   []string
+	gate  chan struct{}
+	cmd   *exec.Cmd
+	in    io.WriteCloser
+	out   *bufio.Reader
+	wait  chan error
+	pid   int
+	ready bool
 }
 
 func NewPlanner(path string) *Planner { return &Planner{Path: path, gate: make(chan struct{}, 1)} }
@@ -47,7 +49,7 @@ func (p *Planner) Call(ctx context.Context, request []byte) ([]byte, error) {
 		return nil, ctx.Err()
 	default:
 	}
-	if err := p.start(); err != nil {
+	if err := p.start(ctx); err != nil {
 		return nil, err
 	}
 	type result struct {
@@ -72,40 +74,21 @@ func (p *Planner) Call(ctx context.Context, request []byte) ([]byte, error) {
 		p.stop()
 		return nil, got.err
 	}
-	var response struct {
-		RequestID *string `json:"requestId"`
-	}
-	var requestEnvelope map[string]json.RawMessage
-	requestParseErr := json.Unmarshal(request, &requestEnvelope)
-	responseParseErr := json.Unmarshal(got.body, &response)
-	correlationMatches := responseParseErr == nil
-	var expectedID *string
-	if requestParseErr == nil {
-		var id string
-		if rawID, ok := requestEnvelope["requestId"]; ok && json.Unmarshal(rawID, &id) == nil && id != "" && len(id) <= 128 {
-			expectedID = &id
-		}
-	}
-	if correlationMatches && expectedID == nil {
-		correlationMatches = response.RequestID == nil
-	} else if correlationMatches {
-		correlationMatches = response.RequestID != nil && *response.RequestID == *expectedID
-	}
-	if !correlationMatches {
+	if err := validateResponse(request, got.body); err != nil {
 		p.stop()
-		return nil, errors.New("planner response correlation or JSON validation failed")
+		return nil, fmt.Errorf("planner response rejected: %w", err)
 	}
 	return got.body, nil
 }
 
-func (p *Planner) start() error {
-	if p.cmd != nil {
+func (p *Planner) start(ctx context.Context) error {
+	if p.cmd != nil && p.ready {
 		return nil
 	}
 	if p.Path == "" {
 		return errors.New("planner executable path is empty")
 	}
-	cmd := exec.Command(p.Path)
+	cmd := exec.Command(p.Path, p.Args...)
 	cmd.Env = append(os.Environ(), p.Env...)
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -122,6 +105,36 @@ func (p *Planner) start() error {
 	waitCh := make(chan error, 1)
 	p.cmd, p.in, p.out, p.wait, p.pid = cmd, in, bufio.NewReader(out), waitCh, cmd.Process.Pid
 	go func() { waitCh <- cmd.Wait() }()
+	capabilityRequest := []byte(fmt.Sprintf(`{"protocolVersion":2,"semanticVersion":1,"diagnosticVersion":1,"requestId":"startup-%d","kind":"capabilities"}`, p.pid))
+	type result struct {
+		body []byte
+		err  error
+	}
+	ready := make(chan result, 1)
+	plannerIn, plannerOut := p.in, p.out
+	go func() { body, err := exchange(plannerIn, plannerOut, capabilityRequest); ready <- result{body, err} }()
+	select {
+	case got := <-ready:
+		if got.err == nil {
+			got.err = validateResponse(capabilityRequest, got.body)
+		}
+		if got.err == nil {
+			var status struct {
+				OK bool `json:"ok"`
+			}
+			if err := json.Unmarshal(got.body, &status); err != nil || !status.OK {
+				got.err = errors.New("planner did not affirm capability readiness")
+			}
+		}
+		if got.err != nil {
+			p.stop()
+			return fmt.Errorf("planner capability handshake failed: %w", got.err)
+		}
+		p.ready = true
+	case <-ctx.Done():
+		p.stop()
+		return ctx.Err()
+	}
 	return nil
 }
 
@@ -153,7 +166,7 @@ func (p *Planner) stop() {
 		return
 	}
 	cmd, input, wait := p.cmd, p.in, p.wait
-	p.cmd, p.in, p.out, p.wait, p.pid = nil, nil, nil, nil, 0
+	p.cmd, p.in, p.out, p.wait, p.pid, p.ready = nil, nil, nil, nil, 0, false
 	_ = input.Close()
 	_ = cmd.Process.Kill()
 	<-wait
@@ -163,9 +176,10 @@ func (p *Planner) Close()   { p.stop() }
 func (p *Planner) PID() int { return p.pid }
 
 type boundedBuffer struct {
-	mu    sync.Mutex
-	value bytes.Buffer
-	limit int
+	mu        sync.Mutex
+	value     bytes.Buffer
+	limit     int
+	truncated bool
 }
 
 func (b *boundedBuffer) Write(data []byte) (int, error) {
@@ -179,8 +193,13 @@ func (b *boundedBuffer) Write(data []byte) (int, error) {
 			_, _ = b.value.Write(data)
 		}
 	}
+	if len(data) > remaining {
+		b.truncated = true
+	}
 	return len(data), nil
 }
+
+func (b *boundedBuffer) Truncated() bool { b.mu.Lock(); defer b.mu.Unlock(); return b.truncated }
 
 func CallOneShot(ctx context.Context, path string, request []byte) ([]byte, error) {
 	if len(request) > MaxRequestBytes {
@@ -193,16 +212,22 @@ func CallOneShot(ctx context.Context, path string, request []byte) ([]byte, erro
 	framed.Write(request)
 	cmd := exec.CommandContext(ctx, path)
 	cmd.Stdin = &framed
-	var output bytes.Buffer
-	cmd.Stdout = &output
+	output := &boundedBuffer{limit: MaxResponseBytes + 4}
+	cmd.Stdout = output
 	cmd.Stderr = &boundedBuffer{limit: 4096}
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("one-shot planner failed: %w", err)
 	}
+	if output.Truncated() {
+		return nil, fmt.Errorf("one-shot planner output exceeds %d bytes", MaxResponseBytes+4)
+	}
 	lastOneShotPeakRSSKiB = oneShotRSS(cmd.ProcessState)
-	response, err := readFrame(&output, MaxResponseBytes)
+	response, err := readFrame(bytes.NewReader(output.value.Bytes()), MaxResponseBytes)
 	if err != nil {
 		return nil, err
+	}
+	if err := validateResponse(request, response); err != nil {
+		return nil, fmt.Errorf("one-shot planner response rejected: %w", err)
 	}
 	return response, nil
 }

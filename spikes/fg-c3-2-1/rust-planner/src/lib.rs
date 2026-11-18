@@ -150,6 +150,7 @@ pub fn handle_json(raw: &str) -> String {
                 "documentOperations": {"version": 1, "operations": ["applyOperation", "validateDocument"]},
                 "projectionIdentity": {"version": 1, "operations": ["deriveIds", "checkDetachIds"]},
                 "componentInstanceDomain": {"status": "not-supported-here", "owner": "TypeScript componentInstanceDomainV1"},
+                "responseContract": {"version": 1, "correlation": ["requestId", "operationKind"]},
                 "diagnostics": {"version": DIAGNOSTIC_VERSION}
             }
         })
@@ -167,6 +168,11 @@ pub fn handle_json(raw: &str) -> String {
 }
 
 fn evaluate(request_id: &str, document_value: Value, operation_value: Value) -> String {
+    let operation_kind = operation_value
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
     let document_json = match serde_json::to_string(&document_value) {
         Ok(value) => value,
         Err(_) => {
@@ -194,7 +200,7 @@ fn evaluate(request_id: &str, document_value: Value, operation_value: Value) -> 
         }
     };
     match apply_operation(&document, &operation) {
-        Ok(candidate) => json!({"protocolVersion": PROTOCOL_VERSION, "semanticVersion": SEMANTIC_VERSION, "diagnosticVersion": DIAGNOSTIC_VERSION, "requestId": request_id, "ok": true, "phase": "evaluated", "document": candidate, "diagnostics": []}).to_string(),
+        Ok(candidate) => json!({"protocolVersion": PROTOCOL_VERSION, "semanticVersion": SEMANTIC_VERSION, "diagnosticVersion": DIAGNOSTIC_VERSION, "requestId": request_id, "ok": true, "phase": "evaluated", "operationKind": operation_kind, "document": candidate, "diagnostics": []}).to_string(),
         Err(diagnostics) => json!({"protocolVersion": PROTOCOL_VERSION, "semanticVersion": SEMANTIC_VERSION, "diagnosticVersion": DIAGNOSTIC_VERSION, "requestId": request_id, "ok": false, "phase": "operation-rejected", "diagnostics": diagnostics}).to_string(),
     }
 }
@@ -343,6 +349,7 @@ mod tests {
             result["capabilities"]["componentInstanceDomain"]["status"],
             "not-supported-here"
         );
+        assert_eq!(result["capabilities"]["responseContract"]["version"], 1);
     }
 
     #[test]

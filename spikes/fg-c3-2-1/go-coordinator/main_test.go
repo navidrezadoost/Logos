@@ -136,6 +136,7 @@ func TestProjectionIdentityFixtureRelations(t *testing.T) {
 func TestConcurrentCallersReceiveCorrelatedResponses(t *testing.T) {
 	p := NewPlanner(rustPath(t))
 	defer p.Close()
+	p.Close() // all callers below race to trigger one capability-checked restart
 	request := fixture(t, "detach-ids.json")
 	var wg sync.WaitGroup
 	errors := make(chan string, 32)
@@ -245,10 +246,13 @@ func TestOversizedRequestsAndResponsesFailClosed(t *testing.T) {
 	}
 	p.Env = []string{"FG_C3_2_2_TEST_RESPONSE_LIMIT=256"}
 	capabilities := []byte(`{"protocolVersion":2,"semanticVersion":1,"diagnosticVersion":1,"requestId":"large-response","kind":"capabilities"}`)
-	large, _ := invoke(t, p, capabilities)
-	if large.Error.Code != "RESPONSE_TOO_LARGE" {
-		t.Fatalf("oversized planner response was not rejected: %+v", large)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	_, err := p.Call(ctx, capabilities)
+	cancel()
+	if err == nil || p.PID() != 0 {
+		t.Fatalf("oversized startup capability response did not fail readiness: err=%v pid=%d", err, p.PID())
 	}
+	p.Env = nil
 	small, _ := invoke(t, p, []byte(`{"protocolVersion":2,"semanticVersion":1,"diagnosticVersion":1,"requestId":"after-limit","kind":"deriveIds","addresses":[]}`))
 	if !small.OK || small.RequestID != "after-limit" {
 		t.Fatalf("response limit corrupted the next frame: %+v", small)
