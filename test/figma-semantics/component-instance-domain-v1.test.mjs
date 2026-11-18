@@ -53,6 +53,12 @@ test("positive-fixture-preserves-ordered-set-members-and-authored-slot-content-i
   assert.deepEqual(result.document.componentSets["icon-set"].memberComponentIds, ["icon-small", "icon-large"]);
   assert.deepEqual(result.document.instances["card-instance"].slotContent["content-slot"].rootNodeIds, ["authored-1", "authored-2"]);
   assert.equal(result.document.instances["card-instance"].slotContent["content-slot"].nodes["authored-1"].parentId, null);
+  assert.deepEqual(result.document.instances["external-instance"].source, {
+    kind: "external", fileId: "external-file", componentId: "external-component", revision: "r17",
+  });
+  assert.deepEqual(result.document.instances["unresolved-instance"].source.locator, {
+    library: "Old Library", key: "asset-key-1",
+  });
 });
 
 test("deterministic-negative-fixtures-fail-closed-with-stable-diagnostics-and-no-mutation", () => {

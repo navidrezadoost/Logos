@@ -231,6 +231,19 @@
       "propertyValues": {},
       "overrides": [],
       "slotContent": {}
+    },
+    "external-instance": {
+      "id": "external-instance",
+      "source": {
+        "kind": "external",
+        "fileId": "external-file",
+        "componentId": "external-component",
+        "revision": "r17"
+      },
+      "variantSelection": {},
+      "propertyValues": {},
+      "overrides": [],
+      "slotContent": {}
     }
   }
 }
