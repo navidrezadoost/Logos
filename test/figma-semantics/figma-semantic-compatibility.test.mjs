@@ -61,6 +61,44 @@ function hydrateFixture() {
   return useDocumentStore.getState();
 }
 
+function assertGraphConsistent(state) {
+  const reached = new Set();
+  for (const pageId of state.pageOrder) {
+    const page = state.pages[pageId];
+    assert.ok(page, `pageOrder references missing page ${pageId}`);
+    const local = new Set();
+    const visit = (shapeId, parentId) => {
+      const shape = state.shapes[shapeId];
+      assert.ok(shape, `membership references missing shape ${shapeId}`);
+      assert.equal(shape.parentId, parentId, `parent mismatch for ${shapeId}`);
+      assert.equal(local.has(shapeId), false, `shape has duplicate membership: ${shapeId}`);
+      assert.equal(reached.has(shapeId), false, `shape is owned by multiple pages: ${shapeId}`);
+      local.add(shapeId);
+      reached.add(shapeId);
+      for (const childId of shape.children) visit(childId, shapeId);
+    };
+    for (const rootId of page.rootShapeIds) visit(rootId, null);
+  }
+  assert.deepEqual([...reached].sort(), Object.keys(state.shapes).sort(), "every shape is reachable from one page root");
+  for (const shape of Object.values(state.shapes)) {
+    if (shape.parentId !== null) assert.ok(state.shapes[shape.parentId].children.includes(shape.id));
+  }
+}
+
+function observeDocumentPublications(run) {
+  let publications = 0;
+  const unsubscribe = useDocumentStore.subscribe((state, previous) => {
+    if (state.pages !== previous.pages || state.shapes !== previous.shapes) publications += 1;
+  });
+  let result;
+  try {
+    result = run();
+  } finally {
+    unsubscribe();
+  }
+  return { publications, result };
+}
+
 const insertedRectId = "00000000-0000-4000-8000-000000000107";
 
 test("page-roots-and-ordered-containment", () => {
@@ -124,6 +162,8 @@ test("frame-and-group-rectangle-children", () => {
   assert.equal(frameResult.ok, true);
   assert.equal(useDocumentStore.getState().shapes[insertedRectId].parentId, frameId);
   assert.deepEqual(useDocumentStore.getState().shapes[frameId].children, [insertedRectId, fixture.nodes[1].id]);
+  const frameRendererNode = frameResult.projection.nodes.find((node) => node.id === frameId);
+  assert.deepEqual(frameRendererNode.rendererChildrenIds, [fixture.nodes[1].id, insertedRectId]);
 
   const groupChildId = "00000000-0000-4000-8000-000000000110";
   const groupChild = createRect(groupChildId, "Inserted under group", { x: 270, y: 20, w: 8, h: 8 });
@@ -213,7 +253,7 @@ test("strict-reorder-reparent-delete-preserve-membership-order-and-selection", (
   assert.deepEqual(useSelectionStore.getState().selectedIds, []);
 });
 
-test("strict-rename-commits-once-and-invalid-containment-leaves-all-state-unchanged", () => {
+test("strict-rename-and-invalid-containment-leaves-all-state-unchanged", () => {
   const store = hydrateFixture();
   const rectId = fixture.nodes[1].id;
   const renamed = store.applyHierarchyOperation({ kind: "rename", shapeId: rectId, name: "Renamed child" });
@@ -230,4 +270,192 @@ test("strict-rename-commits-once-and-invalid-containment-leaves-all-state-unchan
   assert.equal(useDocumentStore.getState().pages, before.pages);
   assert.equal(useDocumentStore.getState().shapes, before.shapes);
   assert.deepEqual(useSelectionStore.getState().selectedIds, selectedBefore);
+});
+
+test("contract-containment-pairs-match-the-actual-planner", () => {
+  const cases = [
+    { parent: "page", child: "frame", expected: true },
+    { parent: "page", child: "rect", expected: true },
+    { parent: "frame", child: "rect", expected: true },
+    { parent: "group", child: "rect", expected: true },
+    { parent: "page", child: "group", expected: false },
+    { parent: "page", child: "circle", expected: false },
+    { parent: "frame", child: "frame", expected: false },
+    { parent: "group", child: "frame", expected: false },
+    { parent: "rect", child: "rect", expected: false },
+  ];
+  const [frameId, groupId] = fixture.rootShapeIds;
+
+  for (const [index, entry] of cases.entries()) {
+    hydrateFixture();
+    const childId = `00000000-0000-4000-8000-${String(200 + index).padStart(12, "0")}`;
+    const bounds = entry.parent === "group" ? { x: 260, y: 20, w: 8, h: 8 } : { x: 20, y: 20, w: 8, h: 8 };
+    const child = {
+      ...createRect(childId, `Pair ${entry.parent} to ${entry.child}`, bounds),
+      type: entry.child,
+    };
+    const allowedByContract = hierarchyContract.allowsStrictContainment(entry.parent, entry.child);
+    assert.equal(allowedByContract, entry.expected, `contract pair ${entry.parent} → ${entry.child}`);
+    useSelectionStore.getState().select(fixture.nodes[1].id);
+    const before = useDocumentStore.getState();
+    const selectedBefore = [...useSelectionStore.getState().selectedIds];
+    const { publications, result } = observeDocumentPublications(() => {
+      const state = useDocumentStore.getState();
+      if (entry.parent === "page") return state.applyHierarchyOperation({ kind: "create-root", shape: child });
+      const parentId = entry.parent === "frame" ? frameId : entry.parent === "group" ? groupId : fixture.nodes[1].id;
+      return state.applyHierarchyOperation({ kind: "insert-child", parentId, shape: child });
+    });
+    assert.equal(result.ok, entry.expected, `planner pair ${entry.parent} → ${entry.child}${result.ok ? "" : ` (${result.diagnostic.code})`}`);
+    assert.equal(publications, entry.expected ? 1 : 0, `publication count for ${entry.parent} → ${entry.child}`);
+    if (!entry.expected) {
+      assert.equal(useDocumentStore.getState().pages, before.pages);
+      assert.equal(useDocumentStore.getState().shapes, before.shapes);
+      assert.deepEqual(useSelectionStore.getState().selectedIds, selectedBefore);
+    }
+    assertGraphConsistent(useDocumentStore.getState());
+  }
+});
+
+test("all-seven-strict-operations-publish-once-and-retain-a-valid-ordered-graph", () => {
+  const frameId = fixture.rootShapeIds[0];
+  const groupId = fixture.rootShapeIds[1];
+  const originalFrameChild = fixture.nodes[1].id;
+  const originalGroupChild = fixture.nodes[3].id;
+  const scenarios = [
+    {
+      name: "create-root",
+      prepare: () => hydrateFixture(),
+      operation: () => ({
+        kind: "create-root",
+        shape: createRect("00000000-0000-4000-8000-000000000121", "Created root", { x: 500, y: 0, w: 12, h: 12 }),
+      }),
+    },
+    {
+      name: "insert-child",
+      prepare: () => hydrateFixture(),
+      operation: () => ({
+        kind: "insert-child",
+        parentId: frameId,
+        shape: createRect("00000000-0000-4000-8000-000000000122", "Inserted child", { x: 50, y: 20, w: 8, h: 8 }),
+        index: 0,
+      }),
+    },
+    {
+      name: "rename",
+      prepare: () => hydrateFixture(),
+      operation: () => ({ kind: "rename", shapeId: originalFrameChild, name: "Renamed" }),
+    },
+    {
+      name: "delete",
+      prepare: () => hydrateFixture(),
+      operation: () => ({ kind: "delete", shapeId: frameId }),
+      before: () => useSelectionStore.getState().select(originalFrameChild),
+    },
+    {
+      name: "reorder",
+      prepare: () => {
+        const state = hydrateFixture();
+        state.applyHierarchyOperation({
+          kind: "insert-child",
+          parentId: frameId,
+          shape: createRect("00000000-0000-4000-8000-000000000123", "Second child", { x: 70, y: 20, w: 8, h: 8 }),
+          index: 1,
+        });
+      },
+      operation: () => ({ kind: "reorder", shapeId: "00000000-0000-4000-8000-000000000123", toIndex: 0 }),
+    },
+    {
+      name: "reorder-root-list",
+      prepare: () => hydrateFixture(),
+      operation: () => ({ kind: "reorder-root-list", rootShapeIds: [...fixture.rootShapeIds].reverse() }),
+    },
+    {
+      name: "reparent",
+      prepare: () => hydrateFixture(),
+      operation: () => ({ kind: "reparent", shapeId: originalFrameChild, parentId: groupId, index: 1, preserveWorldPosition: true }),
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    scenario.prepare();
+    scenario.before?.();
+    const before = useDocumentStore.getState();
+    const expectedIds = Object.keys(before.shapes).sort();
+    const { publications, result } = observeDocumentPublications(() =>
+      useDocumentStore.getState().applyHierarchyOperation(scenario.operation()),
+    );
+    assert.equal(result.ok, true, `${scenario.name}: ${result.ok ? "" : result.diagnostic.code}`);
+    assert.equal(publications, 1, `${scenario.name} must publish exactly one document change`);
+    assertGraphConsistent(useDocumentStore.getState());
+    const after = useDocumentStore.getState();
+    for (const id of expectedIds) {
+      if (scenario.name === "delete" && (id === frameId || id === originalFrameChild)) continue;
+      assert.equal(after.shapes[id]?.id, id, `${scenario.name} preserves existing ID ${id}`);
+    }
+    if (scenario.name === "reorder-root-list") assert.deepEqual(after.pages[fixture.pageId].rootShapeIds, [...fixture.rootShapeIds].reverse());
+    if (scenario.name === "reorder") assert.deepEqual(after.shapes[frameId].children, ["00000000-0000-4000-8000-000000000123", originalFrameChild]);
+    if (scenario.name === "reparent") {
+      assert.deepEqual(after.shapes[frameId].children, []);
+      assert.deepEqual(after.shapes[groupId].children, [originalGroupChild, originalFrameChild]);
+    }
+    if (scenario.name === "delete") {
+      assert.equal(after.shapes[frameId], undefined);
+      assert.equal(after.shapes[originalFrameChild], undefined);
+      assert.deepEqual(after.pages[fixture.pageId].rootShapeIds, fixture.rootShapeIds.slice(1));
+      assert.deepEqual(useSelectionStore.getState().selectedIds, []);
+    }
+  }
+});
+
+test("rejected-strict-operation-publishes-nothing-and-preserves-document-and-selection", () => {
+  const store = hydrateFixture();
+  const child = fixture.nodes[1];
+  useSelectionStore.getState().select(child.id);
+  const before = useDocumentStore.getState();
+  const selectedBefore = [...useSelectionStore.getState().selectedIds];
+  const rejectedOperation = {
+    kind: "reparent",
+    shapeId: fixture.rootShapeIds[0],
+    parentId: child.id,
+    index: 0,
+    preserveWorldPosition: true,
+  };
+  const { publications, result } = observeDocumentPublications(() => store.applyHierarchyOperation(rejectedOperation));
+  assert.equal(result.ok, false);
+  assert.equal(result.diagnostic.code, "LOGOS_OPERATION_CYCLE");
+  assert.equal(publications, 0);
+  assert.equal(useDocumentStore.getState().pages, before.pages);
+  assert.equal(useDocumentStore.getState().shapes, before.shapes);
+  assert.deepEqual(useSelectionStore.getState().selectedIds, selectedBefore);
+
+  const frameId = fixture.rootShapeIds[0];
+  useDocumentStore.getState().updateShape(frameId, { locked: true });
+  useSelectionStore.getState().select(child.id);
+  const lockedBefore = useDocumentStore.getState();
+  const lockedSelection = [...useSelectionStore.getState().selectedIds];
+  const lockedAttempt = observeDocumentPublications(() =>
+    useDocumentStore.getState().applyHierarchyOperation({ kind: "delete", shapeId: frameId }),
+  );
+  assert.equal(lockedAttempt.result.ok, false);
+  assert.equal(lockedAttempt.result.diagnostic.code, "LOGOS_OPERATION_LOCKED_SHAPE");
+  assert.equal(lockedAttempt.publications, 0);
+  assert.equal(useDocumentStore.getState().pages, lockedBefore.pages);
+  assert.equal(useDocumentStore.getState().shapes, lockedBefore.shapes);
+  assert.deepEqual(useSelectionStore.getState().selectedIds, lockedSelection);
+
+  const otherPageId = useDocumentStore.getState().addPage("Ambiguous ownership page");
+  useDocumentStore.setState((state) => ({
+    pages: { ...state.pages, [otherPageId]: { ...state.pages[otherPageId], rootShapeIds: [frameId] } },
+  }));
+  const ambiguousBefore = useDocumentStore.getState();
+  const ambiguousSelection = [...useSelectionStore.getState().selectedIds];
+  const ambiguousAttempt = observeDocumentPublications(() =>
+    useDocumentStore.getState().applyHierarchyOperation({ kind: "rename", shapeId: child.id, name: "Must reject" }),
+  );
+  assert.equal(ambiguousAttempt.result.ok, false);
+  assert.equal(ambiguousAttempt.result.diagnostic.code, "LOGOS_OPERATION_PAGE_OWNERSHIP_AMBIGUOUS");
+  assert.equal(ambiguousAttempt.publications, 0);
+  assert.equal(useDocumentStore.getState().pages, ambiguousBefore.pages);
+  assert.equal(useDocumentStore.getState().shapes, ambiguousBefore.shapes);
+  assert.deepEqual(useSelectionStore.getState().selectedIds, ambiguousSelection);
 });
