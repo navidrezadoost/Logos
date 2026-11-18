@@ -8,7 +8,7 @@
 
 Figma Design documents Sections as top-level canvas elements by default. They may contain other Sections and layer types, and may not be contained in Frames or Groups. Objects can be added by moving or resizing a Section over them, or by moving objects into it. Figma documents two deletion choices: delete the Section with its contents, or delete the Section without deleting its contents. [Figma: Organize your canvas with sections](https://help.figma.com/hc/en-us/articles/9771500257687-Organize-your-canvas-with-sections)
 
-Sections have authored canvas bounds: Figma's documented creation flow drags an area, and the edit flow resizes a Section. The public help page also says adding a frame to a Section can resize the Section to accommodate it. This supports independently stored bounds, but does not establish the complete resize/move/reparent coordinate algorithm. [Figma: Frames in Figma Design](https://help.figma.com/hc/en-us/articles/360041539473-Frames-in-Figma-Design)
+Sections have authored canvas bounds: Figma's documented creation flow drags an area, and its Section help page says a Section can be resized over an object to add that object. These statements do not establish the complete resize/move/reparent coordinate algorithm or say that Section bounds automatically expand to fit contents.
 
 The public SectionNode API describes **FigJam** Sections. Its explicit statement that resizing does not resize children is scoped to FigJam and is not used here to assert Figma Design parity. [Figma SectionNode API](https://developers.figma.com/docs/plugins/api/SectionNode/)
 
@@ -68,7 +68,7 @@ Operation input has its own fail-closed boundary. The planner validates the snap
 
 Section `bounds` are explicitly authored in the candidate and are not calculated from descendants. Reparent, reorder, and preserve-delete operations do not rewrite a child node's bounds. The candidate contains no move or resize operation, so it cannot accidentally claim a world-space transform rule.
 
-Figma Design source confirms Sections can be resized and that adding content can affect Section extent, but this source set does not define whether every drag, resize, reparent, or nested Section change translates children, changes membership based on overlap, adjusts the Section bounds, or changes world-space positions. Those behaviors remain **NOT QUALIFIED**. Do not connect this candidate to production editing until representative Figma-created fixtures and browser observations establish the required geometry rules. The FigJam API behavior is not substituted for Design behavior.
+Figma Design source confirms that a Section can be resized over an object as a way to add the object. This does not establish whether existing contents translate on Section movement, whether partial overlap changes membership, whether the Section auto-sizes, or how nested geometry composes. Those behaviors remain **NOT QUALIFIED**. Do not connect this candidate to production editing until representative Figma-created fixtures and browser observations establish the required geometry rules. The FigJam API behavior is not substituted for Design behavior.
 
 ## 6. Executable evidence
 
@@ -107,11 +107,11 @@ Acceptance should require generated valid/invalid fixtures, exact IDs/order roun
 - Rust canonical authority: **NOT AUTHORIZED**
 - Renderer and Chromium parity: **NOT VERIFIED**
 - Figma geometry/deletion parity: **PARTIALLY SOURCED; REMAINS UNQUALIFIED**
+- FG-C2.1 spatial behavior and adapter gate: [qualification record](FG-C2.1-SECTION-GEOMETRY-QUALIFICATION.md)
 - Persistence or migration: **NOT IMPLEMENTED**
 
 ### Reference sources
 
 - [Figma Design — Organize your canvas with sections](https://help.figma.com/hc/en-us/articles/9771500257687-Organize-your-canvas-with-sections)
-- [Figma Design — Frames in Figma Design](https://help.figma.com/hc/en-us/articles/360041539473-Frames-in-Figma-Design)
 - [Figma Design — The difference between frames and groups](https://help.figma.com/hc/en-us/articles/360039832054-The-difference-between-frames-and-groups)
 - [Figma Plugin API — SectionNode (FigJam API; not generalized to Design)](https://developers.figma.com/docs/plugins/api/SectionNode/)

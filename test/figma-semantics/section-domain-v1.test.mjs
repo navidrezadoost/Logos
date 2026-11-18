@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 const appRoot = fileURLToPath(new URL("../../logos-app/", import.meta.url));
 const fixtureUrl = new URL("../fixtures/figma-semantics/section-domain-v1.json", import.meta.url);
 const fixture = JSON.parse(await readFile(fixtureUrl, "utf8"));
+const geometryFixtureUrl = new URL("../fixtures/figma-semantics/section-geometry-candidate-v1.json", import.meta.url);
+const geometryFixture = JSON.parse(await readFile(geometryFixtureUrl, "utf8"));
 const require = createRequire(new URL("../../logos-app/package.json", import.meta.url));
 const { createServer } = await import(require.resolve("vite"));
 let server;
@@ -300,6 +302,113 @@ test("valid-operation-is-rejected-immutably-when-its-snapshot-is-malformed", () 
   assert.strictEqual(result.snapshot, snapshot);
   assert.deepEqual(result.changedIds, []);
   assert.equal(JSON.stringify(snapshot), before);
+});
+
+test("geometry-candidate-fixture-keeps-authored-bounds-separate-from-explicit-membership", () => {
+  const snapshot = structuredClone(geometryFixture);
+  assert.equal(snapshot.evidenceClass, "generated-logos-candidate-fixture");
+  delete snapshot.evidenceClass;
+  assert.equal(domain.validateSectionSnapshot(snapshot), null);
+
+  const [outerId, overlapId, emptyId] = snapshot.pages[snapshot.pageOrder[0]].childIds;
+  const outer = snapshot.nodes[outerId];
+  const nestedId = outer.childIds[0];
+  const frameId = outer.childIds[1];
+  const rectId = outer.childIds[2];
+  const frameRectId = snapshot.nodes[frameId].childIds[0];
+  const groupId = snapshot.nodes[nestedId].childIds[0];
+  const textId = snapshot.nodes[groupId].childIds[0];
+  const originalGeometry = Object.fromEntries(
+    [outerId, nestedId, frameId, frameRectId, rectId, textId, overlapId, emptyId]
+      .map((id) => [id, {
+        bounds: snapshot.nodes[id].bounds && structuredClone(snapshot.nodes[id].bounds),
+        worldBounds: snapshot.nodes[id].worldBounds && structuredClone(snapshot.nodes[id].worldBounds),
+      }]),
+  );
+
+  assert.deepEqual(outer.bounds, { x: -120, y: -80, width: 500, height: 360 });
+  assert.deepEqual(snapshot.nodes[nestedId].bounds, { x: -40, y: -20, width: 160, height: 110 });
+  assert.deepEqual(snapshot.nodes[frameId].worldBounds, { x: -100, y: -60, width: 220, height: 140 });
+  assert.deepEqual(snapshot.nodes[frameRectId].worldBounds, { x: -90, y: -40, width: 35, height: 22 });
+  assert.deepEqual(snapshot.nodes[rectId].worldBounds, { x: 280, y: 170, width: 17, height: 23 });
+  assert.deepEqual(snapshot.nodes[textId].worldBounds, { x: -35, y: -12, width: 190, height: 31 });
+  assert.deepEqual(snapshot.nodes[emptyId].bounds, { x: -500, y: 260, width: 0, height: 0 });
+  assert.ok(outer.bounds.x < 0 && snapshot.nodes[rectId].worldBounds.x > 0, "fixture spans negative and positive coordinates");
+  assert.deepEqual(snapshot.nodes[outerId].childIds, [nestedId, frameId, rectId]);
+  assert.deepEqual(snapshot.nodes[overlapId].childIds, []);
+
+  // The nested Section and a shape can be explicitly reparented in the candidate.
+  // No overlap-derived membership or coordinate transform is inferred.
+  const moveNested = domain.planSectionOperation(snapshot, {
+    kind: "reparent", id: nestedId, parentId: overlapId, index: 0,
+  });
+  assert.equal(moveNested.ok, true);
+  const moveRect = domain.planSectionOperation(moveNested.snapshot, {
+    kind: "reparent", id: rectId, parentId: overlapId, index: 1,
+  });
+  assert.equal(moveRect.ok, true);
+  assert.deepEqual(moveRect.snapshot.nodes[outerId].childIds, [frameId]);
+  assert.deepEqual(moveRect.snapshot.nodes[overlapId].childIds, [nestedId, rectId]);
+  for (const id of [outerId, nestedId, frameId, frameRectId, rectId, textId, overlapId, emptyId]) {
+    assert.deepEqual({
+      bounds: moveRect.snapshot.nodes[id].bounds && structuredClone(moveRect.snapshot.nodes[id].bounds),
+      worldBounds: moveRect.snapshot.nodes[id].worldBounds && structuredClone(moveRect.snapshot.nodes[id].worldBounds),
+    }, originalGeometry[id], `candidate hierarchy edits preserve authored geometry for ${id}`);
+  }
+
+  const addedEmpty = domain.planSectionOperation(moveRect.snapshot, {
+    kind: "create-section", id: "20000000-0000-4000-8000-000000000028",
+    pageId: snapshot.pageOrder[0], parentId: null, index: 3,
+    bounds: { x: -700, y: -300, width: 40, height: 50 },
+  });
+  assert.equal(addedEmpty.ok, true);
+  assert.deepEqual(addedEmpty.snapshot.nodes["20000000-0000-4000-8000-000000000028"].bounds,
+    { x: -700, y: -300, width: 40, height: 50 });
+
+  // Movement and resize have no qualified operation in this candidate.
+  for (const operation of [
+    { kind: "move-section", id: outerId, dx: 10, dy: -5 },
+    { kind: "resize-section", id: outerId, bounds: { x: 0, y: 0, width: 1, height: 1 } },
+  ]) assertRejectedUnchanged(moveRect.snapshot, operation, "SECTION_OPERATION_KIND_UNSUPPORTED");
+});
+
+test("geometry-candidate-delete-with-contents-removes-exact-subtree-and-preserve-keeps-geometry", () => {
+  const snapshot = structuredClone(geometryFixture);
+  delete snapshot.evidenceClass;
+  const [outerId, , emptyId] = snapshot.pages[snapshot.pageOrder[0]].childIds;
+  const subtreeIds = [outerId, ...snapshot.nodes[outerId].childIds];
+  const nestedId = snapshot.nodes[outerId].childIds[0];
+  const frameId = snapshot.nodes[outerId].childIds[1];
+  const groupId = snapshot.nodes[nestedId].childIds[0];
+  const textId = snapshot.nodes[groupId].childIds[0];
+  subtreeIds.push(...snapshot.nodes[frameId].childIds, groupId, textId);
+  const preservedWorldBounds = structuredClone(snapshot.nodes[textId].worldBounds);
+
+  const preserveEmpty = domain.planSectionOperation(snapshot, {
+    kind: "delete-section", id: emptyId, contents: "preserve",
+  });
+  assert.equal(preserveEmpty.ok, true);
+  assert.equal(preserveEmpty.snapshot.nodes[emptyId], undefined);
+  assert.deepEqual(preserveEmpty.snapshot.nodes[outerId].bounds, snapshot.nodes[outerId].bounds);
+
+  const preserveOuter = domain.planSectionOperation(snapshot, {
+    kind: "delete-section", id: outerId, contents: "preserve",
+  });
+  assert.equal(preserveOuter.ok, true);
+  assert.deepEqual(preserveOuter.snapshot.pages[snapshot.pageOrder[0]].childIds,
+    [nestedId, frameId, snapshot.nodes[outerId].childIds[2], ...snapshot.pages[snapshot.pageOrder[0]].childIds.slice(1)]);
+  assert.deepEqual(preserveOuter.snapshot.nodes[nestedId].bounds, snapshot.nodes[nestedId].bounds);
+  assert.deepEqual(preserveOuter.snapshot.nodes[textId].worldBounds, preservedWorldBounds);
+  for (const id of subtreeIds.slice(1)) assert.ok(preserveOuter.snapshot.nodes[id], `preserved subtree member ${id}`);
+
+  const deleted = domain.planSectionOperation(snapshot, {
+    kind: "delete-section", id: outerId, contents: "delete",
+  });
+  assert.equal(deleted.ok, true);
+  for (const id of subtreeIds) assert.equal(deleted.snapshot.nodes[id], undefined, `deleted subtree member ${id}`);
+  assert.equal(deleted.snapshot.nodes[emptyId].bounds.x, -500);
+  assert.deepEqual(snapshot.nodes[textId].worldBounds, preservedWorldBounds, "input fixture remains immutable");
+  assert.equal(domain.validateSectionSnapshot(deleted.snapshot), null);
 });
 
 test("create-root-and-nested-sections-publish-new-immutable-snapshots-in-order", () => {
