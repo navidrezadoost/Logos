@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 )
 
 const (
@@ -84,7 +85,14 @@ func validateResponse(request, raw []byte) error {
 		if err := decodeStrict(rawErr, &e); err != nil || !knownErrorCodes[e.Code] || e.Path == "" || e.Message == "" {
 			return errors.New("malformed structured planner error")
 		}
-		return validateDiagnostics(envelope["diagnostics"], true)
+		if err := validateDiagnostics(envelope["diagnostics"], true); err != nil {
+			return err
+		}
+		var diagnostics []protocolDiagnostic
+		if err := json.Unmarshal(envelope["diagnostics"], &diagnostics); err != nil || len(diagnostics) != 1 || diagnostics[0].Code != e.Code || diagnostics[0].Path != e.Path {
+			return errors.New("planner error and diagnostic are contradictory")
+		}
+		return nil
 	}
 	kind := stringField(req["kind"])
 	if kind == nil {
@@ -105,6 +113,10 @@ func validateResponse(request, raw []byte) error {
 			return err
 		}
 		if ok {
+			var successDiagnostics []json.RawMessage
+			if err := json.Unmarshal(envelope["diagnostics"], &successDiagnostics); err != nil || len(successDiagnostics) != 0 {
+				return errors.New("successful evaluation must not contain diagnostics")
+			}
 			if *phase != "evaluated" || hasAny(envelope, "error", "ids", "capabilities", "limits") {
 				return errors.New("successful evaluation has contradictory fields")
 			}
@@ -134,6 +146,10 @@ func validateResponse(request, raw []byte) error {
 			if *phase == "evaluated" || hasAny(envelope, "document", "operationKind", "ids", "error", "capabilities", "limits") {
 				return errors.New("rejected evaluation has contradictory fields")
 			}
+			var rejectedDiagnostics []json.RawMessage
+			if err := json.Unmarshal(envelope["diagnostics"], &rejectedDiagnostics); err != nil || len(rejectedDiagnostics) == 0 {
+				return errors.New("rejected evaluation must contain at least one diagnostic")
+			}
 		}
 		return nil
 	case "deriveIds", "checkDetachIds":
@@ -144,23 +160,173 @@ func validateResponse(request, raw []byte) error {
 		if err := decodeStrict(envelope["ids"], &ids); err != nil {
 			return errors.New("identity result is missing or malformed")
 		}
-		inputKey, expectedLen := "addresses", 0
-		if *kind == "checkDetachIds" {
-			inputKey = "candidateIds"
+		if *kind == "deriveIds" {
+			return validateDerivedIdentities(req, ids)
 		}
-		if req != nil {
-			_ = json.Unmarshal(req[inputKey], &[]json.RawMessage{})
-			var values []json.RawMessage
-			_ = json.Unmarshal(req[inputKey], &values)
-			expectedLen = len(values)
-		}
-		if len(ids) != expectedLen {
-			return errors.New("identity result count does not match request")
-		}
-		return nil
+		return validateDetachIdentities(req, ids)
 	default:
 		return errors.New("unknown request operation cannot produce a successful response")
 	}
+}
+
+type definitionStep struct {
+	ComponentID           string `json:"componentId"`
+	ThroughInstanceNodeID string `json:"throughInstanceNodeId"`
+}
+type slotStep struct {
+	PropertyID     string `json:"propertyId"`
+	AuthoredNodeID string `json:"authoredNodeId"`
+}
+type projectionAddress struct {
+	DocumentID       string           `json:"documentId"`
+	InstanceID       string           `json:"instanceId"`
+	DefinitionRoute  []definitionStep `json:"definitionRoute"`
+	DefinitionNodeID string           `json:"definitionNodeId"`
+	SlotRoute        []slotStep       `json:"slotRoute"`
+	ExternalRevision *string          `json:"externalRevision"`
+}
+
+func validateDerivedIdentities(req map[string]json.RawMessage, ids []string) error {
+	var rawAddresses []json.RawMessage
+	if req == nil || json.Unmarshal(req["addresses"], &rawAddresses) != nil || rawAddresses == nil || len(rawAddresses) != len(ids) {
+		return errors.New("derived identity count does not match valid addresses")
+	}
+	byAddress := make(map[string]string, len(ids))
+	byIdentity := make(map[string]string, len(ids))
+	for index, rawAddress := range rawAddresses {
+		address, err := decodeProjectionAddress(rawAddress)
+		if err != nil {
+			return fmt.Errorf("projection address %d is malformed", index)
+		}
+		id, err := canonicalUUID(ids[index])
+		if err != nil {
+			return fmt.Errorf("derived identity %d is not a valid UUID", index)
+		}
+		encoded, err := json.Marshal(address)
+		if err != nil {
+			return errors.New("projection address cannot be normalized")
+		}
+		key := string(encoded)
+		if previous, exists := byAddress[key]; exists && previous != id {
+			return errors.New("equivalent projection addresses returned different identities")
+		}
+		if previous, exists := byIdentity[id]; exists && previous != key {
+			return errors.New("distinct projection addresses returned a colliding identity")
+		}
+		byAddress[key], byIdentity[id] = id, key
+	}
+	return nil
+}
+
+func decodeProjectionAddress(raw json.RawMessage) (projectionAddress, error) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return projectionAddress{}, errors.New("address is not an object")
+	}
+	for _, key := range []string{"documentId", "instanceId", "definitionRoute", "definitionNodeId"} {
+		if _, ok := fields[key]; !ok {
+			return projectionAddress{}, fmt.Errorf("missing %s", key)
+		}
+	}
+	var address projectionAddress
+	if json.Unmarshal(raw, &address) != nil || address.InstanceID == "" || address.DefinitionNodeID == "" {
+		return projectionAddress{}, errors.New("invalid address fields")
+	}
+	if _, err := canonicalUUID(address.DocumentID); err != nil {
+		return projectionAddress{}, err
+	}
+	if address.DefinitionRoute == nil {
+		return projectionAddress{}, errors.New("definitionRoute is not an array")
+	}
+	var route []json.RawMessage
+	if json.Unmarshal(fields["definitionRoute"], &route) != nil || route == nil {
+		return projectionAddress{}, errors.New("definitionRoute is malformed")
+	}
+	for _, step := range route {
+		if !hasStringFields(step, "componentId", "throughInstanceNodeId") {
+			return projectionAddress{}, errors.New("definition route step is malformed")
+		}
+	}
+	if slotRaw, exists := fields["slotRoute"]; exists {
+		var slots []json.RawMessage
+		if json.Unmarshal(slotRaw, &slots) != nil || slots == nil {
+			return projectionAddress{}, errors.New("slotRoute is malformed")
+		}
+		for _, step := range slots {
+			if !hasStringFields(step, "propertyId", "authoredNodeId") {
+				return projectionAddress{}, errors.New("slot route step is malformed")
+			}
+		}
+	} else {
+		address.SlotRoute = []slotStep{}
+	}
+	if revision, exists := fields["externalRevision"]; exists && string(revision) != "null" {
+		var value string
+		if json.Unmarshal(revision, &value) != nil {
+			return projectionAddress{}, errors.New("externalRevision is malformed")
+		}
+		address.ExternalRevision = &value
+	}
+	if address.DefinitionRoute == nil {
+		address.DefinitionRoute = []definitionStep{}
+	}
+	return address, nil
+}
+
+func hasStringFields(raw json.RawMessage, required ...string) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return false
+	}
+	for _, key := range required {
+		if stringField(fields[key]) == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func validateDetachIdentities(req map[string]json.RawMessage, ids []string) error {
+	if req == nil {
+		return errors.New("detach identity request is missing")
+	}
+	var candidates, existing []string
+	if json.Unmarshal(req["candidateIds"], &candidates) != nil || candidates == nil || json.Unmarshal(req["existingIds"], &existing) != nil || existing == nil || len(candidates) != len(ids) {
+		return errors.New("detach identity result count does not match request")
+	}
+	seen := make(map[string]bool, len(existing)+len(candidates))
+	for _, value := range existing {
+		id, err := canonicalUUID(value)
+		if err != nil {
+			return errors.New("existing authored identity is not a valid UUID")
+		}
+		if seen[id] {
+			return errors.New("existing authored identities contain a duplicate")
+		}
+		seen[id] = true
+	}
+	for index, value := range ids {
+		id, err := canonicalUUID(value)
+		if err != nil {
+			return fmt.Errorf("detach identity %d is not a valid UUID", index)
+		}
+		candidate, err := canonicalUUID(candidates[index])
+		if err != nil || value != candidates[index] || candidate != id {
+			return fmt.Errorf("detach identity %d does not match its requested candidate", index)
+		}
+		if seen[id] {
+			return fmt.Errorf("detach identity %d collides with an existing or prior identity", index)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+func canonicalUUID(value string) (string, error) {
+	if !uuidText.MatchString(value) {
+		return "", errors.New("invalid UUID text")
+	}
+	return strings.ToLower(value), nil
 }
 
 func validateCapabilities(envelope map[string]json.RawMessage) error {

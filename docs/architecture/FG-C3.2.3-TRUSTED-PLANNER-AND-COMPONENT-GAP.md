@@ -8,6 +8,10 @@ The coordinator accepts a planner process only after a `capabilities` request re
 
 Every response is checked before it is returned to a caller. The Go boundary checks exact versions and request ID, known response phase, required result/error fields, contradictory fields, typed diagnostic/error shapes, and unknown protocol-owned fields. Evaluate success additionally requires a supported candidate document envelope, matching document ID, and echoed operation kind equal to the request. Document properties remain open data because the Rust Document contract preserves extensions. Invalid responses invalidate the process session.
 
+Successful evaluation requires `phase: evaluated` and an empty diagnostics array. Rejected evaluation requires `input-validation` or `operation-rejected`, at least one structured diagnostic, and no candidate-only fields. A protocol error requires one diagnostic whose code and path match the structured error. The current diagnostic protocol has no warning severity, so successful results cannot carry warning diagnostics.
+
+Identity results require dashed UUID text (hex case-insensitive). `deriveIds` must return one UUID per input address; semantically identical repeated addresses may repeat the same UUID, while distinct addresses must resolve to distinct UUIDs. `checkDetachIds` must return the exact candidate list in order, with no malformed UUIDs, duplicates, or collisions with existing authored IDs. These checks validate response consistency; they do not reproduce the Rust UUIDv5 derivation algorithm in Go.
+
 Capability negotiation verifies protocol compatibility, not trustworthiness of a compromised executable. The child is a local executable configured by its launcher; executable provenance, OS sandboxing, memory/CPU limits, and production supervision are outside this spike.
 
 ### Resource and lifecycle limits
