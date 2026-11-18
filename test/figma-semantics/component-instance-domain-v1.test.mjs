@@ -134,3 +134,107 @@ test("unknown-unresolved-source-payload-is-preserved-but-never-treated-as-resolv
   assert.strictEqual(result.document.instances["unresolved-instance"].source.locator, locator);
   assert.equal(result.diagnostics.some((d) => d.code === "COMPONENT_REFERENCE_UNRESOLVED" && d.severity === "warning"), true);
 });
+
+function referenceDocument(components, instances) {
+  return { version: 1, components, componentSets: {}, instances };
+}
+function instance(id, componentId, extra = {}) {
+  return { id, source: { kind: "local-component", componentId }, variantSelection: {}, propertyValues: {}, overrides: [], slotContent: {}, ...extra };
+}
+function leaf(id) {
+  return { id, name: id, setId: null, rootNodeIds: [`${id}-node`], nodes: {
+    [`${id}-node`]: { id: `${id}-node`, kind: "shape", parentId: null, childIds: [] },
+  }, properties: {}, variantValues: {} };
+}
+function referenceComponent(id, targetId, { swapTo = null, swapAllowed = [] } = {}) {
+  const nodeId = `${id}-ref`;
+  return { id, name: id, setId: null, rootNodeIds: [nodeId], nodes: {
+    [nodeId]: { id: nodeId, kind: "instance", parentId: null, childIds: [], source: { kind: "local-component", componentId: targetId }, variantSelection: {} },
+  }, properties: swapTo ? { [`${id}-swap`]: {
+    id: `${id}-swap`, name: "Swap", kind: "instance-swap", targetNodeId: nodeId,
+    allowedComponentIds: swapAllowed, defaultComponentId: swapTo,
+  } } : {}, variantValues: {} };
+}
+
+test("independent opposite swap selections do not form a synthetic cross-instance cycle", () => {
+  const document = referenceDocument({
+    leaf: leaf("leaf"),
+    a: referenceComponent("a", "leaf", { swapTo: "leaf", swapAllowed: ["leaf", "b"] }),
+    b: referenceComponent("b", "leaf", { swapTo: "leaf", swapAllowed: ["leaf", "a"] }),
+  }, {
+    "a-instance": instance("a-instance", "a", { propertyValues: { "a-swap": { kind: "local-component", componentId: "b" } } }),
+    "b-instance": instance("b-instance", "b", { propertyValues: { "b-swap": { kind: "local-component", componentId: "a" } } }),
+  });
+  const result = domain.validateComponentInstanceDocument(document);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  assert.equal(result.diagnostics.some((d) => d.code === "COMPONENT_REFERENCE_CYCLE"), false);
+  document.instances["a-instance"].propertyValues["a-swap"].componentId = "not-allowed";
+  const changed = domain.validateComponentInstanceDocument(document);
+  assert.equal(changed.ok, false);
+  assert.ok(diagnosticCodes(changed).includes("COMPONENT_PROPERTY_VALUE_INVALID"));
+});
+
+test("active self and multi-component expansion paths reject with stable cycle diagnostics", () => {
+  const self = referenceDocument({ self: referenceComponent("self", "self") }, { use: instance("use", "self") });
+  const selfBefore = JSON.stringify(self);
+  const selfResult = domain.validateComponentInstanceDocument(self);
+  assert.ok(diagnosticCodes(selfResult).includes("COMPONENT_REFERENCE_CYCLE"));
+  assert.equal(JSON.stringify(self), selfBefore, "contextual cycle validation must not mutate input");
+  assert.deepEqual(selfResult.diagnostics, domain.validateComponentInstanceDocument(self).diagnostics);
+
+  const multi = referenceDocument({ a: referenceComponent("a", "b"), b: referenceComponent("b", "a") }, { use: instance("use", "a") });
+  assert.ok(diagnosticCodes(domain.validateComponentInstanceDocument(multi)).includes("COMPONENT_REFERENCE_CYCLE"));
+});
+
+test("selected set variants produce contextual cyclic and noncyclic expansions", () => {
+  const components = {
+    switcher: { id: "switcher", name: "switcher", setId: null, rootNodeIds: ["switcher-ref"], nodes: {
+      "switcher-ref": { id: "switcher-ref", kind: "instance", parentId: null, childIds: [],
+        source: { kind: "local-set", componentSetId: "choices" }, variantSelection: { mode: "safe" } },
+    }, properties: {}, variantValues: {} },
+    cyclic: { ...referenceComponent("cyclic", "switcher"), setId: "choices", variantValues: { mode: "cycle" } },
+    safe: { ...leaf("safe"), setId: "choices", variantValues: { mode: "safe" } },
+  };
+  const componentSets = { choices: { id: "choices", name: "Choices", memberComponentIds: ["cyclic", "safe"], properties: {
+    mode: { id: "mode", name: "Mode", kind: "variant", values: ["cycle", "safe"], defaultValue: "safe" },
+  } } };
+  const cyclic = referenceDocument(structuredClone(components), structuredClone({ use: instance("use", "switcher") }));
+  cyclic.componentSets = structuredClone(componentSets);
+  cyclic.components.switcher.nodes["switcher-ref"].variantSelection.mode = "cycle";
+  assert.ok(diagnosticCodes(domain.validateComponentInstanceDocument(cyclic)).includes("COMPONENT_REFERENCE_CYCLE"));
+  const safe = structuredClone(cyclic);
+  safe.components.switcher.nodes["switcher-ref"].variantSelection.mode = "safe";
+  assert.equal(domain.validateComponentInstanceDocument(safe).ok, true);
+});
+
+test("slot content participates in the active expansion path and opaque external refs add no edge", () => {
+  const card = { id: "card", name: "card", setId: null, rootNodeIds: ["slot-root"], nodes: {
+    "slot-root": { id: "slot-root", kind: "container", parentId: null, childIds: [] },
+  }, properties: { slot: { id: "slot", name: "Slot", kind: "slot", targetNodeId: "slot-root" } }, variantValues: {} };
+  const child = referenceComponent("child", "card");
+  const cyclic = referenceDocument({ card, child }, { use: instance("use", "card", { slotContent: { slot: {
+    rootNodeIds: ["slot-instance"], nodes: { "slot-instance": { id: "slot-instance", kind: "instance", parentId: null, childIds: [],
+      source: { kind: "local-component", componentId: "child" }, variantSelection: {} } },
+  } } }) });
+  assert.ok(diagnosticCodes(domain.validateComponentInstanceDocument(cyclic)).includes("COMPONENT_REFERENCE_CYCLE"));
+
+  const opaque = referenceDocument({ ext: referenceComponent("ext", "unused") }, { use: instance("use", "ext") });
+  opaque.components.ext.nodes["ext-ref"].source = { kind: "external", fileId: "remote", componentId: "remote-card", revision: null };
+  const opaqueResult = domain.validateComponentInstanceDocument(opaque);
+  assert.equal(opaqueResult.ok, true, JSON.stringify(opaqueResult.diagnostics));
+  assert.equal(opaqueResult.diagnostics.some((d) => d.code === "COMPONENT_REFERENCE_CYCLE"), false);
+});
+
+test("post-validation reference changes are rejected and map insertion order cannot alter diagnostics", () => {
+  const accepted = clone();
+  assert.equal(domain.validateComponentInstanceDocument(accepted).ok, true);
+  accepted.components.card.nodes["card-icon"].source.componentSetId = "missing-set";
+  const changed = domain.validateComponentInstanceDocument(accepted);
+  assert.equal(changed.ok, false);
+  assert.ok(diagnosticCodes(changed).includes("COMPONENT_REFERENCE_MISSING"));
+
+  const baseline = clone(); baseline.components.card.nodes["card-icon"].source.componentSetId = "missing-set";
+  const reverse = (record) => Object.fromEntries(Object.entries(record).reverse());
+  const reordered = { ...baseline, components: reverse(baseline.components), componentSets: reverse(baseline.componentSets), instances: reverse(baseline.instances) };
+  assert.deepEqual(domain.validateComponentInstanceDocument(baseline).diagnostics, domain.validateComponentInstanceDocument(reordered).diagnostics);
+});

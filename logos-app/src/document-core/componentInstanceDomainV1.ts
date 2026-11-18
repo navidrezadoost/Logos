@@ -190,8 +190,8 @@ function validateReference(ref: unknown, path: string, ds: ComponentDiagnostic[]
   if (ref.kind === "local-component") {
     if (!strictRecord(ref, path, ["kind", "componentId"], ds) || !nonEmpty(ref.componentId)) { add(ds, "COMPONENT_REFERENCE_INVALID", path, "Invalid local component reference."); return; }
     if (!localComponentIds.has(ref.componentId)) add(ds, "COMPONENT_REFERENCE_MISSING", path, `Unknown component ID ${ref.componentId}.`);
-    // Reference graph edges are added by validateNestedSelection, which also
-    // checks exact member selection for local-set references.
+    // Local targets and set selections are validated separately; expansion is
+    // evaluated later in an instance-specific context.
   } else if (ref.kind === "local-set") {
     if (!strictRecord(ref, path, ["kind", "componentSetId"], ds) || !nonEmpty(ref.componentSetId)) { add(ds, "COMPONENT_REFERENCE_INVALID", path, "Invalid local component-set reference."); return; }
     if (!localSetIds.has(ref.componentSetId)) add(ds, "COMPONENT_REFERENCE_MISSING", path, `Unknown component-set ID ${ref.componentSetId}.`);
@@ -210,7 +210,7 @@ function validateReference(ref: unknown, path: string, ds: ComponentDiagnostic[]
 
 function validateNestedSelection(
   ref: unknown, selection: unknown, path: string, ds: ComponentDiagnostic[],
-  components: Record<string, unknown>, sets: Record<string, unknown>, edges: Set<string>,
+  components: Record<string, unknown>, sets: Record<string, unknown>,
 ): void {
   if (!isRecord(selection) || Object.values(selection).some((v) => !nonEmpty(v))) {
     add(ds, "COMPONENT_VARIANT_SELECTION_INVALID", `${path}.variantSelection`, "Nested instance selection must be a string-valued map.");
@@ -233,10 +233,10 @@ function validateNestedSelection(
     });
     if (matches.length > 1) add(ds, "COMPONENT_AMBIGUOUS_SOURCE", path, "Nested set reference matches multiple component definitions.");
     else if (matches.length === 0) add(ds, "COMPONENT_VARIANT_SELECTION_INVALID", `${path}.variantSelection`, "Nested set reference does not resolve to a member.");
-    else edges.add(String(matches[0]));
+    // Resolution is validated here. Expansion edges are evaluated later in a
+    // per-instance context, never accumulated in a shared definition graph.
   } else if (isRecord(ref) && ref.kind === "local-component" && typeof ref.componentId === "string") {
     if (Object.keys(selection).length) add(ds, "COMPONENT_VARIANT_SELECTION_INVALID", `${path}.variantSelection`, "A direct component reference cannot also carry set selection.");
-    else if (components[ref.componentId]) edges.add(ref.componentId);
   } else if (Object.keys(selection).length) {
     add(ds, "COMPONENT_VARIANT_SELECTION_INVALID", `${path}.variantSelection`, "External or unresolved references cannot be locally variant-selected.");
   }
@@ -255,6 +255,77 @@ function resolveLocalComponentReference(ref: unknown, selection: unknown, compon
       && Object.keys(selection).every((key) => values[key] === selection[key]);
   });
   return matches.length === 1 ? String(matches[0]) : null;
+}
+
+/**
+ * Check only concrete local expansion paths. Each authored instance gets its
+ * own root property and slot context; selections from sibling instances never
+ * become edges in a shared component-definition graph.
+ */
+function validateInstanceExpansionCycles(
+  components: Record<string, unknown>, sets: Record<string, unknown>, instances: Record<string, unknown>, ds: ComponentDiagnostic[],
+): void {
+  for (const instanceId of Object.keys(instances).sort()) {
+    const instance = instances[instanceId];
+    if (!isRecord(instance)) continue;
+    const rootComponentId = resolveLocalComponentReference(instance.source, instance.variantSelection, components, sets);
+    if (rootComponentId === null) continue;
+    const rootPath = `$.instances.${instanceId}.source`;
+    const rootPropertyValues = isRecord(instance.propertyValues) ? instance.propertyValues : {};
+    const rootSlots = isRecord(instance.slotContent) ? instance.slotContent : {};
+
+    const expand = (componentId: string, path: string, stack: string[]) => {
+      if (stack.includes(componentId)) {
+        add(ds, "COMPONENT_REFERENCE_CYCLE", path, `Active component expansion cycle: ${[...stack, componentId].join(" -> ")}.`);
+        return;
+      }
+      const component = components[componentId];
+      if (!isRecord(component) || !isRecord(component.nodes)) return;
+      const nextStack = [...stack, componentId];
+      const properties = isRecord(component.properties) ? component.properties : {};
+      const nodes = component.nodes;
+
+      for (const nodeId of Object.keys(nodes).sort()) {
+        const node = nodes[nodeId];
+        if (!isRecord(node) || node.kind !== "instance") continue;
+        const sourceNodePath = `${path}.nodes.${nodeId}.source`;
+        const swap = Object.keys(properties).sort().map((propId) => ({ id: propId, value: properties[propId] }))
+          .find(({ value }) => isRecord(value) && value.kind === "instance-swap" && value.targetNodeId === nodeId);
+        let targetId: string | null = null;
+        if (swap && isRecord(swap.value)) {
+          const selected = componentId === rootComponentId ? rootPropertyValues[swap.id] : undefined;
+          if (isRecord(selected) && selected.kind === "local-component" && typeof selected.componentId === "string"
+            && Array.isArray(swap.value.allowedComponentIds) && swap.value.allowedComponentIds.includes(selected.componentId)) {
+            targetId = selected.componentId;
+          } else if (typeof swap.value.defaultComponentId === "string") targetId = swap.value.defaultComponentId;
+        }
+        if (targetId === null) targetId = resolveLocalComponentReference(node.source, node.variantSelection, components, sets);
+        if (targetId !== null) expand(targetId, sourceNodePath, nextStack);
+      }
+
+      // Slot references belong to this concrete root instance. Definitions
+      // reached recursively have no independent persisted slot selection in v1.
+      if (componentId !== rootComponentId) return;
+      for (const propId of Object.keys(properties).sort()) {
+        const property = properties[propId];
+        const content = rootSlots[propId];
+        if (!isRecord(property) || property.kind !== "slot" || !isRecord(content) || !isRecord(content.nodes)) continue;
+        const slotNodes = content.nodes as Record<string, unknown>;
+        const walkSlot = (nodeId: string) => {
+          const node = slotNodes[nodeId];
+          if (!isRecord(node)) return;
+          if (node.kind === "instance") {
+            const targetId = resolveLocalComponentReference(node.source, node.variantSelection, components, sets);
+            if (targetId !== null) expand(targetId, `$.instances.${instanceId}.slotContent.${propId}.nodes.${nodeId}.source`, nextStack);
+          }
+          if (Array.isArray(node.childIds)) for (const childId of node.childIds) walkSlot(String(childId));
+        };
+        if (Array.isArray(content.rootNodeIds)) for (const nodeId of content.rootNodeIds) walkSlot(String(nodeId));
+      }
+    };
+
+    expand(rootComponentId, rootPath, []);
+  }
 }
 
 function validateNodeGraph(nodesValue: unknown, rootsValue: unknown, path: string, ds: ComponentDiagnostic[], allowedKinds: Set<string>): Set<string> {
@@ -389,7 +460,6 @@ export function validateComponentInstanceDocument(input: unknown): ComponentVali
   const instances = input.instances as Record<string, unknown>;
   const componentIds = new Set(Object.keys(components));
   const setIds = new Set(Object.keys(sets));
-  const componentEdges = new Map<string, Set<string>>();
   const componentNodes = new Map<string, Set<string>>();
   const setsByMember = new Map<string, string>();
   // Component, set, instance, and definition-node IDs share one domain identity
@@ -412,12 +482,10 @@ export function validateComponentInstanceDocument(input: unknown): ComponentVali
     if (value.setId === null && Object.keys(value.variantValues).length) add(diagnostics, "COMPONENT_VARIANT_INVALID", `${path}.variantValues`, "Standalone component cannot carry set variant values.");
     const nodeIds = validateNodeGraph(value.nodes, value.rootNodeIds, path, diagnostics, DEFINITION_KINDS);
     for (const nodeId of [...nodeIds].sort()) claimIdentity(nodeId, `${path}.nodes.${nodeId}`);
-    componentNodes.set(id, nodeIds); componentEdges.set(id, new Set());
+    componentNodes.set(id, nodeIds);
     for (const propId of Object.keys(value.properties).sort()) {
       validateProperty(value.properties[propId], propId, `${path}.properties.${propId}`, nodeIds, diagnostics);
       validatePropertyTarget(value.properties[propId], value.nodes, `${path}.properties.${propId}`, diagnostics);
-      const prop = value.properties[propId];
-      if (isRecord(prop) && prop.kind === "instance-swap" && typeof prop.defaultComponentId === "string") componentEdges.get(id)!.add(prop.defaultComponentId);
     }
     for (const propId of Object.keys(value.properties).sort()) {
       const prop = value.properties[propId];
@@ -435,7 +503,7 @@ export function validateComponentInstanceDocument(input: unknown): ComponentVali
       const n = isRecord(rawNodes[nodeId]) ? rawNodes[nodeId] as AnyRecord : null;
       if (n?.kind === "instance" && has(n, "source")) {
         validateReference(n.source, `${path}.nodes.${nodeId}.source`, diagnostics, componentIds, setIds);
-        validateNestedSelection(n.source, n.variantSelection, `${path}.nodes.${nodeId}`, diagnostics, components, sets, componentEdges.get(id)!);
+        validateNestedSelection(n.source, n.variantSelection, `${path}.nodes.${nodeId}`, diagnostics, components, sets);
       }
     }
     if (value.setId !== null) {
@@ -520,14 +588,12 @@ export function validateComponentInstanceDocument(input: unknown): ComponentVali
     if (definition) {
       const nodeIds = componentNodes.get(String(definition.id)) ?? new Set<string>();
       const properties = isRecord(definition.properties) ? definition.properties : {};
-      const ownerEdges = componentEdges.get(String(definition.id)) ?? new Set<string>();
       for (const propId of Object.keys(value.propertyValues).sort()) {
         const prop = properties[propId]; const propValue = (value.propertyValues as AnyRecord)[propId];
         if (!isRecord(prop)) add(diagnostics, "COMPONENT_PROPERTY_VALUE_INVALID", `${path}.propertyValues.${propId}`, "Value refers to an undeclared property.");
         else if (prop.kind === "boolean" && typeof propValue !== "boolean" || prop.kind === "text" && typeof propValue !== "string") add(diagnostics, "COMPONENT_PROPERTY_VALUE_INVALID", `${path}.propertyValues.${propId}`, "Value does not match property kind.");
         else if (prop.kind === "instance-swap") {
           if (!isRecord(propValue) || onlyKeys(propValue, ["kind", "componentId"]) !== null || propValue.kind !== "local-component" || !Array.isArray(prop.allowedComponentIds) || !prop.allowedComponentIds.includes(propValue.componentId as string)) add(diagnostics, "COMPONENT_PROPERTY_VALUE_INVALID", `${path}.propertyValues.${propId}`, "Swap value is not an explicitly allowed local component reference.");
-          else ownerEdges.add(propValue.componentId as string);
         }
         else if (prop.kind === "slot") add(diagnostics, "COMPONENT_PROPERTY_VALUE_INVALID", `${path}.propertyValues.${propId}`, "Slot values belong in slotContent.");
       }
@@ -551,7 +617,7 @@ export function validateComponentInstanceDocument(input: unknown): ComponentVali
         const content = value.slotContent[propId];
         const localIds = validateSlotContent(content, slotPath, diagnostics, (r, selection, p) => {
           validateReference(r, p, diagnostics, componentIds, setIds);
-          validateNestedSelection(r, selection, p, diagnostics, components, sets, ownerEdges);
+          validateNestedSelection(r, selection, p, diagnostics, components, sets);
         });
         if (!isRecord(content) || !Array.isArray(content.rootNodeIds)) continue;
         const entryCount = content.rootNodeIds.length;
@@ -577,15 +643,7 @@ export function validateComponentInstanceDocument(input: unknown): ComponentVali
     }
   }
 
-  const visiting = new Set<string>(); const visited = new Set<string>();
-  const visit = (id: string, trail: string[]) => {
-    if (visiting.has(id)) { add(diagnostics, "COMPONENT_REFERENCE_CYCLE", `$.components.${id}`, `Nested component reference cycle: ${[...trail, id].join(" -> ")}.`); return; }
-    if (visited.has(id)) return;
-    visiting.add(id);
-    for (const next of [...(componentEdges.get(id) ?? [])].sort()) if (componentIds.has(next)) visit(next, [...trail, id]);
-    visiting.delete(id); visited.add(id);
-  };
-  for (const id of [...componentIds].sort()) visit(id, []);
+  validateInstanceExpansionCycles(components, sets, instances, diagnostics);
 
   const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
   diagnostics.sort((a, b) => compare(a.path, b.path) || compare(a.code, b.code) || compare(a.severity, b.severity));

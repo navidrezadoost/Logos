@@ -151,7 +151,7 @@ Each evidence record must state Figma surface/version, date, exact action, initi
 No tests are added by this specification because this environment has no controlled Figma file observation and the current semantics do not yet have an approved canonical representation. The implementation phase should add focused tests in this order:
 
 1. **Pure validation:** every property kind's valid/invalid value, definition target, variant tuple, stable diagnostic, and unknown-data preservation.
-2. **Graph integrity:** local and external reference resolution, component-set membership, acyclic definition references or explicit cycle policy, slot containment/cardinality, reciprocal parent/child links, stable IDs and ordering.
+2. **Graph integrity:** local and external reference resolution, component-set membership, per-instance active expansion-cycle policy (separate from structural reference validation), slot containment/cardinality, reciprocal parent/child links, stable IDs and ordering.
 3. **Immutable operations:** each accepted operation publishes exactly one valid snapshot; every rejected operation publishes none and preserves selection and renderer-visible state.
 4. **Resolver determinism:** same definitions/revisions/instance input yields byte-equivalent semantic output and diagnostics; resolver never mutates source.
 5. **Propagation and overrides:** typed override application, target removal/rename, component updates, variant changes, swaps, reset-one/reset-all, and explicit orphan handling.

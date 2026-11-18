@@ -67,7 +67,7 @@ An explicit `external` or `unresolved` reference is different from an unknown fi
 - Record keys agree with stable embedded IDs; document entity IDs do not collide.
 - Definition and slot-content node graphs have ordered roots, reciprocal parent/child edges, unique ownership, no containment cycles, and no unreachable nodes.
 - Component Set membership is reciprocal and ordered; each member belongs to one set and has one valid, unique variant tuple.
-- Local references resolve by typed ID. Nested local component/set references participate in cycle detection, including authored slot content attached to a local instance. Cyclic definition expansion rejects.
+- Local references resolve by typed ID. Cycle checks run in each authored instance's concrete expansion context: the selected root component/variant, that instance's selected swaps, and its authored slot content. Instance selections from separate roots are never combined into one graph. External and unresolved references remain opaque and cannot provide local expansion edges.
 - External and unresolved references are explicit opaque leaves; their remote graph cannot be cycle-checked without authorized resolution data.
 - Slots are owned only by a declared slot property. Content nodes have one slot owner. Instance-swap and preferred IDs must be declared local components.
 
@@ -79,7 +79,13 @@ Each diagnostic has a stable code, JSON-like path, severity, and detail. The com
 
 Positive fixture: [`component-instance-domain-v1.json`](../../test/fixtures/figma-semantics/component-instance-domain-v1.json). It covers standalone definitions, a set with ordered variant members, direct and set-linked instances, nested references, all five property kinds, typed overrides, slot order, advisory warning, and an unresolved source locator.
 
-Negative fixture cases: [`component-instance-v1-invalid-cases.json`](../../test/fixtures/figma-semantics/component-instance-v1-invalid-cases.json). The regression suite also checks malformed JSON/version, unknown kinds, graph and reference cycles, deterministic ordering, no mutation, warning-only guidance, and explicit hard-limit rejection: [`component-instance-domain-v1.test.mjs`](../../test/figma-semantics/component-instance-domain-v1.test.mjs).
+Negative fixture cases: [`component-instance-v1-invalid-cases.json`](../../test/fixtures/figma-semantics/component-instance-v1-invalid-cases.json). The regression suite also checks malformed JSON/version, unknown kinds, active reference cycles, independent opposite swap selections, variant-dependent paths, slot-content references, deterministic ordering, no mutation, warning-only guidance, and explicit hard-limit rejection: [`component-instance-domain-v1.test.mjs`](../../test/figma-semantics/component-instance-domain-v1.test.mjs).
+
+## FG-C3.1.1 cycle qualification boundary
+
+The validator proves structural local-reference validity and rejects a cycle when it is reachable along an authored instance expansion path. It evaluates each top-level instance separately and applies only that instance's root-level property values and slot content. Nested definitions use their authored references, selected set variants, and declared swap defaults; unresolved or external leaves stay opaque. This prevents mutually opposite swaps on unrelated instances from creating a synthetic cycle.
+
+This is graph validation, not full instance materialization. It does not produce an expanded tree, resolve renderable property values, issue derived child identities, or establish canonical persisted identity. In particular, nested instances do not carry their own persisted exposed-property values or slot-content selections in v1. Identity mapping, nested override propagation, and production resolution remain gated on the canonical identity/ownership decision.
 
 Run from `logos-app`:
 
