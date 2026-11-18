@@ -1,6 +1,7 @@
 //! Non-production, bounded protocol wrapper around logos-types' immutable planner.
 
 pub mod component_instance_v1;
+pub mod component_instance_validator;
 
 use logos_types::{apply_operation, decode_and_validate_json, DocumentOperation};
 use serde::{Deserialize, Serialize};
