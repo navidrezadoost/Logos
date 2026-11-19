@@ -128,9 +128,26 @@ If the Chief Architect wants further exposure work, authorize **FG-C3.8.1 — Na
 | --- | --- |
 | FG-C3.3–FG-C3.6.1 semantic/protocol/resource evidence | Accepted/local evidence as documented; bounded scope |
 | FG-C3.7.1 local Rust OOM recovery | Accepted, locally qualified; deployment behavior unverified |
-| FG-C3.8 decision package | Prepared for Chief Architect decision |
-| Capability advertisement | **NO-GO pending explicit decision and unmet prerequisites** |
+| FG-C3.8 decision package | **Accepted and closed by Chief Architect** |
+| Capability advertisement | **NO-GO — prohibited by binding decision** |
 | Production Rust authority / canonical ownership | Not authorized / pending |
 | G1-B9.6 retained memory | **NOT MEASURED** |
 | G1-B10 authority transfer | **NO-GO** |
+
+## Final Chief Architect disposition
+
+**Decision: APPROVED — FG-C3.8 CLOSED, NO-GO for Component/Instance capability exposure.** This section records the binding disposition received after the recommendation above. It supersedes the earlier “Decision requested” and “Smallest separately authorizable next milestone” language: those sections describe the proposal before the decision and do not authorize FG-C3.8.1.
+
+| Area | Binding disposition |
+| --- | --- |
+| TypeScript `componentInstanceDomainV1` | Retained as the v1 semantic reference. |
+| Rust Component/Instance validator | Retained only as an isolated conformance candidate for differential testing, regression qualification, and architecture research. |
+| Rust capability advertisement | **PROHIBITED.** The capability handshake remains `not-supported-here`. |
+| Production React/Go/Rust integration, persistence, and authority transfer | Not authorized; Rust production authority remains **NO-GO**. |
+| Canonical Document ownership | Not approved; remains a separate architecture decision. |
+| FG-C3.8.1 or further capability-exposure work | Not authorized. No additional exposure, deployment-qualification, or product-integration milestone is open under FG-C3.8. |
+| PR, merge, or `main` changes | Not authorized by this disposition. |
+| G1-B9.6 retained memory / G1-B10 | **NOT MEASURED / NO-GO**, respectively. |
+
+The strategic recommendation is to redirect future authorized architecture work toward Canonical Document ownership and transaction boundaries. That recommendation does not authorize a new milestone or implementation. Existing qualification evidence from FG-C3.3 through FG-C3.7.1 remains preserved; it does not imply deployment readiness.
 
